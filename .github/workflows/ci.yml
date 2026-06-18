@@ -19,7 +19,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.3"
-          extensions: mbstring, pdo, pdo_sqlite, curl, dom, xml, zip, fileinfo, openssl, bcmath, gmp
+          extensions: mbstring, dom, curl, libxml, zip, gd, iconv, simplexml, xmlreader, xmlwriter, fileinfo, bcmath, gmp, pdo, pdo_sqlite
           tools: composer:v2
 
       - name: Install dependencies
