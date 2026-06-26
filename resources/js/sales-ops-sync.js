@@ -54,6 +54,7 @@ function smoothWidthUpdate(el, pct) {
         return;
     }
 
+    el.classList.add('app-progress-fill');
     el.style.width = next;
     el.classList.add('live-sync-flash');
     window.setTimeout(() => el.classList.remove('live-sync-flash'), 320);
@@ -104,8 +105,8 @@ function renderLeaderboardRow(row, index) {
 
 function renderSdrLoadRow(row) {
     const status = row.at_capacity
-        ? '<span class="text-xs font-bold text-rose-600 bg-rose-50 px-2 py-1 rounded">At capacity</span>'
-        : '<span class="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">Accepting leads</span>';
+        ? '<span class="app-badge app-badge-danger">At capacity</span>'
+        : '<span class="app-badge app-badge-success">Accepting leads</span>';
 
     return `
         <tr data-sdr-id="${row.user_id}">
@@ -142,10 +143,10 @@ function updateOverview(overview) {
 
 function renderActivityItem(activity) {
     return `
-        <div class="text-xs text-slate-600" data-activity-id="${activity.id}">
+        <div class="text-xs text-zinc-600" data-activity-id="${activity.id}">
             <span class="font-bold">${escapeHtml(activity.type_label)}</span>
             · ${escapeHtml(activity.created_at)}
-            ${activity.notes ? `<div class="text-slate-400 mt-0.5">${escapeHtml(activity.notes)}</div>` : ''}
+            ${activity.notes ? `<div class="text-zinc-400 mt-0.5">${escapeHtml(activity.notes)}</div>` : ''}
         </div>
     `;
 }
@@ -164,7 +165,7 @@ function updateLeadDetail(detail) {
         smoothHtmlUpdate(
             activitiesEl,
             detail.activities.length === 0
-                ? '<p class="text-xs text-slate-400 italic">No activity logged yet.</p>'
+                ? '<p class="text-xs text-zinc-400 italic">No activity logged yet.</p>'
                 : detail.activities.map(renderActivityItem).join(''),
         );
     }

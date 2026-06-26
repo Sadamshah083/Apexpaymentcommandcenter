@@ -114,7 +114,7 @@ class WorkflowController extends Controller
             'mapping_confirmed' => $request->boolean('mapping_confirmed'),
         ]);
 
-        return redirect()->route('admin.workflows.show', $workflow->id)->with('success', 'Pipeline launched. Leads will auto-enrich and queue for your manual verification.');
+        return redirect()->route('admin.workflows.show', $workflow->id)->with('success', 'Enrichment started. Leads will appear for your review when ready.');
     }
 
     public function pause(Workflow $workflow)

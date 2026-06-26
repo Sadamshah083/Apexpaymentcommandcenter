@@ -32,7 +32,7 @@
 <x-sidebar.section title="Data Acquisition">
     <x-sidebar.link
         :href="route('admin.workflows.index')"
-        label="AI Agent Pipelines"
+        label="Import Leads"
         :active="request()->routeIs('admin.workflows.*')"
     >
         <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'pipeline'])</x-slot:icon>

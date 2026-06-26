@@ -4,28 +4,13 @@ import { isOsNotificationsEnabled, showOsNotification } from './system-notificat
 import { applyWorkspaceAdminState } from './workspace-admin.js';
 import { applySalesOpsSync, initAjaxActivityForms, TIER_LABELS, smoothWidthUpdate } from './sales-ops-sync.js';
 
-const STAGE_CLASSES = {
-    closed_won: 'bg-emerald-50 text-emerald-700',
-    closed_lost: 'bg-rose-50 text-rose-700',
-    follow_up: 'bg-amber-50 text-amber-700',
-    new_lead: 'bg-slate-100 text-slate-700',
-    attempted_contact: 'bg-sky-50 text-sky-700',
-    connected: 'bg-cyan-50 text-cyan-700',
-    discovery_completed: 'bg-violet-50 text-violet-700',
-    meeting_scheduled: 'bg-indigo-50 text-indigo-700',
-    proposal_sent: 'bg-purple-50 text-purple-700',
-    lead: 'bg-slate-100 text-slate-700',
-    contacted: 'bg-sky-50 text-sky-700',
-    interested: 'bg-indigo-50 text-indigo-700',
-};
-
-const WORKFLOW_STATUS_CLASSES = {
-    completed: 'bg-emerald-100 text-emerald-800',
-    failed: 'bg-rose-100 text-rose-800',
-    extracting: 'bg-amber-100 text-amber-800 animate-pulse',
-    mapping: 'bg-blue-100 text-blue-800',
-    pending: 'bg-slate-200 text-slate-700',
-    paused: 'bg-orange-100 text-orange-800',
+const WORKFLOW_STATUS_LABELS = {
+    mapping: 'Setup',
+    pending: 'Queued',
+    extracting: 'Enriching',
+    paused: 'Paused',
+    completed: 'Complete',
+    failed: 'Failed',
 };
 
 /** Only these event types may surface an in-app toast. */
@@ -54,19 +39,19 @@ function workflowActionForms(workflow, showBase) {
     const pauseForm = ['pending', 'extracting'].includes(workflow.status)
         ? `<form method="POST" action="${showBase}/${workflow.id}/pause" class="inline">
                 <input type="hidden" name="_token" value="${escapeHtml(csrfToken())}">
-                <button type="submit" class="text-xs text-amber-700 hover:text-amber-900 font-semibold">Stop</button>
+                <button type="submit" class="app-link text-xs text-amber-700">Pause</button>
            </form>`
         : '';
     const resumeForm = workflow.status === 'paused'
         ? `<form method="POST" action="${showBase}/${workflow.id}/resume" class="inline">
                 <input type="hidden" name="_token" value="${escapeHtml(csrfToken())}">
-                <button type="submit" class="text-xs text-emerald-600 hover:text-emerald-800 font-semibold">Resume</button>
+                <button type="submit" class="app-link text-xs text-emerald-700">Resume</button>
            </form>`
         : '';
     const deleteForm = `<form method="POST" action="${showBase}/${workflow.id}" class="inline" onsubmit="return confirm('Delete this pipeline and all lead records from the database?')">
                 <input type="hidden" name="_token" value="${escapeHtml(csrfToken())}">
                 <input type="hidden" name="_method" value="DELETE">
-                <button type="submit" class="text-xs text-rose-600 hover:text-rose-800 font-semibold ml-2">Delete</button>
+                <button type="submit" class="app-link text-xs text-rose-600">Delete</button>
            </form>`;
 
     return `${pauseForm}${resumeForm}${deleteForm}`;
@@ -85,40 +70,36 @@ function escapeHtml(value) {
 }
 
 function renderLeadRow(lead, leadShowBase) {
-    const stageClass = STAGE_CLASSES[lead.stage] || STAGE_CLASSES.new_lead;
     const contact = lead.direct_email && lead.direct_email !== 'Not Publicly Available'
-        ? `<div class="text-slate-700">${escapeHtml(lead.direct_email)}</div>`
+        ? `<div class="text-zinc-700">${escapeHtml(lead.direct_email)}</div>`
         : '';
     const phone = lead.direct_phone && lead.direct_phone !== 'Not Publicly Available'
-        ? `<div class="text-xs text-slate-400 mt-0.5">${escapeHtml(lead.direct_phone)}</div>`
+        ? `<div class="text-xs text-zinc-400 mt-0.5">${escapeHtml(lead.direct_phone)}</div>`
         : '';
     const contactFallback = (!lead.direct_email && !lead.direct_phone)
-        ? '<span class="text-xs text-slate-400 font-italic">None available</span>'
+        ? '<span class="text-xs text-zinc-400 italic">None available</span>'
         : '';
     const tierLabel = lead.tier_label || TIER_LABELS[lead.tier] || '';
+    const editIcon = `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>`;
 
     return `
-        <tr class="hover:bg-slate-50/80 transition-colors" data-lead-id="${lead.id}">
-            <td class="py-3.5 px-4">
-                <div class="font-bold text-slate-800">${escapeHtml(lead.business_name)}</div>
-                ${lead.address ? `<div class="text-xs text-slate-500 mt-0.5">${escapeHtml(lead.address)}</div>` : ''}
-                <div class="text-[10px] text-slate-400 font-normal mt-0.5">${escapeHtml(lead.city)}, ${escapeHtml(lead.state)}</div>
+        <tr data-lead-id="${lead.id}">
+            <td>
+                <div class="font-bold text-zinc-900">${escapeHtml(lead.business_name)}</div>
+                ${lead.address ? `<div class="text-xs text-zinc-500 mt-0.5">${escapeHtml(lead.address)}</div>` : ''}
+                <div class="text-[10px] text-zinc-400 font-normal mt-0.5">${escapeHtml(lead.city)}, ${escapeHtml(lead.state)}</div>
             </td>
-            <td class="py-3.5 px-4 font-medium text-slate-600">${escapeHtml(lead.owner_name || 'Not Found')}</td>
-            <td class="py-3.5 px-4">${contact}${phone}${contactFallback}</td>
-            <td class="py-3.5 px-4">
-                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700">
-                    ${escapeHtml(lead.payment_processor || 'Unknown')}
-                </span>
+            <td class="font-medium text-zinc-600">${escapeHtml(lead.owner_name || 'Not Found')}</td>
+            <td>${contact}${phone}${contactFallback}</td>
+            <td>
+                <span class="app-badge app-badge-info">${escapeHtml(lead.payment_processor || 'Unknown')}</span>
             </td>
-            <td class="py-3.5 px-4">
-                ${tierLabel ? `<div class="text-[10px] font-semibold text-slate-400 mb-1">${escapeHtml(tierLabel)}</div>` : ''}
-                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${stageClass}">
-                    ${escapeHtml(lead.stage_label || stageLabel(lead.stage))}
-                </span>
+            <td>
+                ${tierLabel ? `<div class="text-[10px] font-semibold text-zinc-400 mb-1">${escapeHtml(tierLabel)}</div>` : ''}
+                <span class="app-badge app-badge-muted">${escapeHtml(lead.stage_label || stageLabel(lead.stage))}</span>
             </td>
-            <td class="py-3.5 px-4 text-right">
-                <a href="${leadShowBase}/${lead.id}" class="inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors">✎</a>
+            <td class="text-right">
+                <a href="${leadShowBase}/${lead.id}" class="app-icon-btn" title="Open lead">${editIcon}</a>
             </td>
         </tr>
     `;
@@ -126,63 +107,93 @@ function renderLeadRow(lead, leadShowBase) {
 
 function pipelineStatusClass(status) {
     const map = {
-        completed: 'bg-emerald-100 text-emerald-800',
-        failed: 'bg-rose-100 text-rose-800',
-        extracting: 'bg-amber-100 text-amber-800 animate-pulse',
-        pending_verification: 'bg-indigo-100 text-indigo-800',
-        pending: 'bg-slate-100 text-slate-600',
+        completed: 'app-badge app-badge-success',
+        failed: 'app-badge app-badge-danger',
+        extracting: 'app-badge app-badge-info',
+        pending_verification: 'app-badge app-badge-warning',
+        pending: 'app-badge app-badge-muted',
     };
 
-    return map[status] || 'bg-slate-100 text-slate-600';
+    return map[status] || 'app-badge app-badge-muted';
 }
 
+const WORKFLOW_PILL_CLASS = {
+    mapping: 'app-status-pill-setup',
+    pending: 'app-status-pill-queued',
+    extracting: 'app-status-pill-enriching',
+    paused: 'app-status-pill-paused',
+    completed: 'app-status-pill-complete',
+    failed: 'app-status-pill-failed',
+};
+
+function renderWorkflowStatusPill(status) {
+    const label = WORKFLOW_STATUS_LABELS[status] || status;
+    const pillClass = WORKFLOW_PILL_CLASS[status] || 'app-status-pill-queued';
+
+    return `<span class="app-status-pill ${pillClass}">${escapeHtml(label)}</span>`;
+}
+
+const LEAD_PIPELINE_STATUS_LABELS = {
+    pending_verification: 'Needs review',
+    completed: 'Released',
+    extracting: 'Enriching',
+    failed: 'Failed',
+    pending: 'Queued',
+};
+
 function renderPipelineLeadRow(lead, leadShowBase, csrf) {
-    const status = (lead.status || '').replace(/_/g, ' ');
+    const status = LEAD_PIPELINE_STATUS_LABELS[lead.status] || (lead.status || '').replace(/_/g, ' ');
+    const location = [lead.city, lead.state].filter(Boolean).join(', ');
     const actions = lead.status === 'pending_verification'
-        ? `<div class="flex items-center gap-2">
+        ? `<div class="flex items-center justify-end gap-1">
                 <form method="POST" action="/admin/leads/${lead.id}/approve">
                     <input type="hidden" name="_token" value="${escapeHtml(csrf)}">
-                    <button type="submit" class="px-2 py-1 rounded text-[10px] font-bold bg-emerald-600 text-white">Approve</button>
+                    <button type="submit" class="app-btn app-btn-success app-btn-sm">Approve</button>
+                </form>
+                <form method="POST" action="/admin/leads/${lead.id}/reject">
+                    <input type="hidden" name="_token" value="${escapeHtml(csrf)}">
+                    <button type="submit" class="app-btn app-btn-ghost-danger app-btn-sm">Reject</button>
                 </form>
            </div>`
-        : (lead.status === 'completed' ? '<span class="text-[10px] text-emerald-600 font-semibold">Released</span>' : '<span class="text-[10px] text-slate-400">—</span>');
+        : (lead.status === 'completed' ? '<span class="text-xs font-semibold text-emerald-700">Released</span>' : '');
+
+    const email = lead.direct_email && lead.direct_email !== 'Not Publicly Available' ? escapeHtml(lead.direct_email) : '';
+    const phone = lead.direct_phone && lead.direct_phone !== 'Not Publicly Available' ? escapeHtml(lead.direct_phone) : '';
+    const contact = email || phone
+        ? `${email ? `<div>${email}</div>` : ''}${phone ? `<div class="text-xs text-zinc-400 mt-0.5">${phone}</div>` : ''}`
+        : '<span class="text-zinc-400">—</span>';
 
     return `
-        <tr data-lead-id="${lead.id}">
-            <td class="text-xs font-mono text-slate-400">#${lead.row_number ?? lead.id}</td>
-            <td class="font-bold text-warmgrey-900">
-                <a href="${leadShowBase}/${lead.id}" class="hover:text-warmgrey-500 underline">${escapeHtml(lead.business_name)}</a>
+        <tr data-lead-id="${lead.id}" data-lead-status="${escapeHtml(lead.status || '')}">
+            <td>
+                <a href="${leadShowBase}/${lead.id}" class="font-bold text-zinc-900 hover:underline">${escapeHtml(lead.business_name)}</a>
+                ${location ? `<div class="text-xs text-zinc-400 mt-0.5">${escapeHtml(location)}</div>` : ''}
             </td>
-            <td class="text-xs text-slate-500">${escapeHtml(lead.address || 'Not public')}<div class="text-[10px] text-slate-400">${escapeHtml(lead.city)}, ${escapeHtml(lead.state)}</div></td>
-            <td>${escapeHtml(lead.owner_name || 'Not public')}</td>
-            <td>${escapeHtml(lead.direct_email || 'Not public')}</td>
-            <td>${escapeHtml(lead.direct_phone || 'Not public')}</td>
-            <td><span class="inline-flex px-2 py-0.5 rounded text-xs bg-slate-100">${escapeHtml(lead.payment_processor || 'Not public')}</span></td>
-            <td><span class="inline-flex px-2 py-0.5 rounded text-xs font-semibold ${pipelineStatusClass(lead.status)}">${escapeHtml(status)}</span></td>
-            <td>${actions}</td>
+            <td class="text-sm text-zinc-600">${escapeHtml(lead.owner_name || '—')}</td>
+            <td class="text-sm text-zinc-600">${contact}</td>
+            <td><span class="${pipelineStatusClass(lead.status)}">${escapeHtml(status)}</span></td>
+            <td class="text-right whitespace-nowrap">${actions}</td>
         </tr>
     `;
 }
 
 function renderWorkflowCard(workflow, showBase) {
-    const statusClass = WORKFLOW_STATUS_CLASSES[workflow.status] || WORKFLOW_STATUS_CLASSES.pending;
+    const openLabel = workflow.status === 'mapping' ? 'Continue setup' : 'Open';
 
     return `
-        <div class="p-4 rounded-xl bg-slate-50/50 border border-slate-100 hover:border-indigo-100 transition-colors relative group" data-workflow-id="${workflow.id}">
-            <div class="flex items-start justify-between">
-                <div>
-                    <h3 class="font-bold text-slate-800 text-sm truncate max-w-[180px]">${escapeHtml(workflow.name)}</h3>
-                    <p class="text-[11px] text-slate-400 truncate mt-0.5">${escapeHtml(workflow.original_filename || '')}</p>
+        <div class="app-import-card" data-workflow-id="${workflow.id}">
+            <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                    <h3 class="app-import-card-title">${escapeHtml(workflow.name)}</h3>
+                    <p class="app-import-card-meta">${escapeHtml(workflow.original_filename || '')}</p>
                 </div>
-                <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${statusClass}">
-                    ${escapeHtml(workflow.status)}
-                </span>
+                ${renderWorkflowStatusPill(workflow.status)}
             </div>
-            <div class="mt-3 flex items-center justify-between text-xs text-slate-500">
-                <span>Processed: <strong class="text-slate-800">${workflow.processed_leads}</strong> / ${workflow.total_leads}</span>
+            <div class="mt-3 flex items-center justify-between text-xs text-zinc-500">
+                <span>${workflow.processed_leads} / ${workflow.total_leads} processed</span>
             </div>
-            <div class="mt-3 flex items-center justify-end gap-2 flex-wrap">
-                <a href="${showBase}/${workflow.id}" class="text-xs text-indigo-600 hover:text-indigo-800 font-semibold">View mapping</a>
+            <div class="mt-3 flex items-center justify-end gap-3">
+                <a href="${showBase}/${workflow.id}" class="app-link text-xs">${openLabel}</a>
                 ${workflowActionForms(workflow, showBase)}
             </div>
         </div>
@@ -193,10 +204,10 @@ function renderTeam(members) {
     return members.map((member) => `
         <div class="py-3 flex items-center justify-between" data-member-id="${member.id}">
             <div>
-                <div class="font-bold text-slate-800 text-sm">${escapeHtml(member.name)}</div>
-                <div class="text-xs text-slate-400 mt-0.5">${escapeHtml(member.email)}</div>
+                <div class="font-bold text-zinc-900 text-sm">${escapeHtml(member.name)}</div>
+                <div class="text-xs text-zinc-400 mt-0.5">${escapeHtml(member.email)}</div>
             </div>
-            <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-100 text-slate-600">
+            <span class="app-badge app-badge-muted">
                 ${escapeHtml(member.role)}${member.status !== 'active' ? ` (${member.status})` : ''}
             </span>
         </div>
@@ -573,7 +584,7 @@ export function initWorkspaceSync() {
 
             if (workflowId && Array.isArray(data.workflows) && data.workflows.length > 0) {
                 const wf = data.workflows[0];
-                smoothTextUpdate(workflowStatus, `Status: ${wf.status}`);
+                smoothHtmlUpdate(workflowStatus, renderWorkflowStatusPill(wf.status));
                 smoothTextUpdate(workflowProgress, String(wf.enriched_leads ?? wf.processed_leads ?? 0));
                 smoothTextUpdate(workflowAssigned, String(wf.assigned_leads ?? 0));
                 smoothTextUpdate(workflowPendingReview, String(wf.pending_verification ?? 0));

@@ -10,7 +10,7 @@
             <p class="app-page-subtitle">Weekly rankings for dials, discoveries, meetings booked, and deals funded.</p>
         </div>
         <form method="GET" class="flex gap-2">
-            <select name="period" onchange="this.form.submit()" class="px-3 py-2 border border-slate-200 rounded-xl text-sm">
+            <select name="period" onchange="this.form.submit()" class="app-input !w-auto">
                 <option value="week" {{ $period === 'week' ? 'selected' : '' }}>This Week</option>
                 <option value="day" {{ $period === 'day' ? 'selected' : '' }}>Today</option>
             </select>
@@ -36,7 +36,7 @@
                 <tbody>
                     @forelse($leaderboard as $index => $row)
                         <tr>
-                            <td class="font-black text-indigo-600">#{{ $index + 1 }}</td>
+                            <td class="font-black text-zinc-900">#{{ $index + 1 }}</td>
                             <td class="font-bold">{{ $row['name'] }}</td>
                             <td>{{ $row['role'] }}</td>
                             <td>{{ $row['dials'] }}</td>
@@ -47,7 +47,7 @@
                             <td class="font-bold">{{ $row['score'] }}</td>
                         </tr>
                     @empty
-                        <tr><td colspan="9" class="text-center text-slate-400 py-8">No activity logged yet this period.</td></tr>
+                        <tr><td colspan="9" class="text-center text-zinc-400 py-8">No activity logged yet this period.</td></tr>
                     @endforelse
                 </tbody>
             </table>

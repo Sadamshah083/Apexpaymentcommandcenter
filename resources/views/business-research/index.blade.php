@@ -1,91 +1,93 @@
 @extends('layouts.admin')
 
-@section('title', 'Business Intelligence')
+@section('title', 'Merchant Research')
 
 @section('content')
-<div class="mb-8">
-    <h2 class="text-2xl font-bold">Business Intelligence</h2>
-    <p class="text-slate-600">Google AI mode–style research: Gemini 2.5 Pro + live Google Search. For bulk CSV enrichment use <a href="{{ route('admin.workflows.create') }}" class="text-indigo-600 underline">AI Agent Pipelines</a>.</p>
-</div>
+<div class="app-page space-y-6">
+    <x-page-header
+        title="Merchant Research"
+        subtitle="Look up a single business with AI web research. For bulk lists, use Import Leads."
+    >
+        <x-slot:actions>
+            <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-secondary app-btn-sm">Import leads</a>
+        </x-slot:actions>
+    </x-page-header>
 
-<div class="grid lg:grid-cols-2 gap-8 mb-8">
-    <form action="{{ route('admin.business-research.store') }}" method="POST" class="bg-white rounded-xl shadow-sm border p-6 space-y-4">
-        @csrf
-        <h3 class="font-semibold text-lg">Research a Business</h3>
-
-        <div>
-            <label class="block text-sm font-medium mb-1">Business Name *</label>
-            <input type="text" name="business_name" value="{{ old('business_name') }}" required
-                placeholder="bluefrog Plumbing and Drain of West Houston"
-                class="w-full border rounded-lg px-3 py-2">
+    <div class="grid lg:grid-cols-2 gap-6">
+        <div class="app-card app-card-padded">
+            <h2 class="app-section-title mb-4">Research a business</h2>
+            <form action="{{ route('admin.business-research.store') }}" method="POST" class="space-y-4">
+                @csrf
+                <div class="app-field">
+                    <label class="app-label">Business name <span class="text-rose-600">*</span></label>
+                    <input type="text" name="business_name" value="{{ old('business_name') }}" required
+                        placeholder="e.g. bluefrog Plumbing and Drain"
+                        class="app-input">
+                </div>
+                <div class="app-field">
+                    <label class="app-label">Address / city, state</label>
+                    <textarea name="address" rows="2" placeholder="Full address or city/state" class="app-input">{{ old('address') }}</textarea>
+                    <p class="text-xs text-zinc-400 mt-1">Helps match the correct location in search results.</p>
+                </div>
+                <div class="app-field">
+                    <label class="app-label">Website (optional)</label>
+                    <input type="text" name="website" value="{{ old('website') }}" placeholder="https://example.com" class="app-input">
+                </div>
+                <button type="submit" class="app-btn app-btn-primary">Search and analyze</button>
+            </form>
         </div>
 
-        <div>
-            <label class="block text-sm font-medium mb-1">Address / City, State</label>
-            <textarea name="address" rows="2" placeholder="1065 Richmond Ave Suite 140, Houston, TX 77006"
-                class="w-full border rounded-lg px-3 py-2">{{ old('address') }}</textarea>
-            <p class="text-xs text-slate-500 mt-1">Full address or city/state — used to match the correct location in search.</p>
+        <div class="app-card app-card-padded bg-zinc-900 text-white border-zinc-800">
+            <h2 class="text-base font-bold mb-3">What we find</h2>
+            <ul class="text-sm space-y-2 text-zinc-300">
+                <li class="flex gap-2"><span class="text-zinc-500">•</span> Owner / decision-maker name</li>
+                <li class="flex gap-2"><span class="text-zinc-500">•</span> Payment processor (Square, Clover, etc.)</li>
+                <li class="flex gap-2"><span class="text-zinc-500">•</span> POS &amp; booking software</li>
+                <li class="flex gap-2"><span class="text-zinc-500">•</span> Public email and phone</li>
+                <li class="flex gap-2"><span class="text-zinc-500">•</span> Source links for verification</li>
+            </ul>
         </div>
-
-        <div>
-            <label class="block text-sm font-medium mb-1">Website (optional)</label>
-            <input type="text" name="website" value="{{ old('website') }}" placeholder="https://example.com"
-                class="w-full border rounded-lg px-3 py-2">
-        </div>
-
-        <p class="text-xs text-slate-500">Runs immediately on this page (typically 2–4 min). Searches directories, social media, Google SERP, and official sites.</p>
-
-        <button type="submit" class="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700">
-            Search Web & Analyze
-        </button>
-
-        <p class="text-xs text-slate-500">Uses Google Gemini + live Google Search grounding. Requires queue worker unless sync is checked.</p>
-    </form>
-
-    <div class="bg-slate-900 text-white rounded-xl p-6">
-        <h3 class="font-semibold mb-3">What we find (POS sales intel)</h3>
-        <ul class="text-sm space-y-2 text-slate-300">
-            <li>• Owner / franchise owner name</li>
-            <li>• Payment processor (Square, Clover, ServiceTitan Payments, etc.)</li>
-            <li>• POS & field service software (ServiceTitan, Housecall Pro…)</li>
-            <li>• Public emails & phone numbers</li>
-            <li>• Franchise vs independent, business type</li>
-            <li>• Source links for verification</li>
-        </ul>
-        <p class="text-xs text-slate-500 mt-4">Similar to Google AI mode — searches the web, then structures results for your sales team.</p>
     </div>
-</div>
 
-<x-data-table title="Recent Research" :paginator="$researches" class="mt-0">
-    <table>
-        <thead>
-            <tr>
-                <th>Business</th>
-                <th>Owner</th>
-                <th>Processor</th>
-                <th>Confidence</th>
-                <th>Status</th>
-            </tr>
-        </thead>
-        <tbody>
-            @forelse($researches as $item)
+    <x-data-table title="Recent research" :paginator="$researches">
+        <table>
+            <thead>
                 <tr>
-                    <td>
-                        <a href="{{ route('admin.business-research.show', $item) }}" class="text-indigo-600 font-medium">
-                            {{ Str::limit($item->business_name, 40) }}
-                        </a>
-                    </td>
-                    <td>{{ $item->owner_name ?? '—' }}</td>
-                    <td>{{ Str::limit($item->payment_processor ?? '—', 30) }}</td>
-                    <td>{{ $item->confidence ?? '—' }}</td>
-                    <td>
-                        <span class="px-2 py-0.5 rounded text-xs bg-slate-100">{{ $item->status }}</span>
-                    </td>
+                    <th>Business</th>
+                    <th>Owner</th>
+                    <th>Processor</th>
+                    <th>Confidence</th>
+                    <th>Status</th>
                 </tr>
-            @empty
-                <tr><td colspan="5" class="text-center py-8 text-slate-500">No research yet.</td></tr>
-            @endforelse
-        </tbody>
-    </table>
-</x-data-table>
+            </thead>
+            <tbody>
+                @forelse($researches as $item)
+                    <tr>
+                        <td>
+                            <a href="{{ route('admin.business-research.show', $item) }}" class="font-semibold text-zinc-900 hover:underline">
+                                {{ Str::limit($item->business_name, 40) }}
+                            </a>
+                        </td>
+                        <td class="text-zinc-600">{{ $item->owner_name ?? '—' }}</td>
+                        <td class="text-zinc-600">{{ Str::limit($item->payment_processor ?? '—', 30) }}</td>
+                        <td class="text-zinc-600">{{ $item->confidence ?? '—' }}</td>
+                        <td>
+                            @php
+                                $statusClass = match($item->status) {
+                                    'completed' => 'app-badge-success',
+                                    'failed' => 'app-badge-danger',
+                                    'processing', 'pending' => 'app-badge-info',
+                                    default => 'app-badge-muted',
+                                };
+                            @endphp
+                            <span class="app-badge {{ $statusClass }}">{{ $item->status }}</span>
+                        </td>
+                    </tr>
+                @empty
+                    <tr><td colspan="5" class="text-center py-8 text-zinc-400">No research yet.</td></tr>
+                @endforelse
+            </tbody>
+        </table>
+    </x-data-table>
+</div>
 @endsection
