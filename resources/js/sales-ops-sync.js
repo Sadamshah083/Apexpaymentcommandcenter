@@ -88,7 +88,8 @@ function updateWeeklyMetrics(weekly) {
     }
 }
 
-function renderLeaderboardRow(row, index) {
+function renderLeaderboardRow(row, index, options = {}) {
+    const { includeScore = false } = options;
     return `
         <tr data-member-row="${row.user_id}">
             <td class="font-bold">#${index + 1}</td>
@@ -99,6 +100,7 @@ function renderLeaderboardRow(row, index) {
             <td>${row.discoveries}</td>
             <td>${row.meetings}</td>
             <td>${row.deals_funded}</td>
+            ${includeScore ? `<td class="font-bold">${row.score ?? 0}</td>` : ''}
         </tr>
     `;
 }
@@ -180,9 +182,10 @@ export function applySalesOpsSync(data) {
 
         const leaderboardBody = document.getElementById('workspace-sync-leaderboard-body');
         if (leaderboardBody && Array.isArray(salesOps.leaderboard)) {
+            const includeScore = leaderboardBody.dataset.includeScore === '1';
             smoothHtmlUpdate(
                 leaderboardBody,
-                salesOps.leaderboard.map((row, index) => renderLeaderboardRow(row, index)).join(''),
+                salesOps.leaderboard.map((row, index) => renderLeaderboardRow(row, index, { includeScore })).join(''),
             );
         }
 

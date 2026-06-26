@@ -1,22 +1,5 @@
 @php
-    $pending = $workflow->pending_verification_count ?? 0;
-    $enriched = ($workflow->processed_leads ?? 0) + $pending;
-    $assigned = $workflow->assigned_leads_count ?? 0;
-    $total = max(1, $workflow->total_leads ?: 1);
-
-    $importDone = $workflow->status !== 'mapping';
-    $enrichActive = in_array($workflow->status, ['extracting', 'pending', 'paused']);
-    $enrichDone = in_array($workflow->status, ['completed', 'paused']) || $enriched > 0;
-    $reviewActive = $pending > 0;
-    $reviewDone = $importDone && $pending === 0 && $enriched > 0;
-    $distributeDone = $assigned > 0;
-
-    $steps = [
-        ['key' => 'import', 'label' => 'Import', 'done' => $importDone, 'active' => false, 'detail' => $workflow->total_leads . ' leads'],
-        ['key' => 'enrich', 'label' => 'Enrich', 'done' => $workflow->status === 'completed' || ($enrichDone && !$enrichActive), 'active' => $enrichActive, 'detail' => $enrichActive ? ($enriched . ' / ' . $workflow->total_leads) : ($enrichDone ? 'Complete' : 'Waiting')],
-        ['key' => 'review', 'label' => 'Review', 'done' => $reviewDone, 'active' => $reviewActive, 'detail' => $pending > 0 ? $pending . ' waiting' : ($reviewDone ? 'Cleared' : '—')],
-        ['key' => 'distribute', 'label' => 'Distribute', 'done' => $distributeDone && $workflow->status === 'completed', 'active' => $assigned > 0 && $pending === 0, 'detail' => $assigned . ' assigned'],
-    ];
+    $steps = \App\Support\PipelineProgress::steps($workflow);
 @endphp
 
 <div class="pipeline-steps" aria-label="Pipeline progress">

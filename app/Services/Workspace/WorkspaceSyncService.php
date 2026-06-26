@@ -9,6 +9,7 @@ use App\Models\WorkspaceSyncEvent;
 use App\Models\Workflow;
 use App\Models\WorkflowLead;
 use App\Services\SalesOps\SdrPerformanceService;
+use App\Support\PipelineProgress;
 use App\Support\SalesOps;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -392,6 +393,7 @@ class WorkspaceSyncService
             'completion_pct' => $workflow->total_leads > 0
                 ? (int) round((($workflow->processed_leads + $workflow->failed_leads) / $workflow->total_leads) * 100)
                 : 0,
+            'pipeline_steps' => PipelineProgress::steps($workflow),
             'updated_at' => $workflow->updated_at?->toIso8601String(),
         ];
     }
@@ -414,6 +416,9 @@ class WorkspaceSyncService
             'direct_email' => $lead->direct_email,
             'direct_phone' => $lead->direct_phone,
             'payment_processor' => $lead->payment_processor,
+            'current_processor' => $lead->current_processor,
+            'monthly_processing_volume' => $lead->monthly_processing_volume,
+            'schedule_at' => $lead->schedule_at?->format('M j, g:i A'),
             'stage' => $lead->stage,
             'stage_label' => SalesOps::crmStageLabel($lead->stage),
             'tier' => $lead->tier,

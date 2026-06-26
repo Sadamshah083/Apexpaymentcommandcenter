@@ -37,14 +37,14 @@
             </form>
         </div>
 
-        <div class="app-card app-card-padded bg-zinc-900 text-white border-zinc-800">
-            <h2 class="text-base font-bold mb-3">What we find</h2>
-            <ul class="text-sm space-y-2 text-zinc-300">
-                <li class="flex gap-2"><span class="text-zinc-500">•</span> Owner / decision-maker name</li>
-                <li class="flex gap-2"><span class="text-zinc-500">•</span> Payment processor (Square, Clover, etc.)</li>
-                <li class="flex gap-2"><span class="text-zinc-500">•</span> POS &amp; booking software</li>
-                <li class="flex gap-2"><span class="text-zinc-500">•</span> Public email and phone</li>
-                <li class="flex gap-2"><span class="text-zinc-500">•</span> Source links for verification</li>
+        <div class="app-card app-card-padded">
+            <h2 class="app-section-title mb-3 text-zinc-900">What we find</h2>
+            <ul class="text-sm space-y-2 text-zinc-900">
+                <li class="flex gap-2"><span>•</span> Owner / decision-maker name</li>
+                <li class="flex gap-2"><span>•</span> Payment processor (Square, Clover, etc.)</li>
+                <li class="flex gap-2"><span>•</span> POS &amp; booking software</li>
+                <li class="flex gap-2"><span>•</span> Public email and phone</li>
+                <li class="flex gap-2"><span>•</span> Source links for verification</li>
             </ul>
         </div>
     </div>

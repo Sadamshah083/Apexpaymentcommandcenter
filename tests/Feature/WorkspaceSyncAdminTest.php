@@ -156,4 +156,35 @@ class WorkspaceSyncAdminTest extends TestCase
             'entity_type' => 'workspace',
         ]);
     }
+
+    public function test_sync_poll_includes_pipeline_steps_for_workflow(): void
+    {
+        $admin = User::factory()->create();
+        $workspace = Workspace::create([
+            'name' => 'Ops',
+            'admin_id' => $admin->id,
+        ]);
+        $workspace->users()->attach($admin->id, [
+            'role' => 'admin',
+            'status' => 'active',
+            'joined_at' => now(),
+        ]);
+        $admin->update(['current_workspace_id' => $workspace->id]);
+
+        $workflow = \App\Models\Workflow::create([
+            'workspace_id' => $workspace->id,
+            'name' => 'Test Import',
+            'status' => 'extracting',
+            'total_leads' => 10,
+            'processed_leads' => 3,
+        ]);
+
+        $response = $this->actingAs($admin)->getJson(route('admin.sync.poll', [
+            'workflow_id' => $workflow->id,
+        ]));
+
+        $response->assertOk()
+            ->assertJsonPath('workflows.0.pipeline_steps.0.key', 'import')
+            ->assertJsonPath('workflows.0.pipeline_steps.1.key', 'enrich');
+    }
 }

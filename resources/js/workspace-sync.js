@@ -214,6 +214,138 @@ function renderTeam(members) {
     `).join('');
 }
 
+const AE_PIPELINE_STAGES = new Set(['meeting_scheduled', 'proposal_sent', 'follow_up', 'closed_won', 'closed_lost']);
+
+function renderAePipelineRow(lead, leadShowBase) {
+    const volume = lead.monthly_processing_volume
+        ? `$${Number(lead.monthly_processing_volume).toLocaleString()}`
+        : '—';
+    const meeting = lead.schedule_at || '—';
+
+    return `
+        <tr data-lead-id="${lead.id}">
+            <td class="font-bold">${escapeHtml(lead.business_name)}</td>
+            <td>${escapeHtml(lead.owner_name || '—')}</td>
+            <td>${escapeHtml(lead.stage_label || stageLabel(lead.stage))}</td>
+            <td>${volume}</td>
+            <td>${escapeHtml(lead.current_processor || lead.payment_processor || '—')}</td>
+            <td class="text-xs">${escapeHtml(meeting)}</td>
+            <td><a href="${leadShowBase}/${lead.id}" class="app-link text-sm">Open</a></td>
+        </tr>
+    `;
+}
+
+const PIPELINE_STEP_CHECK = '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>';
+
+function syncModeIsPatch(el) {
+    return el?.dataset?.syncMode === 'patch';
+}
+
+function rowFromHtml(html) {
+    const temp = document.createElement('tbody');
+    temp.innerHTML = html.trim();
+    return temp.querySelector('tr');
+}
+
+function patchTableRows(tbody, items, renderRow, renderArgs) {
+    const byId = new Map(items.map((item) => [String(item.id), item]));
+    tbody.querySelectorAll('tr[data-lead-id]').forEach((row) => {
+        const item = byId.get(row.dataset.leadId);
+        if (!item) {
+            return;
+        }
+        const newRow = rowFromHtml(renderRow(item, ...renderArgs));
+        if (newRow && newRow.outerHTML !== row.outerHTML) {
+            row.replaceWith(newRow);
+        }
+    });
+}
+
+function syncTableBody(tbody, items, renderRow, renderArgs = []) {
+    if (!tbody || !Array.isArray(items)) {
+        return;
+    }
+
+    if (syncModeIsPatch(tbody)) {
+        patchTableRows(tbody, items, renderRow, renderArgs);
+        return;
+    }
+
+    const html = items.length === 0
+        ? ''
+        : items.map((item) => renderRow(item, ...renderArgs)).join('');
+    smoothHtmlUpdate(tbody, html);
+}
+
+function patchWorkflowCards(container, workflows, showBase) {
+    const byId = new Map(workflows.map((wf) => [String(wf.id), wf]));
+    container.querySelectorAll('[data-workflow-id]').forEach((card) => {
+        const wf = byId.get(card.dataset.workflowId);
+        if (!wf) {
+            return;
+        }
+        const temp = document.createElement('div');
+        temp.innerHTML = renderWorkflowCard(wf, showBase);
+        const fresh = temp.firstElementChild;
+        if (fresh && fresh.innerHTML !== card.innerHTML) {
+            card.innerHTML = fresh.innerHTML;
+        }
+    });
+}
+
+function updatePipelineProgress(wf) {
+    if (!wf?.pipeline_steps) {
+        return;
+    }
+
+    const stepsContainer = document.querySelector('.pipeline-steps');
+    if (!stepsContainer) {
+        return;
+    }
+
+    wf.pipeline_steps.forEach((step, index) => {
+        const detailEl = document.getElementById(`workspace-sync-step-${step.key}`);
+        if (detailEl) {
+            smoothTextUpdate(detailEl, step.detail);
+        }
+
+        const stepEl = detailEl?.closest('.pipeline-step');
+        if (stepEl) {
+            stepEl.classList.toggle('is-done', Boolean(step.done));
+            stepEl.classList.toggle('is-active', Boolean(step.active));
+            const dot = stepEl.querySelector('.pipeline-step-dot');
+            if (dot) {
+                dot.innerHTML = step.done ? PIPELINE_STEP_CHECK : `<span>${index + 1}</span>`;
+            }
+        }
+    });
+
+    const connectors = stepsContainer.querySelectorAll('.pipeline-steps-connector');
+    wf.pipeline_steps.forEach((step, index) => {
+        if (index === 0) {
+            return;
+        }
+        const connector = connectors[index - 1];
+        if (connector) {
+            connector.classList.toggle('is-done', Boolean(wf.pipeline_steps[index - 1].done));
+        }
+    });
+}
+
+function reapplyPipelineLeadFilter() {
+    const filters = document.getElementById('pipeline-lead-filters');
+    const active = filters?.querySelector('button.is-active');
+    const filter = active?.dataset.filter || 'all';
+    document.querySelectorAll('#workspace-sync-pipeline-leads tr').forEach((row) => {
+        row.hidden = filter !== 'all' && row.dataset.leadStatus !== filter;
+    });
+}
+
+function formatWorkflowProgressLabel(wf) {
+    const done = (wf.processed_leads ?? 0) + (wf.failed_leads ?? 0);
+    return `${wf.completion_pct ?? 0}% · ${done} / ${wf.total_leads ?? 0}`;
+}
+
 const SYNC_ACTIVE_MS = 2000;
 const SYNC_HIDDEN_MS = 10000;
 const SYNC_ERROR_MS = 4000;
@@ -480,6 +612,7 @@ export function initWorkspaceSync() {
     const workflowPendingReview2 = document.getElementById('workspace-sync-workflow-pending-review-2');
     const workflowProgressBar = document.getElementById('workspace-sync-workflow-progress-bar');
     const workflowProgressLabel = document.getElementById('workspace-sync-workflow-progress-label');
+    const aePipelineBody = document.getElementById('workspace-sync-ae-pipeline-body');
 
     initAjaxActivityForms();
 
@@ -551,24 +684,28 @@ export function initWorkspaceSync() {
             sessionStorage.setItem(readyStorageKey(workspaceId), '1');
 
             if (leadsBody && Array.isArray(data.leads)) {
-                const leadsHtml = data.leads.length === 0
-                    ? ''
-                    : data.leads.map((lead) => renderLeadRow(lead, leadShowBase)).join('');
-                smoothHtmlUpdate(leadsBody, leadsHtml);
+                syncTableBody(leadsBody, data.leads, renderLeadRow, [leadShowBase]);
             }
 
             if (pipelineLeadsBody && Array.isArray(data.leads)) {
-                const pipelineHtml = data.leads.length === 0
-                    ? ''
-                    : data.leads.map((lead) => renderPipelineLeadRow(lead, leadShowBase, csrfToken())).join('');
-                smoothHtmlUpdate(pipelineLeadsBody, pipelineHtml);
+                syncTableBody(pipelineLeadsBody, data.leads, renderPipelineLeadRow, [leadShowBase, csrfToken()]);
+                reapplyPipelineLeadFilter();
+            }
+
+            if (aePipelineBody && Array.isArray(data.leads)) {
+                const aeLeads = data.leads.filter((lead) => AE_PIPELINE_STAGES.has(lead.stage));
+                syncTableBody(aePipelineBody, aeLeads, renderAePipelineRow, [leadShowBase]);
             }
 
             if (workflowsList && Array.isArray(data.workflows)) {
-                smoothHtmlUpdate(
-                    workflowsList,
-                    data.workflows.map((wf) => renderWorkflowCard(wf, workflowShowBase)).join(''),
-                );
+                if (syncModeIsPatch(workflowsList)) {
+                    patchWorkflowCards(workflowsList, data.workflows, workflowShowBase);
+                } else {
+                    smoothHtmlUpdate(
+                        workflowsList,
+                        data.workflows.map((wf) => renderWorkflowCard(wf, workflowShowBase)).join(''),
+                    );
+                }
             }
 
             if (teamList && Array.isArray(data.team)) {
@@ -591,12 +728,9 @@ export function initWorkspaceSync() {
                 smoothTextUpdate(workflowPendingReview2, String(wf.pending_verification ?? 0));
                 smoothWidthUpdate(workflowProgressBar, wf.completion_pct ?? 0);
                 if (workflowProgressLabel) {
-                    const done = (wf.processed_leads ?? 0) + (wf.failed_leads ?? 0);
-                    smoothTextUpdate(
-                        workflowProgressLabel,
-                        `${wf.completion_pct ?? 0}% (${done} / ${wf.total_leads ?? 0} leads)`,
-                    );
+                    smoothTextUpdate(workflowProgressLabel, formatWorkflowProgressLabel(wf));
                 }
+                updatePipelineProgress(wf);
             }
 
             document.dispatchEvent(new CustomEvent('workspace:sync', { detail: data }));

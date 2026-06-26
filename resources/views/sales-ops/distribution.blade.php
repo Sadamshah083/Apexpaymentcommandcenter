@@ -23,16 +23,16 @@
                 </thead>
                 <tbody id="workspace-sync-sdr-load-body">
                     @foreach($sdrLoad as $row)
-                        <tr>
+                        <tr data-sdr-id="{{ $row['user_id'] }}">
                             <td class="font-bold">{{ $row['name'] }}</td>
-                            <td>{{ $row['assigned'] }}</td>
+                            <td id="workspace-sync-sdr-assigned-{{ $row['user_id'] }}">{{ $row['assigned'] }}</td>
                             <td>{{ $row['cap'] }}</td>
-                            <td>{{ $row['available'] }}</td>
-                            <td>
+                            <td id="workspace-sync-sdr-available-{{ $row['user_id'] }}">{{ $row['available'] }}</td>
+                            <td id="workspace-sync-sdr-status-{{ $row['user_id'] }}">
                                 @if($row['at_capacity'])
-                                    <span class="text-xs font-bold text-rose-600 bg-rose-50 px-2 py-1 rounded">At capacity — work existing pool</span>
+                                    <span class="app-badge app-badge-danger">At capacity</span>
                                 @else
-                                    <span class="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">Accepting new leads</span>
+                                    <span class="app-badge app-badge-success">Accepting leads</span>
                                 @endif
                             </td>
                         </tr>

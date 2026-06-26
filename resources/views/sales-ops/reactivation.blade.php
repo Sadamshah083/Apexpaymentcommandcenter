@@ -9,6 +9,13 @@
         <p class="app-page-subtitle">Revisit old leads, no-shows, lost opportunities, and expired proposals — historically higher conversion than cold outreach.</p>
     </div>
 
+    <div class="app-card app-card-padded flex items-center justify-between">
+        <div>
+            <p class="app-kpi-label">Candidates in queue</p>
+            <p id="workspace-sync-kpi-reactivation" class="app-kpi-value">{{ $candidates->count() }}</p>
+        </div>
+    </div>
+
     <div class="app-card app-card-padded">
         @if($candidates->isEmpty())
             <p class="text-sm text-zinc-500 italic">No reactivation candidates right now.</p>

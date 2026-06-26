@@ -22,9 +22,9 @@
                     <th></th>
                 </tr>
             </thead>
-            <tbody>
+            <tbody id="workspace-sync-ae-pipeline-body">
                 @foreach($leads as $lead)
-                    <tr>
+                    <tr data-lead-id="{{ $lead->id }}">
                         <td class="font-bold">{{ $lead->business_name }}</td>
                         <td>{{ $lead->owner_name ?: '—' }}</td>
                         <td>{{ \App\Support\SalesOps::crmStageLabel($lead->stage) }}</td>

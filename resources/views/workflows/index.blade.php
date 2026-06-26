@@ -101,9 +101,9 @@
                                     <th class="text-right">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody id="workspace-sync-leads-body">
+                            <tbody id="workspace-sync-leads-body" data-sync-mode="{{ request()->anyFilled(['search', 'stage', 'tier']) || $leads->currentPage() > 1 ? 'patch' : 'replace' }}">
                                 @foreach($leads as $lead)
-                                    <tr>
+                                    <tr data-lead-id="{{ $lead->id }}">
                                         <td>
                                             <div class="font-bold text-zinc-900">{{ $lead->business_name }}</div>
                                             @if($lead->address)
@@ -157,9 +157,9 @@
                     <p class="text-sm text-zinc-500">No imports yet.</p>
                     <a href="{{ route('admin.workflows.create') }}" class="app-link text-sm inline-block mt-3">Import your first list</a>
                 @else
-                    <div id="workspace-sync-workflows" class="space-y-3">
+                    <div id="workspace-sync-workflows" class="space-y-3" data-sync-mode="{{ $workflows->currentPage() > 1 ? 'patch' : 'replace' }}">
                         @foreach($workflows as $wf)
-                            <div class="app-import-card">
+                            <div class="app-import-card" data-workflow-id="{{ $wf->id }}">
                                 <div class="flex items-start justify-between gap-3">
                                     <div class="min-w-0">
                                         <h3 class="app-import-card-title">{{ $wf->name }}</h3>
