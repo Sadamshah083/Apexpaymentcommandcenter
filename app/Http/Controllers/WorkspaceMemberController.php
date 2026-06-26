@@ -6,6 +6,8 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Services\Workspace\WorkspaceContextService;
 use App\Services\Workspace\WorkspaceMemberService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -21,7 +23,7 @@ class WorkspaceMemberController extends Controller
         $data = $request->validate([
             'username' => 'required|string|max:255',
             'password' => 'required|string|min:6|confirmed',
-            'role' => 'required|in:marketer,admin',
+            'role' => 'required|in:admin,sdr,marketer,account_executive,data_acquisition',
         ]);
 
         $member = $this->memberService->createAgent(
@@ -36,41 +38,53 @@ class WorkspaceMemberController extends Controller
             ? 'Admin and Marketer portals'
             : 'Agent portal only';
 
-        return back()->with(
-            'success',
-            "Account \"{$member->name}\" created. Sign in at the agent portal ({$portalLabel})."
+        return $this->respond(
+            $request,
+            "Account \"{$member->name}\" created. Sign in at the agent portal ({$portalLabel}).",
         );
     }
 
     public function updateRole(Request $request, Workspace $workspace, User $member)
     {
         $data = $request->validate([
-            'role' => 'required|in:admin,marketer',
+            'role' => 'required|in:admin,sdr,marketer,account_executive,data_acquisition',
         ]);
 
         $this->memberService->updateMemberRole($workspace, Auth::user(), $member, $data['role']);
 
-        return back()->with('success', "Updated role for {$member->name}.");
+        return $this->respond($request, "Updated role for {$member->name}.");
     }
 
-    public function suspend(Workspace $workspace, User $member)
+    public function suspend(Request $request, Workspace $workspace, User $member)
     {
         $this->memberService->suspendMember($workspace, Auth::user(), $member);
 
-        return back()->with('success', "{$member->name} has been suspended.");
+        return $this->respond($request, "{$member->name} has been suspended.");
     }
 
-    public function reactivate(Workspace $workspace, User $member)
+    public function reactivate(Request $request, Workspace $workspace, User $member)
     {
         $this->memberService->reactivateMember($workspace, Auth::user(), $member);
 
-        return back()->with('success', "{$member->name} has been reactivated.");
+        return $this->respond($request, "{$member->name} has been reactivated.");
     }
 
-    public function destroy(Workspace $workspace, User $member)
+    public function destroy(Request $request, Workspace $workspace, User $member)
     {
         $this->memberService->removeMember($workspace, Auth::user(), $member);
 
-        return back()->with('success', "{$member->name} removed from workspace.");
+        return $this->respond($request, "{$member->name} removed from workspace.");
+    }
+
+    protected function respond(Request $request, string $message): JsonResponse|RedirectResponse
+    {
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => $message,
+            ]);
+        }
+
+        return back()->with('success', $message);
     }
 }

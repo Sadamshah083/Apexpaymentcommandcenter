@@ -2,7 +2,7 @@
     $status = $member->pivot->status ?? 'active';
     $isOwner = $activeWorkspace->admin_id === $member->id;
     $canManage = Auth::user()->isWorkspaceAdmin($activeWorkspace->id) && ! $isOwner;
-    $roleLabel = $member->pivot->role === 'marketer' ? 'Agent' : 'Admin';
+    $roleLabel = \App\Support\SalesOps::roleLabel($member->pivot->role ?? null);
     $nextRole = $member->pivot->role === 'admin' ? 'marketer' : 'admin';
 @endphp
 

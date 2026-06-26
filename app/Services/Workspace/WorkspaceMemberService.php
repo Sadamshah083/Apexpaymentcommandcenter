@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use App\Support\SalesOps;
 
 class WorkspaceMemberService
 {
@@ -26,12 +27,12 @@ class WorkspaceMemberService
         User $createdBy,
         string $username,
         string $password,
-        string $role = 'marketer',
+        string $role = 'sdr',
     ): User {
         $this->workspaceContext->ensureCanManageMembers($createdBy, $workspace);
 
         $username = trim($username);
-        $role = in_array($role, ['admin', 'marketer'], true) ? $role : 'marketer';
+        $role = $this->normalizeRole($role);
 
         if ($username === '') {
             throw ValidationException::withMessages([
@@ -105,7 +106,7 @@ class WorkspaceMemberService
         $this->workspaceContext->ensureCanManageMembers($invitedBy, $workspace);
 
         $email = strtolower(trim($email));
-        $role = in_array($role, ['admin', 'marketer'], true) ? $role : 'marketer';
+        $role = $this->normalizeRole($role);
 
         $existingMember = $workspace->users()->where('users.email', $email)->first();
         if ($existingMember) {
@@ -233,7 +234,7 @@ class WorkspaceMemberService
             ]);
         }
 
-        if (! in_array($role, ['admin', 'marketer'], true)) {
+        if (! in_array($role, array_keys(config('sales_ops.roles', [])), true)) {
             throw ValidationException::withMessages([
                 'role' => 'Invalid role selected.',
             ]);
@@ -342,6 +343,13 @@ class WorkspaceMemberService
             $payload,
             $admin->id
         );
+    }
+
+    protected function normalizeRole(string $role): string
+    {
+        $allowed = array_keys(config('sales_ops.roles', []));
+
+        return in_array($role, $allowed, true) ? $role : 'sdr';
     }
 
     /**

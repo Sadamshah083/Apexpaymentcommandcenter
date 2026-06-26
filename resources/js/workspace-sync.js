@@ -1,14 +1,22 @@
 import { showToast } from './toast.js';
 import { updateMemberRows } from './member-management.js';
 import { isOsNotificationsEnabled, showOsNotification } from './system-notifications.js';
+import { applyWorkspaceAdminState } from './workspace-admin.js';
+import { applySalesOpsSync, initAjaxActivityForms, TIER_LABELS, smoothWidthUpdate } from './sales-ops-sync.js';
 
 const STAGE_CLASSES = {
     closed_won: 'bg-emerald-50 text-emerald-700',
     closed_lost: 'bg-rose-50 text-rose-700',
     follow_up: 'bg-amber-50 text-amber-700',
-    interested: 'bg-indigo-50 text-indigo-700',
+    new_lead: 'bg-slate-100 text-slate-700',
+    attempted_contact: 'bg-sky-50 text-sky-700',
+    connected: 'bg-cyan-50 text-cyan-700',
+    discovery_completed: 'bg-violet-50 text-violet-700',
+    meeting_scheduled: 'bg-indigo-50 text-indigo-700',
+    proposal_sent: 'bg-purple-50 text-purple-700',
     lead: 'bg-slate-100 text-slate-700',
     contacted: 'bg-sky-50 text-sky-700',
+    interested: 'bg-indigo-50 text-indigo-700',
 };
 
 const WORKFLOW_STATUS_CLASSES = {
@@ -33,6 +41,9 @@ const NOTIFY_EVENT_TYPES = new Set([
     'member.reactivated',
     'member.removed',
     'member.role_updated',
+    'lead.verified',
+    'lead.assigned',
+    'lead.activity',
 ]);
 
 function csrfToken() {
@@ -74,7 +85,7 @@ function escapeHtml(value) {
 }
 
 function renderLeadRow(lead, leadShowBase) {
-    const stageClass = STAGE_CLASSES[lead.stage] || STAGE_CLASSES.lead;
+    const stageClass = STAGE_CLASSES[lead.stage] || STAGE_CLASSES.new_lead;
     const contact = lead.direct_email && lead.direct_email !== 'Not Publicly Available'
         ? `<div class="text-slate-700">${escapeHtml(lead.direct_email)}</div>`
         : '';
@@ -84,6 +95,7 @@ function renderLeadRow(lead, leadShowBase) {
     const contactFallback = (!lead.direct_email && !lead.direct_phone)
         ? '<span class="text-xs text-slate-400 font-italic">None available</span>'
         : '';
+    const tierLabel = lead.tier_label || TIER_LABELS[lead.tier] || '';
 
     return `
         <tr class="hover:bg-slate-50/80 transition-colors" data-lead-id="${lead.id}">
@@ -100,13 +112,54 @@ function renderLeadRow(lead, leadShowBase) {
                 </span>
             </td>
             <td class="py-3.5 px-4">
+                ${tierLabel ? `<div class="text-[10px] font-semibold text-slate-400 mb-1">${escapeHtml(tierLabel)}</div>` : ''}
                 <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${stageClass}">
-                    ${escapeHtml(stageLabel(lead.stage))}
+                    ${escapeHtml(lead.stage_label || stageLabel(lead.stage))}
                 </span>
             </td>
             <td class="py-3.5 px-4 text-right">
                 <a href="${leadShowBase}/${lead.id}" class="inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors">✎</a>
             </td>
+        </tr>
+    `;
+}
+
+function pipelineStatusClass(status) {
+    const map = {
+        completed: 'bg-emerald-100 text-emerald-800',
+        failed: 'bg-rose-100 text-rose-800',
+        extracting: 'bg-amber-100 text-amber-800 animate-pulse',
+        pending_verification: 'bg-indigo-100 text-indigo-800',
+        pending: 'bg-slate-100 text-slate-600',
+    };
+
+    return map[status] || 'bg-slate-100 text-slate-600';
+}
+
+function renderPipelineLeadRow(lead, leadShowBase, csrf) {
+    const status = (lead.status || '').replace(/_/g, ' ');
+    const actions = lead.status === 'pending_verification'
+        ? `<div class="flex items-center gap-2">
+                <form method="POST" action="/admin/leads/${lead.id}/approve">
+                    <input type="hidden" name="_token" value="${escapeHtml(csrf)}">
+                    <button type="submit" class="px-2 py-1 rounded text-[10px] font-bold bg-emerald-600 text-white">Approve</button>
+                </form>
+           </div>`
+        : (lead.status === 'completed' ? '<span class="text-[10px] text-emerald-600 font-semibold">Released</span>' : '<span class="text-[10px] text-slate-400">—</span>');
+
+    return `
+        <tr data-lead-id="${lead.id}">
+            <td class="text-xs font-mono text-slate-400">#${lead.row_number ?? lead.id}</td>
+            <td class="font-bold text-warmgrey-900">
+                <a href="${leadShowBase}/${lead.id}" class="hover:text-warmgrey-500 underline">${escapeHtml(lead.business_name)}</a>
+            </td>
+            <td class="text-xs text-slate-500">${escapeHtml(lead.address || 'Not public')}<div class="text-[10px] text-slate-400">${escapeHtml(lead.city)}, ${escapeHtml(lead.state)}</div></td>
+            <td>${escapeHtml(lead.owner_name || 'Not public')}</td>
+            <td>${escapeHtml(lead.direct_email || 'Not public')}</td>
+            <td>${escapeHtml(lead.direct_phone || 'Not public')}</td>
+            <td><span class="inline-flex px-2 py-0.5 rounded text-xs bg-slate-100">${escapeHtml(lead.payment_processor || 'Not public')}</span></td>
+            <td><span class="inline-flex px-2 py-0.5 rounded text-xs font-semibold ${pipelineStatusClass(lead.status)}">${escapeHtml(status)}</span></td>
+            <td>${actions}</td>
         </tr>
     `;
 }
@@ -224,6 +277,9 @@ const SYNC_EVENT_TOASTS = {
     'member.reactivated': (payload) => `${payload.name || payload.email || 'Member'} was reactivated.`,
     'member.removed': (payload) => `${payload.name || payload.email || 'Member'} was removed from the workspace.`,
     'member.role_updated': (payload) => `Member role updated to ${payload.role || 'new role'}.`,
+    'lead.verified': (payload) => `Lead approved: ${payload.business_name || 'Lead'}`,
+    'lead.assigned': (payload) => `New lead assigned: ${payload.business_name || 'Lead'}`,
+    'lead.activity': (payload) => `Activity logged on ${payload.business_name || 'lead'}`,
 };
 
 const SYNC_EVENT_TITLES = {
@@ -238,6 +294,9 @@ const SYNC_EVENT_TITLES = {
     'member.reactivated': 'Member reactivated',
     'member.removed': 'Member removed',
     'member.role_updated': 'Role updated',
+    'lead.verified': 'Lead approved',
+    'lead.assigned': 'Lead assigned',
+    'lead.activity': 'Activity logged',
 };
 
 function toastTypeForSyncEvent(type) {
@@ -362,6 +421,7 @@ function notifySyncEvents(events, workspaceId, seenIds, leadShowBase, workflowSh
 let syncTimer = null;
 let syncInflight = null;
 let syncVisibilityHandler = null;
+let syncRequestHandler = null;
 
 export function teardownWorkspaceSync() {
     if (syncTimer) {
@@ -373,6 +433,10 @@ export function teardownWorkspaceSync() {
     if (syncVisibilityHandler) {
         document.removeEventListener('visibilitychange', syncVisibilityHandler);
         syncVisibilityHandler = null;
+    }
+    if (syncRequestHandler) {
+        document.removeEventListener('workspace:sync-request', syncRequestHandler);
+        syncRequestHandler = null;
     }
 }
 
@@ -388,16 +452,32 @@ export function initWorkspaceSync() {
     let cursor = loadStoredCursor(workspaceId);
     let hasSyncedOnce = sessionStorage.getItem(readyStorageKey(workspaceId)) === '1';
     const seenEventIds = loadSeenEventIds(workspaceId);
-    const workflowId = root.dataset.workspaceWorkflowId || null;
+    const pageContext = document.getElementById('workspace-sync-page');
+    const workflowId = pageContext?.dataset.workflowId || root.dataset.workspaceWorkflowId || null;
+    const leadId = pageContext?.dataset.leadId || root.dataset.workspaceLeadId || null;
     const leadShowBase = root.dataset.leadShowBase || '/portal/leads';
     const workflowShowBase = root.dataset.workflowShowBase || '/admin/workflows';
 
     const leadsBody = document.getElementById('workspace-sync-leads-body');
+    const pipelineLeadsBody = document.getElementById('workspace-sync-pipeline-leads');
     const workflowsList = document.getElementById('workspace-sync-workflows');
     const teamList = document.getElementById('workspace-sync-team');
     const workflowStatus = document.getElementById('workspace-sync-workflow-status');
     const workflowProgress = document.getElementById('workspace-sync-workflow-progress');
     const workflowAssigned = document.getElementById('workspace-sync-workflow-assigned');
+    const workflowPendingReview = document.getElementById('workspace-sync-workflow-pending-review');
+    const workflowPendingReview2 = document.getElementById('workspace-sync-workflow-pending-review-2');
+    const workflowProgressBar = document.getElementById('workspace-sync-workflow-progress-bar');
+    const workflowProgressLabel = document.getElementById('workspace-sync-workflow-progress-label');
+
+    initAjaxActivityForms();
+
+    function onSyncRequest() {
+        schedulePoll(0);
+    }
+
+    syncRequestHandler = onSyncRequest;
+    document.addEventListener('workspace:sync-request', syncRequestHandler);
 
     function schedulePoll(ms) {
         if (syncTimer) {
@@ -418,6 +498,7 @@ export function initWorkspaceSync() {
             if (version) params.set('v', version);
             params.set('cursor', String(cursor));
             if (workflowId) params.set('workflow_id', workflowId);
+            if (leadId) params.set('lead_id', leadId);
 
             const response = await fetch(`${syncUrl}?${params.toString()}`, {
                 headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
@@ -465,6 +546,13 @@ export function initWorkspaceSync() {
                 smoothHtmlUpdate(leadsBody, leadsHtml);
             }
 
+            if (pipelineLeadsBody && Array.isArray(data.leads)) {
+                const pipelineHtml = data.leads.length === 0
+                    ? ''
+                    : data.leads.map((lead) => renderPipelineLeadRow(lead, leadShowBase, csrfToken())).join('');
+                smoothHtmlUpdate(pipelineLeadsBody, pipelineHtml);
+            }
+
             if (workflowsList && Array.isArray(data.workflows)) {
                 smoothHtmlUpdate(
                     workflowsList,
@@ -473,18 +561,31 @@ export function initWorkspaceSync() {
             }
 
             if (teamList && Array.isArray(data.team)) {
-                if (teamList.dataset.staticTeam === '1') {
+                if (teamList.dataset.adminTeam === '1' || teamList.dataset.staticTeam === '1') {
                     updateMemberRows(teamList, data.team);
                 } else {
                     smoothHtmlUpdate(teamList, renderTeam(data.team));
                 }
             }
 
+            applyWorkspaceAdminState(data);
+            applySalesOpsSync(data);
+
             if (workflowId && Array.isArray(data.workflows) && data.workflows.length > 0) {
                 const wf = data.workflows[0];
                 smoothTextUpdate(workflowStatus, `Status: ${wf.status}`);
-                smoothTextUpdate(workflowProgress, String(wf.processed_leads ?? 0));
+                smoothTextUpdate(workflowProgress, String(wf.enriched_leads ?? wf.processed_leads ?? 0));
                 smoothTextUpdate(workflowAssigned, String(wf.assigned_leads ?? 0));
+                smoothTextUpdate(workflowPendingReview, String(wf.pending_verification ?? 0));
+                smoothTextUpdate(workflowPendingReview2, String(wf.pending_verification ?? 0));
+                smoothWidthUpdate(workflowProgressBar, wf.completion_pct ?? 0);
+                if (workflowProgressLabel) {
+                    const done = (wf.processed_leads ?? 0) + (wf.failed_leads ?? 0);
+                    smoothTextUpdate(
+                        workflowProgressLabel,
+                        `${wf.completion_pct ?? 0}% (${done} / ${wf.total_leads ?? 0} leads)`,
+                    );
+                }
             }
 
             document.dispatchEvent(new CustomEvent('workspace:sync', { detail: data }));

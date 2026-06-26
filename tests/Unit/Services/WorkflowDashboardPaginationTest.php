@@ -7,6 +7,7 @@ use App\Models\Workflow;
 use App\Models\WorkflowLead;
 use App\Models\Workspace;
 use App\Services\Workflow\WorkflowDashboardService;
+use App\Services\SalesOps\SdrPerformanceService;
 use App\Services\Workflow\WorkflowProviderStatusService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -50,7 +51,10 @@ class WorkflowDashboardPaginationTest extends TestCase
             ]);
         }
 
-        $service = new WorkflowDashboardService(new WorkflowProviderStatusService);
+        $service = new WorkflowDashboardService(
+            new WorkflowProviderStatusService,
+            app(SdrPerformanceService::class),
+        );
         $data = $service->buildIndexData($workspace, $admin);
 
         $this->assertSame(20, $data['leads']->perPage());

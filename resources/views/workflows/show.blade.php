@@ -21,7 +21,7 @@
             <div class="flex items-center justify-between">
                 <div>
                     <h2 class="text-lg font-bold text-slate-800">Active Pipeline Tracking</h2>
-                    <p class="text-xs text-slate-400 mt-0.5">Leads are flowing through the automated extraction and distribution pipeline.</p>
+                    <p class="text-xs text-slate-400 mt-0.5">Automation runs end-to-end; you approve enriched leads before they reach agents.</p>
                     @if($workflow->isProcessing())
                         <p class="text-xs text-amber-700 mt-1">Speed tip: run <code class="bg-amber-50 px-1 rounded">php artisan queue:pool</code> for {{ config('queue.workers', 2) }} parallel workers (set <code class="bg-amber-50 px-1 rounded">QUEUE_WORKERS</code> in <code class="bg-amber-50 px-1 rounded">.env</code>).</p>
                     @endif
@@ -91,10 +91,10 @@
                             Completed
                         @elseif($workflow->status === 'paused')
                             <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                            Paused (<span id="workspace-sync-workflow-progress">{{ $workflow->processed_leads }}</span> / {{ $workflow->total_leads }} enriched)
+                            Paused (<span id="workspace-sync-workflow-progress">{{ $workflow->processed_leads + ($workflow->pending_verification_count ?? 0) }}</span> / {{ $workflow->total_leads }} enriched)
                         @elseif($workflow->status === 'extracting')
                             <svg class="animate-spin mr-1.5 h-3.5 w-3.5 text-amber-600" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                            Active Research (<span id="workspace-sync-workflow-progress">{{ $workflow->processed_leads }}</span> / {{ $workflow->total_leads }} enriched)
+                            Active Research (<span id="workspace-sync-workflow-progress">{{ $workflow->processed_leads + ($workflow->pending_verification_count ?? 0) }}</span> / {{ $workflow->total_leads }} enriched)
                         @else
                             Waiting
                         @endif
@@ -105,29 +105,98 @@
                 <div class="hidden md:flex items-center text-warmgrey-200">&rarr;</div>
 
                 <!-- Step 3 -->
-                <div class="flex-1 p-4 rounded-xl border {{ ($workflow->assigned_leads_count ?? 0) > 0 && in_array($workflow->status, ['extracting', 'pending', 'paused']) ? 'border-emerald-400 bg-emerald-50/10' : 'border-warmgrey-200 bg-cream-50/50' }} flex flex-col justify-between">
+                <div class="flex-1 p-4 rounded-xl border {{ ($workflow->pending_verification_count ?? 0) > 0 || in_array($workflow->status, ['extracting', 'pending']) ? 'border-indigo-400 bg-indigo-50/10' : 'border-warmgrey-200 bg-cream-50/50' }} flex flex-col justify-between">
                     <div>
                         <span class="px-2 py-0.5 bg-cream-200 text-warmgrey-900 border border-warmgrey-500 rounded text-[10px] font-bold">NODE 03</span>
+                        <h4 class="font-bold text-warmgrey-900 mt-2 text-sm">Auto Verification</h4>
+                        <p class="text-[11px] text-warmgrey-500 mt-1">SMTP, MX, disposable email, and domain deliverability scans.</p>
+                    </div>
+                    <div class="mt-4 text-xs font-semibold flex items-center
+                        {{ ($workflow->pending_verification_count ?? 0) > 0 ? 'text-indigo-600' : '' }}
+                        {{ $workflow->status === 'completed' ? 'text-emerald-600' : '' }}
+                    ">
+                        @if(($workflow->pending_verification_count ?? 0) > 0)
+                            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            Scans complete — <span id="workspace-sync-workflow-pending-review">{{ $workflow->pending_verification_count ?? 0 }}</span> awaiting your review
+                        @elseif($workflow->status === 'completed')
+                            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            All scans processed
+                        @else
+                            Running with enrichment
+                        @endif
+                    </div>
+                </div>
+
+                <!-- Connector -->
+                <div class="hidden md:flex items-center text-warmgrey-200">&rarr;</div>
+
+                <!-- Step 4 -->
+                <div class="flex-1 p-4 rounded-xl border {{ ($workflow->pending_verification_count ?? 0) > 0 ? 'border-amber-400 bg-amber-50/20' : 'border-warmgrey-200 bg-cream-50/50' }} flex flex-col justify-between">
+                    <div>
+                        <span class="px-2 py-0.5 bg-cream-200 text-warmgrey-900 border border-warmgrey-500 rounded text-[10px] font-bold">NODE 04</span>
+                        <h4 class="font-bold text-warmgrey-900 mt-2 text-sm">Manual Verification</h4>
+                        <p class="text-[11px] text-warmgrey-500 mt-1">Review enriched data and approve or reject each lead.</p>
+                    </div>
+                    <div class="mt-4 text-xs font-semibold flex items-center
+                        {{ ($workflow->pending_verification_count ?? 0) > 0 ? 'text-amber-600' : '' }}
+                        {{ $workflow->status === 'completed' && ($workflow->pending_verification_count ?? 0) === 0 ? 'text-emerald-600' : '' }}
+                    ">
+                        @if(($workflow->pending_verification_count ?? 0) > 0)
+                            <svg class="animate-pulse w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                            Action required (<span id="workspace-sync-workflow-pending-review-2">{{ $workflow->pending_verification_count ?? 0 }}</span> in queue)
+                        @elseif($workflow->status === 'completed')
+                            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            Queue cleared
+                        @else
+                            Waiting for enriched leads
+                        @endif
+                    </div>
+                </div>
+
+                <!-- Connector -->
+                <div class="hidden md:flex items-center text-warmgrey-200">&rarr;</div>
+
+                <!-- Step 5 -->
+                <div class="flex-1 p-4 rounded-xl border {{ ($workflow->assigned_leads_count ?? 0) > 0 ? 'border-emerald-400 bg-emerald-50/10' : 'border-warmgrey-200 bg-cream-50/50' }} flex flex-col justify-between">
+                    <div>
+                        <span class="px-2 py-0.5 bg-cream-200 text-warmgrey-900 border border-warmgrey-500 rounded text-[10px] font-bold">NODE 05</span>
                         <h4 class="font-bold text-warmgrey-900 mt-2 text-sm">Lead Distribution</h4>
-                        <p class="text-[11px] text-warmgrey-500 mt-1">Round-robin assign leads to workspace team while enrichment runs.</p>
+                        <p class="text-[11px] text-warmgrey-500 mt-1">Approved leads are round-robin assigned to your team.</p>
                     </div>
                     <div class="mt-4 text-xs font-semibold flex items-center
                         {{ $workflow->status === 'completed' ? 'text-emerald-600' : '' }}
-                        {{ ($workflow->assigned_leads_count ?? 0) > 0 && in_array($workflow->status, ['extracting', 'pending', 'paused']) ? 'text-emerald-600' : '' }}
-                        {{ ($workflow->assigned_leads_count ?? 0) === 0 && $workflow->status !== 'completed' ? 'text-warmgrey-500' : '' }}
+                        {{ ($workflow->assigned_leads_count ?? 0) > 0 ? 'text-emerald-600' : 'text-warmgrey-500' }}
                     ">
-                        @if($workflow->status === 'completed')
+                        @if($workflow->status === 'completed' && ($workflow->assigned_leads_count ?? 0) > 0)
                             <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                            Distributed
+                            Distributed (<span id="workspace-sync-workflow-assigned">{{ $workflow->assigned_leads_count ?? 0 }}</span> / {{ $workflow->total_leads }})
                         @elseif(($workflow->assigned_leads_count ?? 0) > 0)
                             <svg class="animate-pulse w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-                            Assigning (<span id="workspace-sync-workflow-assigned">{{ $workflow->assigned_leads_count ?? 0 }}</span> / {{ $workflow->total_leads }} to agents)
+                            Assigning (<span id="workspace-sync-workflow-assigned">{{ $workflow->assigned_leads_count ?? 0 }}</span> released)
                         @else
-                            Waiting for leads
+                            Releases after approval
                         @endif
                     </div>
                 </div>
             </div>
+
+            @if(($workflow->pending_verification_count ?? 0) > 0)
+                <div class="p-4 rounded-xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                        <p class="text-sm font-bold text-amber-900">{{ $workflow->pending_verification_count }} lead(s) awaiting manual verification</p>
+                        <p class="text-xs text-amber-700 mt-0.5">Automation has finished enriching these leads. Approve them to release to your team.</p>
+                    </div>
+                    <form method="POST" action="{{ route('admin.workflows.approve-leads', $workflow->id) }}" class="flex-shrink-0">
+                        @csrf
+                        @foreach($workflow->leads()->where('status', 'pending_verification')->pluck('id') as $leadId)
+                            <input type="hidden" name="lead_ids[]" value="{{ $leadId }}">
+                        @endforeach
+                        <button type="submit" class="px-4 py-2 rounded-lg text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">
+                            Approve All Pending
+                        </button>
+                    </form>
+                </div>
+            @endif
 
             <!-- Progress Bar -->
             @if($workflow->total_leads > 0)
@@ -136,11 +205,11 @@
                 @endphp
                 <div class="space-y-2 pt-2">
                     <div class="flex justify-between text-xs text-warmgrey-500 font-semibold">
-                        <span>Ingestion Pipeline Completion</span>
-                        <span>{{ $pct }}% ({{ $workflow->processed_leads + $workflow->failed_leads }} / {{ $workflow->total_leads }} leads)</span>
+                        <span>Pipeline completion (approved + rejected)</span>
+                        <span id="workspace-sync-workflow-progress-label">{{ $pct }}% ({{ $workflow->processed_leads + $workflow->failed_leads }} / {{ $workflow->total_leads }} leads)</span>
                     </div>
                     <div class="w-full h-3 bg-cream-200 rounded-full overflow-hidden border border-warmgrey-200">
-                        <div class="h-full bg-gradient-to-r from-warmgrey-500 to-warmgrey-900 transition-all duration-500" style="width: {{ $pct }}%"></div>
+                        <div id="workspace-sync-workflow-progress-bar" class="h-full bg-gradient-to-r from-warmgrey-500 to-warmgrey-900 transition-all duration-500" style="width: {{ $pct }}%"></div>
                     </div>
                 </div>
             @endif
@@ -303,7 +372,7 @@ STRICT COMPLIANCE RULES:
                         <div class="w-8 h-8 rounded-full bg-cream-200 text-warmgrey-900 border border-warmgrey-500 flex items-center justify-center font-bold text-sm">4</div>
                         <div>
                             <h3 class="font-bold text-warmgrey-900 text-base">Node 4: Round-Robin Distribution</h3>
-                            <p class="text-xs text-warmgrey-500 mt-0.5">Select the team members in the active workspace to evenly allocate leads to.</p>
+                            <p class="text-xs text-warmgrey-500 mt-0.5">Select team members who receive leads <strong>after you approve</strong> enriched data.</p>
                         </div>
                     </div>
 
@@ -318,6 +387,28 @@ STRICT COMPLIANCE RULES:
                             </label>
                         @endforeach
                     </div>
+                </div>
+
+                <!-- NODE 5: Manual verification gate -->
+                <div class="bg-white rounded-2xl shadow-sm border border-amber-200 p-6 space-y-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-full bg-amber-100 text-amber-900 border border-amber-300 flex items-center justify-center font-bold text-sm">5</div>
+                        <div>
+                            <h3 class="font-bold text-warmgrey-900 text-base">Node 5: Manual Verification Gate (GoHighLevel-style)</h3>
+                            <p class="text-xs text-warmgrey-500 mt-0.5">The pipeline runs automatically through ingestion, AI research, and deliverability scans. Every enriched lead pauses here until you approve or reject it.</p>
+                        </div>
+                    </div>
+
+                    <label class="p-4 rounded-xl border border-amber-200 bg-amber-50/50 hover:bg-amber-50 cursor-pointer flex items-start gap-3 transition-colors">
+                        <input type="checkbox" name="mapping_confirmed" value="1" required class="mt-1 rounded border-amber-400 text-amber-700 focus:ring-amber-500">
+                        <div>
+                            <span class="font-bold text-warmgrey-900 text-xs block">I have reviewed the column mapping and launch settings</span>
+                            <span class="text-[10px] text-warmgrey-500 block mt-0.5">Required before automation starts. You will manually verify each enriched lead before it is assigned to marketers.</span>
+                        </div>
+                    </label>
+                    @error('mapping_confirmed')
+                        <p class="text-xs text-rose-600 font-semibold">{{ $message }}</p>
+                    @enderror
                 </div>
 
                 <!-- Trigger Actions -->
@@ -355,9 +446,10 @@ STRICT COMPLIANCE RULES:
                                 <th>Phone</th>
                                 <th>Processor</th>
                                 <th>Status</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody id="workspace-sync-pipeline-leads">
                             @foreach($leads as $lead)
                                 <tr>
                                     <td class="text-xs font-mono text-slate-400">#{{ $lead->row_number }}</td>
@@ -381,10 +473,29 @@ STRICT COMPLIANCE RULES:
                                             {{ $lead->status === 'completed' ? 'bg-emerald-100 text-emerald-800' : '' }}
                                             {{ $lead->status === 'failed' ? 'bg-rose-100 text-rose-800' : '' }}
                                             {{ $lead->status === 'extracting' ? 'bg-amber-100 text-amber-800 animate-pulse' : '' }}
+                                            {{ $lead->status === 'pending_verification' ? 'bg-indigo-100 text-indigo-800' : '' }}
                                             {{ $lead->status === 'pending' ? 'bg-slate-100 text-slate-600' : '' }}
                                         ">
-                                            {{ $lead->status }}
+                                            {{ str_replace('_', ' ', $lead->status) }}
                                         </span>
+                                    </td>
+                                    <td>
+                                        @if($lead->status === 'pending_verification')
+                                            <div class="flex items-center gap-2">
+                                                <form method="POST" action="{{ route('admin.leads.approve', $lead->id) }}">
+                                                    @csrf
+                                                    <button type="submit" class="px-2 py-1 rounded text-[10px] font-bold bg-emerald-600 text-white hover:bg-emerald-700">Approve</button>
+                                                </form>
+                                                <form method="POST" action="{{ route('admin.leads.reject', $lead->id) }}" class="flex items-center gap-1">
+                                                    @csrf
+                                                    <button type="submit" class="px-2 py-1 rounded text-[10px] font-bold bg-rose-100 text-rose-700 hover:bg-rose-200">Reject</button>
+                                                </form>
+                                            </div>
+                                        @elseif($lead->status === 'completed')
+                                            <span class="text-[10px] text-emerald-600 font-semibold">Released</span>
+                                        @else
+                                            <span class="text-[10px] text-slate-400">—</span>
+                                        @endif
                                     </td>
                                 </tr>
                             @endforeach
@@ -398,6 +509,7 @@ STRICT COMPLIANCE RULES:
 @endsection
 
 @push('scripts')
+<div id="workspace-sync-page" class="hidden" data-workflow-id="{{ $workflow->id }}" aria-hidden="true"></div>
 <script>
     document.body.dataset.workspaceWorkflowId = '{{ $workflow->id }}';
 </script>

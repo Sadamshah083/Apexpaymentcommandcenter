@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class WorkflowLead extends Model
 {
@@ -11,6 +12,11 @@ class WorkflowLead extends Model
         'workflow_id',
         'assigned_user_id',
         'status',
+        'verification_status',
+        'verification_snapshot',
+        'verified_at',
+        'verified_by',
+        'rejection_reason',
         'row_number',
         'business_name',
         'address',
@@ -31,7 +37,22 @@ class WorkflowLead extends Model
         'operating_hours',
         'markdown_report',
         'stage',
+        'contact_attempts',
+        'tier',
         'sale_value',
+        'monthly_processing_volume',
+        'current_processor',
+        'pricing_model',
+        'contract_expiration_date',
+        'pain_points',
+        'offer_type',
+        'discovery_completed_at',
+        'discovery_completed_by',
+        'meeting_qualified',
+        'meeting_qualified_at',
+        'reactivation_source',
+        'reactivation_eligible_at',
+        'is_nurture',
         'notes',
         'followup_at',
         'schedule_at',
@@ -44,11 +65,22 @@ class WorkflowLead extends Model
 
     protected $casts = [
         'raw_row' => 'array',
+        'verification_snapshot' => 'array',
+        'verified_at' => 'datetime',
         'followup_at' => 'datetime',
         'schedule_at' => 'datetime',
         'last_contacted_at' => 'datetime',
         'researched_at' => 'datetime',
-        'sale_value' => 'decimal:2'
+        'sale_value' => 'decimal:2',
+        'monthly_processing_volume' => 'decimal:2',
+        'pain_points' => 'array',
+        'contract_expiration_date' => 'date',
+        'discovery_completed_at' => 'datetime',
+        'meeting_qualified_at' => 'datetime',
+        'reactivation_eligible_at' => 'datetime',
+        'is_nurture' => 'boolean',
+        'meeting_qualified' => 'boolean',
+        'contact_attempts' => 'integer',
     ];
 
     public function workflow(): BelongsTo
@@ -59,5 +91,30 @@ class WorkflowLead extends Model
     public function assignee(): BelongsTo
     {
         return $this->belongsTo(User::class, 'assigned_user_id');
+    }
+
+    public function verifier(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'verified_by');
+    }
+
+    public function discoveryAuthor(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'discovery_completed_by');
+    }
+
+    public function activities(): HasMany
+    {
+        return $this->hasMany(LeadActivity::class, 'workflow_lead_id')->latest();
+    }
+
+    public function isAwaitingVerification(): bool
+    {
+        return $this->status === 'pending_verification';
+    }
+
+    public function isReleasedToCrm(): bool
+    {
+        return $this->status === 'completed';
     }
 }

@@ -12,6 +12,7 @@ use Illuminate\Notifications\Notifiable;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use App\Support\SalesOps;
 
 #[Fillable(['name', 'email', 'password', 'current_workspace_id'])]
 #[Hidden(['password', 'remember_token'])]
@@ -178,7 +179,22 @@ class User extends Authenticatable
 
     public function isMarketerOnly(?int $workspaceId = null): bool
     {
-        return $this->getWorkspaceRole($workspaceId) === 'marketer';
+        return SalesOps::isSdrRole($this->getWorkspaceRole($workspaceId));
+    }
+
+    public function isSdr(?int $workspaceId = null): bool
+    {
+        return SalesOps::isSdrRole($this->getWorkspaceRole($workspaceId));
+    }
+
+    public function isAccountExecutive(?int $workspaceId = null): bool
+    {
+        return $this->getWorkspaceRole($workspaceId) === 'account_executive';
+    }
+
+    public function isDataAcquisition(?int $workspaceId = null): bool
+    {
+        return $this->getWorkspaceRole($workspaceId) === 'data_acquisition';
     }
 }
 

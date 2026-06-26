@@ -27,6 +27,7 @@ class WorkspaceSyncController extends Controller
                 $request->query('v'),
                 $request->has('cursor') ? $request->integer('cursor') : null,
                 $request->integer('workflow_id') ?: null,
+                $request->integer('lead_id') ?: null,
             )
         );
     }

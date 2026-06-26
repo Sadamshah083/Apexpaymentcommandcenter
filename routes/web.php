@@ -9,6 +9,7 @@ use App\Http\Controllers\EmailListController;
 use App\Http\Controllers\ReputationController;
 use App\Http\Controllers\WorkflowController;
 use App\Http\Controllers\PushNotificationController;
+use App\Http\Controllers\SalesOpsController;
 use App\Http\Controllers\WorkspaceAuthController;
 use App\Http\Controllers\WorkspaceMemberController;
 use App\Http\Controllers\WorkspaceSyncController;
@@ -40,6 +41,16 @@ Route::prefix('portal')->name('portal.')->group(function () {
 // Protected Admin Routes
 Route::prefix('admin')->name('admin.')->middleware([\App\Http\Middleware\AdminPortalMiddleware::class])->group(function () {
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+
+    Route::prefix('sales-ops')->name('sales-ops.')->group(function () {
+        Route::get('/', [SalesOpsController::class, 'index'])->name('index');
+        Route::get('/performance', [SalesOpsController::class, 'performance'])->name('performance');
+        Route::get('/distribution', [SalesOpsController::class, 'distribution'])->name('distribution');
+        Route::get('/reactivation', [SalesOpsController::class, 'reactivation'])->name('reactivation');
+        Route::post('/leads/{lead}/reactivate', [SalesOpsController::class, 'enrollReactivation'])->name('reactivate');
+    });
+
+    Route::post('leads/{lead}/activities', [SalesOpsController::class, 'logActivity'])->name('leads.activities.store');
 
     Route::resource('lists', EmailListController::class)->except(['edit', 'update']);
     Route::get('lists/{list}/progress', [EmailListController::class, 'progress'])->name('lists.progress');
@@ -75,10 +86,14 @@ Route::prefix('admin')->name('admin.')->middleware([\App\Http\Middleware\AdminPo
         Route::get('/{workflow}', [WorkflowController::class, 'show'])->name('show');
         Route::post('/{workflow}/map', [WorkflowController::class, 'map'])->name('map');
         Route::post('/{workflow}/run', [WorkflowController::class, 'run'])->name('run');
+        Route::post('/{workflow}/approve-leads', [WorkflowController::class, 'bulkApproveLeads'])->name('approve-leads');
         Route::post('/{workflow}/pause', [WorkflowController::class, 'pause'])->name('pause');
         Route::post('/{workflow}/resume', [WorkflowController::class, 'resume'])->name('resume');
         Route::delete('/{workflow}', [WorkflowController::class, 'destroy'])->name('destroy');
     });
+
+    Route::post('leads/{lead}/approve', [WorkflowController::class, 'approveLead'])->name('leads.approve');
+    Route::post('leads/{lead}/reject', [WorkflowController::class, 'rejectLead'])->name('leads.reject');
 
     Route::prefix('workspaces')->name('workspaces.')->group(function () {
         Route::get('/', [WorkflowController::class, 'workspaceIndex'])->name('index');
@@ -112,6 +127,10 @@ Route::prefix('admin')->name('admin.')->middleware([\App\Http\Middleware\AdminPo
 // Protected Portal Routes
 Route::prefix('portal')->name('portal.')->middleware([\App\Http\Middleware\MarketerPortalMiddleware::class])->group(function () {
     Route::get('/dashboard', [WorkflowController::class, 'index'])->name('dashboard');
+
+    Route::get('/performance', [SalesOpsController::class, 'sdrPerformance'])->name('performance');
+    Route::get('/ae/pipeline', [SalesOpsController::class, 'aePipeline'])->name('ae.pipeline');
+    Route::post('/leads/{lead}/activities', [SalesOpsController::class, 'logActivity'])->name('leads.activities.store');
     Route::post('/workspaces/switch/{workspace}', [WorkflowController::class, 'workspaceSwitch'])->name('workspaces.switch');
 
     Route::get('sync', [WorkspaceSyncController::class, 'poll'])->name('sync.poll');

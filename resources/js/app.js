@@ -6,6 +6,7 @@ import { initWorkspaceSync, teardownWorkspaceSync } from './workspace-sync.js';
 import { initPushNotifications } from './push-notifications.js';
 import { initFormLoading } from './form-loading.js';
 import { initMemberManagement } from './member-management.js';
+import { initWorkspaceAdmin } from './workspace-admin.js';
 import { startProgressPoll } from './realtime-poll.js';
 
 window.startProgressPoll = startProgressPoll;
@@ -33,6 +34,7 @@ function boot() {
     initPushNotifications();
     initFormLoading();
     initMemberManagement();
+    initWorkspaceAdmin();
 }
 
 if (document.readyState === 'loading') {
@@ -47,5 +49,6 @@ document.addEventListener('turbo:load', () => {
     initPushNotifications();
     initFormLoading();
     initMemberManagement();
+    initWorkspaceAdmin();
 });
 document.addEventListener('turbo:before-cache', teardownWorkspaceSync);

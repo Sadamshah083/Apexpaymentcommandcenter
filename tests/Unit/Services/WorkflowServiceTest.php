@@ -51,6 +51,30 @@ class WorkflowServiceTest extends TestCase
         $service->queueForProcessing($workflow, ['mapping' => []]);
     }
 
+    public function test_queue_for_processing_requires_mapping_confirmation(): void
+    {
+        $admin = User::create([
+            'name' => 'Admin Confirm',
+            'email' => 'admin-confirm@example.com',
+            'password' => bcrypt('password'),
+        ]);
+
+        $workspace = Workspace::create(['name' => 'Sales', 'admin_id' => $admin->id]);
+        $workflow = Workflow::create([
+            'workspace_id' => $workspace->id,
+            'name' => 'Pipeline',
+            'status' => 'mapping',
+        ]);
+
+        $sync = Mockery::mock(WorkspaceSyncService::class);
+        $service = new WorkflowService(Mockery::mock(WorkflowAiMapper::class), $sync);
+
+        $this->expectException(ValidationException::class);
+        $service->queueForProcessing($workflow, [
+            'mapping' => ['business_name' => 'Company'],
+        ]);
+    }
+
     public function test_queue_for_processing_dispatches_job(): void
     {
         Queue::fake();
@@ -76,6 +100,7 @@ class WorkflowServiceTest extends TestCase
         $service->queueForProcessing($workflow, [
             'mapping' => ['business_name' => 'Company'],
             'custom_prompt' => 'Find owner details',
+            'mapping_confirmed' => true,
         ]);
 
         $workflow->refresh();
@@ -106,6 +131,7 @@ class WorkflowServiceTest extends TestCase
         $this->expectException(ValidationException::class);
         $service->queueForProcessing($workflow, [
             'mapping' => ['business_name' => 'Company'],
+            'mapping_confirmed' => true,
         ]);
     }
 
@@ -144,6 +170,7 @@ class WorkflowServiceTest extends TestCase
         $service = new WorkflowService(Mockery::mock(WorkflowAiMapper::class), $sync);
         $service->queueForProcessing($workflow, [
             'mapping' => ['business_name' => 'Company'],
+            'mapping_confirmed' => true,
         ]);
 
         $workflow->refresh();

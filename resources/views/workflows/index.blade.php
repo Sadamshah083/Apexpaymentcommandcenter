@@ -7,9 +7,13 @@
     <div class="app-hero">
         <div class="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
             <div>
-                <h1 class="app-hero-title">Lead Intelligence Pipeline</h1>
+                <h1 class="app-hero-title">{{ request()->is('admin*') ? 'Lead Intelligence Pipeline' : 'My Lead Pool' }}</h1>
                 <p class="app-hero-subtitle">
-                    Upload any arbitrary spreadsheet, auto-map columns using AI, extract deep business intelligence (owner, contact info, POS systems), and evenly distribute leads to your team.
+                    @if(request()->is('admin*'))
+                        Upload spreadsheets, run AI enrichment, verify lead quality, and distribute to your SDR team.
+                    @else
+                        Work your assigned merchant leads by tier. Log dials and discoveries to hit daily quotas.
+                    @endif
                 </p>
             </div>
             <div class="flex flex-wrap items-center gap-3">
@@ -40,6 +44,26 @@
         </div>
     </div>
 
+    @if(isset($dailyMetrics))
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            @foreach(['dials' => 'Dials', 'conversations' => 'Conversations', 'decision_maker_contacts' => 'DM Contacts', 'discoveries' => 'Discoveries'] as $key => $label)
+                @php $m = $dailyMetrics[$key]; @endphp
+                <div class="app-card app-card-padded">
+                    <p class="text-[10px] font-bold uppercase text-slate-400">{{ $label }} Today</p>
+                    <p class="text-xl font-black text-slate-800">
+                        <span id="workspace-sync-metric-{{ $key }}-actual">{{ $m['actual'] }}</span><span class="text-sm text-slate-400">/<span id="workspace-sync-metric-{{ $key }}-target">{{ $m['target'] }}</span></span>
+                    </p>
+                    <div class="w-full h-1.5 bg-slate-100 rounded-full mt-2 overflow-hidden">
+                        <div id="workspace-sync-metric-{{ $key }}-bar" class="h-full bg-indigo-600 transition-all duration-300" style="width: {{ $m['pct'] }}%"></div>
+                    </div>
+                </div>
+            @endforeach
+        </div>
+        <div class="text-right">
+            <a href="{{ route('portal.performance') }}" class="text-sm font-semibold text-indigo-600">Full performance dashboard →</a>
+        </div>
+    @endif
+
     <!-- Main Grid -->
     <div class="grid grid-cols-1 {{ request()->is('admin*') ? 'lg:grid-cols-3' : '' }} gap-8">
         
@@ -60,14 +84,17 @@
                         </div>
                         <select name="stage" onchange="this.form.submit()" class="py-2 px-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500">
                             <option value="">All Stages</option>
-                            <option value="lead" {{ request('stage') === 'lead' ? 'selected' : '' }}>Lead</option>
-                            <option value="contacted" {{ request('stage') === 'contacted' ? 'selected' : '' }}>Contacted</option>
-                            <option value="follow_up" {{ request('stage') === 'follow_up' ? 'selected' : '' }}>Follow-up</option>
-                            <option value="interested" {{ request('stage') === 'interested' ? 'selected' : '' }}>Interested</option>
-                            <option value="closed_won" {{ request('stage') === 'closed_won' ? 'selected' : '' }}>Deal Closed</option>
-                            <option value="closed_lost" {{ request('stage') === 'closed_lost' ? 'selected' : '' }}>Lost</option>
+                            @foreach($crmStages ?? [] as $value => $label)
+                                <option value="{{ $value }}" {{ request('stage') === $value ? 'selected' : '' }}>{{ $label }}</option>
+                            @endforeach
                         </select>
-                        @if(request()->anyFilled(['search', 'stage']))
+                        <select name="tier" onchange="this.form.submit()" class="py-2 px-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <option value="">All Tiers</option>
+                            @foreach($leadTiers ?? [] as $value => $tier)
+                                <option value="{{ $value }}" {{ request('tier') === $value ? 'selected' : '' }}>{{ $tier['label'] }}</option>
+                            @endforeach
+                        </select>
+                        @if(request()->anyFilled(['search', 'stage', 'tier']))
                             <a href="{{ request()->is('admin*') ? route('admin.workflows.index') : route('portal.dashboard') }}" class="p-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-sm" title="Clear Filters">Clear</a>
                         @endif
                     </form>
@@ -125,15 +152,16 @@
                                             </span>
                                         </td>
                                         <td>
+                                            <div class="text-[10px] font-semibold text-slate-400 mb-1">{{ \App\Support\SalesOps::tierLabel($lead->tier) }}</div>
                                             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold
                                                 {{ $lead->stage === 'closed_won' ? 'bg-emerald-50 text-emerald-700' : '' }}
                                                 {{ $lead->stage === 'closed_lost' ? 'bg-rose-50 text-rose-700' : '' }}
                                                 {{ $lead->stage === 'follow_up' ? 'bg-amber-50 text-amber-700' : '' }}
-                                                {{ $lead->stage === 'interested' ? 'bg-indigo-50 text-indigo-700' : '' }}
-                                                {{ $lead->stage === 'lead' ? 'bg-slate-100 text-slate-700' : '' }}
-                                                {{ $lead->stage === 'contacted' ? 'bg-sky-50 text-sky-700' : '' }}
+                                                {{ in_array($lead->stage, ['connected','discovery_completed','meeting_scheduled','proposal_sent']) ? 'bg-indigo-50 text-indigo-700' : '' }}
+                                                {{ in_array($lead->stage, ['new_lead','lead']) ? 'bg-slate-100 text-slate-700' : '' }}
+                                                {{ in_array($lead->stage, ['attempted_contact','contacted']) ? 'bg-sky-50 text-sky-700' : '' }}
                                             ">
-                                                {{ ucfirst(str_replace('_', ' ', $lead->stage)) }}
+                                                {{ \App\Support\SalesOps::crmStageLabel($lead->stage) }}
                                             </span>
                                         </td>
                                         <td class="text-right">

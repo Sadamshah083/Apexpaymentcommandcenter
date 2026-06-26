@@ -7,13 +7,54 @@
     <div class="app-page-header flex items-center justify-between">
         <div>
             <h1 class="app-page-title">{{ $lead->business_name }}</h1>
-            <p class="app-page-subtitle">Lead ID: #{{ $lead->id }} &bull; Ingested {{ $lead->created_at->format('M d, Y') }}</p>
+            <p class="app-page-subtitle">Lead ID: #{{ $lead->id }} &bull; Ingested {{ $lead->created_at->format('M d, Y') }} &bull; <span id="workspace-sync-lead-stage">{{ \App\Support\SalesOps::crmStageLabel($lead->stage) }}</span></p>
         </div>
         <a href="{{ route('portal.dashboard') }}" class="app-btn app-btn-secondary text-sm">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
             Back to Dashboard
         </a>
     </div>
+
+    @if($lead->isAwaitingVerification())
+        <div class="app-card app-card-padded border-2 border-amber-200 bg-amber-50/40 space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                    <h2 class="text-lg font-bold text-amber-900">Awaiting manual verification</h2>
+                    <p class="text-sm text-amber-800 mt-1">Automation enriched this lead and ran deliverability scans. Approve to release it to marketers.</p>
+                </div>
+                @if(auth()->id() === $workspace->admin_id)
+                    <div class="flex items-center gap-2 flex-shrink-0">
+                        <form method="POST" action="{{ route('admin.leads.approve', $lead->id) }}">
+                            @csrf
+                            <button type="submit" class="app-btn app-btn-primary text-sm">Approve &amp; Release</button>
+                        </form>
+                        <form method="POST" action="{{ route('admin.leads.reject', $lead->id) }}" class="flex items-center gap-2">
+                            @csrf
+                            <input type="text" name="rejection_reason" placeholder="Reason (optional)" class="px-3 py-2 text-xs border border-rose-200 rounded-lg w-40">
+                            <button type="submit" class="app-btn bg-rose-100 text-rose-700 hover:bg-rose-200 text-sm">Reject</button>
+                        </form>
+                    </div>
+                @endif
+            </div>
+
+            @if($lead->verification_snapshot)
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    @if(!empty($lead->verification_snapshot['email']))
+                        <div class="p-3 rounded-xl bg-white border border-slate-200">
+                            <p class="font-bold text-slate-600 uppercase tracking-wider mb-2">Email auto-check</p>
+                            <pre class="text-[10px] text-slate-600 whitespace-pre-wrap overflow-x-auto">{{ json_encode($lead->verification_snapshot['email'], JSON_PRETTY_PRINT) }}</pre>
+                        </div>
+                    @endif
+                    @if(!empty($lead->verification_snapshot['domain']))
+                        <div class="p-3 rounded-xl bg-white border border-slate-200">
+                            <p class="font-bold text-slate-600 uppercase tracking-wider mb-2">Domain auto-check</p>
+                            <pre class="text-[10px] text-slate-600 whitespace-pre-wrap overflow-x-auto">{{ json_encode($lead->verification_snapshot['domain'], JSON_PRETTY_PRINT) }}</pre>
+                        </div>
+                    @endif
+                </div>
+            @endif
+        </div>
+    @endif
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div class="lg:col-span-2 space-y-6">
@@ -24,24 +65,39 @@
                     <!-- B2B Marketing Stage & Allocation -->
                     <div class="p-6 bg-slate-50 rounded-2xl border border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div class="space-y-1">
-                            <label for="stage" class="block text-xs font-bold text-slate-500 uppercase tracking-wider">CRM Pipeline Stage</label>
+                            <label for="stage" class="block text-xs font-bold text-slate-500 uppercase tracking-wider">GHL CRM Stage</label>
                             <select name="stage" id="stage" class="w-full mt-1 px-3 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
-                                <option value="lead" {{ $lead->stage === 'lead' ? 'selected' : '' }}>Lead Ingested</option>
-                                <option value="contacted" {{ $lead->stage === 'contacted' ? 'selected' : '' }}>Contacted</option>
-                                <option value="follow_up" {{ $lead->stage === 'follow_up' ? 'selected' : '' }}>Follow-up Scheduled</option>
-                                <option value="interested" {{ $lead->stage === 'interested' ? 'selected' : '' }}>Interested</option>
-                                <option value="closed_won" {{ $lead->stage === 'closed_won' ? 'selected' : '' }}>Deal Closed (Won)</option>
-                                <option value="closed_lost" {{ $lead->stage === 'closed_lost' ? 'selected' : '' }}>Deal Lost</option>
+                                @foreach($crmStages as $value => $label)
+                                    <option value="{{ $value }}" {{ $lead->stage === $value ? 'selected' : '' }}>{{ $label }}</option>
+                                @endforeach
                             </select>
                         </div>
-                        
+
                         <div class="space-y-1">
-                            <label for="assigned_user_id" class="block text-xs font-bold text-slate-500 uppercase tracking-wider">Assigned Marketer</label>
+                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider">Lead Tier</label>
+                            <div class="mt-1 px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700">
+                                <span id="workspace-sync-lead-tier">{{ \App\Support\SalesOps::tierLabel($lead->tier) }}</span>
+                                <span id="workspace-sync-lead-attempts" class="text-xs font-normal text-slate-400 block">{{ $lead->contact_attempts }} contact attempt(s)</span>
+                            </div>
+                        </div>
+
+                        <div class="space-y-1">
+                            <label for="offer_type" class="block text-xs font-bold text-slate-500 uppercase tracking-wider">Offer Positioning</label>
+                            <select name="offer_type" id="offer_type" class="w-full mt-1 px-3 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
+                                <option value="">— Select offer —</option>
+                                @foreach($offerTypes as $value => $label)
+                                    <option value="{{ $value }}" {{ $lead->offer_type === $value ? 'selected' : '' }}>{{ $label }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+
+                        <div class="space-y-1">
+                            <label for="assigned_user_id" class="block text-xs font-bold text-slate-500 uppercase tracking-wider">Assigned SDR</label>
                             <select name="assigned_user_id" id="assigned_user_id" class="w-full mt-1 px-3 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
                                 <option value="">-- Unassigned --</option>
                                 @foreach($team as $member)
                                     <option value="{{ $member->id }}" {{ $lead->assigned_user_id === $member->id ? 'selected' : '' }}>
-                                        {{ $member->name }} ({{ $member->pivot->role }})
+                                        {{ $member->name }} ({{ \App\Support\SalesOps::roleLabel($member->pivot->role) }})
                                     </option>
                                 @endforeach
                             </select>
@@ -51,6 +107,58 @@
                             <label for="sale_value" class="block text-xs font-bold text-slate-500 uppercase tracking-wider">Estimated Value ($)</label>
                             <input type="number" step="0.01" name="sale_value" id="sale_value" value="{{ $lead->sale_value }}" class="w-full mt-1 px-3 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
                         </div>
+
+                        <div class="space-y-1 flex items-end">
+                            <label class="flex items-center gap-2 text-sm text-slate-700">
+                                <input type="checkbox" name="is_nurture" value="1" {{ $lead->is_nurture ? 'checked' : '' }} class="rounded border-slate-300">
+                                Long-term nurture (Tier 4)
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Discovery Qualification -->
+                    <div class="space-y-4 p-6 bg-indigo-50/50 rounded-2xl border border-indigo-100">
+                        <div class="flex items-center justify-between gap-4">
+                            <h3 class="text-sm font-bold text-indigo-900 uppercase tracking-wider">Discovery Qualification</h3>
+                            @if(empty($discoveryMissing))
+                                <span class="text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-1 rounded-lg">Discovery Complete</span>
+                            @else
+                                <span class="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-1 rounded-lg">{{ count($discoveryMissing) }} field(s) missing</span>
+                            @endif
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="space-y-1">
+                                <label for="monthly_processing_volume" class="text-xs font-semibold text-slate-600">Monthly Processing Volume ($)</label>
+                                <input type="number" step="0.01" name="monthly_processing_volume" id="monthly_processing_volume" value="{{ $lead->monthly_processing_volume }}" class="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm">
+                            </div>
+                            <div class="space-y-1">
+                                <label for="current_processor" class="text-xs font-semibold text-slate-600">Current Processor</label>
+                                <input type="text" name="current_processor" id="current_processor" value="{{ $lead->current_processor }}" class="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm">
+                            </div>
+                            <div class="space-y-1">
+                                <label for="pricing_model" class="text-xs font-semibold text-slate-600">Current Pricing Model</label>
+                                <input type="text" name="pricing_model" id="pricing_model" value="{{ $lead->pricing_model }}" placeholder="e.g. Interchange-plus, Flat rate" class="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm">
+                            </div>
+                            <div class="space-y-1">
+                                <label for="contract_expiration_date" class="text-xs font-semibold text-slate-600">Contract Expiration</label>
+                                <input type="date" name="contract_expiration_date" id="contract_expiration_date" value="{{ $lead->contract_expiration_date?->format('Y-m-d') }}" class="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm">
+                            </div>
+                        </div>
+                        <div class="space-y-2">
+                            <label class="text-xs font-semibold text-slate-600">Pain Points</label>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                @foreach($painPoints as $key => $label)
+                                    <label class="flex items-center gap-2 text-xs text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2">
+                                        <input type="checkbox" name="pain_points[]" value="{{ $key }}" {{ in_array($key, $lead->pain_points ?? [], true) ? 'checked' : '' }} class="rounded border-slate-300">
+                                        {{ $label }}
+                                    </label>
+                                @endforeach
+                            </div>
+                        </div>
+                        <label class="flex items-center gap-2 text-sm text-slate-700">
+                            <input type="checkbox" name="meeting_qualified" value="1" {{ $lead->meeting_qualified ? 'checked' : '' }} class="rounded border-slate-300">
+                            Meeting qualified (decision maker, volume, processor, pain point confirmed)
+                        </label>
                     </div>
 
                     <!-- Business Identity Info -->
@@ -168,6 +276,35 @@
         </div>
 
         <div class="lg:col-span-1 space-y-6">
+            <div class="app-card app-card-padded space-y-4">
+                <h2 class="text-lg font-bold text-zinc-900">Log Outreach Activity</h2>
+                <p class="text-xs text-zinc-500">Counts toward daily SDR quotas (dials, conversations, discoveries).</p>
+                <form method="POST" action="{{ route(request()->is('admin*') ? 'admin.leads.activities.store' : 'portal.leads.activities.store', $lead->id) }}" class="space-y-3" data-ajax-activity>
+                    @csrf
+                    <select name="type" required class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm">
+                        @foreach($activityTypes as $value => $label)
+                            <option value="{{ $value }}">{{ $label }}</option>
+                        @endforeach
+                    </select>
+                    <input type="text" name="outcome" placeholder="Outcome (e.g. voicemail, connected)" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm">
+                    <textarea name="notes" rows="2" placeholder="Quick notes..." class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"></textarea>
+                    <button type="submit" class="app-btn app-btn-primary w-full text-sm">Log Activity</button>
+                </form>
+                <div id="workspace-sync-lead-activities" class="border-t border-slate-100 pt-3 space-y-2 max-h-48 overflow-y-auto">
+                @if($lead->activities->isNotEmpty())
+                        @foreach($lead->activities->take(8) as $activity)
+                            <div class="text-xs text-slate-600" data-activity-id="{{ $activity->id }}">
+                                <span class="font-bold">{{ $activityTypes[$activity->type] ?? $activity->type }}</span>
+                                · {{ $activity->created_at->diffForHumans() }}
+                                @if($activity->notes)<div class="text-slate-400 mt-0.5">{{ $activity->notes }}</div>@endif
+                            </div>
+                        @endforeach
+                @else
+                    <p class="text-xs text-slate-400 italic">No activity logged yet.</p>
+                @endif
+                </div>
+            </div>
+
         <div class="app-card app-card-padded space-y-4">
             <h2 class="text-lg font-bold text-zinc-900 flex items-center">
                 <svg class="w-5 h-5 mr-2 text-zinc-900" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
@@ -305,6 +442,7 @@
 </div>
 
 @push('scripts')
+<div id="workspace-sync-page" class="hidden" data-lead-id="{{ $lead->id }}" aria-hidden="true"></div>
 <script>
     function switchToolkitTab(tabId) {
         const tabs = ['email-verify', 'spam-analyzer', 'domain-auth'];

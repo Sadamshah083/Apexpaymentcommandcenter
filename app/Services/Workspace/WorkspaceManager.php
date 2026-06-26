@@ -9,6 +9,7 @@ class WorkspaceManager
 {
     public function __construct(
         protected WorkspaceContextService $workspaceContext,
+        protected WorkspaceSyncService $syncService,
     ) {}
 
     public function createWorkspace(User $user, string $name): Workspace
@@ -25,6 +26,15 @@ class WorkspaceManager
         ]);
         $user->update(['current_workspace_id' => $workspace->id]);
 
+        $this->syncService->record(
+            $workspace,
+            'workspace.created',
+            'workspace',
+            $workspace->id,
+            ['name' => $workspace->name],
+            $user->id,
+        );
+
         return $workspace;
     }
 
@@ -33,5 +43,14 @@ class WorkspaceManager
         $this->workspaceContext->ensureUserIsMember($user, $workspace);
         $this->workspaceContext->ensureActiveMember($user, $workspace);
         $user->update(['current_workspace_id' => $workspace->id]);
+
+        $this->syncService->record(
+            $workspace,
+            'workspace.switched',
+            'workspace',
+            $workspace->id,
+            ['name' => $workspace->name],
+            $user->id,
+        );
     }
 }

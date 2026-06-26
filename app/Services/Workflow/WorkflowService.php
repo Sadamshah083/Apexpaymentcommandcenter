@@ -114,12 +114,13 @@ class WorkflowService
         $workflow = $this->applyAutoMappingIfNeeded($workflow);
         $workflow->loadCount([
             'leads as assigned_leads_count' => fn ($query) => $query->whereNotNull('assigned_user_id'),
+            'leads as pending_verification_count' => fn ($query) => $query->where('status', 'pending_verification'),
         ]);
 
         $perPage = min(max((int) ($options['per_page'] ?? config('pagination.pipeline_leads_per_page', 25)), 5), 100);
 
         $leads = $workflow->leads()
-            ->orderByRaw("CASE WHEN status = 'completed' THEN 1 WHEN status = 'extracting' THEN 2 WHEN status = 'failed' THEN 3 ELSE 4 END ASC")
+            ->orderByRaw("CASE WHEN status = 'pending_verification' THEN 0 WHEN status = 'extracting' THEN 1 WHEN status = 'completed' THEN 2 WHEN status = 'failed' THEN 3 ELSE 4 END ASC")
             ->orderBy('researched_at', 'desc')
             ->orderBy('row_number', 'asc')
             ->paginate($perPage)
@@ -179,6 +180,12 @@ class WorkflowService
         if (empty($mapping['business_name'])) {
             throw ValidationException::withMessages([
                 'mapping' => 'Please map at least the Business Name column.',
+            ]);
+        }
+
+        if (empty($runConfig['mapping_confirmed'])) {
+            throw ValidationException::withMessages([
+                'mapping_confirmed' => 'Confirm you have reviewed the column mapping before launching the pipeline.',
             ]);
         }
 
@@ -322,13 +329,6 @@ class WorkflowService
 
     public function dispatchPendingLeadJobs(Workflow $workflow): void
     {
-        $workflow->loadMissing('workspace');
-        $workspace = $workflow->workspace;
-
-        if ($workspace) {
-            app(WorkflowLeadDistributor::class)->assignUnassignedPending($workspace, $workflow);
-        }
-
         $workflow->leads()
             ->where('status', 'pending')
             ->orderBy('row_number')

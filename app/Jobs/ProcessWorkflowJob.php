@@ -175,11 +175,6 @@ class ProcessWorkflowJob implements ShouldQueue
 
                     $existingRowNumbers->put($spreadsheetRowNumber, true);
 
-                    $assignedUser = $distributor->assignNext($workspace, $lead, $workflow);
-                    if ($assignedUser) {
-                        $lead->refresh();
-                    }
-
                     if (! $workflow->isPaused()) {
                         ProcessLeadJob::dispatch($lead->id, $workflow->custom_prompt);
                     }
@@ -227,13 +222,6 @@ class ProcessWorkflowJob implements ShouldQueue
 
     protected function dispatchPendingLeadJobs(Workflow $workflow): void
     {
-        $workflow->loadMissing('workspace');
-        $workspace = $workflow->workspace;
-
-        if ($workspace) {
-            app(WorkflowLeadDistributor::class)->assignUnassignedPending($workspace, $workflow);
-        }
-
         WorkflowLead::where('workflow_id', $workflow->id)
             ->where('status', 'pending')
             ->orderBy('row_number')

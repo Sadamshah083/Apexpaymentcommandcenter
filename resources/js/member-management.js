@@ -1,5 +1,4 @@
 import { showToast } from './toast.js';
-import { showLoadingOverlay } from './form-loading.js';
 
 const ACTION_COPY = {
     suspend: {
@@ -34,6 +33,27 @@ const ACTION_COPY = {
 
 let pendingForm = null;
 
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function adminOptions() {
+    const root = document.getElementById('workspace-member-management');
+    if (!root) {
+        return null;
+    }
+
+    return {
+        workspaceId: root.dataset.workspaceId,
+        membersBase: root.dataset.membersBase,
+        csrf: root.dataset.csrfToken || '',
+    };
+}
+
 function getModal() {
     return document.getElementById('member-confirm-modal');
 }
@@ -53,8 +73,7 @@ function setModalIcon(tone) {
 function openConfirmModal(form) {
     const modal = getModal();
     if (!modal) {
-        form.dataset.confirmed = '1';
-        form.requestSubmit();
+        submitMemberForm(form);
 
         return;
     }
@@ -62,8 +81,7 @@ function openConfirmModal(form) {
     const action = form.dataset.memberAction;
     const copy = ACTION_COPY[action];
     if (!copy) {
-        form.dataset.confirmed = '1';
-        form.requestSubmit();
+        submitMemberForm(form);
 
         return;
     }
@@ -104,6 +122,46 @@ function flashMemberRow(form) {
     row.classList.add('member-row-flash');
 }
 
+async function submitMemberForm(form) {
+    const name = form.dataset.memberName || 'Member';
+    const row = form.closest('.member-row');
+    const method = (form.querySelector('[name="_method"]')?.value || form.method || 'POST').toUpperCase();
+
+    if (row) {
+        row.classList.add('member-row-busy');
+    }
+
+    flashMemberRow(form);
+
+    try {
+        const response = await fetch(form.action, {
+            method: method === 'GET' ? 'POST' : method,
+            body: new FormData(form),
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            credentials: 'same-origin',
+        });
+
+        const payload = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+            const message = payload.message
+                || Object.values(payload.errors || {}).flat().join(' ')
+                || `Could not update ${name}.`;
+            showToast(message, 'error');
+            row?.classList.remove('member-row-busy');
+            return;
+        }
+
+        showToast(payload.message || `${name} updated.`, 'success');
+    } catch {
+        showToast(`Network error while updating ${name}.`, 'error');
+        row?.classList.remove('member-row-busy');
+    }
+}
+
 function bindMemberForms() {
     document.querySelectorAll('form[data-member-action]').forEach((form) => {
         if (form.dataset.memberBound === '1') {
@@ -113,23 +171,15 @@ function bindMemberForms() {
         form.dataset.memberBound = '1';
 
         form.addEventListener('submit', (event) => {
+            event.preventDefault();
+
             if (form.dataset.confirmed === '1') {
                 form.dataset.confirmed = '0';
-                const action = form.dataset.memberAction;
-                const name = form.dataset.memberName || 'Member';
-                const row = form.closest('.member-row');
-
-                if (row) {
-                    row.classList.add('member-row-busy');
-                }
-
-                showLoadingOverlay(`Updating ${name}…`, 'Account management');
-                flashMemberRow(form);
+                submitMemberForm(form);
 
                 return;
             }
 
-            event.preventDefault();
             openConfirmModal(form);
         });
     });
@@ -156,13 +206,77 @@ function bindConfirmModal() {
         pendingForm.dataset.confirmed = '1';
         const form = pendingForm;
         closeConfirmModal();
-        form.requestSubmit();
+        submitMemberForm(form);
     });
 
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape' && !modal.hidden) {
             closeConfirmModal();
         }
+    });
+}
+
+export function renderAdminMemberRow(member, options) {
+    const status = member.status || 'active';
+    const role = member.role || 'marketer';
+    const nextRole = role === 'admin' ? 'marketer' : 'admin';
+    const base = options.membersBase;
+    const csrf = options.csrf;
+    const canManage = member.can_manage;
+
+    const actions = canManage
+        ? `<div class="member-row-actions flex flex-wrap items-center gap-2">
+                <form method="POST" action="${escapeHtml(base)}/${member.id}/role" data-member-action="role" data-member-name="${escapeHtml(member.name)}" data-next-role="${nextRole}">
+                    <input type="hidden" name="_token" value="${escapeHtml(csrf)}">
+                    <input type="hidden" name="_method" value="PATCH">
+                    <input type="hidden" name="role" value="${nextRole}">
+                    <button type="submit" class="member-action-btn member-action-btn-role">${role === 'admin' ? 'Make agent' : 'Make admin'}</button>
+                </form>
+                <form method="POST" action="${escapeHtml(base)}/${member.id}/suspend" data-member-action="suspend" data-member-name="${escapeHtml(member.name)}" ${status === 'suspended' ? 'hidden' : ''}>
+                    <input type="hidden" name="_token" value="${escapeHtml(csrf)}">
+                    <button type="submit" class="member-action-btn member-action-btn-suspend">Suspend</button>
+                </form>
+                <form method="POST" action="${escapeHtml(base)}/${member.id}/reactivate" data-member-action="reactivate" data-member-name="${escapeHtml(member.name)}" ${status !== 'suspended' ? 'hidden' : ''}>
+                    <input type="hidden" name="_token" value="${escapeHtml(csrf)}">
+                    <button type="submit" class="member-action-btn member-action-btn-reactivate">Reactivate</button>
+                </form>
+                <form method="POST" action="${escapeHtml(base)}/${member.id}" data-member-action="remove" data-member-name="${escapeHtml(member.name)}">
+                    <input type="hidden" name="_token" value="${escapeHtml(csrf)}">
+                    <input type="hidden" name="_method" value="DELETE">
+                    <button type="submit" class="member-action-btn member-action-btn-remove">Remove</button>
+                </form>
+           </div>`
+        : '';
+
+    return `
+        <div class="member-row py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${status === 'suspended' ? 'member-row-suspended' : ''}" data-member-id="${member.id}">
+            <div class="member-row-identity min-w-0">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <span class="font-bold text-slate-800 text-sm">${escapeHtml(member.name)}</span>
+                    ${member.is_owner ? '<span class="member-owner-badge">Owner</span>' : ''}
+                    <span class="member-status-badge member-status-${status}" data-member-status>${status === 'suspended' ? 'Suspended' : (status === 'invited' ? 'Invited' : 'Active')}</span>
+                </div>
+                <div class="text-xs text-slate-400 mt-1 truncate">${escapeHtml(member.email)}</div>
+                <div class="text-xs text-slate-500 mt-0.5" data-member-role>${role === 'marketer' ? 'Agent' : 'Administrator'}</div>
+            </div>
+            ${actions}
+        </div>
+    `;
+}
+
+export function replaceAdminTeam(container, members) {
+    const options = adminOptions();
+    if (!container || !options || !Array.isArray(members)) {
+        return;
+    }
+
+    const html = members.map((member) => renderAdminMemberRow(member, options)).join('');
+
+    container.classList.add('live-sync-updating');
+    window.requestAnimationFrame(() => {
+        container.innerHTML = html;
+        bindMemberForms();
+        window.requestAnimationFrame(() => container.classList.remove('live-sync-updating'));
     });
 }
 
@@ -177,6 +291,11 @@ export function initMemberManagement() {
 
 export function updateMemberRows(container, members) {
     if (!container || !Array.isArray(members)) {
+        return;
+    }
+
+    if (container.dataset.adminTeam === '1') {
+        replaceAdminTeam(container, members);
         return;
     }
 

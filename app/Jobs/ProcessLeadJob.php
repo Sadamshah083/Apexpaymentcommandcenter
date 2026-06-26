@@ -5,9 +5,8 @@ namespace App\Jobs;
 use App\Models\Workflow;
 use App\Models\WorkflowLead;
 use App\Services\Workflow\WorkflowExtractor;
-use App\Services\Workflow\WorkflowLeadDistributor;
+use App\Services\Workflow\WorkflowLeadAutoVerificationService;
 use App\Services\Workspace\WorkspaceSyncService;
-use App\Http\Controllers\PushNotificationController;
 use App\Support\SqliteConcurrency;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -31,8 +30,11 @@ class ProcessLeadJob implements ShouldQueue
         public ?string $customPrompt = null
     ) {}
 
-    public function handle(WorkflowExtractor $extractor, WorkflowLeadDistributor $distributor, WorkspaceSyncService $syncService): void
-    {
+    public function handle(
+        WorkflowExtractor $extractor,
+        WorkflowLeadAutoVerificationService $autoVerification,
+        WorkspaceSyncService $syncService
+    ): void {
         $lead = WorkflowLead::find($this->leadId);
         if (! $lead) {
             return;
@@ -48,7 +50,7 @@ class ProcessLeadJob implements ShouldQueue
             return;
         }
 
-        if (in_array($lead->status, ['completed', 'failed'], true)) {
+        if (in_array($lead->status, ['completed', 'failed', 'pending_verification'], true)) {
             return;
         }
 
@@ -59,16 +61,6 @@ class ProcessLeadJob implements ShouldQueue
             }
 
             return;
-        }
-
-        $hadAssignee = (bool) $lead->assigned_user_id;
-        if (! $lead->assigned_user_id) {
-            SqliteConcurrency::retry(fn () => $distributor->assignNext($workspace, $lead->fresh(), $workflow));
-            $lead->refresh();
-        }
-
-        if (! $hadAssignee && $lead->assigned_user_id) {
-            $this->notifyAssignee($lead);
         }
 
         SqliteConcurrency::retry(fn () => $lead->update(['status' => 'extracting']));
@@ -83,13 +75,21 @@ class ProcessLeadJob implements ShouldQueue
                 return;
             }
 
-            $lead->update($result);
+            if (($result['status'] ?? '') === 'failed') {
+                SqliteConcurrency::retry(fn () => $lead->update($result));
+                SqliteConcurrency::retry(fn () => $workflow->increment('failed_leads'));
+                $this->syncWorkflowProgress($workflow, $workspace, $syncService);
 
-            if ($result['status'] === 'completed') {
-                $workflow->increment('processed_leads');
-            } else {
-                $workflow->increment('failed_leads');
+                return;
             }
+
+            $snapshot = $autoVerification->run($lead->fresh(), $workflow);
+
+            SqliteConcurrency::retry(fn () => $lead->update(array_merge($result, [
+                'status' => 'pending_verification',
+                'verification_status' => 'pending',
+                'verification_snapshot' => $snapshot,
+            ])));
         } catch (\Exception $e) {
             if (SqliteConcurrency::causedByLock($e)) {
                 throw $e;
@@ -106,24 +106,6 @@ class ProcessLeadJob implements ShouldQueue
         $this->syncWorkflowProgress($workflow, $workspace, $syncService);
     }
 
-    protected function notifyAssignee(WorkflowLead $lead): void
-    {
-        if (! $lead->assigned_user_id) {
-            return;
-        }
-
-        try {
-            PushNotificationController::sendPushNotification(
-                $lead->assigned_user_id,
-                'New lead assigned',
-                'You have been assigned: '.$lead->business_name,
-                route('portal.leads.show', $lead->id)
-            );
-        } catch (\Exception $e) {
-            Log::warning("Push notification failed for lead {$lead->id}: ".$e->getMessage());
-        }
-    }
-
     protected function syncWorkflowProgress(Workflow $workflow, $workspace, WorkspaceSyncService $syncService): void
     {
         DB::transaction(function () use ($workflow, $workspace, $syncService) {
@@ -133,6 +115,14 @@ class ProcessLeadJob implements ShouldQueue
             }
 
             if ($locked->isPaused()) {
+                return;
+            }
+
+            $stillProcessing = WorkflowLead::where('workflow_id', $locked->id)
+                ->whereIn('status', ['pending', 'extracting'])
+                ->exists();
+
+            if ($stillProcessing) {
                 return;
             }
 

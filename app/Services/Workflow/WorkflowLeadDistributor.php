@@ -53,7 +53,26 @@ class WorkflowLeadDistributor
 
             $userCount = $users->count();
             $cursor = (int) ($workflowModel->distribution_cursor ?? 0);
-            $assignedUser = $users->get($cursor % $userCount);
+            $cap = (int) config('sales_ops.leads_per_sdr', 500);
+
+            $assignedUser = null;
+            for ($i = 0; $i < $userCount; $i++) {
+                $candidate = $users->get(($cursor + $i) % $userCount);
+                $load = WorkflowLead::query()
+                    ->where('assigned_user_id', $candidate->id)
+                    ->where('status', 'completed')
+                    ->whereNotIn('stage', ['closed_won', 'closed_lost'])
+                    ->count();
+
+                if ($load < $cap) {
+                    $assignedUser = $candidate;
+                    break;
+                }
+            }
+
+            if (! $assignedUser) {
+                return null;
+            }
 
             $leadModel->update(['assigned_user_id' => $assignedUser->id]);
             $workflowModel->update(['distribution_cursor' => $cursor + 1]);
@@ -92,11 +111,11 @@ class WorkflowLeadDistributor
                 ->get();
         }
 
-        $marketers = (clone $query)->wherePivot('role', 'marketer')->get();
+        $marketers = (clone $query)->wherePivotIn('role', ['marketer', 'sdr'])->get();
         if ($marketers->isNotEmpty()) {
             return $marketers;
         }
 
-        return $query->wherePivotIn('role', ['marketer', 'admin'])->get();
+        return $query->wherePivotIn('role', ['marketer', 'sdr', 'admin'])->get();
     }
 }
