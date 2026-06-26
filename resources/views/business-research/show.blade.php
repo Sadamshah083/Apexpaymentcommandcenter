@@ -4,7 +4,7 @@
 
 @section('content')
 <div class="mb-6">
-    <a href="{{ route('business-research.index') }}" class="text-indigo-600 text-sm">&larr; Back</a>
+    <a href="{{ route('admin.business-research.index') }}" class="text-indigo-600 text-sm">&larr; Back</a>
     <h2 class="text-2xl font-bold mt-2">{{ $research->business_name }}</h2>
     @if($research->address)
         <p class="text-slate-600 text-sm">{{ $research->address }}</p>
@@ -29,7 +29,7 @@
         @if(str_contains($research->error_message ?? '', 'Gemini'))
             <p class="text-sm text-red-600 mt-2">Confirm <code class="text-xs bg-red-100 px-1 rounded">GEMINI_API_KEY</code> in <code class="text-xs bg-red-100 px-1 rounded">.env</code> is from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" class="underline">Google AI Studio</a> (starts with <code class="text-xs">AIzaSy</code>) and billing is enabled.</p>
         @endif
-        <form action="{{ route('business-research.retry', $research) }}" method="POST" class="mt-3">
+        <form action="{{ route('admin.business-research.retry', $research) }}" method="POST" class="mt-3">
             @csrf
             <button type="submit" class="text-sm bg-red-600 text-white px-3 py-1 rounded">Retry</button>
         </form>
@@ -94,11 +94,11 @@
 @endif
 
 <div class="mt-6 flex gap-2">
-    <form action="{{ route('business-research.retry', $research) }}" method="POST">
+    <form action="{{ route('admin.business-research.retry', $research) }}" method="POST">
         @csrf
         <button type="submit" class="text-sm border px-3 py-2 rounded-lg hover:bg-slate-50">Re-run research</button>
     </form>
-    <form action="{{ route('business-research.destroy', $research) }}" method="POST" onsubmit="return confirm('Delete this research?')">
+    <form action="{{ route('admin.business-research.destroy', $research) }}" method="POST" onsubmit="return confirm('Delete this research?')">
         @csrf @method('DELETE')
         <button type="submit" class="text-sm text-red-600 border border-red-200 px-3 py-2 rounded-lg">Delete</button>
     </form>
@@ -112,7 +112,7 @@
     const start = window.startProgressPoll;
     if (!start) return;
 
-    start('{{ route('business-research.status', $research) }}', (data) => {
+    start('{{ route('admin.business-research.status', $research) }}', (data) => {
         if (data.complete) {
             if (window.showToast) {
                 window.showToast('Business research complete.', 'success');

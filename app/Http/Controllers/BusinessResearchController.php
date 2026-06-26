@@ -33,7 +33,7 @@ class BusinessResearchController extends Controller
         // Always run synchronously — avoids stale queue workers calling old OpenRouter code
         RunBusinessResearchJob::dispatchSync($research->id);
 
-        return redirect()->route('business-research.show', $research)
+        return redirect()->route('admin.business-research.show', $research)
             ->with('success', 'Business research started. Results will appear shortly.');
     }
 
@@ -62,7 +62,7 @@ class BusinessResearchController extends Controller
 
         RunBusinessResearchJob::dispatchSync($businessResearch->id);
 
-        return redirect()->route('business-research.show', $businessResearch)
+        return redirect()->route('admin.business-research.show', $businessResearch)
             ->with('success', 'Research queued again.');
     }
 
@@ -70,6 +70,6 @@ class BusinessResearchController extends Controller
     {
         $businessResearch->delete();
 
-        return redirect()->route('business-research.index')->with('success', 'Research deleted.');
+        return redirect()->route('admin.business-research.index')->with('success', 'Research deleted.');
     }
 }

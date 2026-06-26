@@ -5,11 +5,11 @@
 @section('content')
 <div class="mb-8">
     <h2 class="text-2xl font-bold">Business Intelligence</h2>
-    <p class="text-slate-600">Google AI mode–style research: Gemini 2.5 Pro + live Google Search. For bulk CSV enrichment use <a href="{{ route('crm.create') }}" class="text-indigo-600 underline">Business CRM</a>.</p>
+    <p class="text-slate-600">Google AI mode–style research: Gemini 2.5 Pro + live Google Search. For bulk CSV enrichment use <a href="{{ route('admin.workflows.create') }}" class="text-indigo-600 underline">AI Agent Pipelines</a>.</p>
 </div>
 
 <div class="grid lg:grid-cols-2 gap-8 mb-8">
-    <form action="{{ route('business-research.store') }}" method="POST" class="bg-white rounded-xl shadow-sm border p-6 space-y-4">
+    <form action="{{ route('admin.business-research.store') }}" method="POST" class="bg-white rounded-xl shadow-sm border p-6 space-y-4">
         @csrf
         <h3 class="font-semibold text-lg">Research a Business</h3>
 
@@ -71,7 +71,7 @@
             @forelse($researches as $item)
                 <tr>
                     <td>
-                        <a href="{{ route('business-research.show', $item) }}" class="text-indigo-600 font-medium">
+                        <a href="{{ route('admin.business-research.show', $item) }}" class="text-indigo-600 font-medium">
                             {{ Str::limit($item->business_name, 40) }}
                         </a>
                     </td>
