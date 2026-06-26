@@ -112,20 +112,21 @@
 @push('scripts')
 @if(!$lead->isComplete())
 <script>
-(function poll() {
-    fetch('{{ route('crm.leads.status', [$crm, $lead]) }}')
-        .then(r => r.json())
-        .then(data => {
-            if (data.complete) {
-                if (window.showToast) {
-                    window.showToast('Lead research complete.', 'success');
-                }
-                setTimeout(() => location.reload(), 700);
-            } else {
-                setTimeout(poll, 5000);
+(function () {
+    const start = window.startProgressPoll;
+    if (!start) return;
+
+    start('{{ route('crm.leads.status', [$crm, $lead]) }}', (data) => {
+        if (data.complete) {
+            if (window.showToast) {
+                window.showToast('Lead research complete.', 'success');
             }
-        })
-        .catch(() => setTimeout(poll, 6000));
+            setTimeout(() => location.reload(), 400);
+            return false;
+        }
+
+        return true;
+    });
 })();
 </script>
 @endif

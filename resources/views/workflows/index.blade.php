@@ -81,22 +81,22 @@
                         <p class="text-xs text-slate-400 mt-1">Upload a workflow or check filters</p>
                     </div>
                 @else
-                    <div class="app-table-wrap">
-                        <table class="w-full text-left border-collapse">
+                    <x-data-table :paginator="$leads">
+                        <table>
                             <thead>
-                                <tr class="border-b border-slate-100 text-slate-400 text-xs font-semibold uppercase tracking-wider">
-                                    <th class="py-3 px-4">Business</th>
-                                    <th class="py-3 px-4">Owner</th>
-                                    <th class="py-3 px-4">Contact</th>
-                                    <th class="py-3 px-4">Processor</th>
-                                    <th class="py-3 px-4">Stage</th>
-                                    <th class="py-3 px-4 text-right">Actions</th>
+                                <tr>
+                                    <th>Business</th>
+                                    <th>Owner</th>
+                                    <th>Contact</th>
+                                    <th>Processor</th>
+                                    <th>Stage</th>
+                                    <th class="text-right">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody id="workspace-sync-leads-body" class="divide-y divide-slate-50 text-sm text-slate-700">
+                            <tbody id="workspace-sync-leads-body">
                                 @foreach($leads as $lead)
-                                    <tr class="hover:bg-slate-50/80 transition-colors">
-                                        <td class="py-3.5 px-4">
+                                    <tr>
+                                        <td>
                                             <div class="font-bold text-slate-800">{{ $lead->business_name }}</div>
                                             @if($lead->address)
                                                 <div class="text-xs text-slate-500 mt-0.5">{{ $lead->address }}</div>
@@ -105,10 +105,10 @@
                                                 {{ $lead->city }}, {{ $lead->state }}
                                             </div>
                                         </td>
-                                        <td class="py-3.5 px-4 font-medium text-slate-600">
+                                        <td class="font-medium text-slate-600">
                                             {{ $lead->owner_name ?: 'Not Found' }}
                                         </td>
-                                        <td class="py-3.5 px-4">
+                                        <td>
                                             @if($lead->direct_email && $lead->direct_email !== 'Not Publicly Available')
                                                 <div class="text-slate-700">{{ $lead->direct_email }}</div>
                                             @endif
@@ -119,12 +119,12 @@
                                                 <span class="text-xs text-slate-400 font-italic">None available</span>
                                             @endif
                                         </td>
-                                        <td class="py-3.5 px-4">
+                                        <td>
                                             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700">
                                                 {{ $lead->payment_processor ?: 'Unknown' }}
                                             </span>
                                         </td>
-                                        <td class="py-3.5 px-4">
+                                        <td>
                                             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold
                                                 {{ $lead->stage === 'closed_won' ? 'bg-emerald-50 text-emerald-700' : '' }}
                                                 {{ $lead->stage === 'closed_lost' ? 'bg-rose-50 text-rose-700' : '' }}
@@ -136,7 +136,7 @@
                                                 {{ ucfirst(str_replace('_', ' ', $lead->stage)) }}
                                             </span>
                                         </td>
-                                        <td class="py-3.5 px-4 text-right">
+                                        <td class="text-right">
                                             <a href="{{ route('portal.leads.show', $lead->id) }}" class="inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors">
                                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
                                             </a>
@@ -145,10 +145,7 @@
                                 @endforeach
                             </tbody>
                         </table>
-                    </div>
-                    <div class="mt-4">
-                        <x-pagination :paginator="$leads" />
-                    </div>
+                    </x-data-table>
                 @endif
             </div>
         </div>
@@ -211,7 +208,7 @@
                             </div>
                         @endforeach
                     </div>
-                    <x-pagination :paginator="$workflows" class="mt-4 pt-4 border-t border-slate-100" />
+                    <x-pagination :paginator="$workflows" class="app-data-table-footer !border-t !border-slate-100 !bg-transparent !px-0" />
                 @endif
             </div>
 

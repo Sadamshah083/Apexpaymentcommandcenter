@@ -7,7 +7,7 @@
     <title>@yield('title', 'Dashboard') - {{ config('app.name') }}</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
-<body class="bg-cream-100 text-warmgrey-900 min-h-screen font-sans antialiased"
+<body class="bg-cream-100 text-warmgrey-900 min-h-screen font-sans antialiased" data-turbo-prefetch="true"
     @auth
         data-workspace-id="{{ auth()->user()->current_workspace_id }}"
         data-workspace-sync-url="{{ route('portal.sync.poll') }}"

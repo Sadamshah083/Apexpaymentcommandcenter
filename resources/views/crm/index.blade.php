@@ -32,41 +32,41 @@
     </div>
 </div>
 
-<div class="bg-white rounded-xl shadow-sm border overflow-hidden">
-    <div class="p-5 border-b flex justify-between items-center">
-        <h3 class="font-semibold">Campaigns</h3>
+<x-data-table :paginator="$campaigns">
+    <x-slot:header>
+        <h3 class="app-data-table-title">Campaigns</h3>
         <a href="{{ route('business-research.index') }}" class="text-sm text-indigo-600 hover:underline">Single business lookup</a>
-    </div>
-    <table class="w-full text-sm">
-        <thead class="bg-slate-50 text-left">
+    </x-slot:header>
+    <table>
+        <thead>
             <tr>
-                <th class="p-3">Name</th>
-                <th class="p-3">File</th>
-                <th class="p-3">Leads</th>
-                <th class="p-3">Progress</th>
-                <th class="p-3">Status</th>
-                <th class="p-3">Created</th>
+                <th>Name</th>
+                <th>File</th>
+                <th>Leads</th>
+                <th>Progress</th>
+                <th>Status</th>
+                <th>Created</th>
             </tr>
         </thead>
         <tbody>
             @forelse($campaigns as $campaign)
-                <tr class="border-t hover:bg-slate-50">
-                    <td class="p-3">
+                <tr>
+                    <td>
                         <a href="{{ route('crm.show', $campaign) }}" class="font-medium text-indigo-600 hover:underline">
                             {{ $campaign->name }}
                         </a>
                     </td>
-                    <td class="p-3 text-slate-500">{{ $campaign->original_filename ?? '—' }}</td>
-                    <td class="p-3">{{ $campaign->total_leads }}</td>
-                    <td class="p-3">
+                    <td class="text-slate-500">{{ $campaign->original_filename ?? '—' }}</td>
+                    <td>{{ $campaign->total_leads }}</td>
+                    <td>
                         <div class="flex items-center gap-2">
                             <div class="w-24 bg-slate-200 rounded-full h-2">
-                                <div class="bg-indigo-600 h-2 rounded-full" style="width: {{ $campaign->progressPercent() }}%"></div>
+                                <div class="bg-indigo-600 h-2 rounded-full progress-bar-live" style="width: {{ $campaign->progressPercent() }}%"></div>
                             </div>
                             <span class="text-xs text-slate-500">{{ $campaign->progressPercent() }}%</span>
                         </div>
                     </td>
-                    <td class="p-3">
+                    <td>
                         @php
                             $badge = match($campaign->status) {
                                 'completed' => 'bg-green-100 text-green-800',
@@ -77,19 +77,16 @@
                         @endphp
                         <span class="px-2 py-0.5 rounded text-xs {{ $badge }}">{{ $campaign->status }}</span>
                     </td>
-                    <td class="p-3 text-slate-500">{{ $campaign->created_at->diffForHumans() }}</td>
+                    <td class="text-slate-500">{{ $campaign->created_at->diffForHumans() }}</td>
                 </tr>
             @empty
                 <tr>
-                    <td colspan="6" class="p-8 text-center text-slate-500">
+                    <td colspan="6" class="text-center py-8 text-slate-500">
                         No campaigns yet. <a href="{{ route('crm.create') }}" class="text-indigo-600">Upload a CSV</a> to start.
                     </td>
                 </tr>
             @endforelse
         </tbody>
     </table>
-    @if($campaigns->hasPages())
-        <x-pagination :paginator="$campaigns" class="p-4 border-t" />
-    @endif
-</div>
+</x-data-table>
 @endsection

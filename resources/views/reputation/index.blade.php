@@ -58,59 +58,61 @@
     </div>
 </div>
 
-<div class="bg-white rounded-xl shadow-sm border p-6 mb-8">
-    <h3 class="font-semibold mb-4">6-Week Warmup Schedule (to 50,000/day)</h3>
-    <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-            <thead class="bg-slate-50">
+<div class="app-data-table mb-8">
+    <div class="app-data-table-header">
+        <h3 class="app-data-table-title">6-Week Warmup Schedule (to 50,000/day)</h3>
+    </div>
+    <div class="app-table-wrap">
+        <table>
+            <thead>
                 <tr>
-                    <th class="text-left p-2">Day</th>
-                    <th class="text-left p-2">Week</th>
-                    <th class="text-left p-2">Daily Volume</th>
-                    <th class="text-left p-2">Focus</th>
-                    <th class="text-left p-2">Check</th>
+                    <th>Day</th>
+                    <th>Week</th>
+                    <th>Daily Volume</th>
+                    <th>Focus</th>
+                    <th>Check</th>
                 </tr>
             </thead>
             <tbody>
                 @foreach(array_slice($warmupSchedule, 0, 14) as $row)
-                    <tr class="border-t">
-                        <td class="p-2">{{ $row['day'] }}</td>
-                        <td class="p-2">{{ $row['week'] }}</td>
-                        <td class="p-2 font-mono">{{ number_format($row['daily_volume']) }}</td>
-                        <td class="p-2 text-xs">{{ $row['focus'] }}</td>
-                        <td class="p-2 text-xs">{{ $row['check'] }}</td>
+                    <tr>
+                        <td>{{ $row['day'] }}</td>
+                        <td>{{ $row['week'] }}</td>
+                        <td class="font-mono">{{ number_format($row['daily_volume']) }}</td>
+                        <td class="text-xs">{{ $row['focus'] }}</td>
+                        <td class="text-xs">{{ $row['check'] }}</td>
                     </tr>
                 @endforeach
             </tbody>
         </table>
     </div>
-    <p class="text-xs text-slate-500 mt-2">Showing first 2 weeks. Full schedule: 42 days ramping to 50k/day.</p>
+    <div class="app-data-table-footer">
+        <p class="app-pagination-summary">Showing first 2 weeks. Full schedule: 42 days ramping to 50k/day.</p>
+    </div>
 </div>
 
-<div class="bg-white rounded-xl shadow-sm border overflow-hidden">
-    <h3 class="font-semibold p-4 border-b">Reputation Logs</h3>
-    <table class="w-full text-sm">
-        <thead class="bg-slate-50">
+<x-data-table title="Reputation Logs" :paginator="$logs">
+    <table>
+        <thead>
             <tr>
-                <th class="text-left p-3">Date</th>
-                <th class="text-left p-3">Domain</th>
-                <th class="text-left p-3">Metric</th>
-                <th class="text-left p-3">Value</th>
+                <th>Date</th>
+                <th>Domain</th>
+                <th>Metric</th>
+                <th>Value</th>
             </tr>
         </thead>
         <tbody>
             @forelse($logs as $log)
-                <tr class="border-t">
-                    <td class="p-3">{{ $log->recorded_at->format('Y-m-d') }}</td>
-                    <td class="p-3">{{ $log->domain }}</td>
-                    <td class="p-3">{{ $log->metric }}</td>
-                    <td class="p-3">{{ $log->value }}</td>
+                <tr>
+                    <td>{{ $log->recorded_at->format('Y-m-d') }}</td>
+                    <td>{{ $log->domain }}</td>
+                    <td>{{ $log->metric }}</td>
+                    <td>{{ $log->value }}</td>
                 </tr>
             @empty
-                <tr><td colspan="4" class="p-8 text-center text-slate-500">No logs yet. Paste weekly data from Google Postmaster Tools.</td></tr>
+                <tr><td colspan="4" class="text-center py-8 text-slate-500">No logs yet. Paste weekly data from Google Postmaster Tools.</td></tr>
             @endforelse
         </tbody>
     </table>
-</div>
-<x-pagination :paginator="$logs" class="mt-4" />
+</x-data-table>
 @endsection

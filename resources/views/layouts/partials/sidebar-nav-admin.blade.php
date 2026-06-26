@@ -46,16 +46,6 @@
     </x-sidebar.link>
 </x-sidebar.section>
 
-<x-sidebar.section title="Communications">
-    <x-sidebar.link
-        :href="route('admin.communications.index')"
-        label="Communications Hub"
-        :active="request()->routeIs('admin.communications.*')"
-    >
-        <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'communications'])</x-slot:icon>
-    </x-sidebar.link>
-</x-sidebar.section>
-
 <x-sidebar.section title="Workspace Admin">
     <x-sidebar.link
         :href="route('admin.workspaces.index')"

@@ -150,14 +150,59 @@ function renderTeam(members) {
     `).join('');
 }
 
-function updateSyncIndicator(active) {
+const SYNC_ACTIVE_MS = 2000;
+const SYNC_HIDDEN_MS = 10000;
+const SYNC_ERROR_MS = 4000;
+
+function updateSyncIndicator(state) {
     const indicator = document.getElementById('workspace-sync-indicator');
-    if (!indicator) return;
-    indicator.classList.toggle('is-paused', !active);
+    if (!indicator) {
+        return;
+    }
+
+    indicator.classList.toggle('is-paused', state === 'paused');
+    indicator.classList.toggle('is-syncing', state === 'syncing');
+
     const text = indicator.querySelector('.app-topnav-status-text');
     if (text) {
-        text.textContent = active ? 'Synced' : 'Reconnecting';
+        const labels = {
+            syncing: 'Syncing…',
+            paused: 'Reconnecting',
+            live: 'Live',
+        };
+        text.textContent = labels[state] || 'Live';
     }
+}
+
+function smoothHtmlUpdate(el, html) {
+    if (!el || el.innerHTML === html) {
+        return;
+    }
+
+    el.classList.add('live-sync-updating');
+    window.requestAnimationFrame(() => {
+        el.innerHTML = html;
+        window.requestAnimationFrame(() => {
+            el.classList.remove('live-sync-updating');
+            el.classList.add('live-sync-updated');
+            window.setTimeout(() => el.classList.remove('live-sync-updated'), 320);
+        });
+    });
+}
+
+function smoothTextUpdate(el, value) {
+    if (!el) {
+        return;
+    }
+
+    const next = String(value ?? '');
+    if (el.textContent === next) {
+        return;
+    }
+
+    el.classList.add('live-sync-flash');
+    el.textContent = next;
+    window.setTimeout(() => el.classList.remove('live-sync-flash'), 320);
 }
 
 const SYNC_EVENT_TOASTS = {
@@ -315,11 +360,19 @@ function notifySyncEvents(events, workspaceId, seenIds, leadShowBase, workflowSh
 }
 
 let syncTimer = null;
+let syncInflight = null;
+let syncVisibilityHandler = null;
 
 export function teardownWorkspaceSync() {
     if (syncTimer) {
-        window.clearInterval(syncTimer);
+        window.clearTimeout(syncTimer);
         syncTimer = null;
+    }
+    syncInflight?.abort();
+    syncInflight = null;
+    if (syncVisibilityHandler) {
+        document.removeEventListener('visibilitychange', syncVisibilityHandler);
+        syncVisibilityHandler = null;
     }
 }
 
@@ -346,7 +399,20 @@ export function initWorkspaceSync() {
     const workflowProgress = document.getElementById('workspace-sync-workflow-progress');
     const workflowAssigned = document.getElementById('workspace-sync-workflow-assigned');
 
+    function schedulePoll(ms) {
+        if (syncTimer) {
+            window.clearTimeout(syncTimer);
+        }
+        syncTimer = window.setTimeout(poll, ms);
+    }
+
     async function poll() {
+        if (syncInflight) {
+            syncInflight.abort();
+        }
+        syncInflight = new AbortController();
+        updateSyncIndicator('syncing');
+
         try {
             const params = new URLSearchParams();
             if (version) params.set('v', version);
@@ -356,12 +422,17 @@ export function initWorkspaceSync() {
             const response = await fetch(`${syncUrl}?${params.toString()}`, {
                 headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                 credentials: 'same-origin',
+                signal: syncInflight.signal,
             });
 
-            if (!response.ok) return;
+            if (!response.ok) {
+                updateSyncIndicator('paused');
+                schedulePoll(SYNC_ERROR_MS);
+                return;
+            }
 
             const data = await response.json();
-            updateSyncIndicator(true);
+            updateSyncIndicator('live');
 
             if (typeof data.cursor === 'number' && data.cursor >= cursor) {
                 cursor = data.cursor;
@@ -379,6 +450,7 @@ export function initWorkspaceSync() {
             if (!data.changed) {
                 hasSyncedOnce = true;
                 sessionStorage.setItem(readyStorageKey(workspaceId), '1');
+                schedulePoll(document.hidden ? SYNC_HIDDEN_MS : SYNC_ACTIVE_MS);
                 return;
             }
 
@@ -387,39 +459,52 @@ export function initWorkspaceSync() {
             sessionStorage.setItem(readyStorageKey(workspaceId), '1');
 
             if (leadsBody && Array.isArray(data.leads)) {
-                if (data.leads.length === 0) {
-                    leadsBody.innerHTML = '';
-                } else {
-                    leadsBody.innerHTML = data.leads.map((lead) => renderLeadRow(lead, leadShowBase)).join('');
-                }
+                const leadsHtml = data.leads.length === 0
+                    ? ''
+                    : data.leads.map((lead) => renderLeadRow(lead, leadShowBase)).join('');
+                smoothHtmlUpdate(leadsBody, leadsHtml);
             }
 
             if (workflowsList && Array.isArray(data.workflows)) {
-                workflowsList.innerHTML = data.workflows.map((wf) => renderWorkflowCard(wf, workflowShowBase)).join('');
+                smoothHtmlUpdate(
+                    workflowsList,
+                    data.workflows.map((wf) => renderWorkflowCard(wf, workflowShowBase)).join(''),
+                );
             }
 
             if (teamList && Array.isArray(data.team)) {
                 if (teamList.dataset.staticTeam === '1') {
                     updateMemberRows(teamList, data.team);
                 } else {
-                    teamList.innerHTML = renderTeam(data.team);
+                    smoothHtmlUpdate(teamList, renderTeam(data.team));
                 }
             }
 
             if (workflowId && Array.isArray(data.workflows) && data.workflows.length > 0) {
                 const wf = data.workflows[0];
-                if (workflowStatus) workflowStatus.textContent = `Status: ${wf.status}`;
-                if (workflowProgress) workflowProgress.textContent = String(wf.processed_leads ?? 0);
-                if (workflowAssigned) workflowAssigned.textContent = String(wf.assigned_leads ?? 0);
+                smoothTextUpdate(workflowStatus, `Status: ${wf.status}`);
+                smoothTextUpdate(workflowProgress, String(wf.processed_leads ?? 0));
+                smoothTextUpdate(workflowAssigned, String(wf.assigned_leads ?? 0));
             }
 
             document.dispatchEvent(new CustomEvent('workspace:sync', { detail: data }));
+            schedulePoll(document.hidden ? SYNC_HIDDEN_MS : SYNC_ACTIVE_MS);
         } catch (error) {
-            updateSyncIndicator(false);
+            if (error?.name === 'AbortError') {
+                return;
+            }
+            updateSyncIndicator('paused');
             console.debug('Workspace sync poll failed', error);
+            schedulePoll(SYNC_ERROR_MS);
         }
     }
 
-    poll();
-    syncTimer = window.setInterval(poll, 3000);
+    syncVisibilityHandler = () => {
+        if (!document.hidden) {
+            schedulePoll(0);
+        }
+    };
+    document.addEventListener('visibilitychange', syncVisibilityHandler);
+
+    schedulePoll(0);
 }

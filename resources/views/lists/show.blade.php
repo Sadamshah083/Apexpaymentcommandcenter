@@ -44,7 +44,7 @@
             <span id="progress-text" class="text-sm text-slate-500">{{ $list->progress_percent }}%</span>
         </div>
         <div class="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
-            <div id="progress-bar" class="bg-indigo-600 h-3 rounded-full transition-all duration-500" style="width: {{ $list->progress_percent }}%"></div>
+            <div id="progress-bar" class="bg-indigo-600 h-3 rounded-full progress-bar-live" style="width: {{ $list->progress_percent }}%"></div>
         </div>
         <p id="progress-status" class="text-xs text-slate-500 mt-2">Status: {{ $list->status }} · Checking DNS, MX, disposable lists, and SMTP from the internet</p>
     </div>
@@ -75,22 +75,22 @@
         @endforeach
     </div>
 
-    <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-x-auto">
-        <table class="w-full text-sm min-w-[900px]">
-            <thead class="bg-slate-50 border-b border-slate-100">
+    <x-data-table :paginator="$contacts" min-width="900px">
+        <table>
+            <thead>
                 <tr>
-                    <th class="text-left p-3 font-bold text-slate-700">Email</th>
-                    <th class="text-left p-3 font-bold text-slate-700">Domain</th>
-                    <th class="text-left p-3 font-bold text-slate-700">Status</th>
-                    <th class="text-left p-3 font-bold text-slate-700">Score</th>
-                    <th class="text-left p-3 font-bold text-slate-700">MX (internet)</th>
-                    <th class="text-left p-3 font-bold text-slate-700">SMTP</th>
-                    <th class="text-left p-3 font-bold text-slate-700">Type</th>
-                    <th class="text-left p-3 font-bold text-slate-700">Tags</th>
-                    <th class="text-left p-3 font-bold text-slate-700">Reason</th>
+                    <th>Email</th>
+                    <th>Domain</th>
+                    <th>Status</th>
+                    <th>Score</th>
+                    <th>MX (internet)</th>
+                    <th>SMTP</th>
+                    <th>Type</th>
+                    <th>Tags</th>
+                    <th>Reason</th>
                 </tr>
             </thead>
-            <tbody class="divide-y divide-slate-50">
+            <tbody>
                 @forelse($contacts as $contact)
                     @php
                         $summary = $contact->verificationSummary();
@@ -103,56 +103,55 @@
                             default => 'bg-slate-100 text-slate-800',
                         };
                     @endphp
-                    <tr class="hover:bg-slate-50/80 transition-colors">
-                        <td class="p-3 font-mono text-xs text-slate-800">{{ $contact->email }}</td>
-                        <td class="p-3 text-slate-600">{{ $contact->domain }}</td>
-                        <td class="p-3">
+                    <tr>
+                        <td class="font-mono text-xs text-slate-800">{{ $contact->email }}</td>
+                        <td class="text-slate-600">{{ $contact->domain }}</td>
+                        <td>
                             <span class="px-2 py-0.5 rounded-full text-xs font-bold {{ $badgeClass }}">{{ $contact->status }}</span>
                         </td>
-                        <td class="p-3 font-semibold">{{ $contact->final_score ?? '—' }}</td>
-                        <td class="p-3 text-xs text-slate-600 max-w-[10rem] truncate" title="{{ $summary['mx'] }}">{{ $summary['mx'] ?? '—' }}</td>
-                        <td class="p-3 text-xs text-slate-600">{{ $summary['smtp'] ?? '—' }}</td>
-                        <td class="p-3 text-xs text-slate-600">{{ $summary['provider'] ?? '—' }}</td>
-                        <td class="p-3 text-xs text-slate-500">{{ implode(', ', $contact->tags ?? []) ?: '—' }}</td>
-                        <td class="p-3 text-xs text-slate-500 max-w-[12rem] truncate" title="{{ $contact->failure_reason }}">{{ $contact->failure_reason ? Str::limit($contact->failure_reason, 48) : '—' }}</td>
+                        <td class="font-semibold">{{ $contact->final_score ?? '—' }}</td>
+                        <td class="text-xs text-slate-600 max-w-[10rem] truncate" title="{{ $summary['mx'] }}">{{ $summary['mx'] ?? '—' }}</td>
+                        <td class="text-xs text-slate-600">{{ $summary['smtp'] ?? '—' }}</td>
+                        <td class="text-xs text-slate-600">{{ $summary['provider'] ?? '—' }}</td>
+                        <td class="text-xs text-slate-500">{{ implode(', ', $contact->tags ?? []) ?: '—' }}</td>
+                        <td class="text-xs text-slate-500 max-w-[12rem] truncate" title="{{ $contact->failure_reason }}">{{ $contact->failure_reason ? Str::limit($contact->failure_reason, 48) : '—' }}</td>
                     </tr>
                 @empty
-                    <tr><td colspan="9" class="p-10 text-center text-slate-500">No results yet. Verification may still be running.</td></tr>
+                    <tr><td colspan="9" class="text-center py-10 text-slate-500">No results yet. Verification may still be running.</td></tr>
                 @endforelse
             </tbody>
         </table>
-    </div>
-
-    <x-pagination :paginator="$contacts" class="mt-4" />
+    </x-data-table>
 </div>
 @endsection
 
 @push('scripts')
 <script>
 @if($list->status !== 'completed' && $list->status !== 'empty' && $list->status !== 'paused')
-(function poll() {
-    fetch('{{ route($routePrefix."lists.progress", $list) }}')
-        .then(r => r.json())
-        .then(data => {
-            document.getElementById('progress-bar').style.width = data.progress + '%';
-            document.getElementById('progress-text').textContent = data.progress + '% (' + data.processed + '/' + data.total + ')';
-            document.getElementById('progress-status').textContent = 'Status: ' + data.status + ' · Checking DNS, MX, disposable lists, and SMTP from the internet';
-            document.getElementById('stat-valid').textContent = Number(data.valid_count).toLocaleString();
-            document.getElementById('stat-invalid').textContent = Number(data.invalid_count).toLocaleString();
-            document.getElementById('stat-risky').textContent = Number(data.risky_count).toLocaleString();
-            document.getElementById('stat-unknown').textContent = Number(data.unknown_count).toLocaleString();
+(function () {
+    const start = window.startProgressPoll;
+    if (!start) return;
 
-            if (!data.complete && data.status !== 'empty' && data.status !== 'paused') {
-                setTimeout(poll, 3000);
-            } else if (data.complete) {
-                document.getElementById('progress-panel').classList.add('hidden');
-                if (window.showToast) {
-                    window.showToast('Email verification complete.', 'success');
-                }
-                setTimeout(() => location.reload(), 700);
+    start('{{ route($routePrefix."lists.progress", $list) }}', (data) => {
+        document.getElementById('progress-bar').style.width = data.progress + '%';
+        document.getElementById('progress-text').textContent = data.progress + '% (' + data.processed + '/' + data.total + ')';
+        document.getElementById('progress-status').textContent = 'Status: ' + data.status + ' · Checking DNS, MX, disposable lists, and SMTP from the internet';
+        document.getElementById('stat-valid').textContent = Number(data.valid_count).toLocaleString();
+        document.getElementById('stat-invalid').textContent = Number(data.invalid_count).toLocaleString();
+        document.getElementById('stat-risky').textContent = Number(data.risky_count).toLocaleString();
+        document.getElementById('stat-unknown').textContent = Number(data.unknown_count).toLocaleString();
+
+        if (data.complete) {
+            document.getElementById('progress-panel').classList.add('hidden');
+            if (window.showToast) {
+                window.showToast('Email verification complete.', 'success');
             }
-        })
-        .catch(() => setTimeout(poll, 5000));
+            setTimeout(() => location.reload(), 400);
+            return false;
+        }
+
+        return !data.complete && data.status !== 'empty' && data.status !== 'paused';
+    });
 })();
 @endif
 </script>

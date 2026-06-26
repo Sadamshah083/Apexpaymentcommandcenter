@@ -23,7 +23,7 @@
                 </div>
             </div>
 
-            <div class="app-table-wrap">
+            <x-data-table>
                 <table>
                     <thead>
                         <tr>
@@ -54,7 +54,7 @@
                         @endforelse
                     </tbody>
                 </table>
-            </div>
+            </x-data-table>
         </section>
 
         <section class="app-card app-card-padded">

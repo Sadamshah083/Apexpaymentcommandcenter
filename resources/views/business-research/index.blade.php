@@ -56,38 +56,36 @@
     </div>
 </div>
 
-<div class="bg-white rounded-xl shadow-sm border overflow-hidden">
-    <h3 class="font-semibold p-4 border-b">Recent Research</h3>
-    <table class="w-full text-sm">
-        <thead class="bg-slate-50">
+<x-data-table title="Recent Research" :paginator="$researches" class="mt-0">
+    <table>
+        <thead>
             <tr>
-                <th class="text-left p-3">Business</th>
-                <th class="text-left p-3">Owner</th>
-                <th class="text-left p-3">Processor</th>
-                <th class="text-left p-3">Confidence</th>
-                <th class="text-left p-3">Status</th>
+                <th>Business</th>
+                <th>Owner</th>
+                <th>Processor</th>
+                <th>Confidence</th>
+                <th>Status</th>
             </tr>
         </thead>
         <tbody>
             @forelse($researches as $item)
-                <tr class="border-t hover:bg-slate-50">
-                    <td class="p-3">
+                <tr>
+                    <td>
                         <a href="{{ route('business-research.show', $item) }}" class="text-indigo-600 font-medium">
                             {{ Str::limit($item->business_name, 40) }}
                         </a>
                     </td>
-                    <td class="p-3">{{ $item->owner_name ?? '—' }}</td>
-                    <td class="p-3">{{ Str::limit($item->payment_processor ?? '—', 30) }}</td>
-                    <td class="p-3">{{ $item->confidence ?? '—' }}</td>
-                    <td class="p-3">
+                    <td>{{ $item->owner_name ?? '—' }}</td>
+                    <td>{{ Str::limit($item->payment_processor ?? '—', 30) }}</td>
+                    <td>{{ $item->confidence ?? '—' }}</td>
+                    <td>
                         <span class="px-2 py-0.5 rounded text-xs bg-slate-100">{{ $item->status }}</span>
                     </td>
                 </tr>
             @empty
-                <tr><td colspan="5" class="p-8 text-center text-slate-500">No research yet.</td></tr>
+                <tr><td colspan="5" class="text-center py-8 text-slate-500">No research yet.</td></tr>
             @endforelse
         </tbody>
     </table>
-</div>
-<x-pagination :paginator="$researches" class="mt-4" />
+</x-data-table>
 @endsection

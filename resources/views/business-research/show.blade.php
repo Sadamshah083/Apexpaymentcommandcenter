@@ -108,20 +108,21 @@
 @push('scripts')
 @if(!$research->isComplete())
 <script>
-(function poll() {
-    fetch('{{ route('business-research.status', $research) }}')
-        .then(r => r.json())
-        .then(data => {
-            if (data.complete) {
-                if (window.showToast) {
-                    window.showToast('Business research complete.', 'success');
-                }
-                setTimeout(() => location.reload(), 700);
-            } else {
-                setTimeout(poll, 4000);
+(function () {
+    const start = window.startProgressPoll;
+    if (!start) return;
+
+    start('{{ route('business-research.status', $research) }}', (data) => {
+        if (data.complete) {
+            if (window.showToast) {
+                window.showToast('Business research complete.', 'success');
             }
-        })
-        .catch(() => setTimeout(poll, 5000));
+            setTimeout(() => location.reload(), 400);
+            return false;
+        }
+
+        return true;
+    });
 })();
 </script>
 @endif

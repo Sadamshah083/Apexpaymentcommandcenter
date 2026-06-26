@@ -47,30 +47,28 @@
     </div>
 </div>
 
-<div class="bg-white rounded-xl shadow-sm border overflow-hidden">
-    <h3 class="font-semibold p-4 border-b">Recent Tests</h3>
-    <table class="w-full text-sm">
-        <thead class="bg-slate-50">
+<x-data-table title="Recent Tests" :paginator="$tests">
+    <table>
+        <thead>
             <tr>
-                <th class="text-left p-3">Domain</th>
-                <th class="text-left p-3">Score</th>
-                <th class="text-left p-3">Status</th>
-                <th class="text-left p-3">Date</th>
+                <th>Domain</th>
+                <th>Score</th>
+                <th>Status</th>
+                <th>Date</th>
             </tr>
         </thead>
         <tbody>
             @forelse($tests as $test)
-                <tr class="border-t hover:bg-slate-50">
-                    <td class="p-3"><a href="{{ request()->is('admin*') ? route('admin.deliverability.show', $test) : route('portal.deliverability.show', $test) }}" class="text-indigo-600">{{ $test->domain }}</a></td>
-                    <td class="p-3 font-bold">{{ $test->overall_score }}/10</td>
-                    <td class="p-3">{{ $test->status }}</td>
-                    <td class="p-3 text-slate-500">{{ $test->created_at->diffForHumans() }}</td>
+                <tr>
+                    <td><a href="{{ request()->is('admin*') ? route('admin.deliverability.show', $test) : route('portal.deliverability.show', $test) }}" class="text-indigo-600">{{ $test->domain }}</a></td>
+                    <td class="font-bold">{{ $test->overall_score }}/10</td>
+                    <td>{{ $test->status }}</td>
+                    <td class="text-slate-500">{{ $test->created_at->diffForHumans() }}</td>
                 </tr>
             @empty
-                <tr><td colspan="4" class="p-8 text-center text-slate-500">No tests yet.</td></tr>
+                <tr><td colspan="4" class="text-center py-8 text-slate-500">No tests yet.</td></tr>
             @endforelse
         </tbody>
     </table>
-</div>
-<x-pagination :paginator="$tests" class="mt-4" />
+</x-data-table>
 @endsection

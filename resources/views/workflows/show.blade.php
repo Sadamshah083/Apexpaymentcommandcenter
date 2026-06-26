@@ -343,40 +343,40 @@ STRICT COMPLIANCE RULES:
             @if($leads->isEmpty())
                 <p class="text-sm text-slate-400 italic">No lead records processed yet. They will appear here once extraction begins.</p>
             @else
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left border-collapse">
+                <x-data-table :paginator="$leads" min-width="900px">
+                    <table>
                         <thead>
-                            <tr class="border-b border-slate-100 text-slate-400 text-xs font-semibold uppercase tracking-wider">
-                                <th class="py-3 px-4">Row</th>
-                                <th class="py-3 px-4">Business</th>
-                                <th class="py-3 px-4">Address</th>
-                                <th class="py-3 px-4">Owner Name</th>
-                                <th class="py-3 px-4">Email</th>
-                                <th class="py-3 px-4">Phone</th>
-                                <th class="py-3 px-4">Processor</th>
-                                <th class="py-3 px-4">Status</th>
+                            <tr>
+                                <th>Row</th>
+                                <th>Business</th>
+                                <th>Address</th>
+                                <th>Owner Name</th>
+                                <th>Email</th>
+                                <th>Phone</th>
+                                <th>Processor</th>
+                                <th>Status</th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-slate-50 text-sm text-slate-700">
+                        <tbody>
                             @foreach($leads as $lead)
-                                <tr class="hover:bg-slate-50/80 transition-colors">
-                                    <td class="py-3 px-4 text-xs font-mono text-slate-400">#{{ $lead->row_number }}</td>
-                                    <td class="py-3 px-4 font-bold text-warmgrey-900">
+                                <tr>
+                                    <td class="text-xs font-mono text-slate-400">#{{ $lead->row_number }}</td>
+                                    <td class="font-bold text-warmgrey-900">
                                         <a href="{{ route('portal.leads.show', $lead->id) }}" class="hover:text-warmgrey-500 transition-colors underline">{{ $lead->business_name }}</a>
                                     </td>
-                                    <td class="py-3 px-4 text-xs text-slate-500">
+                                    <td class="text-xs text-slate-500">
                                         {{ $lead->address ?: 'Not public' }}
                                         <div class="text-[10px] text-slate-400 font-normal">{{ $lead->city }}, {{ $lead->state }}</div>
                                     </td>
-                                    <td class="py-3 px-4">{{ $lead->owner_name ?: 'Not public' }}</td>
-                                    <td class="py-3 px-4">{{ $lead->direct_email ?: 'Not public' }}</td>
-                                    <td class="py-3 px-4">{{ $lead->direct_phone ?: 'Not public' }}</td>
-                                    <td class="py-3 px-4">
+                                    <td>{{ $lead->owner_name ?: 'Not public' }}</td>
+                                    <td>{{ $lead->direct_email ?: 'Not public' }}</td>
+                                    <td>{{ $lead->direct_phone ?: 'Not public' }}</td>
+                                    <td>
                                         <span class="inline-flex items-center px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-600">
                                             {{ $lead->payment_processor ?: 'Not public' }}
                                         </span>
                                     </td>
-                                    <td class="py-3 px-4">
+                                    <td>
                                         <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold
                                             {{ $lead->status === 'completed' ? 'bg-emerald-100 text-emerald-800' : '' }}
                                             {{ $lead->status === 'failed' ? 'bg-rose-100 text-rose-800' : '' }}
@@ -390,8 +390,7 @@ STRICT COMPLIANCE RULES:
                             @endforeach
                         </tbody>
                     </table>
-                </div>
-                <x-pagination :paginator="$leads" class="mt-4 pt-4 border-t border-slate-100" />
+                </x-data-table>
             @endif
         </div>
     @endif

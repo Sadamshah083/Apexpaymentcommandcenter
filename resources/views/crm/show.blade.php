@@ -49,7 +49,7 @@
             <span id="progress-text" class="text-sm text-amber-800">{{ $crm->progressPercent() }}%</span>
         </div>
         <div class="w-full bg-amber-200 rounded-full h-3">
-            <div id="progress-bar" class="bg-indigo-600 h-3 rounded-full transition-all" style="width: {{ $crm->progressPercent() }}%"></div>
+            <div id="progress-bar" class="bg-indigo-600 h-3 rounded-full progress-bar-live" style="width: {{ $crm->progressPercent() }}%"></div>
         </div>
         <p class="text-xs text-amber-700 mt-2">
             <span id="progress-stats">{{ $crm->completed_count }} done · {{ $crm->processing_count }} processing · {{ $crm->pending_count }} pending · {{ $crm->failed_count }} failed</span>
@@ -165,32 +165,32 @@
     </div>
 </div>
 
-<div class="bg-white rounded-xl shadow-sm border overflow-x-auto">
-    <table class="w-full text-sm min-w-[900px]">
-        <thead class="bg-slate-50 text-left">
+<x-data-table :paginator="$leads" min-width="900px">
+    <table>
+        <thead>
             <tr>
-                <th class="p-3">#</th>
-                <th class="p-3">Business</th>
-                <th class="p-3">Location</th>
-                <th class="p-3">Owner</th>
-                <th class="p-3">Phone</th>
-                <th class="p-3">Processor</th>
-                <th class="p-3">POS / Software</th>
-                <th class="p-3">Status</th>
-                <th class="p-3"></th>
+                <th>#</th>
+                <th>Business</th>
+                <th>Location</th>
+                <th>Owner</th>
+                <th>Phone</th>
+                <th>Processor</th>
+                <th>POS / Software</th>
+                <th>Status</th>
+                <th></th>
             </tr>
         </thead>
         <tbody>
             @forelse($leads as $lead)
-                <tr class="border-t hover:bg-slate-50">
-                    <td class="p-3 text-slate-400">{{ $lead->row_number }}</td>
-                    <td class="p-3 font-medium">{{ Str::limit($lead->business_name, 35) }}</td>
-                    <td class="p-3 text-slate-600">{{ Str::limit($lead->city ?? $lead->fullAddress(), 25) }}</td>
-                    <td class="p-3">{{ $lead->owner_name ?? '—' }}</td>
-                    <td class="p-3">{{ $lead->displayPhone() ?? '—' }}</td>
-                    <td class="p-3 text-indigo-700">{{ Str::limit($lead->payment_processor ?? '—', 20) }}</td>
-                    <td class="p-3">{{ Str::limit($lead->field_service_software ?? $lead->pos_system ?? '—', 18) }}</td>
-                    <td class="p-3">
+                <tr>
+                    <td class="text-slate-400">{{ $lead->row_number }}</td>
+                    <td class="font-medium">{{ Str::limit($lead->business_name, 35) }}</td>
+                    <td class="text-slate-600">{{ Str::limit($lead->city ?? $lead->fullAddress(), 25) }}</td>
+                    <td>{{ $lead->owner_name ?? '—' }}</td>
+                    <td>{{ $lead->displayPhone() ?? '—' }}</td>
+                    <td class="text-indigo-700">{{ Str::limit($lead->payment_processor ?? '—', 20) }}</td>
+                    <td>{{ Str::limit($lead->field_service_software ?? $lead->pos_system ?? '—', 18) }}</td>
+                    <td>
                         @php
                             $lb = match($lead->status) {
                                 'completed' => 'bg-green-100 text-green-800',
@@ -204,46 +204,41 @@
                             <span class="ml-1 px-2 py-0.5 rounded text-xs bg-emerald-100 text-emerald-800">enriched</span>
                         @endif
                     </td>
-                    <td class="p-3">
+                    <td>
                         <a href="{{ route('crm.leads.show', [$crm, $lead]) }}" class="text-indigo-600 hover:underline text-xs">View</a>
                     </td>
                 </tr>
             @empty
-                <tr><td colspan="9" class="p-8 text-center text-slate-500">No leads match your filters.</td></tr>
+                <tr><td colspan="9" class="text-center py-8 text-slate-500">No leads match your filters.</td></tr>
             @endforelse
         </tbody>
     </table>
-    @if($leads->hasPages())
-        <x-pagination :paginator="$leads" class="p-4 border-t" />
-    @elseif($leads->total() > 0)
-        <div class="p-4 border-t text-xs text-slate-500">
-            Showing all {{ number_format($leads->total()) }} leads
-        </div>
-    @endif
-</div>
+</x-data-table>
 @endsection
 
 @push('scripts')
 @if(!$crm->isComplete())
 <script>
-(function poll() {
-    fetch('{{ route('crm.progress', $crm) }}')
-        .then(r => r.json())
-        .then(data => {
-            document.getElementById('progress-bar').style.width = data.percent + '%';
-            document.getElementById('progress-text').textContent = data.percent + '%';
-            document.getElementById('progress-stats').textContent =
-                data.completed + ' done · ' + data.processing + ' processing · ' + data.pending + ' pending · ' + data.failed + ' failed';
-            if (data.complete) {
-                if (window.showToast) {
-                    window.showToast('Campaign research complete.', 'success');
-                }
-                setTimeout(() => location.reload(), 700);
-            } else {
-                setTimeout(poll, 4000);
+(function () {
+    const start = window.startProgressPoll;
+    if (!start) return;
+
+    start('{{ route('crm.progress', $crm) }}', (data) => {
+        document.getElementById('progress-bar').style.width = data.percent + '%';
+        document.getElementById('progress-text').textContent = data.percent + '%';
+        document.getElementById('progress-stats').textContent =
+            data.completed + ' done · ' + data.processing + ' processing · ' + data.pending + ' pending · ' + data.failed + ' failed';
+
+        if (data.complete) {
+            if (window.showToast) {
+                window.showToast('Campaign research complete.', 'success');
             }
-        })
-        .catch(() => setTimeout(poll, 5000));
+            setTimeout(() => location.reload(), 400);
+            return false;
+        }
+
+        return true;
+    });
 })();
 </script>
 @endif

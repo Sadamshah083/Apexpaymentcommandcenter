@@ -21,7 +21,7 @@
     <div class="app-topnav-left">
         <div id="workspace-sync-indicator" class="app-topnav-status" title="Real-time workspace sync">
             <span class="app-topnav-status-dot" aria-hidden="true"></span>
-            <span class="app-topnav-status-text">Synced</span>
+            <span class="app-topnav-status-text">Live</span>
         </div>
     </div>
 
