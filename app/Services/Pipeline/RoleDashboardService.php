@@ -60,6 +60,58 @@ class RoleDashboardService
             ->get();
     }
 
+    public function closerTeamLeads(Workspace $workspace, User $user, array $filters = []): LengthAwarePaginator
+    {
+        $closerIds = $workspace->users()
+            ->wherePivot('role', 'closer')
+            ->wherePivot('status', 'active')
+            ->pluck('users.id');
+
+        return $this->baseQuery($workspace, $filters)
+            ->whereIn('pipeline_phase', ['with_closer', 'closed'])
+            ->where(function($query) use ($closerIds) {
+                $query->whereIn('assigned_closer_id', $closerIds)
+                      ->orWhereIn('assigned_user_id', $closerIds);
+            })
+            ->paginate(25)
+            ->withQueryString();
+    }
+
+    public function closerTeamMetrics(Workspace $workspace): array
+    {
+        $closers = $workspace->users()
+            ->wherePivot('role', 'closer')
+            ->wherePivot('status', 'active')
+            ->get();
+
+        return $closers->map(function (User $closer) use ($workspace) {
+            $active = WorkflowLead::query()
+                ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspace->id))
+                ->where('assigned_user_id', $closer->id)
+                ->where('pipeline_phase', 'with_closer')
+                ->count();
+
+            $salesMade = WorkflowLead::query()
+                ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspace->id))
+                ->where('assigned_closer_id', $closer->id)
+                ->where('closer_status', 'sale_made')
+                ->count();
+
+            $totalClosed = WorkflowLead::query()
+                ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspace->id))
+                ->where('assigned_closer_id', $closer->id)
+                ->where('pipeline_phase', 'closed')
+                ->count();
+
+            return [
+                'user' => $closer,
+                'active_leads' => $active,
+                'sales_made' => $salesMade,
+                'total_closed' => $totalClosed,
+            ];
+        })->all();
+    }
+
     public function setterTeamMetrics(Workspace $workspace): array
     {
         $setters = $workspace->users()

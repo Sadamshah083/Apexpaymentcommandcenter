@@ -221,6 +221,16 @@ class ApexPaymentsPipelineTest extends TestCase
 
         $this->actingAs($this->closerTl)
             ->get(route('portal.dashboard'))
-            ->assertRedirect(route('portal.closer-team.queue'));
+            ->assertRedirect(route('portal.closer-team.dashboard'));
+    }
+
+    public function test_closer_team_lead_can_access_dashboard(): void
+    {
+        $this->actingAs($this->closerTl)
+            ->get(route('portal.closer-team.dashboard'))
+            ->assertOk()
+            ->assertViewIs('pipeline.closer-team.index')
+            ->assertViewHas('leads')
+            ->assertViewHas('teamMetrics');
     }
 }

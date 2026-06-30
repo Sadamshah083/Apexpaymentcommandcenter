@@ -158,7 +158,8 @@ Route::prefix('portal')->name('portal.')->middleware([\App\Http\Middleware\Marke
 
     Route::get('/setter', [PipelineController::class, 'setterDashboard'])->name('setter.dashboard');
     Route::get('/setter-team', [PipelineController::class, 'setterTeamDashboard'])->name('setter-team.dashboard');
-    Route::get('/closer-team', [PipelineController::class, 'closerTeamQueue'])->name('closer-team.queue');
+    Route::get('/closer-team', [PipelineController::class, 'closerTeamDashboard'])->name('closer-team.dashboard');
+    Route::get('/closer-team/queue', [PipelineController::class, 'closerTeamQueue'])->name('closer-team.queue');
     Route::get('/closer', [PipelineController::class, 'closerDashboard'])->name('closer.dashboard');
     Route::post('/leads/{lead}/assign-closer', [PipelineController::class, 'assignCloser'])->name('leads.assign-closer');
     Route::post('/leads/{lead}/setter-status', [PipelineController::class, 'updateSetterStatus'])->name('leads.setter-status');

@@ -61,7 +61,9 @@
                         <h2 class="app-section-title">Update closer status</h2>
                         <select name="closer_status" required class="app-input max-w-xs">
                             @foreach($closerStatuses as $value => $label)
-                                <option value="{{ $value }}" @selected($lead->closer_status === $value)>{{ $label }}</option>
+                                @if($value !== 'sale_made' || $user->isCloser($workspace->id) || $user->isSuperAdmin($workspace->id) || $user->isAdmin($workspace->id))
+                                    <option value="{{ $value }}" @selected($lead->closer_status === $value)>{{ $label }}</option>
+                                @endif
                             @endforeach
                         </select>
                         <textarea name="notes" rows="3" class="app-input" placeholder="Notes (optional)">{{ $lead->notes }}</textarea>

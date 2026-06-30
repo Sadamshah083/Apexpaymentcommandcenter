@@ -128,7 +128,7 @@ class WorkspaceSyncService
         }
 
         $workflows = $this->loadWorkflows($workspace, $workflowId);
-        $leads = $this->loadLeads($workflowIds, $user, $isAdmin, $workflowId);
+        $leads = $this->loadLeads($workspace, $workflowIds, $user, $isAdmin, $workflowId);
         $team = $workspace->users()->get(['users.id', 'users.name', 'users.email']);
 
         $state = [
@@ -230,7 +230,7 @@ class WorkspaceSyncService
      * @param  Collection<int, int>  $workflowIds
      * @return Collection<int, WorkflowLead>
      */
-    protected function loadLeads(Collection $workflowIds, User $user, bool $isAdmin, ?int $workflowId): Collection
+    protected function loadLeads(Workspace $workspace, Collection $workflowIds, User $user, bool $isAdmin, ?int $workflowId): Collection
     {
         if ($workflowIds->isEmpty()) {
             return collect();

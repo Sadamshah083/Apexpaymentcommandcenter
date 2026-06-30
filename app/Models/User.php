@@ -247,7 +247,7 @@ class User extends Authenticatable
         return match ($this->getWorkspaceRole()) {
             'appointment_setter' => 'portal.setter.dashboard',
             'appointment_setter_team_lead' => 'portal.setter-team.dashboard',
-            'closers_team_lead' => 'portal.closer-team.queue',
+            'closers_team_lead' => 'portal.closer-team.dashboard',
             'closer' => 'portal.closer.dashboard',
             default => 'portal.login',
         };

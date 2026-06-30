@@ -65,6 +65,24 @@ class PipelineController extends Controller
         return view('pipeline.setter-team.index', compact('workspace', 'leads', 'user', 'teamMetrics'));
     }
 
+    public function closerTeamDashboard(Request $request)
+    {
+        $user = Auth::user();
+        $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
+
+        if (! $user->isClosersTeamLead($workspace->id)) {
+            abort(403);
+        }
+
+        $leads = $this->dashboardService->closerTeamLeads($workspace, $user, [
+            'search' => $request->input('search'),
+            'phase' => $request->input('phase'),
+        ]);
+        $teamMetrics = $this->dashboardService->closerTeamMetrics($workspace);
+
+        return view('pipeline.closer-team.index', compact('workspace', 'leads', 'user', 'teamMetrics'));
+    }
+
     public function closerTeamQueue(Request $request)
     {
         $user = Auth::user();

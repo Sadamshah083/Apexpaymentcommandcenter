@@ -13,7 +13,10 @@
             <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'team'])</x-slot:icon>
         </x-sidebar.link>
     @elseif($role === 'closers_team_lead')
-        <x-sidebar.link :href="route('portal.closer-team.queue')" label="Closer Queue" :active="request()->routeIs('portal.closer-team.*')">
+        <x-sidebar.link :href="route('portal.closer-team.dashboard')" label="Closer Team" :active="request()->routeIs('portal.closer-team.dashboard')">
+            <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'team'])</x-slot:icon>
+        </x-sidebar.link>
+        <x-sidebar.link :href="route('portal.closer-team.queue')" label="Closer Queue" :active="request()->routeIs('portal.closer-team.queue')">
             <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'pipeline'])</x-slot:icon>
         </x-sidebar.link>
     @elseif($role === 'closer')
