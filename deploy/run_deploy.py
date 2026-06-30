@@ -72,8 +72,7 @@ def build_tarball() -> bytes:
     with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
         for path in ROOT.rglob("*"):
             rel = path.relative_to(ROOT)
-            parts = set(rel.parts)
-            if parts & EXCLUDE_DIRS:
+            if rel.parts and rel.parts[0] in EXCLUDE_DIRS:
                 continue
             if rel.name in EXCLUDE_FILES:
                 continue
