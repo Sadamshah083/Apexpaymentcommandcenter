@@ -141,6 +141,16 @@ class WorkflowController extends Controller
         return redirect()->route('admin.workflows.show', $workflow->id)->with('success', 'Pipeline processing resumed.');
     }
 
+    public function retryFailed(Workflow $workflow)
+    {
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+        $this->workspaceContext->ensureWorkflowBelongsToWorkspace($workflow, $workspace);
+
+        $this->workflowService->retryFailedLeads($workflow);
+
+        return redirect()->route('admin.workflows.show', $workflow->id)->with('success', 'Failed leads queued for re-enrichment.');
+    }
+
     public function activate(Workflow $workflow)
     {
         $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());

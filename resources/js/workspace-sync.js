@@ -144,6 +144,9 @@ const LEAD_PIPELINE_STATUS_LABELS = {
 function renderPipelineLeadRow(lead, leadShowBase, csrf) {
     const status = LEAD_PIPELINE_STATUS_LABELS[lead.status] || (lead.status || '').replace(/_/g, ' ');
     const location = [lead.city, lead.state].filter(Boolean).join(', ');
+    const failureNote = lead.status === 'failed' && lead.error_message
+        ? `<div class="text-xs text-rose-600 mt-1 max-w-xs">${escapeHtml(lead.error_message).slice(0, 120)}</div>`
+        : '';
     const actions = lead.status === 'pending_verification'
         ? `<div class="flex items-center justify-end gap-1">
                 <form method="POST" action="/admin/leads/${lead.id}/approve">
@@ -171,7 +174,7 @@ function renderPipelineLeadRow(lead, leadShowBase, csrf) {
             </td>
             <td class="text-sm text-zinc-600">${escapeHtml(lead.owner_name || '—')}</td>
             <td class="text-sm text-zinc-600">${contact}</td>
-            <td><span class="${pipelineStatusClass(lead.status)}">${escapeHtml(status)}</span></td>
+            <td><span class="${pipelineStatusClass(lead.status)}">${escapeHtml(status)}</span>${failureNote}</td>
             <td class="text-right whitespace-nowrap">${actions}</td>
         </tr>
     `;
@@ -723,7 +726,7 @@ export function initWorkspaceSync() {
             if (workflowId && Array.isArray(data.workflows) && data.workflows.length > 0) {
                 const wf = data.workflows[0];
                 smoothHtmlUpdate(workflowStatus, renderWorkflowStatusPill(wf.status));
-                smoothTextUpdate(workflowProgress, String(wf.enriched_leads ?? wf.processed_leads ?? 0));
+                smoothTextUpdate(workflowProgress, String(wf.attempted_leads ?? wf.enriched_leads ?? wf.processed_leads ?? 0));
                 smoothTextUpdate(workflowAssigned, String(wf.assigned_leads ?? 0));
                 smoothTextUpdate(workflowPendingReview, String(wf.pending_verification ?? 0));
                 smoothTextUpdate(workflowPendingReview2, String(wf.pending_verification ?? 0));

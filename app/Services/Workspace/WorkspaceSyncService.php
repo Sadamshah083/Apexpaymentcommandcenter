@@ -459,6 +459,7 @@ class WorkspaceSyncService
     protected function serializeWorkflow(Workflow $workflow): array
     {
         $enriched = ($workflow->processed_leads ?? 0) + ($workflow->pending_verification_count ?? 0);
+        $attempted = $enriched + ($workflow->failed_leads ?? 0);
 
         return [
             'id' => $workflow->id,
@@ -469,6 +470,7 @@ class WorkspaceSyncService
             'processed_leads' => $workflow->processed_leads,
             'failed_leads' => $workflow->failed_leads,
             'enriched_leads' => $enriched,
+            'attempted_leads' => $attempted,
             'assigned_leads' => (int) ($workflow->assigned_leads_count ?? 0),
             'pending_verification' => (int) ($workflow->pending_verification_count ?? 0),
             'completion_pct' => $workflow->total_leads > 0
@@ -511,6 +513,7 @@ class WorkspaceSyncService
             'tier' => $lead->tier,
             'tier_label' => SalesOps::tierLabel($lead->tier),
             'contact_attempts' => (int) $lead->contact_attempts,
+            'error_message' => $lead->error_message,
             'updated_at' => $lead->updated_at?->toIso8601String(),
         ];
     }

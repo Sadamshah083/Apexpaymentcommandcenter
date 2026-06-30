@@ -219,7 +219,29 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                 <div class="app-alert app-alert-danger">{{ $workflow->error_message }}</div>
             @endif
 
-            <span id="workspace-sync-workflow-progress" class="hidden">{{ $workflow->processed_leads + ($workflow->pending_verification_count ?? 0) }}</span>
+            @if(!($enrichmentConfigured ?? true))
+                <div class="app-alert app-alert-danger">
+                    <p class="app-alert-title">AI enrichment is not configured</p>
+                    <p class="app-alert-desc">{{ $enrichmentConfigMessage ?? 'Add GEMINI_API_KEY or OPENROUTER_API_KEY to the server .env file, then retry failed leads.' }}</p>
+                </div>
+            @endif
+
+            @if(($retryableFailedLeads ?? 0) > 0)
+                <div class="app-alert app-alert-warning flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                        <p class="app-alert-title">{{ number_format($retryableFailedLeads) }} leads failed enrichment</p>
+                        <p class="app-alert-desc">Open the Failed tab below for details. After API keys are configured, retry the batch.</p>
+                    </div>
+                    @if($enrichmentConfigured ?? false)
+                        <form method="POST" action="{{ route('admin.workflows.retry-failed', $workflow->id) }}">
+                            @csrf
+                            <button type="submit" class="app-btn app-btn-primary app-btn-sm whitespace-nowrap">Retry failed leads</button>
+                        </form>
+                    @endif
+                </div>
+            @endif
+
+            <span id="workspace-sync-workflow-progress" class="hidden">{{ $workflow->processed_leads + $workflow->failed_leads + ($workflow->pending_verification_count ?? 0) }}</span>
             <span id="workspace-sync-workflow-pending-review-2" class="hidden">{{ $workflow->pending_verification_count ?? 0 }}</span>
             <span id="workspace-sync-workflow-assigned" class="hidden">{{ $workflow->assigned_leads_count ?? 0 }}</span>
         </div>
@@ -235,15 +257,7 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                 </div>
             </div>
 
-            @if($leads->isEmpty())
-                <div class="app-empty-state">
-                    <div class="app-empty-state-icon">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-                    </div>
-                    <p class="app-empty-state-title">No leads yet</p>
-                    <p class="app-empty-state-desc">Leads appear here as enrichment runs.</p>
-                </div>
-            @else
+            @if($workflow->total_leads > 0 || $leads->isNotEmpty())
                 <x-data-table :paginator="$leads" min-width="640px">
                     <table>
                         <thead>
@@ -256,7 +270,7 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                             </tr>
                         </thead>
                         <tbody id="workspace-sync-pipeline-leads">
-                            @foreach($leads as $lead)
+                            @forelse($leads as $lead)
                                 <tr data-lead-id="{{ $lead->id }}" data-lead-status="{{ $lead->status }}">
                                     <td>
                                         <a href="{{ route('portal.leads.show', $lead->id) }}" class="font-bold text-zinc-900 hover:underline">{{ $lead->business_name }}</a>
@@ -278,6 +292,9 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                                     </td>
                                     <td>
                                         <x-lead-pipeline-badge :status="$lead->status" />
+                                        @if($lead->status === 'failed' && $lead->error_message)
+                                            <div class="text-xs text-rose-600 mt-1 max-w-xs">{{ Str::limit($lead->error_message, 120) }}</div>
+                                        @endif
                                     </td>
                                     <td class="text-right whitespace-nowrap">
                                         @if($lead->status === 'pending_verification')
@@ -296,10 +313,22 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                                         @endif
                                     </td>
                                 </tr>
-                            @endforeach
+                            @empty
+                                <tr>
+                                    <td colspan="5" class="text-center py-8 text-slate-500">Leads are queued. They will appear here as enrichment runs.</td>
+                                </tr>
+                            @endforelse
                         </tbody>
                     </table>
                 </x-data-table>
+            @else
+                <div class="app-empty-state">
+                    <div class="app-empty-state-icon">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                    </div>
+                    <p class="app-empty-state-title">No leads yet</p>
+                    <p class="app-empty-state-desc">Leads appear here after import completes.</p>
+                </div>
             @endif
         </div>
     @endif

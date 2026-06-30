@@ -12,7 +12,9 @@ class PipelineProgress
     public static function steps(Workflow $workflow): array
     {
         $pending = (int) ($workflow->pending_verification_count ?? 0);
+        $failed = (int) ($workflow->failed_leads ?? 0);
         $enriched = (int) ($workflow->processed_leads ?? 0) + $pending;
+        $attempted = $enriched + $failed;
         $assigned = (int) ($workflow->assigned_leads_count ?? 0);
 
         $importDone = $workflow->status !== 'mapping';
@@ -36,7 +38,7 @@ class PipelineProgress
                 'done' => $workflow->status === 'completed' || ($enrichDone && ! $enrichActive),
                 'active' => $enrichActive,
                 'detail' => $enrichActive
-                    ? $enriched.' / '.$workflow->total_leads
+                    ? $attempted.' / '.$workflow->total_leads
                     : ($enrichDone ? 'Complete' : 'Waiting'),
             ],
             [

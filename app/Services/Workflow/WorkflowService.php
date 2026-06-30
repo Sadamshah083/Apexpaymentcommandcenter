@@ -19,6 +19,7 @@ class WorkflowService
     public function __construct(
         protected WorkflowAiMapper $aiMapper,
         protected WorkspaceSyncService $syncService,
+        protected WorkflowProviderStatusService $providerStatus,
     ) {}
 
     public function createFromUpload(Workspace $workspace, string $name, UploadedFile $file, string $processingMode = 'full_pipeline'): Workflow
@@ -137,6 +138,9 @@ class WorkflowService
                 ->wherePivot('role', 'appointment_setter')
                 ->wherePivot('status', 'active')
                 ->get(),
+            'enrichmentConfigured' => $this->providerStatus->isEnrichmentConfigured(),
+            'enrichmentConfigMessage' => $this->providerStatus->configurationMessage(),
+            'retryableFailedLeads' => $workflow->failed_leads,
         ];
     }
 
@@ -207,6 +211,12 @@ class WorkflowService
             ]);
         }
 
+        if ($workflow->processing_mode !== 'store_only' && ! $this->providerStatus->isEnrichmentConfigured()) {
+            throw ValidationException::withMessages([
+                'enrichment' => $this->providerStatus->configurationMessage(),
+            ]);
+        }
+
         $workflow->leads()->delete();
 
         $workflow->update([
@@ -253,6 +263,12 @@ class WorkflowService
         if ($workflow->leads()->count() === 0) {
             throw ValidationException::withMessages([
                 'workflow' => 'No leads found to activate.',
+            ]);
+        }
+
+        if (! $this->providerStatus->isEnrichmentConfigured()) {
+            throw ValidationException::withMessages([
+                'enrichment' => $this->providerStatus->configurationMessage(),
             ]);
         }
 
@@ -354,10 +370,11 @@ class WorkflowService
         }
 
         $pendingCount = $workflow->leads()->where('status', 'pending')->count();
+        $failedCount = $workflow->leads()->where('status', 'failed')->count();
         $ingestionIncomplete = ! $workflow->ingestion_complete;
 
         $workflow->update([
-            'status' => ($pendingCount > 0 || $ingestionIncomplete || $workflow->leads()->exists())
+            'status' => ($pendingCount > 0 || $failedCount > 0 || $ingestionIncomplete || $workflow->leads()->exists())
                 ? 'extracting'
                 : 'pending',
         ]);
@@ -366,6 +383,8 @@ class WorkflowService
             ProcessWorkflowJob::dispatch($workflow->id, $workflow->file_path);
         } elseif ($pendingCount > 0) {
             $this->dispatchPendingLeadJobs($workflow);
+        } elseif ($failedCount > 0) {
+            $this->retryFailedLeads($workflow);
         } elseif (! $workflow->leads()->exists() && $workflow->file_path) {
             ProcessWorkflowJob::dispatch($workflow->id, $workflow->file_path);
         }
@@ -391,6 +410,51 @@ class WorkflowService
             ->orderBy('row_number')
             ->pluck('id')
             ->each(fn (int $leadId) => ProcessLeadJob::dispatch($leadId, $workflow->custom_prompt));
+    }
+
+    public function retryFailedLeads(Workflow $workflow): void
+    {
+        if (! $this->providerStatus->isEnrichmentConfigured()) {
+            throw ValidationException::withMessages([
+                'enrichment' => $this->providerStatus->configurationMessage(),
+            ]);
+        }
+
+        $failedCount = $workflow->leads()->where('status', 'failed')->count();
+        if ($failedCount === 0) {
+            throw ValidationException::withMessages([
+                'workflow' => 'No failed leads to retry.',
+            ]);
+        }
+
+        $workflow->loadMissing('workspace');
+
+        WorkflowLead::where('workflow_id', $workflow->id)
+            ->where('status', 'failed')
+            ->update([
+                'status' => 'pending',
+                'error_message' => null,
+            ]);
+
+        $workflow->update([
+            'status' => 'extracting',
+            'failed_leads' => 0,
+            'error_message' => null,
+        ]);
+
+        $this->dispatchPendingLeadJobs($workflow->fresh());
+
+        $this->syncService->record(
+            $workflow->workspace,
+            'workflow.resumed',
+            'workflow',
+            $workflow->id,
+            [
+                'name' => $workflow->name,
+                'status' => 'extracting',
+                'retried_failed' => $failedCount,
+            ]
+        );
     }
 
     public function delete(Workflow $workflow): void

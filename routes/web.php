@@ -112,6 +112,7 @@ Route::prefix('admin')->name('admin.')->middleware([\App\Http\Middleware\AdminPo
         Route::post('/{workflow}/activate', [WorkflowController::class, 'activate'])->name('activate');
         Route::post('/{workflow}/pause', [WorkflowController::class, 'pause'])->name('pause');
         Route::post('/{workflow}/resume', [WorkflowController::class, 'resume'])->name('resume');
+        Route::post('/{workflow}/retry-failed', [WorkflowController::class, 'retryFailed'])->name('retry-failed');
         Route::delete('/{workflow}', [WorkflowController::class, 'destroy'])->name('destroy');
     });
 

@@ -42,4 +42,18 @@ class WorkflowProviderStatusService
     {
         return config('gemini.api_key') ? 'Paid / Active' : 'Not Configured';
     }
+
+    public function isEnrichmentConfigured(): bool
+    {
+        return filled(config('gemini.api_key')) || filled(config('openrouter.api_key'));
+    }
+
+    public function configurationMessage(): ?string
+    {
+        if ($this->isEnrichmentConfigured()) {
+            return null;
+        }
+
+        return 'AI enrichment requires GEMINI_API_KEY or OPENROUTER_API_KEY in the server environment.';
+    }
 }

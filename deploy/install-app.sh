@@ -52,6 +52,13 @@ VITE_APP_NAME="ApexOne Command Center"
 PRODUCTION_ADMIN_USER=${ADMIN_USER}
 PRODUCTION_ADMIN_PASSWORD=${ADMIN_PASS}
 PRODUCTION_ADMIN_EMAIL=admin@apexone.local
+
+OPENROUTER_API_KEY=
+OPENROUTER_MODEL=openai/gpt-oss-20b:free
+OPENROUTER_FALLBACK_MODELS=openrouter/free,meta-llama/llama-3.3-70b-instruct:free
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.5-pro
+GEMINI_FALLBACK_MODELS=gemini-2.5-flash,gemini-2.0-flash
 EOF
 
   chown www-data:www-data .env
@@ -61,6 +68,24 @@ fi
 if [[ ! -f .env ]]; then
   echo "ERROR: .env missing after install bootstrap" >&2
   exit 1
+fi
+
+echo "==> Ensuring enrichment API keys in .env..."
+for key in GEMINI_API_KEY OPENROUTER_API_KEY GEMINI_MODEL OPENROUTER_MODEL; do
+  if ! grep -q "^${key}=" .env; then
+    case "$key" in
+      GEMINI_API_KEY|OPENROUTER_API_KEY) echo "${key}=" >> .env ;;
+      GEMINI_MODEL) echo "GEMINI_MODEL=gemini-2.5-pro" >> .env ;;
+      OPENROUTER_MODEL) echo "OPENROUTER_MODEL=openai/gpt-oss-20b:free" >> .env ;;
+    esac
+  fi
+done
+
+if [[ -n "${GEMINI_API_KEY:-}" ]]; then
+  sed -i "s|^GEMINI_API_KEY=.*|GEMINI_API_KEY=${GEMINI_API_KEY}|" .env
+fi
+if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
+  sed -i "s|^OPENROUTER_API_KEY=.*|OPENROUTER_API_KEY=${OPENROUTER_API_KEY}|" .env
 fi
 
 echo "==> Installing PHP dependencies..."
