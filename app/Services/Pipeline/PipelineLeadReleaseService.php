@@ -15,32 +15,42 @@ class PipelineLeadReleaseService
         protected SetterDistributionService $setterDistribution,
     ) {}
 
+    /** @deprecated Use releaseToSetter() */
     public function autoReleaseToSetter(WorkflowLead $lead, User $actor): WorkflowLead
+    {
+        return $this->releaseToSetter($lead, $actor);
+    }
+
+    public function releaseToSetter(WorkflowLead $lead, User $actor, ?array $distributionUserIds = null): WorkflowLead
     {
         $lead->loadMissing('workflow.workspace');
         $workflow = $lead->workflow;
         $workspace = $workflow->workspace;
 
-        if ($workflow->processing_mode === 'store_only') {
+        if (! in_array($lead->status, ['enriched', 'pending_verification'], true)) {
             return $lead;
         }
 
-        SqliteConcurrency::retry(function () use ($lead, $actor, $workflow, $workspace) {
-            DB::transaction(function () use ($lead, $actor, $workflow, $workspace) {
+        SqliteConcurrency::retry(function () use ($lead, $actor) {
+            DB::transaction(function () use ($lead, $actor) {
                 $lockedLead = WorkflowLead::lockForUpdate()->find($lead->id);
-                if (! $lockedLead || $lockedLead->pipeline_phase === 'with_setter') {
+                if (! $lockedLead || $lockedLead->assigned_user_id) {
                     return;
                 }
 
                 $lockedLead->update([
-                    'status' => 'completed',
                     'verification_status' => 'approved',
                     'verified_at' => now(),
                     'verified_by' => $actor->id,
-                    'pipeline_phase' => 'enriching',
-                    'import_mode' => 'pipeline',
                 ]);
+            });
+        });
 
+        $lead->refresh();
+        $this->setterDistribution->assignNext($workspace, $lead->fresh(), $workflow, $distributionUserIds);
+
+        SqliteConcurrency::retry(function () use ($workflow) {
+            DB::transaction(function () use ($workflow) {
                 $lockedWorkflow = Workflow::lockForUpdate()->find($workflow->id);
                 if ($lockedWorkflow) {
                     $lockedWorkflow->increment('processed_leads');
@@ -48,9 +58,24 @@ class PipelineLeadReleaseService
             });
         });
 
-        $lead->refresh();
-        $this->setterDistribution->assignNext($workspace, $lead->fresh(), $workflow);
-
         return $lead->fresh();
+    }
+
+    public function distributeEnrichedLeads(Workflow $workflow, Workspace $workspace, User $actor): int
+    {
+        $leads = WorkflowLead::query()
+            ->where('workflow_id', $workflow->id)
+            ->where('status', 'enriched')
+            ->whereNull('assigned_user_id')
+            ->orderBy('row_number')
+            ->get();
+
+        $count = 0;
+        foreach ($leads as $lead) {
+            $this->releaseToSetter($lead, $actor);
+            $count++;
+        }
+
+        return $count;
     }
 }

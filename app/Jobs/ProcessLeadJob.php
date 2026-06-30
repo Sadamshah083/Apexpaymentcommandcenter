@@ -53,14 +53,14 @@ class ProcessLeadJob implements ShouldQueue
             return;
         }
 
-        if (in_array($lead->status, ['completed', 'failed', 'pending_verification'], true)) {
+        if (in_array($lead->status, ['completed', 'failed', 'pending_verification', 'enriched'], true)) {
             return;
         }
 
         $workflow->refresh();
         if ($workflow->isPaused()) {
             if ($lead->status === 'extracting') {
-                $lead->update(['status' => 'pending']);
+                $lead->update(['status' => 'imported']);
             }
 
             return;
@@ -73,7 +73,7 @@ class ProcessLeadJob implements ShouldQueue
 
             $workflow->refresh();
             if (! $workflow || $workflow->isPaused()) {
-                $lead->update(['status' => 'pending']);
+                $lead->update(['status' => 'imported']);
 
                 return;
             }
@@ -88,23 +88,27 @@ class ProcessLeadJob implements ShouldQueue
 
             $snapshot = $autoVerification->run($lead->fresh(), $workflow);
 
-            if ($workflow->isFullPipeline()) {
+            if ($workflow->shouldAutoAssignSetters()) {
                 SqliteConcurrency::retry(fn () => $lead->update(array_merge($result, [
                     'verification_snapshot' => $snapshot,
-                    'pipeline_phase' => 'enriching',
+                    'pipeline_phase' => 'enriched',
                     'import_mode' => 'pipeline',
+                    'status' => 'enriched',
                 ])));
+                SqliteConcurrency::retry(fn () => $workflow->increment('enriched_leads'));
 
                 $actor = User::find($workspace->admin_id) ?? $workspace->admin;
                 if ($actor) {
-                    $releaseService->autoReleaseToSetter($lead->fresh(), $actor);
+                    $releaseService->releaseToSetter($lead->fresh(), $actor);
                 }
             } else {
                 SqliteConcurrency::retry(fn () => $lead->update(array_merge($result, [
-                    'status' => 'pending_verification',
-                    'verification_status' => 'pending',
+                    'status' => 'enriched',
+                    'pipeline_phase' => 'enriched',
                     'verification_snapshot' => $snapshot,
+                    'import_mode' => 'pipeline',
                 ])));
+                SqliteConcurrency::retry(fn () => $workflow->increment('enriched_leads'));
             }
         } catch (\Exception $e) {
             if (SqliteConcurrency::causedByLock($e)) {
@@ -135,28 +139,25 @@ class ProcessLeadJob implements ShouldQueue
             }
 
             $stillProcessing = WorkflowLead::where('workflow_id', $locked->id)
-                ->whereIn('status', ['pending', 'extracting'])
+                ->whereIn('status', ['imported', 'extracting'])
                 ->exists();
 
             if ($stillProcessing) {
                 return;
             }
 
-            $finished = $locked->total_leads > 0
-                && ($locked->processed_leads + $locked->failed_leads) >= $locked->total_leads;
+            $enrichmentDone = $locked->total_leads > 0
+                && ($locked->enriched_leads + $locked->failed_leads) >= $locked->total_leads;
 
-            if ($finished && $locked->status !== 'completed') {
+            if ($enrichmentDone && $locked->status === 'extracting') {
                 $locked->update(['status' => 'completed']);
                 $syncService->record($workspace, 'workflow.completed', 'workflow', $locked->id, [
                     'name' => $locked->name,
+                    'enriched_leads' => $locked->enriched_leads,
                     'processed_leads' => $locked->processed_leads,
                     'failed_leads' => $locked->failed_leads,
                 ]);
-
-                return;
             }
-
-            // UI refreshes from poll state; skip per-lead workflow.updated noise.
         });
     }
 }

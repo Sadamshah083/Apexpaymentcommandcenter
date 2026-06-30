@@ -54,6 +54,9 @@ class WorkflowDashboardService
             'pipelinePhases' => config('sales_ops.pipeline_phases', []),
             'openRouterBalance' => $this->providerStatus->getOpenRouterBalance(),
             'geminiStatus' => $this->providerStatus->getGeminiStatus(),
+            'enrichmentStatus' => $this->providerStatus->getEnrichmentStatus(
+                (bool) ($filters['refresh_enrichment'] ?? false)
+            ),
             'phaseCounts' => WorkflowLead::query()
                 ->whereIn('workflow_id', $workflowIds)
                 ->selectRaw('pipeline_phase, count(*) as total')

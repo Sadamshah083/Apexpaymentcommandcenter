@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use App\Support\AdminModules;
 use App\Support\SalesOps;
 
 class WorkspaceMemberService
@@ -28,6 +29,7 @@ class WorkspaceMemberService
         string $username,
         string $password,
         string $role = 'appointment_setter',
+        ?array $modulePermissions = null,
     ): User {
         $this->workspaceContext->ensureCanManageMembers($createdBy, $workspace);
 
@@ -63,6 +65,7 @@ class WorkspaceMemberService
             'role' => $role,
             'status' => 'active',
             'joined_at' => now(),
+            'module_permissions' => $this->encodeModulePermissions($role, $modulePermissions),
         ]);
 
         $this->syncService->record(
@@ -250,7 +253,10 @@ class WorkspaceMemberService
             abort(404);
         }
 
-        $workspace->users()->updateExistingPivot($member->id, ['role' => $role]);
+        $workspace->users()->updateExistingPivot($member->id, [
+            'role' => $role,
+            'module_permissions' => $this->modulePermissionsForRoleChange($role, $member, $workspace),
+        ]);
 
         $this->syncService->record(
             $workspace,
@@ -371,6 +377,103 @@ class WorkspaceMemberService
         );
     }
 
+    public function updateMemberModules(
+        Workspace $workspace,
+        User $admin,
+        User $member,
+        ?array $modulePermissions,
+        bool $restrictAccess = true,
+    ): void {
+        $this->workspaceContext->ensureCanAssignModulePermissions($admin, $workspace);
+
+        if ($workspace->admin_id === $member->id) {
+            throw ValidationException::withMessages([
+                'modules' => 'The workspace owner always has full access.',
+            ]);
+        }
+
+        $pivot = $workspace->users()->where('user_id', $member->id)->first()?->pivot;
+        if (! $pivot) {
+            abort(404);
+        }
+
+        $role = $pivot->role ?? null;
+        if (! SalesOps::isAdminPortalRole($role) || $role === 'super_admin') {
+            throw ValidationException::withMessages([
+                'modules' => 'Module access can only be configured for Admin or Manager accounts.',
+            ]);
+        }
+
+        $modules = $restrictAccess
+            ? AdminModules::sanitize($modulePermissions ?? [])
+            : null;
+
+        foreach ($modules ?? [] as $module) {
+            if (! AdminModules::canGrantModule($module, $admin, $workspace->id)) {
+                throw ValidationException::withMessages([
+                    'modules' => 'You cannot grant access to '.(AdminModules::labels()[$module] ?? $module).'.',
+                ]);
+            }
+        }
+
+        $workspace->users()->updateExistingPivot($member->id, [
+            'module_permissions' => $this->encodeStoredModulePermissions($modules),
+        ]);
+
+        $this->syncService->record(
+            $workspace,
+            'member.modules_updated',
+            'user',
+            $member->id,
+            array_merge($this->memberPayload($member, $workspace), [
+                'module_permissions' => $modules,
+            ]),
+            $admin->id
+        );
+    }
+
+    protected function modulePermissionsForRoleChange(string $role, User $member, Workspace $workspace): ?string
+    {
+        if (! SalesOps::isAdminPortalRole($role) || $role === 'super_admin') {
+            return null;
+        }
+
+        $existing = $member->getModulePermissions($workspace->id);
+        if ($existing !== null) {
+            return $this->encodeStoredModulePermissions($existing);
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  list<string>|null  $modulePermissions
+     */
+    protected function encodeModulePermissions(string $role, ?array $modulePermissions): ?string
+    {
+        if (! SalesOps::isAdminPortalRole($role) || $role === 'super_admin') {
+            return null;
+        }
+
+        if ($modulePermissions === null) {
+            return null;
+        }
+
+        return $this->encodeStoredModulePermissions(AdminModules::sanitize($modulePermissions));
+    }
+
+    /**
+     * @param  list<string>|null  $modules
+     */
+    protected function encodeStoredModulePermissions(?array $modules): ?string
+    {
+        if ($modules === null) {
+            return null;
+        }
+
+        return json_encode(array_values($modules));
+    }
+
     protected function normalizeRole(string $role): string
     {
         $allowed = array_keys(config('sales_ops.roles', []));
@@ -390,6 +493,7 @@ class WorkspaceMemberService
             'email' => $member->email,
             'role' => $pivot->role ?? null,
             'status' => $pivot->status ?? null,
+            'module_permissions' => $member->getModulePermissions($workspace->id),
         ];
     }
 

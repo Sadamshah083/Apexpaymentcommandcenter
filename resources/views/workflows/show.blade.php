@@ -4,9 +4,13 @@
 
 @section('content')
 @php
+    $attempted = ($workflow->enriched_leads ?? 0) + ($workflow->failed_leads ?? 0);
     $pct = $workflow->total_leads > 0
-        ? (int) round((($workflow->processed_leads + $workflow->failed_leads) / $workflow->total_leads) * 100)
+        ? (int) round(($attempted / $workflow->total_leads) * 100)
         : 0;
+    $importedCount = $workflow->imported_leads_count ?? 0;
+    $enrichedCount = $workflow->enriched_leads_count ?? 0;
+    $readyToDistribute = $workflow->ready_to_distribute_count ?? 0;
 @endphp
 
 <div class="app-page space-y-6">
@@ -120,19 +124,37 @@
                 <div class="app-step-header">
                     <span class="app-step-number">2</span>
                     <div>
-                        <h2 class="app-section-title">Assign to appointment setters</h2>
-                        <p class="app-section-desc">Approved leads round-robin to selected appointment setters.</p>
+                        <h2 class="app-section-title">Segment your list</h2>
+                        <p class="app-section-desc">HubSpot-style lists and tags — every imported lead is added to a static list and tagged for filtering.</p>
                     </div>
                 </div>
-                <div class="flex flex-wrap gap-2">
-                    @foreach($team as $member)
-                        <label class="app-member-chip">
-                            <input type="checkbox" name="distribution_users[]" value="{{ $member->id }}" checked>
-                            <span class="app-member-chip-name">{{ $member->name }}</span>
-                            <span class="app-member-chip-role">{{ \App\Support\SalesOps::roleLabel($member->pivot->role) }}</span>
-                        </label>
-                    @endforeach
+
+                <div class="app-field">
+                    <label class="app-label">Static list</label>
+                    <p class="text-sm text-zinc-700 font-semibold">{{ $workflow->name }}</p>
+                    <p class="app-field-hint">A new list is created with this import name.</p>
                 </div>
+
+                @if(($leadTags ?? collect())->isNotEmpty())
+                    <div class="app-field">
+                        <span class="app-label">Tags</span>
+                        <div class="flex flex-wrap gap-2 mt-2">
+                            @foreach($leadTags as $tag)
+                                <label class="app-member-chip">
+                                    <input type="checkbox" name="tag_ids[]" value="{{ $tag->id }}">
+                                    <span class="app-member-chip-name" style="border-left: 3px solid {{ $tag->color }}">{{ $tag->name }}</span>
+                                </label>
+                            @endforeach
+                        </div>
+                    </div>
+                @endif
+
+                <div class="app-field">
+                    <label for="tag_names" class="app-label">New tags</label>
+                    <input type="text" name="tag_names" id="tag_names" class="app-input" placeholder="e.g. cold-outreach, texas, june-2026">
+                    <p class="app-field-hint">Comma-separated. Tags trace leads across imports — use them for batch enrich and assign in Lead Tags.</p>
+                </div>
+
                 <input type="hidden" name="verification_toggles[email]" value="1">
                 <input type="hidden" name="verification_toggles[domain]" value="1">
             </div>
@@ -141,16 +163,31 @@
                 <div class="app-step-header">
                     <span class="app-step-number">3</span>
                     <div>
-                        <h2 class="app-section-title">Start enrichment</h2>
-                        <p class="app-section-desc">AI researches each business and auto-releases to appointment setters.</p>
+                        <h2 class="app-section-title">Import options</h2>
+                        <p class="app-section-desc">Leads are imported unassigned. Enrichment and setter distribution are separate steps you can run later.</p>
                     </div>
                 </div>
 
                 <label class="app-checkbox-row">
+                    <input type="checkbox" name="run_enrichment_on_import" value="1" @checked($enrichmentConfigured ?? false) @disabled(!($enrichmentConfigured ?? false))>
+                    <span class="app-checkbox-row-text">
+                        <strong>Run AI enrichment now</strong>
+                        @if(!($enrichmentConfigured ?? false))
+                            <span class="block text-xs text-zinc-500 font-normal mt-0.5">Requires GEMINI_API_KEY or OPENROUTER_API_KEY on the server.</span>
+                        @else
+                            <span class="block text-xs text-zinc-500 font-normal mt-0.5">Uncheck to import only — enrich from this page when ready.</span>
+                        @endif
+                    </span>
+                </label>
+
+                <label class="app-checkbox-row">
                     <input type="checkbox" name="mapping_confirmed" value="1" required>
-                    <span class="app-checkbox-row-text">I've reviewed the column mapping and I'm ready to start.</span>
+                    <span class="app-checkbox-row-text">I've reviewed the column mapping. Duplicate US phone numbers in this workspace will be skipped.</span>
                 </label>
                 @error('mapping_confirmed')
+                    <p class="text-xs text-rose-600 font-semibold">{{ $message }}</p>
+                @enderror
+                @error('enrichment')
                     <p class="text-xs text-rose-600 font-semibold">{{ $message }}</p>
                 @enderror
 
@@ -166,11 +203,15 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
 
                 <div class="flex justify-end gap-3 pt-2">
                     <a href="{{ route('admin.workflows.index') }}" class="app-btn app-btn-secondary">Cancel</a>
-                    <button type="submit" class="app-btn app-btn-primary">Start enrichment</button>
+                    <button type="submit" class="app-btn app-btn-primary">Start import</button>
                 </div>
             </div>
         </form>
     @else
+        @if(isset($enrichmentStatus))
+            @include('workflows.partials.enrichment-status', ['status' => $enrichmentStatus])
+        @endif
+
         <div class="app-card app-card-padded space-y-5">
             @include('workflows.partials.pipeline-progress')
 
@@ -178,7 +219,7 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                 <div class="space-y-2">
                     <div class="flex justify-between text-xs font-semibold text-zinc-500">
                         <span>Overall progress</span>
-                        <span id="workspace-sync-workflow-progress-label">{{ $pct }}% &middot; {{ $workflow->processed_leads + $workflow->failed_leads }} / {{ $workflow->total_leads }}</span>
+                        <span id="workspace-sync-workflow-progress-label">{{ $pct }}% &middot; {{ $attempted }} / {{ $workflow->total_leads }}</span>
                     </div>
                     <div class="app-progress-track">
                         <div id="workspace-sync-workflow-progress-bar" class="app-progress-fill" style="width: {{ $pct }}%"></div>
@@ -186,20 +227,61 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                 </div>
             @endif
 
-            @if($workflow->isStoreOnly() && $workflow->status === 'completed')
+            @if(($workflow->discarded_duplicates ?? 0) > 0)
+                <div class="app-alert app-alert-info">
+                    <p class="app-alert-title">{{ number_format($workflow->discarded_duplicates) }} duplicate phone numbers skipped</p>
+                    <p class="app-alert-desc">Rows with the same US number as an existing lead in this workspace were not imported.</p>
+                </div>
+            @endif
+
+            @if(!empty($workflow->import_tag_ids))
+                <div class="app-alert app-alert-info flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                        <p class="app-alert-title">Tagged import</p>
+                        <p class="app-alert-desc">Batch enrich or assign all leads with these tags — including from other files.</p>
+                    </div>
+                    <a href="{{ route('admin.lead-tags.show', ['tag_ids' => $workflow->import_tag_ids]) }}" class="app-btn app-btn-secondary app-btn-sm whitespace-nowrap">Open in Lead Tags</a>
+                </div>
+            @endif
+
+            @if($importedCount > 0 && ! $workflow->isProcessing() && ($enrichmentConfigured ?? false))
                 <div class="app-alert app-alert-warning flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
-                        <p class="app-alert-title">Stored import — pipeline not activated</p>
-                        <p class="app-alert-desc">Run AI enrichment and distribute to appointment setters when ready.</p>
+                        <p class="app-alert-title">{{ number_format($importedCount) }} leads imported — enrichment not started</p>
+                        <p class="app-alert-desc">Run AI enrichment when you're ready. Distribution to setters is a separate step after enrichment.</p>
                     </div>
-                    <form method="POST" action="{{ route('admin.workflows.activate', $workflow->id) }}">
+                    @if($enrichmentConfigured ?? false)
+                        <form method="POST" action="{{ route('admin.workflows.enrich', $workflow->id) }}">
+                            @csrf
+                            <button type="submit" class="app-btn app-btn-primary app-btn-sm whitespace-nowrap">Start enrichment</button>
+                        </form>
+                    @endif
+                </div>
+            @endif
+
+            @if($readyToDistribute > 0 && ! $workflow->isProcessing())
+                <div class="app-card app-card-padded space-y-4 border-emerald-200 bg-emerald-50/40">
+                    <div>
+                        <h3 class="app-section-title text-emerald-900">Distribute to appointment setters</h3>
+                        <p class="app-section-desc">{{ number_format($readyToDistribute) }} enriched leads ready · round-robin to selected setters</p>
+                    </div>
+                    <form method="POST" action="{{ route('admin.workflows.distribute', $workflow->id) }}" class="space-y-4">
                         @csrf
-                        <button type="submit" class="app-btn app-btn-primary app-btn-sm">Activate pipeline</button>
+                        <div class="flex flex-wrap gap-2">
+                            @foreach($team as $member)
+                                <label class="app-member-chip">
+                                    <input type="checkbox" name="distribution_users[]" value="{{ $member->id }}" checked>
+                                    <span class="app-member-chip-name">{{ $member->name }}</span>
+                                    <span class="app-member-chip-role">{{ \App\Support\SalesOps::roleLabel($member->pivot->role) }}</span>
+                                </label>
+                            @endforeach
+                        </div>
+                        <button type="submit" class="app-btn app-btn-primary app-btn-sm">Distribute {{ number_format($readyToDistribute) }} leads</button>
                     </form>
                 </div>
             @endif
 
-            @if(($workflow->pending_verification_count ?? 0) > 0 && $workflow->isFullPipeline())
+            @if(($workflow->pending_verification_count ?? 0) > 0)
                 <div class="app-alert app-alert-warning flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
                         <p class="app-alert-title"><span id="workspace-sync-workflow-pending-review">{{ $workflow->pending_verification_count }}</span> leads ready for review</p>
@@ -222,7 +304,17 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
             @if(!($enrichmentConfigured ?? true))
                 <div class="app-alert app-alert-danger">
                     <p class="app-alert-title">AI enrichment is not configured</p>
-                    <p class="app-alert-desc">{{ $enrichmentConfigMessage ?? 'Add GEMINI_API_KEY or OPENROUTER_API_KEY to the server .env file, then retry failed leads.' }}</p>
+                    <p class="app-alert-desc">{{ $enrichmentConfigMessage ?? 'Add GEMINI_API_KEY or OPENROUTER_API_KEY to the server .env file.' }}</p>
+                </div>
+            @elseif(($enrichmentStatus['gemini']['state'] ?? '') === 'depleted' && ($enrichmentStatus['openrouter']['state'] ?? '') === 'not_configured')
+                <div class="app-alert app-alert-danger">
+                    <p class="app-alert-title">Gemini credits depleted</p>
+                    <p class="app-alert-desc">Top up in AI Studio or add OPENROUTER_API_KEY for fallback enrichment.</p>
+                </div>
+            @elseif(($enrichmentStatus['gemini']['state'] ?? '') === 'depleted')
+                <div class="app-alert app-alert-warning">
+                    <p class="app-alert-title">Gemini credits depleted — using OpenRouter fallback</p>
+                    <p class="app-alert-desc">Enrichment will skip Gemini and use OpenRouter until credits are restored.</p>
                 </div>
             @endif
 
@@ -241,7 +333,7 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                 </div>
             @endif
 
-            <span id="workspace-sync-workflow-progress" class="hidden">{{ $workflow->processed_leads + $workflow->failed_leads + ($workflow->pending_verification_count ?? 0) }}</span>
+            <span id="workspace-sync-workflow-progress" class="hidden">{{ $attempted }}</span>
             <span id="workspace-sync-workflow-pending-review-2" class="hidden">{{ $workflow->pending_verification_count ?? 0 }}</span>
             <span id="workspace-sync-workflow-assigned" class="hidden">{{ $workflow->assigned_leads_count ?? 0 }}</span>
         </div>
@@ -251,6 +343,8 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                 <h2 class="app-section-title">Leads</h2>
                 <div class="app-filter-pills pipeline-lead-filters" id="pipeline-lead-filters" role="tablist">
                     <button type="button" class="is-active" data-filter="all">All</button>
+                    <button type="button" data-filter="imported">Imported</button>
+                    <button type="button" data-filter="enriched">Enriched</button>
                     <button type="button" data-filter="pending_verification">Needs review</button>
                     <button type="button" data-filter="completed">Released</button>
                     <button type="button" data-filter="failed">Failed</button>
@@ -276,6 +370,13 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                                         <a href="{{ route('portal.leads.show', $lead->id) }}" class="font-bold text-zinc-900 hover:underline">{{ $lead->business_name }}</a>
                                         @if($lead->city || $lead->state)
                                             <div class="text-xs text-zinc-400 mt-0.5">{{ $lead->city }}{{ $lead->city && $lead->state ? ', ' : '' }}{{ $lead->state }}</div>
+                                        @endif
+                                        @if($lead->tags->isNotEmpty())
+                                            <div class="flex flex-wrap gap-1 mt-1">
+                                                @foreach($lead->tags as $tag)
+                                                    <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-zinc-100 text-zinc-600" style="border-left: 2px solid {{ $tag->color }}">{{ $tag->name }}</span>
+                                                @endforeach
+                                            </div>
                                         @endif
                                     </td>
                                     <td class="text-sm text-zinc-600">{{ $lead->owner_name ?: '—' }}</td>

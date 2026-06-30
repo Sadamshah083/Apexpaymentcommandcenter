@@ -12,8 +12,11 @@ class PipelineProgressTest extends TestCase
     {
         $workflow = new Workflow([
             'status' => 'extracting',
+            'processing_mode' => 'import_and_enrich',
             'total_leads' => 25,
-            'processed_leads' => 5,
+            'enriched_leads' => 5,
+            'failed_leads' => 2,
+            'ingestion_complete' => true,
         ]);
         $workflow->setAttribute('pending_verification_count', 2);
         $workflow->setAttribute('assigned_leads_count', 0);

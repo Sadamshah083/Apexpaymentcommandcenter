@@ -146,6 +146,10 @@
 
         @if(request()->is('admin*'))
         <div class="space-y-6">
+            @if(isset($enrichmentStatus))
+                @include('workflows.partials.enrichment-status', ['status' => $enrichmentStatus])
+            @endif
+
             <div class="app-card app-card-padded">
                 <h2 class="app-section-title mb-4">Recent imports</h2>
                 

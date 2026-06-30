@@ -59,6 +59,8 @@ class B2bWorkflowPipelineTest extends TestCase
     {
         Queue::fake();
 
+        config(['openrouter.api_key' => 'test-key']);
+
         $admin = User::factory()->create(['current_workspace_id' => null]);
         $workspace = Workspace::create(['name' => 'Acme', 'admin_id' => $admin->id]);
         $workspace->users()->attach($admin->id, ['role' => 'admin', 'status' => 'active', 'joined_at' => now()]);
@@ -75,14 +77,14 @@ class B2bWorkflowPipelineTest extends TestCase
 
         WorkflowLead::create([
             'workflow_id' => $workflow->id,
-            'status' => 'pending',
+            'status' => 'imported',
             'row_number' => 1,
             'business_name' => 'Lead One',
         ]);
 
         WorkflowLead::create([
             'workflow_id' => $workflow->id,
-            'status' => 'pending',
+            'status' => 'imported',
             'row_number' => 2,
             'business_name' => 'Lead Two',
         ]);

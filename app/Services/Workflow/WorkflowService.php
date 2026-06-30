@@ -7,8 +7,11 @@ use App\Jobs\ProcessWorkflowJob;
 use App\Models\Workflow;
 use App\Models\WorkflowLead;
 use App\Models\Workspace;
+use App\Services\Pipeline\LeadSegmentationService;
+use App\Services\Pipeline\PipelineLeadReleaseService;
 use App\Services\Workspace\WorkspaceSyncService;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -20,9 +23,11 @@ class WorkflowService
         protected WorkflowAiMapper $aiMapper,
         protected WorkspaceSyncService $syncService,
         protected WorkflowProviderStatusService $providerStatus,
+        protected LeadSegmentationService $segmentation,
+        protected PipelineLeadReleaseService $releaseService,
     ) {}
 
-    public function createFromUpload(Workspace $workspace, string $name, UploadedFile $file, string $processingMode = 'full_pipeline'): Workflow
+    public function createFromUpload(Workspace $workspace, string $name, UploadedFile $file, string $processingMode = 'import_only'): Workflow
     {
         $storedPath = $file->store('workflows');
         $sheets = [];
@@ -40,9 +45,7 @@ class WorkflowService
         return Workflow::create([
             'workspace_id' => $workspace->id,
             'name' => $name,
-            'processing_mode' => in_array($processingMode, ['store_only', 'full_pipeline'], true)
-                ? $processingMode
-                : 'full_pipeline',
+            'processing_mode' => $this->normalizeProcessingMode($processingMode),
             'original_filename' => $file->getClientOriginalName(),
             'file_path' => $storedPath,
             'sheets' => empty($sheets) ? null : $sheets,
@@ -119,11 +122,15 @@ class WorkflowService
         $workflow->loadCount([
             'leads as assigned_leads_count' => fn ($query) => $query->whereNotNull('assigned_user_id'),
             'leads as pending_verification_count' => fn ($query) => $query->where('status', 'pending_verification'),
+            'leads as imported_leads_count' => fn ($query) => $query->where('status', 'imported'),
+            'leads as enriched_leads_count' => fn ($query) => $query->where('status', 'enriched'),
+            'leads as ready_to_distribute_count' => fn ($query) => $query->where('status', 'enriched')->whereNull('assigned_user_id'),
         ]);
 
         $perPage = min(max((int) ($options['per_page'] ?? config('pagination.pipeline_leads_per_page', 25)), 5), 100);
 
         $leads = $workflow->leads()
+            ->with('tags')
             ->orderByRaw("CASE WHEN status = 'pending_verification' THEN 0 WHEN status = 'extracting' THEN 1 WHEN status = 'completed' THEN 2 WHEN status = 'failed' THEN 3 ELSE 4 END ASC")
             ->orderBy('researched_at', 'desc')
             ->orderBy('row_number', 'asc')
@@ -138,8 +145,13 @@ class WorkflowService
                 ->wherePivot('role', 'appointment_setter')
                 ->wherePivot('status', 'active')
                 ->get(),
+            'leadTags' => $this->segmentation->workspaceTags($workspace),
+            'leadList' => $workflow->leadList,
             'enrichmentConfigured' => $this->providerStatus->isEnrichmentConfigured(),
             'enrichmentConfigMessage' => $this->providerStatus->configurationMessage(),
+            'enrichmentStatus' => $this->providerStatus->getEnrichmentStatus(
+                (bool) ($options['refresh_enrichment'] ?? false)
+            ),
             'retryableFailedLeads' => $workflow->failed_leads,
         ];
     }
@@ -211,16 +223,33 @@ class WorkflowService
             ]);
         }
 
-        if ($workflow->processing_mode !== 'store_only' && ! $this->providerStatus->isEnrichmentConfigured()) {
+        $runEnrichment = ! empty($runConfig['run_enrichment_on_import']);
+        if ($runEnrichment && ! $this->providerStatus->isEnrichmentConfigured()) {
             throw ValidationException::withMessages([
                 'enrichment' => $this->providerStatus->configurationMessage(),
             ]);
         }
 
+        $processingMode = $runEnrichment ? 'import_and_enrich' : 'import_only';
+        $autoAssign = ! empty($runConfig['auto_assign_setters']);
+
+        $workflow->loadMissing('workspace');
+        $segmentation = $this->segmentation->prepareImportSegmentation(
+            $workflow->workspace,
+            Auth::user(),
+            $workflow->name,
+            $this->parseTagNames($runConfig['tag_names'] ?? ''),
+            array_map('intval', (array) ($runConfig['tag_ids'] ?? [])),
+        );
+
         $workflow->leads()->delete();
 
         $workflow->update([
             'status' => 'pending',
+            'processing_mode' => $processingMode,
+            'lead_list_id' => $segmentation['list']->id,
+            'import_tag_ids' => $segmentation['tag_ids'],
+            'auto_assign_setters' => $autoAssign,
             'column_mapping' => $mapping,
             'custom_prompt' => $runConfig['custom_prompt'] ?? null,
             'verification_toggles' => $runConfig['verification_toggles'] ?? null,
@@ -230,7 +259,9 @@ class WorkflowService
             'ingestion_complete' => false,
             'total_leads' => 0,
             'processed_leads' => 0,
+            'enriched_leads' => 0,
             'failed_leads' => 0,
+            'discarded_duplicates' => 0,
             'error_message' => null,
         ]);
 
@@ -273,15 +304,16 @@ class WorkflowService
         }
 
         $workflow->update([
-            'processing_mode' => 'full_pipeline',
-            'status' => 'extracting',
+            'processing_mode' => 'import_and_enrich',
             'processed_leads' => 0,
+            'enriched_leads' => 0,
             'failed_leads' => 0,
             'distribution_cursor' => 0,
+            'auto_assign_setters' => false,
         ]);
 
         $workflow->leads()->update([
-            'status' => 'pending',
+            'status' => 'imported',
             'pipeline_phase' => 'imported',
             'import_mode' => 'pipeline',
             'assigned_user_id' => null,
@@ -291,7 +323,7 @@ class WorkflowService
             'closer_status' => null,
         ]);
 
-        $this->dispatchPendingLeadJobs($workflow);
+        $this->startEnrichment($workflow);
 
         $workflow->loadMissing('workspace');
         $this->syncService->record(
@@ -318,7 +350,7 @@ class WorkflowService
 
         WorkflowLead::where('workflow_id', $workflow->id)
             ->where('status', 'extracting')
-            ->update(['status' => 'pending']);
+            ->update(['status' => 'imported']);
 
         $importedCount = WorkflowLead::where('workflow_id', $workflow->id)->count();
         if ($importedCount > 0) {
@@ -351,7 +383,8 @@ class WorkflowService
         $workspace = $workflow->workspace;
 
         if ($workflow->total_leads > 0
-            && ($workflow->processed_leads + $workflow->failed_leads) >= $workflow->total_leads) {
+            && ($workflow->enriched_leads + $workflow->failed_leads) >= $workflow->total_leads
+            && $workflow->leads()->whereIn('status', ['imported', 'extracting'])->doesntExist()) {
             $workflow->update(['status' => 'completed']);
 
             $this->syncService->record(
@@ -369,20 +402,20 @@ class WorkflowService
             return;
         }
 
-        $pendingCount = $workflow->leads()->where('status', 'pending')->count();
+        $importedCount = $workflow->leads()->where('status', 'imported')->count();
         $failedCount = $workflow->leads()->where('status', 'failed')->count();
         $ingestionIncomplete = ! $workflow->ingestion_complete;
 
         $workflow->update([
-            'status' => ($pendingCount > 0 || $failedCount > 0 || $ingestionIncomplete || $workflow->leads()->exists())
+            'status' => ($importedCount > 0 || $failedCount > 0 || $ingestionIncomplete)
                 ? 'extracting'
                 : 'pending',
         ]);
 
         if ($ingestionIncomplete && $workflow->file_path) {
             ProcessWorkflowJob::dispatch($workflow->id, $workflow->file_path);
-        } elseif ($pendingCount > 0) {
-            $this->dispatchPendingLeadJobs($workflow);
+        } elseif ($importedCount > 0) {
+            $this->startEnrichment($workflow);
         } elseif ($failedCount > 0) {
             $this->retryFailedLeads($workflow);
         } elseif (! $workflow->leads()->exists() && $workflow->file_path) {
@@ -403,10 +436,67 @@ class WorkflowService
         );
     }
 
+    public function startEnrichment(Workflow $workflow): void
+    {
+        if (! $this->providerStatus->isEnrichmentConfigured()) {
+            throw ValidationException::withMessages([
+                'enrichment' => $this->providerStatus->configurationMessage(),
+            ]);
+        }
+
+        if (! $workflow->ingestion_complete) {
+            throw ValidationException::withMessages([
+                'workflow' => 'Import is still running. Wait for it to finish before starting enrichment.',
+            ]);
+        }
+
+        if ($workflow->isProcessing() && $workflow->leads()->where('status', 'extracting')->exists()) {
+            throw ValidationException::withMessages([
+                'workflow' => 'Enrichment is already running.',
+            ]);
+        }
+
+        $importedCount = $workflow->leads()->where('status', 'imported')->count();
+        if ($importedCount === 0) {
+            throw ValidationException::withMessages([
+                'workflow' => 'No imported leads are waiting for enrichment.',
+            ]);
+        }
+
+        $workflow->update([
+            'status' => 'extracting',
+            'processing_mode' => 'import_and_enrich',
+        ]);
+
+        $this->dispatchPendingLeadJobs($workflow);
+    }
+
+    /**
+     * @param  array<int, int>|null  $distributionUsers
+     */
+    public function distributeToSetters(Workflow $workflow, ?array $distributionUsers = null): int
+    {
+        if ($distributionUsers !== null) {
+            $workflow->update(['distribution_users' => $distributionUsers]);
+        }
+
+        $readyCount = $workflow->leads()->where('status', 'enriched')->whereNull('assigned_user_id')->count();
+        if ($readyCount === 0) {
+            throw ValidationException::withMessages([
+                'workflow' => 'No enriched leads are ready for distribution.',
+            ]);
+        }
+
+        $workflow->loadMissing('workspace');
+        $actor = Auth::user();
+
+        return $this->releaseService->distributeEnrichedLeads($workflow, $workflow->workspace, $actor);
+    }
+
     public function dispatchPendingLeadJobs(Workflow $workflow): void
     {
-        $workflow->leads()
-            ->where('status', 'pending')
+        WorkflowLead::where('workflow_id', $workflow->id)
+            ->where('status', 'imported')
             ->orderBy('row_number')
             ->pluck('id')
             ->each(fn (int $leadId) => ProcessLeadJob::dispatch($leadId, $workflow->custom_prompt));
@@ -432,7 +522,7 @@ class WorkflowService
         WorkflowLead::where('workflow_id', $workflow->id)
             ->where('status', 'failed')
             ->update([
-                'status' => 'pending',
+                'status' => 'imported',
                 'error_message' => null,
             ]);
 
@@ -484,5 +574,26 @@ class WorkflowService
                 ['name' => $workflowName]
             );
         }
+    }
+
+    protected function normalizeProcessingMode(string $mode): string
+    {
+        return match ($mode) {
+            'store_only', 'import_only' => 'import_only',
+            'full_pipeline', 'import_and_enrich' => 'import_and_enrich',
+            default => 'import_only',
+        };
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function parseTagNames(string $raw): array
+    {
+        if ($raw === '') {
+            return [];
+        }
+
+        return array_values(array_filter(array_map('trim', preg_split('/[,;]+/', $raw) ?: [])));
     }
 }

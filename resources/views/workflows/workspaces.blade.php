@@ -106,10 +106,10 @@
                     </div>
                 </div>
 
-                @if(auth()->user()->isSuperAdmin($activeWorkspace->id))
+                @if(auth()->user()->canManageWorkspaceMembers($activeWorkspace->id))
                     <div class="app-data-table-footer border-t border-slate-100 !bg-white">
                         <h4 class="text-sm font-bold text-slate-800 mb-2">Add Agent Account</h4>
-                        <p class="text-xs text-slate-500 mb-4">Create a username and password. The agent signs in through the {{ config('app.name') }} agent portal.</p>
+                        <p class="text-xs text-slate-500 mb-4">Create a username and password. Admin and Manager accounts can sign in through the admin portal; agents use the {{ config('app.name') }} agent portal.</p>
                         <form
                             method="POST"
                             action="{{ route('admin.workspaces.members.store', $activeWorkspace->id) }}"
@@ -120,11 +120,14 @@
                             <input type="text" name="username" required placeholder="Username" value="{{ old('username') }}" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm">
                             <input type="password" name="password" required placeholder="Password (min. 6 characters)" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm">
                             <input type="password" name="password_confirmation" required placeholder="Confirm password" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm">
-                            <select name="role" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm">
+                            <select name="role" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm" data-create-member-role>
                                 @foreach(\App\Support\SalesOps::creatableAgentRoles() as $value => $label)
-                                    <option value="{{ $value }}" {{ old('role', 'sdr') === $value ? 'selected' : '' }}>{{ $label }}</option>
+                                    <option value="{{ $value }}" {{ old('role', 'appointment_setter') === $value ? 'selected' : '' }}>{{ $label }}</option>
                                 @endforeach
                             </select>
+                            <div class="create-member-modules space-y-3 hidden" data-create-member-modules>
+                                @include('workflows.partials.member-module-access-fields', ['prefix' => 'create'])
+                            </div>
                             <button type="submit" class="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-sm">Create Team Account</button>
                         </form>
                     </div>

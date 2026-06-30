@@ -88,18 +88,35 @@
 
         <div class="space-y-6">
             <div class="app-card app-card-padded">
-                <h2 class="app-section-title mb-4">Activity</h2>
-                <div class="space-y-3">
-                    @forelse($lead->activities as $activity)
-                        <div class="text-sm border-b border-zinc-100 pb-3">
-                            <p class="font-semibold text-zinc-800">{{ $activity->user?->name ?? 'System' }}</p>
-                            <p class="text-zinc-600">{{ $activity->notes ?: $activity->type }}</p>
-                            <p class="text-xs text-zinc-400">{{ $activity->created_at?->diffForHumans() }}</p>
-                        </div>
-                    @empty
-                        <p class="text-sm text-zinc-500">No activity yet.</p>
-                    @endforelse
-                </div>
+                <h2 class="app-section-title mb-1">Status timeline</h2>
+                <p class="app-section-desc mb-4">Every setter and closer status change on this lead.</p>
+
+                @php
+                    $statusActivities = $lead->activities->filter(fn ($a) => $a->isStatusChange());
+                @endphp
+
+                @if($statusActivities->isNotEmpty())
+                    <ol class="lead-timeline">
+                        @foreach($statusActivities as $activity)
+                            <x-lead-activity-timeline-item :activity="$activity" />
+                        @endforeach
+                    </ol>
+                @else
+                    <p class="text-sm text-zinc-500">No status changes recorded yet.</p>
+                @endif
+            </div>
+
+            <div class="app-card app-card-padded">
+                <h2 class="app-section-title mb-4">All activity</h2>
+                @if($lead->activities->isNotEmpty())
+                    <ol class="lead-timeline">
+                        @foreach($lead->activities as $activity)
+                            <x-lead-activity-timeline-item :activity="$activity" />
+                        @endforeach
+                    </ol>
+                @else
+                    <p class="text-sm text-zinc-500">No activity yet.</p>
+                @endif
             </div>
         </div>
     </div>

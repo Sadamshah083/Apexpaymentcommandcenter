@@ -194,6 +194,36 @@ function bindCreateMemberForm() {
     });
 }
 
+function bindCreateMemberRoleToggle() {
+    const root = adminRoot();
+    if (!root) {
+        return;
+    }
+
+    const roleSelect = root.querySelector('[data-create-member-role]');
+    const modulesPanel = root.querySelector('[data-create-member-modules]');
+    if (!roleSelect || !modulesPanel) {
+        return;
+    }
+
+    const adminRoles = new Set(['admin', 'manager']);
+
+    const syncVisibility = () => {
+        modulesPanel.classList.toggle('hidden', !adminRoles.has(roleSelect.value));
+    };
+
+    roleSelect.addEventListener('change', syncVisibility);
+    syncVisibility();
+
+    modulesPanel.querySelectorAll('.member-access-mode').forEach((input) => {
+        input.addEventListener('change', () => {
+            const grid = modulesPanel.querySelector('[data-module-grid]');
+            const restricted = modulesPanel.querySelector('[name="access_mode"][value="restricted"]')?.checked;
+            grid?.classList.toggle('hidden', !restricted);
+        });
+    });
+}
+
 export function initWorkspaceAdmin() {
     if (!adminRoot()) {
         return;
@@ -201,4 +231,5 @@ export function initWorkspaceAdmin() {
 
     bindWorkspaceSwitchForms();
     bindCreateMemberForm();
+    bindCreateMemberRoleToggle();
 }

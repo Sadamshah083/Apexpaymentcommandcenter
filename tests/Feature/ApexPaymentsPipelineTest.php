@@ -111,6 +111,13 @@ class ApexPaymentsPipelineTest extends TestCase
             $this->setter,
             $lead,
             $this->workspace,
+            'contacted',
+        );
+
+        app(LeadPipelineService::class)->updateSetterStatus(
+            $this->setter,
+            $lead,
+            $this->workspace,
             'appointment_settled',
             'Meeting booked Tuesday'
         );
@@ -119,6 +126,18 @@ class ApexPaymentsPipelineTest extends TestCase
         $this->assertSame('appointment_settled', $lead->pipeline_phase);
         $this->assertNull($lead->assigned_user_id);
         $this->assertNotNull($lead->appointment_settled_at);
+
+        $this->assertDatabaseHas('lead_activities', [
+            'workflow_lead_id' => $lead->id,
+            'user_id' => $this->setter->id,
+            'type' => 'setter_status_change',
+            'outcome' => 'contacted',
+        ]);
+        $this->assertDatabaseHas('lead_activities', [
+            'workflow_lead_id' => $lead->id,
+            'type' => 'setter_status_change',
+            'outcome' => 'appointment_settled',
+        ]);
     }
 
     public function test_closer_team_lead_can_assign_closer(): void

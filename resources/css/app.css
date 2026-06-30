@@ -2531,3 +2531,46 @@ body.member-confirm-open {
 }
 .ghl-tag-unread { background: #fef3c7; color: #92400e; }
 .ghl-empty { text-align: center; color: #71717a; font-size: 0.875rem; padding: 1rem; }
+
+/* Lead detail status timeline */
+.lead-timeline {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+.lead-timeline-item {
+    position: relative;
+    display: flex;
+    gap: 0.875rem;
+    padding-bottom: 1.25rem;
+    padding-left: 0.25rem;
+}
+.lead-timeline-item:not(:last-child)::before {
+    content: '';
+    position: absolute;
+    left: 0.4375rem;
+    top: 1.125rem;
+    bottom: 0;
+    width: 2px;
+    background: #e4e4e7;
+}
+.lead-timeline-item-status .lead-timeline-dot {
+    background: #6366f1;
+    box-shadow: 0 0 0 3px #eef2ff;
+}
+.lead-timeline-dot {
+    flex-shrink: 0;
+    width: 0.875rem;
+    height: 0.875rem;
+    margin-top: 0.25rem;
+    border-radius: 9999px;
+    background: #d4d4d8;
+    z-index: 1;
+}
+.lead-timeline-body {
+    flex: 1;
+    min-width: 0;
+}

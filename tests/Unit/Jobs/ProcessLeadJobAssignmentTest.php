@@ -42,7 +42,7 @@ class ProcessLeadJobAssignmentTest extends TestCase
 
         $lead = WorkflowLead::create([
             'workflow_id' => $workflow->id,
-            'status' => 'pending',
+            'status' => 'imported',
             'row_number' => 1,
             'business_name' => 'Test Business',
             'direct_email' => 'owner@example.com',
@@ -77,6 +77,7 @@ class ProcessLeadJobAssignmentTest extends TestCase
         $job->handle(
             $extractor,
             $autoVerification,
+            app(\App\Services\Pipeline\PipelineLeadReleaseService::class),
             app(\App\Services\Workspace\WorkspaceSyncService::class),
         );
 
@@ -85,8 +86,8 @@ class ProcessLeadJobAssignmentTest extends TestCase
 
         $this->assertFalse($assignedBeforeExtract);
         $this->assertNull($lead->assigned_user_id);
-        $this->assertSame('pending_verification', $lead->status);
-        $this->assertSame('pending', $lead->verification_status);
-        $this->assertSame(0, $workflow->processed_leads);
+        $this->assertSame('enriched', $lead->status);
+        $this->assertNull($lead->verification_status);
+        $this->assertSame(1, $workflow->enriched_leads);
     }
 }

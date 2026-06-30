@@ -345,7 +345,7 @@ function reapplyPipelineLeadFilter() {
 }
 
 function formatWorkflowProgressLabel(wf) {
-    const done = (wf.processed_leads ?? 0) + (wf.failed_leads ?? 0);
+    const done = (wf.attempted_leads ?? ((wf.enriched_leads ?? 0) + (wf.failed_leads ?? 0)));
     return `${wf.completion_pct ?? 0}% · ${done} / ${wf.total_leads ?? 0}`;
 }
 

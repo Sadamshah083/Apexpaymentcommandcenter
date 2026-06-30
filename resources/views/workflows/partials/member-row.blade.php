@@ -4,9 +4,14 @@
     $status = $member->pivot->status ?? 'active';
     $role = $member->pivot->role ?? 'sdr';
     $isOwner = $activeWorkspace->admin_id === $member->id;
-    $canManage = Auth::user()->isSuperAdmin($activeWorkspace->id) && ! $isOwner;
+    $canManageMembership = Auth::user()->canManageWorkspaceMembers($activeWorkspace->id) && ! $isOwner;
+    $canAssignModules = Auth::user()->canAssignModulePermissions($activeWorkspace->id) && ! $isOwner;
     $roleLabel = SalesOps::roleLabel($role);
     $assignableRoles = SalesOps::assignableMemberRoles();
+    $modulePermissions = $member->getModulePermissions($activeWorkspace->id);
+    $moduleSummary = $member->usesRestrictedModuleAccess($activeWorkspace->id)
+        ? count($modulePermissions).' module(s)'
+        : (SalesOps::isAdminPortalRole($role) && $role !== 'super_admin' ? 'Full access' : null);
 @endphp
 
 <div
@@ -27,10 +32,14 @@
         </div>
         <div class="text-xs text-slate-400 mt-1 truncate">{{ $member->email }}</div>
         <div class="text-xs text-slate-500 mt-0.5" data-member-role>{{ $roleLabel }}</div>
+        @if($moduleSummary)
+            <div class="text-[11px] text-indigo-600 mt-0.5" data-member-module-summary>{{ $moduleSummary }}</div>
+        @endif
     </div>
 
-    @if($canManage)
+    @if($canManageMembership || $canAssignModules)
         <div class="member-row-actions flex flex-col gap-3 w-full sm:w-auto sm:min-w-[280px]">
+            @if($canManageMembership)
             <form
                 method="POST"
                 action="{{ route('admin.workspaces.members.role', [$activeWorkspace->id, $member->id]) }}"
@@ -103,6 +112,11 @@
                     <button type="submit" class="member-action-btn member-action-btn-remove">Remove</button>
                 </form>
             </div>
+            @endif
+
+            @if($canAssignModules)
+                @include('workflows.partials.member-module-access', ['member' => $member, 'activeWorkspace' => $activeWorkspace])
+            @endif
         </div>
     @endif
 </div>

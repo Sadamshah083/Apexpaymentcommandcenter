@@ -41,6 +41,7 @@ class WorkflowController extends Controller
             'search' => $request->input('search'),
             'stage' => $request->input('stage'),
             'phase' => $request->input('phase'),
+            'refresh_enrichment' => $request->boolean('refresh_enrichment'),
         ]));
     }
 
@@ -56,7 +57,7 @@ class WorkflowController extends Controller
         $request->validate([
             'name' => 'required|string|max:255',
             'file' => 'required|file|mimes:csv,txt,xlsx,xls|max:10240',
-            'processing_mode' => 'required|in:store_only,full_pipeline',
+            'processing_mode' => 'required|in:store_only,full_pipeline,import_only,import_and_enrich',
         ]);
 
         $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
@@ -84,7 +85,9 @@ class WorkflowController extends Controller
         $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
         $this->workspaceContext->ensureWorkflowBelongsToWorkspace($workflow, $workspace);
 
-        return view('workflows.show', $this->workflowService->buildShowData($workflow, $workspace));
+        return view('workflows.show', $this->workflowService->buildShowData($workflow, $workspace, [
+            'refresh_enrichment' => request()->boolean('refresh_enrichment'),
+        ]));
     }
 
     public function map(Request $request, Workflow $workflow)
@@ -116,9 +119,41 @@ class WorkflowController extends Controller
             'verification_toggles' => $request->input('verification_toggles'),
             'distribution_users' => $request->input('distribution_users'),
             'mapping_confirmed' => $request->boolean('mapping_confirmed'),
+            'run_enrichment_on_import' => $request->boolean('run_enrichment_on_import'),
+            'auto_assign_setters' => $request->boolean('auto_assign_setters'),
+            'tag_ids' => $request->input('tag_ids', []),
+            'tag_names' => $request->input('tag_names', ''),
         ]);
 
-        return redirect()->route('admin.workflows.show', $workflow->id)->with('success', 'Enrichment started. Leads will appear for your review when ready.');
+        return redirect()->route('admin.workflows.show', $workflow->id)->with('success', 'Import started. Leads will appear as rows are processed.');
+    }
+
+    public function enrich(Workflow $workflow)
+    {
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+        $this->workspaceContext->ensureWorkflowBelongsToWorkspace($workflow, $workspace);
+
+        $this->workflowService->startEnrichment($workflow);
+
+        return redirect()->route('admin.workflows.show', $workflow->id)->with('success', 'AI enrichment started for imported leads.');
+    }
+
+    public function distribute(Request $request, Workflow $workflow)
+    {
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+        $this->workspaceContext->ensureWorkflowBelongsToWorkspace($workflow, $workspace);
+
+        $request->validate([
+            'distribution_users' => 'nullable|array|min:1',
+            'distribution_users.*' => 'integer|exists:users,id',
+        ]);
+
+        $count = $this->workflowService->distributeToSetters(
+            $workflow,
+            $request->input('distribution_users'),
+        );
+
+        return redirect()->route('admin.workflows.show', $workflow->id)->with('success', "{$count} enriched leads distributed to appointment setters.");
     }
 
     public function pause(Workflow $workflow)
@@ -291,6 +326,10 @@ class WorkflowController extends Controller
         $user->ensureAdminPortalWorkspace();
         $workspaces = $user->adminSwitchableWorkspaces();
         $activeWorkspace = $this->workspaceContext->resolveActiveWorkspace($user);
+
+        if (! $user->canAccessAdminModule('user_management', $activeWorkspace->id)) {
+            abort(403, 'You do not have access to user management.');
+        }
 
         $activeWorkspace->load(['admin:id,name,email', 'users'])->loadCount(['workflows', 'users']);
         $workspaces->each(function (Workspace $workspace) {

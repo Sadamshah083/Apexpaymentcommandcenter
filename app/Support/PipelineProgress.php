@@ -13,13 +13,16 @@ class PipelineProgress
     {
         $pending = (int) ($workflow->pending_verification_count ?? 0);
         $failed = (int) ($workflow->failed_leads ?? 0);
-        $enriched = (int) ($workflow->processed_leads ?? 0) + $pending;
+        $enriched = (int) ($workflow->enriched_leads ?? 0);
         $attempted = $enriched + $failed;
         $assigned = (int) ($workflow->assigned_leads_count ?? 0);
 
-        $importDone = $workflow->status !== 'mapping';
-        $enrichActive = in_array($workflow->status, ['extracting', 'pending', 'paused'], true);
-        $enrichDone = in_array($workflow->status, ['completed', 'paused'], true) || $enriched > 0;
+        $importDone = $workflow->status !== 'mapping' && ($workflow->ingestion_complete || $workflow->total_leads > 0);
+        $enrichActive = in_array($workflow->status, ['extracting', 'pending'], true)
+            && $workflow->runsEnrichmentOnImport();
+        $enrichSkipped = $workflow->isImportOnly() && $importDone && $enriched === 0 && $failed === 0;
+        $enrichDone = $enriched > 0 || $failed > 0
+            || ($importDone && ! $workflow->runsEnrichmentOnImport() && ! $enrichActive);
         $reviewActive = $pending > 0;
         $reviewDone = $importDone && $pending === 0 && $enriched > 0;
         $distributeDone = $assigned > 0;
@@ -39,7 +42,7 @@ class PipelineProgress
                 'active' => $enrichActive,
                 'detail' => $enrichActive
                     ? $attempted.' / '.$workflow->total_leads
-                    : ($enrichDone ? 'Complete' : 'Waiting'),
+                    : ($enrichSkipped ? 'Skipped — run later' : ($enrichDone ? 'Complete' : 'Waiting')),
             ],
             [
                 'key' => 'review',

@@ -55,10 +55,17 @@ class LeadPipelineService
             throw ValidationException::withMessages(['lead' => 'This lead is not assigned to you.']);
         }
 
+        $previousStatus = $lead->setter_status;
+
         $lead->update(['setter_status' => $status]);
 
         if ($notes) {
             $lead->update(['notes' => $notes]);
+        }
+
+        if ($previousStatus !== $status) {
+            $this->activities->logStatusChange($lead, $user, 'setter', $previousStatus, $status, $notes);
+        } elseif ($notes) {
             $this->activities->log($lead, $user, 'note', null, $notes);
         }
 
@@ -87,10 +94,17 @@ class LeadPipelineService
             throw ValidationException::withMessages(['lead' => 'This lead is not assigned to you.']);
         }
 
+        $previousStatus = $lead->closer_status;
+
         $lead->update(['closer_status' => $status]);
 
         if ($notes) {
             $lead->update(['notes' => $notes]);
+        }
+
+        if ($previousStatus !== $status) {
+            $this->activities->logStatusChange($lead, $user, 'closer', $previousStatus, $status, $notes);
+        } elseif ($notes) {
             $this->activities->log($lead, $user, 'note', null, $notes);
         }
 

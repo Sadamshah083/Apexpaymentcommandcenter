@@ -67,6 +67,53 @@ class LeadActivityService
         return $activity;
     }
 
+    public function logStatusChange(
+        WorkflowLead $lead,
+        User $user,
+        string $role,
+        ?string $fromStatus,
+        string $toStatus,
+        ?string $notes = null,
+    ): LeadActivity {
+        if (! in_array($role, ['setter', 'closer'], true)) {
+            throw ValidationException::withMessages(['role' => 'Invalid status role.']);
+        }
+
+        $type = $role === 'closer' ? 'closer_status_change' : 'setter_status_change';
+
+        $activity = LeadActivity::create([
+            'workflow_lead_id' => $lead->id,
+            'user_id' => $user->id,
+            'type' => $type,
+            'outcome' => $toStatus,
+            'notes' => $notes,
+            'metadata' => [
+                'role' => $role,
+                'from' => $fromStatus,
+                'to' => $toStatus,
+            ],
+        ]);
+
+        $lead->loadMissing('workflow.workspace');
+        if ($lead->workflow?->workspace) {
+            $this->syncService->record(
+                $lead->workflow->workspace,
+                'lead.status_changed',
+                'workflow_lead',
+                $lead->id,
+                [
+                    'role' => $role,
+                    'from' => $fromStatus,
+                    'to' => $toStatus,
+                    'business_name' => $lead->business_name,
+                ],
+                $user->id
+            );
+        }
+
+        return $activity;
+    }
+
     protected function applyActivitySideEffects(WorkflowLead $lead, string $type, ?string $outcome): void
     {
         $updates = ['last_contacted_at' => now()];

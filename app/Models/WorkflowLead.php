@@ -4,12 +4,14 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class WorkflowLead extends Model
 {
     protected $fillable = [
         'workflow_id',
+        'lead_list_id',
         'import_mode',
         'pipeline_phase',
         'setter_status',
@@ -34,6 +36,7 @@ class WorkflowLead extends Model
         'country',
         'website',
         'input_phone',
+        'normalized_phone',
         'input_email',
         'raw_row',
         'owner_name',
@@ -95,6 +98,27 @@ class WorkflowLead extends Model
     public function workflow(): BelongsTo
     {
         return $this->belongsTo(Workflow::class);
+    }
+
+    public function leadList(): BelongsTo
+    {
+        return $this->belongsTo(LeadList::class);
+    }
+
+    public function tags(): BelongsToMany
+    {
+        return $this->belongsToMany(LeadTag::class, 'lead_tag_workflow_lead', 'workflow_lead_id', 'lead_tag_id');
+    }
+
+    public function isEnriched(): bool
+    {
+        return in_array($this->status, ['enriched', 'completed', 'pending_verification'], true)
+            || filled($this->researched_at);
+    }
+
+    public function isReadyForDistribution(): bool
+    {
+        return $this->status === 'enriched' && ! $this->assigned_user_id;
     }
 
     public function assignee(): BelongsTo

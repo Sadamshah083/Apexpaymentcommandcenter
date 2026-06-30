@@ -6,6 +6,7 @@ return [
     'roles' => [
         'super_admin' => 'Super Admin',
         'admin' => 'Admin',
+        'manager' => 'Manager',
         'appointment_setter_team_lead' => 'Appointment Setter Team Lead',
         'appointment_setter' => 'Appointment Setter',
         'closers_team_lead' => 'Closers Team Lead',
@@ -22,10 +23,12 @@ return [
     'admin_portal_roles' => [
         'super_admin',
         'admin',
+        'manager',
     ],
 
     'pipeline_phases' => [
         'imported' => 'Imported',
+        'enriched' => 'Enriched',
         'enriching' => 'Enriching',
         'with_setter' => 'With Appointment Setter',
         'appointment_settled' => 'Appointment Settled',
@@ -54,5 +57,7 @@ return [
         'dial' => 'Outbound Dial',
         'email' => 'Follow-up Email',
         'sms' => 'Follow-up SMS',
+        'setter_status_change' => 'Setter status change',
+        'closer_status_change' => 'Closer status change',
     ],
 ];

@@ -8,14 +8,11 @@ use Illuminate\Support\Facades\Log;
 
 class WorkflowExtractor
 {
-    protected GeminiClient $gemini;
-    protected \App\Services\BusinessResearch\WebSearchService $webSearch;
-
-    public function __construct(GeminiClient $gemini, \App\Services\BusinessResearch\WebSearchService $webSearch)
-    {
-        $this->gemini = $gemini;
-        $this->webSearch = $webSearch;
-    }
+    public function __construct(
+        protected GeminiClient $gemini,
+        protected \App\Services\BusinessResearch\WebSearchService $webSearch,
+        protected WorkflowProviderStatusService $providerStatus,
+    ) {}
 
     /**
      * Enrich lead with business intelligence
@@ -34,7 +31,7 @@ class WorkflowExtractor
             $businessName,
             $lead->address ?: $location,
             $lead->website,
-            2 // Fetch 2 targeted queries for rapid pipeline throughput
+            max(1, (int) config('workflow_enrichment.web_search_queries', 2))
         );
         $contextBlock = $this->webSearch->formatContextBlock($webContext);
 
@@ -72,20 +69,36 @@ class WorkflowExtractor
         }
 
         try {
+            $models = array_values(array_unique(array_filter(
+                config('workflow_enrichment.gemini_model')
+                    ? [config('workflow_enrichment.gemini_model'), ...config('workflow_enrichment.gemini_fallback_models', [])]
+                    : [config('gemini.model'), 'gemini-2.5-flash', 'gemini-2.5-pro']
+            )));
+
             $options = [
-                'models' => [config('gemini.model'), 'gemini-2.5-pro', 'gemini-2.5-flash'],
-                // Fall back to disabled search grounding if key is free tier, since DDG handles it
-                'google_search_enabled' => false, 
-                'thinking_budget' => 0, // Disabled thinking budget for fast extraction
-                'timeout' => 240
+                'models' => $models,
+                'google_search_enabled' => (bool) config('workflow_enrichment.gemini_google_search_enabled', false),
+                'thinking_budget' => (int) config('workflow_enrichment.gemini_thinking_budget', 0),
+                'max_output_tokens' => (int) config('workflow_enrichment.gemini_max_output_tokens', 2048),
+                'timeout' => (int) config('workflow_enrichment.gemini_timeout', 120),
             ];
 
+            $geminiHealth = $this->providerStatus->getGeminiHealth();
+            $skipGemini = ($geminiHealth['state'] ?? '') === 'depleted'
+                && filled(config('openrouter.api_key'));
+
             try {
+                if ($skipGemini) {
+                    throw new \RuntimeException('Gemini credits depleted — using OpenRouter fallback.');
+                }
+
                 $result = $this->gemini->researchWithGoogleSearch($systemPrompt, $userPrompt, $options);
+                $this->providerStatus->clearGeminiError();
             } catch (\Exception $e) {
-                Log::warning("Gemini failed in WorkflowExtractor. Falling back to OpenRouter: " . $e->getMessage());
+                $this->providerStatus->recordGeminiError($e->getMessage());
+                Log::warning('Gemini failed in WorkflowExtractor. Falling back to OpenRouter: '.$e->getMessage());
                 $openRouterClient = app(\App\Services\BusinessResearch\OpenRouterClient::class);
-                $result = $openRouterClient->chat($systemPrompt, $userPrompt);
+                $result = $openRouterClient->chatForPipeline($systemPrompt, $userPrompt);
             }
             $report = $result['content'];
 
@@ -108,7 +121,8 @@ class WorkflowExtractor
                 'error_message' => null
             ];
         } catch (\Exception $e) {
-            Log::error("WorkflowExtractor failed for lead {$lead->id}: " . $e->getMessage());
+            $this->providerStatus->recordGeminiError($e->getMessage());
+            Log::error("WorkflowExtractor failed for lead {$lead->id}: ".$e->getMessage());
             return [
                 'status' => 'failed',
                 'error_message' => $e->getMessage(),

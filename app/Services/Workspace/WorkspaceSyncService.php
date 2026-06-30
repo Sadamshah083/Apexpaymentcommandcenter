@@ -411,8 +411,24 @@ class WorkspaceSyncService
             'role_label' => \App\Support\SalesOps::roleLabel($member->pivot->role),
             'status' => $member->pivot->status ?? 'active',
             'is_owner' => $isOwner,
-            'can_manage' => $viewer->isSuperAdmin($workspace->id) && ! $isOwner,
+            'can_manage' => $viewer->canManageWorkspaceMembers($workspace->id) && ! $isOwner,
+            'can_assign_modules' => $viewer->canAssignModulePermissions($workspace->id) && ! $isOwner,
+            'module_summary' => $this->moduleSummaryForMember($member, $workspace),
         ];
+    }
+
+    protected function moduleSummaryForMember(User $member, Workspace $workspace): ?string
+    {
+        $role = $member->pivot->role ?? null;
+        if (! \App\Support\SalesOps::isAdminPortalRole($role) || $role === 'super_admin') {
+            return null;
+        }
+
+        if ($member->usesRestrictedModuleAccess($workspace->id)) {
+            return count($member->getModulePermissions($workspace->id)).' module(s)';
+        }
+
+        return 'Full access';
     }
 
     /**

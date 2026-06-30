@@ -30,11 +30,11 @@ const ACTION_COPY = {
             return `Change ${name}'s role to ${label}?`;
         },
     },
-    'reset-password': {
-        title: 'Reset password?',
+    'modules': {
+        title: 'Update module access?',
         tone: 'warning',
-        confirmLabel: 'Update password',
-        message: (name) => `Set a new password for ${name}? They will use it on their next agent portal sign-in.`,
+        confirmLabel: 'Save module access',
+        message: (name) => `Update which admin features ${name} can access?`,
     },
 };
 
@@ -179,6 +179,15 @@ async function submitMemberForm(form) {
             }
         }
 
+        if (form.dataset.memberAction === 'modules') {
+            const summary = row?.querySelector('[data-member-module-summary]');
+            const restricted = form.querySelector('[name="access_mode"][value="restricted"]')?.checked;
+            const checkedCount = form.querySelectorAll('[name="modules[]"]:checked').length;
+            if (summary) {
+                summary.textContent = restricted ? `${checkedCount} module(s)` : 'Full access';
+            }
+        }
+
         if (form.dataset.memberAction === 'reset-password') {
             form.reset();
             const details = form.closest('details');
@@ -193,6 +202,27 @@ async function submitMemberForm(form) {
         showToast(`Network error while updating ${name}.`, 'error');
         row?.classList.remove('member-row-busy');
     }
+}
+
+function bindModuleAccessToggles() {
+    document.querySelectorAll('.member-module-access').forEach((form) => {
+        if (form.dataset.moduleBound === '1') {
+            return;
+        }
+
+        form.dataset.moduleBound = '1';
+        const grid = form.querySelector('[data-module-grid]');
+        form.querySelectorAll('.member-access-mode').forEach((input) => {
+            input.addEventListener('change', () => {
+                if (!grid) {
+                    return;
+                }
+
+                const restricted = form.querySelector('[name="access_mode"][value="restricted"]')?.checked;
+                grid.classList.toggle('hidden', !restricted);
+            });
+        });
+    });
 }
 
 function bindMemberForms() {
@@ -341,6 +371,7 @@ export function initMemberManagement() {
 
     bindConfirmModal();
     bindMemberForms();
+    bindModuleAccessToggles();
 }
 
 export function updateMemberRows(container, members) {
@@ -380,6 +411,11 @@ export function updateMemberRows(container, members) {
         const roleEl = row.querySelector('[data-member-role]');
         if (roleEl) {
             roleEl.textContent = member.role_label || member.role || roleEl.textContent;
+        }
+
+        const moduleSummary = row.querySelector('[data-member-module-summary]');
+        if (moduleSummary && member.module_summary) {
+            moduleSummary.textContent = member.module_summary;
         }
 
         const roleSelect = row.querySelector('[data-member-role-select]');

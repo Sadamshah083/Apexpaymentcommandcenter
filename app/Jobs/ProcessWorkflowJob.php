@@ -4,6 +4,8 @@ namespace App\Jobs;
 
 use App\Models\Workflow;
 use App\Models\WorkflowLead;
+use App\Services\Pipeline\LeadImportDedupService;
+use App\Services\Pipeline\LeadSegmentationService;
 use App\Services\Workspace\WorkspaceSyncService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -25,6 +27,8 @@ class ProcessWorkflowJob implements ShouldQueue
 
     public function handle(
         \App\Services\Workflow\WorkflowDataFormatter $formatter,
+        LeadImportDedupService $dedup,
+        LeadSegmentationService $segmentation,
         WorkspaceSyncService $syncService,
     ): void {
         set_time_limit(3600);
@@ -39,13 +43,11 @@ class ProcessWorkflowJob implements ShouldQueue
         }
 
         if ($workflow->ingestion_complete) {
-            $this->dispatchPendingLeadJobs($workflow);
+            if ($workflow->runsEnrichmentOnImport()) {
+                $this->dispatchPendingLeadJobs($workflow);
+            }
 
             return;
-        }
-
-        if ($workflow->ingestion_row_offset > 0) {
-            $this->dispatchPendingLeadJobs($workflow);
         }
 
         $workspace = $workflow->workspace;
@@ -106,7 +108,11 @@ class ProcessWorkflowJob implements ShouldQueue
                 ->pluck('row_number')
                 ->flip();
 
-            Log::info("Processing workflow {$workflow->id} from row offset {$offset} with mapping: ".json_encode($mapping));
+            $batchPhones = [];
+            $discardedDuplicates = (int) ($workflow->discarded_duplicates ?? 0);
+            $importTagIds = $workflow->import_tag_ids ?? [];
+
+            Log::info("Processing workflow {$workflow->id} from row offset {$offset}");
 
             $chunks = array_chunk($remainingRows, 50);
             $rowsProcessed = 0;
@@ -116,8 +122,6 @@ class ProcessWorkflowJob implements ShouldQueue
             foreach ($chunks as $chunk) {
                 $workflow->refresh();
                 if (! $workflow || $workflow->isPaused()) {
-                    $this->syncIngestionProgress($workflow, $syncService, $workspace);
-
                     return;
                 }
 
@@ -137,7 +141,7 @@ class ProcessWorkflowJob implements ShouldQueue
                 }
 
                 $mappedDataBatch = $formatter->formatRowsBatch($rawRowsBatch, $mapping);
-                $leadsToInsert = [];
+                $insertedLeadIds = [];
 
                 foreach ($rawRowsBatch as $i => $rawRow) {
                     $spreadsheetRowNumber = $rowNumbers[$i];
@@ -150,11 +154,20 @@ class ProcessWorkflowJob implements ShouldQueue
                         continue;
                     }
 
-                    $leadsToInsert[] = [
+                    if ($dedup->shouldDiscard($workspace->id, $mappedData['input_phone'] ?? null, $batchPhones)) {
+                        $discardedDuplicates++;
+
+                        continue;
+                    }
+
+                    $phoneFields = $dedup->formatPhoneForStorage($mappedData['input_phone'] ?? null);
+
+                    $lead = WorkflowLead::create([
                         'workflow_id' => $workflow->id,
-                        'import_mode' => $workflow->isStoreOnly() ? 'stored' : 'pipeline',
+                        'lead_list_id' => $workflow->lead_list_id,
+                        'import_mode' => $workflow->isImportOnly() ? 'stored' : 'pipeline',
                         'pipeline_phase' => 'imported',
-                        'status' => $workflow->isStoreOnly() ? 'completed' : 'pending',
+                        'status' => 'imported',
                         'row_number' => $spreadsheetRowNumber,
                         'business_name' => $mappedData['business_name'] ?? '',
                         'address' => $mappedData['address'] ?? null,
@@ -163,31 +176,30 @@ class ProcessWorkflowJob implements ShouldQueue
                         'zip_code' => $mappedData['zip_code'] ?? null,
                         'country' => $mappedData['country'] ?? null,
                         'website' => $mappedData['website'] ?? null,
-                        'input_phone' => $mappedData['input_phone'] ?? null,
+                        'input_phone' => $phoneFields['input_phone'],
+                        'normalized_phone' => $phoneFields['normalized_phone'],
                         'input_email' => $mappedData['input_email'] ?? null,
-                        'raw_row' => json_encode($rawRow),
-                        'created_at' => $now,
-                        'updated_at' => $now,
-                    ];
+                        'raw_row' => $rawRow,
+                    ]);
 
+                    $insertedLeadIds[] = $lead->id;
                     $existingRowNumbers->put($spreadsheetRowNumber, true);
+                    $totalLeadsInserted++;
                 }
 
-                if (! empty($leadsToInsert)) {
-                    WorkflowLead::insert($leadsToInsert);
-                    $totalLeadsInserted += count($leadsToInsert);
+                if ($insertedLeadIds !== [] && $importTagIds !== []) {
+                    $segmentation->attachTagsToLeads($insertedLeadIds, $importTagIds);
                 }
 
                 $workflow->update([
                     'ingestion_row_offset' => $offset + $rowsProcessed,
                     'total_leads' => $totalLeadsInserted,
+                    'discarded_duplicates' => $discardedDuplicates,
                 ]);
             }
 
             $workflow->refresh();
             if (! $workflow || $workflow->isPaused()) {
-                $this->syncIngestionProgress($workflow, $syncService, $workspace);
-
                 return;
             }
 
@@ -196,6 +208,7 @@ class ProcessWorkflowJob implements ShouldQueue
                 'ingestion_complete' => true,
                 'ingestion_row_offset' => count($dataRows),
                 'total_leads' => $totalLeads,
+                'discarded_duplicates' => $discardedDuplicates,
             ]);
 
             if ($totalLeads === 0) {
@@ -208,18 +221,23 @@ class ProcessWorkflowJob implements ShouldQueue
                 return;
             }
 
-            if ($workflow->isStoreOnly()) {
+            if ($workflow->isImportOnly()) {
                 $workflow->update(['status' => 'completed']);
                 $syncService->record($workspace, 'workflow.completed', 'workflow', $workflow->id, [
                     'processed_leads' => 0,
                     'failed_leads' => 0,
-                    'store_only' => true,
+                    'import_only' => true,
+                    'discarded_duplicates' => $discardedDuplicates,
                 ]);
 
                 return;
             }
 
-            $this->dispatchPendingLeadJobs($workflow);
+            if ($workflow->runsEnrichmentOnImport()) {
+                $this->dispatchPendingLeadJobs($workflow);
+            } else {
+                $workflow->update(['status' => 'completed']);
+            }
         } catch (\Throwable $e) {
             Log::error('Workflow processing error: '.$e->getMessage());
             $workflow?->update([
@@ -232,14 +250,11 @@ class ProcessWorkflowJob implements ShouldQueue
     protected function dispatchPendingLeadJobs(Workflow $workflow): void
     {
         WorkflowLead::where('workflow_id', $workflow->id)
-            ->where('status', 'pending')
+            ->where('status', 'imported')
             ->orderBy('row_number')
             ->pluck('id')
             ->each(fn (int $leadId) => ProcessLeadJob::dispatch($leadId, $workflow->custom_prompt));
-    }
 
-    protected function syncIngestionProgress(?Workflow $workflow, WorkspaceSyncService $syncService, $workspace): void
-    {
-        // Poll refreshes workflow cards from DB state; no toast event needed mid-import.
+        $workflow->update(['status' => 'extracting']);
     }
 }

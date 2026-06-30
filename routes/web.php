@@ -6,6 +6,7 @@ use App\Http\Controllers\ContentAnalyzerController;
 use App\Http\Controllers\CrmCampaignController;
 use App\Http\Controllers\DeliverabilityController;
 use App\Http\Controllers\EmailListController;
+use App\Http\Controllers\LeadTagController;
 use App\Http\Controllers\ReputationController;
 use App\Http\Controllers\WorkflowController;
 use App\Http\Controllers\PipelineController;
@@ -43,8 +44,19 @@ Route::prefix('portal')->name('portal.')->group(function () {
 });
 
 // Protected Admin Routes
-Route::prefix('admin')->name('admin.')->middleware([\App\Http\Middleware\AdminPortalMiddleware::class])->group(function () {
-    Route::get('/dashboard', fn () => redirect()->route('admin.workflows.index'))->name('dashboard');
+Route::prefix('admin')->name('admin.')->middleware([
+    \App\Http\Middleware\AdminPortalMiddleware::class,
+    \App\Http\Middleware\EnsureAdminModuleAccess::class,
+])->group(function () {
+    Route::get('/dashboard', function () {
+        $route = \App\Support\AdminModules::defaultRouteForUser(auth()->user());
+
+        if (! $route) {
+            abort(403, 'No admin modules are assigned to your account.');
+        }
+
+        return redirect()->route($route);
+    })->name('dashboard');
 
     Route::prefix('sales-ops')->name('sales-ops.')->group(function () {
         Route::get('/', [SalesOpsController::class, 'index'])->name('index');
@@ -113,7 +125,17 @@ Route::prefix('admin')->name('admin.')->middleware([\App\Http\Middleware\AdminPo
         Route::post('/{workflow}/pause', [WorkflowController::class, 'pause'])->name('pause');
         Route::post('/{workflow}/resume', [WorkflowController::class, 'resume'])->name('resume');
         Route::post('/{workflow}/retry-failed', [WorkflowController::class, 'retryFailed'])->name('retry-failed');
+        Route::post('/{workflow}/enrich', [WorkflowController::class, 'enrich'])->name('enrich');
+        Route::post('/{workflow}/distribute', [WorkflowController::class, 'distribute'])->name('distribute');
         Route::delete('/{workflow}', [WorkflowController::class, 'destroy'])->name('destroy');
+    });
+
+    Route::prefix('lead-tags')->name('lead-tags.')->group(function () {
+        Route::get('/', [LeadTagController::class, 'index'])->name('index');
+        Route::get('/browse', [LeadTagController::class, 'show'])->name('show');
+        Route::post('/enrich', [LeadTagController::class, 'enrich'])->name('enrich');
+        Route::post('/distribute', [LeadTagController::class, 'distribute'])->name('distribute');
+        Route::post('/apply', [LeadTagController::class, 'applyTags'])->name('apply');
     });
 
     Route::post('leads/{lead}/approve', [WorkflowController::class, 'approveLead'])->name('leads.approve');
@@ -133,6 +155,10 @@ Route::prefix('admin')->name('admin.')->middleware([\App\Http\Middleware\AdminPo
         Route::post('/{workspace}/members/{member}/reactivate', [WorkspaceMemberController::class, 'reactivate'])->name('members.reactivate');
         Route::delete('/{workspace}/members/{member}', [WorkspaceMemberController::class, 'destroy'])->name('members.destroy');
     });
+
+    Route::patch('/workspaces/{workspace}/members/{member}/modules', [WorkspaceMemberController::class, 'updateModules'])
+        ->middleware([\App\Http\Middleware\EnsureCanAssignModulePermissions::class])
+        ->name('workspaces.members.modules');
 
     Route::get('push/vapid-public-key', [PushNotificationController::class, 'vapidPublicKey'])->name('push.vapid');
     Route::post('push/subscribe', [PushNotificationController::class, 'subscribe'])->name('push.subscribe');

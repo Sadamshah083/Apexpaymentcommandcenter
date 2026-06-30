@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Services\Workspace\WorkspaceContextService;
 use App\Services\Workspace\WorkspaceMemberService;
+use App\Support\AdminModules;
 use App\Support\SalesOps;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -27,7 +28,12 @@ class WorkspaceMemberController extends Controller
             'username' => 'required|string|max:255',
             'password' => 'required|string|min:6|confirmed',
             'role' => 'required|in:'.implode(',', $creatableRoles),
+            'access_mode' => 'sometimes|in:full,restricted',
+            'modules' => 'nullable|array',
+            'modules.*' => 'string|in:'.implode(',', array_keys(AdminModules::all())),
         ]);
+
+        $modulePermissions = $this->modulePermissionsFromRequest($request, $data['role']);
 
         $member = $this->memberService->createAgent(
             $workspace,
@@ -35,6 +41,7 @@ class WorkspaceMemberController extends Controller
             $data['username'],
             $data['password'],
             $data['role'],
+            $modulePermissions,
         );
 
         return $this->respond(
@@ -86,6 +93,43 @@ class WorkspaceMemberController extends Controller
         $this->memberService->removeMember($workspace, Auth::user(), $member);
 
         return $this->respond($request, "{$member->name} removed from workspace.");
+    }
+
+    public function updateModules(Request $request, Workspace $workspace, User $member)
+    {
+        $validModules = array_keys(AdminModules::all());
+
+        $data = $request->validate([
+            'modules' => 'nullable|array',
+            'modules.*' => 'string|in:'.implode(',', $validModules),
+            'access_mode' => 'required|in:full,restricted',
+        ]);
+
+        $this->memberService->updateMemberModules(
+            $workspace,
+            Auth::user(),
+            $member,
+            $data['modules'] ?? [],
+            $data['access_mode'] === 'restricted',
+        );
+
+        return $this->respond($request, "Updated module access for {$member->name}.");
+    }
+
+    /**
+     * @return list<string>|null
+     */
+    protected function modulePermissionsFromRequest(Request $request, string $role): ?array
+    {
+        if (! SalesOps::isAdminPortalRole($role) || $role === 'super_admin') {
+            return null;
+        }
+
+        if ($request->input('access_mode', 'full') !== 'restricted') {
+            return null;
+        }
+
+        return AdminModules::sanitize($request->input('modules', []));
     }
 
     protected function respond(Request $request, string $message): JsonResponse|RedirectResponse

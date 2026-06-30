@@ -27,7 +27,9 @@
         <div class="app-content-shell">
             @auth
                 @include('layouts.partials.topnav', [
-                    'workspaceManageRoute' => route('admin.workspaces.index'),
+                    'workspaceManageRoute' => auth()->user()->canAccessAdminModule('user_management')
+                        ? route('admin.workspaces.index')
+                        : null,
                     'logoutRoute' => route('admin.logout'),
                 ])
             @endauth

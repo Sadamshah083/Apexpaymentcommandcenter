@@ -24,9 +24,24 @@ class OpenRouterClient
     }
 
     /**
+     * Low-token pipeline fallback (lead import enrichment).
+     *
      * @return array{content: string, model: string, tokens: int|null, raw: array}
      */
-    protected function request(string $systemPrompt, string $userPrompt, bool $enableWebSearch): array
+    public function chatForPipeline(string $systemPrompt, string $userPrompt): array
+    {
+        return $this->request(
+            $systemPrompt,
+            $userPrompt,
+            (bool) config('workflow_enrichment.openrouter_web_search_enabled', false),
+            (int) config('workflow_enrichment.openrouter_max_tokens', 2048),
+        );
+    }
+
+    /**
+     * @return array{content: string, model: string, tokens: int|null, raw: array}
+     */
+    protected function request(string $systemPrompt, string $userPrompt, bool $enableWebSearch, ?int $maxTokens = null): array
     {
         $apiKey = config('openrouter.api_key');
 
@@ -49,7 +64,7 @@ class OpenRouterClient
                     ['role' => 'user', 'content' => $userPrompt],
                 ],
                 'temperature' => 0.2,
-                'max_tokens' => 4096,
+                'max_tokens' => $maxTokens ?? 4096,
             ];
 
             if ($enableWebSearch && config('openrouter.web_search_enabled', true)) {

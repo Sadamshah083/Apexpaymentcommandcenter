@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\AdminModules;
 use App\Support\SalesOps;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -36,7 +37,7 @@ class User extends Authenticatable
     public function workspaces(): BelongsToMany
     {
         return $this->belongsToMany(Workspace::class, 'workspace_user')
-            ->withPivot('role', 'status', 'invited_at', 'joined_at')
+            ->withPivot('role', 'status', 'invited_at', 'joined_at', 'module_permissions')
             ->withTimestamps();
     }
 
@@ -125,6 +126,11 @@ class User extends Authenticatable
         return $this->getWorkspaceRole($workspaceId) === 'admin';
     }
 
+    public function isManager(?int $workspaceId = null): bool
+    {
+        return $this->getWorkspaceRole($workspaceId) === 'manager';
+    }
+
     public function isAppointmentSetter(?int $workspaceId = null): bool
     {
         return $this->getWorkspaceRole($workspaceId) === 'appointment_setter';
@@ -152,9 +158,10 @@ class User extends Authenticatable
         }
 
         return $this->workspaces()
-            ->wherePivot('role', 'admin')
+            ->wherePivotIn('role', ['admin', 'manager'])
             ->wherePivot('status', 'active')
-            ->exists();
+            ->get()
+            ->contains(fn (Workspace $workspace) => $this->canAccessAdminPortal($workspace->id));
     }
 
     public function firstAdminWorkspace(): ?Workspace
@@ -169,7 +176,7 @@ class User extends Authenticatable
         }
 
         return $this->workspaces()
-            ->wherePivot('role', 'admin')
+            ->wherePivotIn('role', ['admin', 'manager'])
             ->wherePivot('status', 'active')
             ->orderBy('workspaces.name')
             ->first();
@@ -229,10 +236,102 @@ class User extends Authenticatable
     public function canAccessAdminPortal(?int $workspaceId = null): bool
     {
         if ($workspaceId) {
-            return $this->isSuperAdmin($workspaceId) || $this->isAdmin($workspaceId);
+            if ($this->isSuperAdmin($workspaceId)) {
+                return true;
+            }
+
+            if (! $this->isAdmin($workspaceId) && ! $this->isManager($workspaceId)) {
+                return false;
+            }
+
+            $permissions = $this->getModulePermissions($workspaceId);
+
+            return $permissions === null || count($permissions) > 0;
         }
 
         return $this->isAdminOfAnyWorkspace();
+    }
+
+    /**
+     * @return list<string>|null null = unrestricted access to all modules
+     */
+    public function getModulePermissions(?int $workspaceId = null): ?array
+    {
+        $workspaceId = $workspaceId ?: $this->current_workspace_id;
+        if (! $workspaceId || $this->isSuperAdmin($workspaceId)) {
+            return null;
+        }
+
+        $pivot = $this->workspaceMembershipPivot($workspaceId);
+        if (! $pivot) {
+            return null;
+        }
+
+        $raw = $pivot->module_permissions ?? null;
+        if ($raw === null) {
+            return null;
+        }
+
+        if (is_string($raw)) {
+            $decoded = json_decode($raw, true);
+
+            return is_array($decoded) ? array_values($decoded) : [];
+        }
+
+        return is_array($raw) ? array_values($raw) : [];
+    }
+
+    public function usesRestrictedModuleAccess(?int $workspaceId = null): bool
+    {
+        return is_array($this->getModulePermissions($workspaceId));
+    }
+
+    public function canAccessAdminModule(string $module, ?int $workspaceId = null): bool
+    {
+        if (! AdminModules::isValid($module)) {
+            return false;
+        }
+
+        $workspaceId = $workspaceId ?: $this->current_workspace_id;
+        if (! $workspaceId || ! $this->canAccessAdminPortal($workspaceId)) {
+            return false;
+        }
+
+        if ($this->isSuperAdmin($workspaceId)) {
+            return true;
+        }
+
+        $permissions = $this->getModulePermissions($workspaceId);
+        if ($permissions === null) {
+            return true;
+        }
+
+        return in_array($module, $permissions, true);
+    }
+
+    public function canAssignModulePermissions(?int $workspaceId = null): bool
+    {
+        $workspaceId = $workspaceId ?: $this->current_workspace_id;
+        if (! $workspaceId) {
+            return false;
+        }
+
+        return $this->isSuperAdmin($workspaceId)
+            || $this->isAdmin($workspaceId);
+    }
+
+    public function canManageWorkspaceMembers(?int $workspaceId = null): bool
+    {
+        return $this->isSuperAdmin($workspaceId ?: $this->current_workspace_id);
+    }
+
+    protected function workspaceMembershipPivot(int $workspaceId): ?object
+    {
+        if ($this->relationLoaded('workspaces')) {
+            return $this->workspaces->firstWhere('id', $workspaceId)?->pivot;
+        }
+
+        return $this->workspaces()->where('workspace_id', $workspaceId)->first()?->pivot;
     }
 
     public function canAccessPortal(?int $workspaceId = null): bool

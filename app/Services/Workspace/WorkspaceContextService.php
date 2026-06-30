@@ -67,8 +67,15 @@ class WorkspaceContextService
 
     public function ensureCanManageMembers(User $user, Workspace $workspace): void
     {
-        if (! $user->isSuperAdmin($workspace->id)) {
+        if (! $user->canManageWorkspaceMembers($workspace->id)) {
             abort(403, 'Only the workspace Super Admin can manage user accounts.');
+        }
+    }
+
+    public function ensureCanAssignModulePermissions(User $user, Workspace $workspace): void
+    {
+        if (! $user->canAssignModulePermissions($workspace->id)) {
+            abort(403, 'You do not have permission to manage module access.');
         }
     }
 

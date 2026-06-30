@@ -7,12 +7,16 @@ use App\Models\Workflow;
 use App\Models\WorkflowLead;
 use App\Models\Workspace;
 use App\Services\Workflow\WorkflowAiMapper;
-use App\Services\Workspace\WorkspaceSyncService;
-use App\Services\Workflow\WorkflowService;
+use App\Services\Pipeline\LeadSegmentationService;
+use App\Services\Pipeline\PipelineLeadReleaseService;
+use App\Services\Workflow\WorkflowProviderStatusService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use App\Services\Workspace\WorkspaceSyncService;
+use App\Services\Workflow\WorkflowService;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 use Mockery;
 use Tests\TestCase;
@@ -25,6 +29,17 @@ class WorkflowServiceTest extends TestCase
     {
         Mockery::close();
         parent::tearDown();
+    }
+
+    protected function makeService(?WorkspaceSyncService $sync = null, ?WorkflowAiMapper $mapper = null): WorkflowService
+    {
+        return new WorkflowService(
+            $mapper ?? Mockery::mock(WorkflowAiMapper::class),
+            $sync ?? Mockery::mock(WorkspaceSyncService::class),
+            new WorkflowProviderStatusService,
+            app(LeadSegmentationService::class),
+            app(PipelineLeadReleaseService::class),
+        );
     }
 
     public function test_queue_for_processing_requires_business_name_mapping(): void
@@ -45,7 +60,7 @@ class WorkflowServiceTest extends TestCase
         $sync = Mockery::mock(WorkspaceSyncService::class);
         $sync->shouldReceive('record')->zeroOrMoreTimes();
 
-        $service = new WorkflowService(Mockery::mock(WorkflowAiMapper::class), $sync);
+        $service = $this->makeService($sync);
 
         $this->expectException(ValidationException::class);
         $service->queueForProcessing($workflow, ['mapping' => []]);
@@ -67,7 +82,7 @@ class WorkflowServiceTest extends TestCase
         ]);
 
         $sync = Mockery::mock(WorkspaceSyncService::class);
-        $service = new WorkflowService(Mockery::mock(WorkflowAiMapper::class), $sync);
+        $service = $this->makeService($sync);
 
         $this->expectException(ValidationException::class);
         $service->queueForProcessing($workflow, [
@@ -86,6 +101,9 @@ class WorkflowServiceTest extends TestCase
         ]);
 
         $workspace = Workspace::create(['name' => 'Sales', 'admin_id' => $admin->id]);
+        $workspace->users()->attach($admin->id, ['role' => 'admin', 'status' => 'active', 'joined_at' => now()]);
+        Auth::login($admin);
+
         $workflow = Workflow::create([
             'workspace_id' => $workspace->id,
             'name' => 'Pipeline',
@@ -96,7 +114,7 @@ class WorkflowServiceTest extends TestCase
         $sync = Mockery::mock(WorkspaceSyncService::class);
         $sync->shouldReceive('record')->zeroOrMoreTimes();
 
-        $service = new WorkflowService(Mockery::mock(WorkflowAiMapper::class), $sync);
+        $service = $this->makeService($sync);
         $service->queueForProcessing($workflow, [
             'mapping' => ['business_name' => 'Company'],
             'custom_prompt' => 'Find owner details',
@@ -126,7 +144,7 @@ class WorkflowServiceTest extends TestCase
         ]);
 
         $sync = Mockery::mock(WorkspaceSyncService::class);
-        $service = new WorkflowService(Mockery::mock(WorkflowAiMapper::class), $sync);
+        $service = $this->makeService($sync);
 
         $this->expectException(ValidationException::class);
         $service->queueForProcessing($workflow, [
@@ -146,6 +164,9 @@ class WorkflowServiceTest extends TestCase
         ]);
 
         $workspace = Workspace::create(['name' => 'Sales', 'admin_id' => $admin->id]);
+        $workspace->users()->attach($admin->id, ['role' => 'admin', 'status' => 'active', 'joined_at' => now()]);
+        Auth::login($admin);
+
         $workflow = Workflow::create([
             'workspace_id' => $workspace->id,
             'name' => 'Pipeline',
@@ -167,7 +188,7 @@ class WorkflowServiceTest extends TestCase
         $sync = Mockery::mock(WorkspaceSyncService::class);
         $sync->shouldReceive('record')->once();
 
-        $service = new WorkflowService(Mockery::mock(WorkflowAiMapper::class), $sync);
+        $service = $this->makeService($sync);
         $service->queueForProcessing($workflow, [
             'mapping' => ['business_name' => 'Company'],
             'mapping_confirmed' => true,
@@ -202,7 +223,7 @@ class WorkflowServiceTest extends TestCase
         $sync = Mockery::mock(WorkspaceSyncService::class);
         $sync->shouldReceive('record')->zeroOrMoreTimes();
 
-        $service = new WorkflowService(Mockery::mock(WorkflowAiMapper::class), $sync);
+        $service = $this->makeService($sync);
         $service->delete($workflow);
 
         Storage::disk('local')->assertMissing('workflows/test.csv');
@@ -240,7 +261,7 @@ class WorkflowServiceTest extends TestCase
         $sync = Mockery::mock(WorkspaceSyncService::class);
         $sync->shouldReceive('record')->zeroOrMoreTimes();
 
-        $service = new WorkflowService(Mockery::mock(WorkflowAiMapper::class), $sync);
+        $service = $this->makeService($sync);
         $service->delete($workflow);
 
         $this->assertDatabaseMissing('workflows', ['id' => $workflow->id]);
@@ -275,19 +296,20 @@ class WorkflowServiceTest extends TestCase
         $sync = Mockery::mock(WorkspaceSyncService::class);
         $sync->shouldReceive('record')->once();
 
-        $service = new WorkflowService(Mockery::mock(WorkflowAiMapper::class), $sync);
+        $service = $this->makeService($sync);
         $service->pauseProcessing($workflow);
 
         $workflow->refresh();
         $extractingLead->refresh();
 
         $this->assertEquals('paused', $workflow->status);
-        $this->assertEquals('pending', $extractingLead->status);
+        $this->assertEquals('imported', $extractingLead->status);
     }
 
     public function test_resume_processing_dispatches_pending_lead_jobs(): void
     {
         Queue::fake();
+        config(['openrouter.api_key' => 'test-key']);
 
         $admin = User::create([
             'name' => 'Admin',
@@ -301,20 +323,21 @@ class WorkflowServiceTest extends TestCase
             'name' => 'Pipeline',
             'status' => 'paused',
             'total_leads' => 2,
-            'processed_leads' => 1,
+            'enriched_leads' => 1,
+            'ingestion_complete' => true,
             'custom_prompt' => 'Find owner',
         ]);
 
         WorkflowLead::create([
             'workflow_id' => $workflow->id,
-            'status' => 'completed',
+            'status' => 'enriched',
             'row_number' => 1,
             'business_name' => 'Done Lead',
         ]);
 
         $pendingLead = WorkflowLead::create([
             'workflow_id' => $workflow->id,
-            'status' => 'pending',
+            'status' => 'imported',
             'row_number' => 2,
             'business_name' => 'Pending Lead',
         ]);
@@ -322,7 +345,7 @@ class WorkflowServiceTest extends TestCase
         $sync = Mockery::mock(WorkspaceSyncService::class);
         $sync->shouldReceive('record')->once();
 
-        $service = new WorkflowService(Mockery::mock(WorkflowAiMapper::class), $sync);
+        $service = $this->makeService($sync);
         $service->resumeProcessing($workflow);
 
         $workflow->refresh();
@@ -349,7 +372,7 @@ class WorkflowServiceTest extends TestCase
         ]);
 
         $sync = Mockery::mock(WorkspaceSyncService::class);
-        $service = new WorkflowService(Mockery::mock(WorkflowAiMapper::class), $sync);
+        $service = $this->makeService($sync);
 
         $this->expectException(ValidationException::class);
         $service->pauseProcessing($workflow);
@@ -374,7 +397,7 @@ class WorkflowServiceTest extends TestCase
         $file = UploadedFile::fake()->create('leads.xlsx', 10, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 
         $sync = Mockery::mock(WorkspaceSyncService::class);
-        $service = new WorkflowService($mapper, $sync);
+        $service = $this->makeService($sync, $mapper);
         $workflow = $service->createFromUpload($workspace, 'Q2 Leads', $file);
 
         $this->assertEquals('Q2 Leads', $workflow->name);
