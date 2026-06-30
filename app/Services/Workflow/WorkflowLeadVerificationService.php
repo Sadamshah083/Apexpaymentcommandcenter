@@ -6,6 +6,7 @@ use App\Http\Controllers\PushNotificationController;
 use App\Models\User;
 use App\Models\Workflow;
 use App\Models\WorkflowLead;
+use App\Services\Pipeline\SetterDistributionService;
 use App\Services\Workspace\WorkspaceSyncService;
 use App\Support\SqliteConcurrency;
 use Illuminate\Support\Facades\DB;
@@ -15,7 +16,7 @@ use Illuminate\Validation\ValidationException;
 class WorkflowLeadVerificationService
 {
     public function __construct(
-        protected WorkflowLeadDistributor $distributor,
+        protected SetterDistributionService $distributor,
         protected WorkspaceSyncService $syncService,
     ) {}
 
@@ -54,6 +55,9 @@ class WorkflowLeadVerificationService
                     'verified_at' => now(),
                     'verified_by' => $user->id,
                     'rejection_reason' => null,
+                    'pipeline_phase' => 'with_setter',
+                    'setter_status' => $lockedLead->setter_status ?: 'new',
+                    'import_mode' => 'pipeline',
                 ]);
 
                 $lockedWorkflow->increment('processed_leads');

@@ -50,11 +50,11 @@ class CrmCampaignController extends Controller
         $campaign->refresh();
 
         if ($campaign->status === 'failed') {
-            return redirect()->route('crm.show', $campaign)
+            return redirect()->route('admin.crm.show', $campaign)
                 ->with('error', $campaign->import_error ?? 'Import failed. Check your CSV has a business name column.');
         }
 
-        return redirect()->route('crm.show', $campaign)
+        return redirect()->route('admin.crm.show', $campaign)
             ->with('success', 'CSV imported. Research runs in the background — keep the queue worker running.');
     }
 
@@ -77,11 +77,11 @@ class CrmCampaignController extends Controller
         $crm->refresh();
 
         if ($crm->status === 'failed') {
-            return redirect()->route('crm.show', $crm)
+            return redirect()->route('admin.crm.show', $crm)
                 ->with('error', $crm->import_error ?? 'Import failed. Check your CSV has a business name column.');
         }
 
-        return redirect()->route('crm.show', $crm)
+        return redirect()->route('admin.crm.show', $crm)
             ->with('success', 'CSV re-imported. Row data updated; completed research kept unless business details changed.');
     }
 
@@ -163,7 +163,7 @@ class CrmCampaignController extends Controller
 
         RunCrmLeadResearchJob::dispatchSync($lead->id);
 
-        return redirect()->route('crm.leads.show', [$crm, $lead->fresh()])
+        return redirect()->route('admin.crm.leads.show', [$crm, $lead->fresh()])
             ->with('success', 'Research completed.');
     }
 
@@ -185,7 +185,7 @@ class CrmCampaignController extends Controller
 
         $crm->refreshCounts();
 
-        return redirect()->route('crm.show', $crm)
+        return redirect()->route('admin.crm.show', $crm)
             ->with('success', count($ids).' leads queued for re-research.');
     }
 
@@ -233,6 +233,6 @@ class CrmCampaignController extends Controller
     {
         $crm->delete();
 
-        return redirect()->route('crm.index')->with('success', 'Campaign deleted.');
+        return redirect()->route('admin.crm.index')->with('success', 'Campaign deleted.');
     }
 }

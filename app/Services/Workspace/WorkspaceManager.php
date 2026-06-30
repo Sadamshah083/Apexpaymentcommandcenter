@@ -20,7 +20,7 @@ class WorkspaceManager
         ]);
 
         $workspace->users()->attach($user->id, [
-            'role' => 'admin',
+            'role' => 'super_admin',
             'status' => 'active',
             'joined_at' => now(),
         ]);

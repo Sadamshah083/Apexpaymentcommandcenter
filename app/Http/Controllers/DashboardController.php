@@ -28,19 +28,8 @@ class DashboardController extends Controller
 
     public function index()
     {
-        // Simple auto-login helper if visiting dashboard guest
-        if (!auth()->check()) {
-            $user = \App\Models\User::first() ?: \App\Models\User::create([
-                'name' => 'Demo Administrator',
-                'email' => 'admin@example.com',
-                'password' => bcrypt('password')
-            ]);
-            auth()->login($user);
-        }
-
         $user = auth()->user();
-        
-        // Ensure user has a workspace
+
         if (!$user->current_workspace_id) {
             $workspace = $user->workspaces()->first();
             if (!$workspace) {

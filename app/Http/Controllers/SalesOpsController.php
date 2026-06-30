@@ -87,7 +87,7 @@ class SalesOpsController extends Controller
         $user = Auth::user();
         $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
 
-        if (! $user->isAccountExecutive() && ! $user->isWorkspaceAdmin()) {
+        if (! $user->canAccessAdminPortal($workspace->id) && ! $user->isCloser($workspace->id)) {
             abort(403);
         }
 

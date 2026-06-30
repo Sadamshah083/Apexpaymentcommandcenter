@@ -10,9 +10,9 @@
 </div>
 
 @if($test->status === 'pending' || $test->status === 'processing')
-    <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
-        Test is {{ $test->status }}... Refresh page in a few seconds.
-        <script>setTimeout(() => location.reload(), 3000);</script>
+    <div id="deliverability-pending-panel" class="app-alert app-alert-warning mb-6">
+        <p class="app-alert-title">Test is {{ $test->status }}…</p>
+        <p class="app-alert-desc">Results update automatically when the scan completes.</p>
     </div>
 @endif
 
@@ -70,3 +70,22 @@
     </div>
 @endif
 @endsection
+
+@push('scripts')
+@if($test->status === 'pending' || $test->status === 'processing')
+<script>
+(function () {
+    const start = window.startProgressPoll;
+    if (!start) return;
+
+    start('{{ request()->is('admin*') ? route('admin.deliverability.status', $test) : route('portal.deliverability.status', $test) }}', (data) => {
+        if (data.complete) {
+            window.location.reload();
+            return false;
+        }
+        return true;
+    });
+})();
+</script>
+@endif
+@endpush

@@ -27,7 +27,7 @@ class WorkspaceMemberService
         User $createdBy,
         string $username,
         string $password,
-        string $role = 'sdr',
+        string $role = 'appointment_setter',
     ): User {
         $this->workspaceContext->ensureCanManageMembers($createdBy, $workspace);
 
@@ -228,9 +228,15 @@ class WorkspaceMemberService
     {
         $this->workspaceContext->ensureCanManageMembers($admin, $workspace);
 
-        if ($workspace->admin_id === $member->id && $role !== 'admin') {
+        if ($workspace->admin_id === $member->id) {
             throw ValidationException::withMessages([
-                'role' => 'The workspace owner must remain an administrator.',
+                'role' => 'The workspace Super Admin role cannot be changed.',
+            ]);
+        }
+
+        if ($role === 'super_admin') {
+            throw ValidationException::withMessages([
+                'role' => 'Super Admin is assigned to the workspace owner only.',
             ]);
         }
 
@@ -326,7 +332,7 @@ class WorkspaceMemberService
         $workspace->users()->detach($member->id);
 
         if ($member->current_workspace_id === $workspace->id) {
-            $fallback = $member->workspaces()->first();
+            $fallback = $member->switchableWorkspaces()->first();
             $member->update(['current_workspace_id' => $fallback?->id]);
         }
 
@@ -345,11 +351,31 @@ class WorkspaceMemberService
         );
     }
 
+    public function resetMemberPassword(Workspace $workspace, User $admin, User $member, string $password): void
+    {
+        $this->workspaceContext->ensureCanManageMembers($admin, $workspace);
+
+        if (! $workspace->users()->where('user_id', $member->id)->exists()) {
+            abort(404);
+        }
+
+        $member->update(['password' => Hash::make($password)]);
+
+        $this->syncService->record(
+            $workspace,
+            'member.password_reset',
+            'user',
+            $member->id,
+            ['name' => $member->name],
+            $admin->id
+        );
+    }
+
     protected function normalizeRole(string $role): string
     {
         $allowed = array_keys(config('sales_ops.roles', []));
 
-        return in_array($role, $allowed, true) ? $role : 'sdr';
+        return in_array($role, $allowed, true) ? $role : 'appointment_setter';
     }
 
     /**

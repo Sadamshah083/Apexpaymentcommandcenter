@@ -27,6 +27,7 @@ return [
             'team_chat:read:list_user_channels:admin' => 'List Zoom Team Chat channels (Chat tab)',
             'team_chat:read:list_user_messages:admin' => 'Read Team Chat messages in channels and DMs',
             'team_chat:read:channel:admin' => 'Read Team Chat channel metadata',
+            'team_chat:write:admin' => 'Send Team Chat messages (Chat compose)',
             'phone:read:list_users:admin' => 'List Zoom Phone users (Dialer caller ID)',
             'phone:read:sms_message:admin' => 'Send SMS messages (SMS compose; POST /phone/sms/messages)',
         ],

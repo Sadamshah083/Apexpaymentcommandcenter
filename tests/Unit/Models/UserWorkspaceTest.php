@@ -56,4 +56,30 @@ class UserWorkspaceTest extends TestCase
 
         $this->assertTrue($workspace->users()->where('user_id', $user->id)->exists());
     }
+
+    public function test_admin_switchable_workspaces_only_includes_admin_contexts(): void
+    {
+        $user = User::create([
+            'name' => 'Dual',
+            'email' => 'dual@example.com',
+            'password' => bcrypt('password'),
+        ]);
+
+        $otherOwner = User::create([
+            'name' => 'Other',
+            'email' => 'other@example.com',
+            'password' => bcrypt('password'),
+        ]);
+
+        $adminWorkspace = Workspace::create(['name' => 'Admin Co', 'admin_id' => $user->id]);
+        $adminWorkspace->users()->attach($user->id, ['role' => 'admin', 'status' => 'active']);
+
+        $agentWorkspace = Workspace::create(['name' => 'Agent Co', 'admin_id' => $otherOwner->id]);
+        $agentWorkspace->users()->attach($user->id, ['role' => 'sdr', 'status' => 'active']);
+
+        $this->assertEquals(
+            ['Admin Co'],
+            $user->adminSwitchableWorkspaces()->pluck('name')->all()
+        );
+    }
 }

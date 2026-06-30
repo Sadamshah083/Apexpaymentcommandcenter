@@ -181,12 +181,22 @@ export function applySalesOpsSync(data) {
         updateWeeklyMetrics(salesOps.weekly);
 
         const leaderboardBody = document.getElementById('workspace-sync-leaderboard-body');
-        if (leaderboardBody && Array.isArray(salesOps.leaderboard)) {
-            const includeScore = leaderboardBody.dataset.includeScore === '1';
-            smoothHtmlUpdate(
-                leaderboardBody,
-                salesOps.leaderboard.map((row, index) => renderLeaderboardRow(row, index, { includeScore })).join(''),
-            );
+        if (leaderboardBody) {
+            const period = leaderboardBody.dataset.leaderboardPeriod || 'week';
+            const rows = period === 'day' ? salesOps.leaderboard_day : salesOps.leaderboard;
+            if (Array.isArray(rows)) {
+                const includeScore = leaderboardBody.dataset.includeScore === '1';
+                smoothHtmlUpdate(
+                    leaderboardBody,
+                    rows.length === 0
+                        ? '<tr><td colspan="9" class="text-center text-zinc-400 py-8">No activity logged yet this period.</td></tr>'
+                        : rows.map((row, index) => renderLeaderboardRow(row, index, { includeScore })).join(''),
+                );
+            }
+        }
+
+        if (salesOps.reactivation) {
+            updateReactivationCandidates(salesOps.reactivation);
         }
 
         const sdrLoadBody = document.getElementById('workspace-sync-sdr-load-body');
@@ -199,6 +209,152 @@ export function applySalesOpsSync(data) {
     }
 
     updateLeadDetail(data?.lead_detail);
+    applyToolkitSync(data?.toolkit);
+}
+
+function listStatusClass(status) {
+    const map = {
+        completed: 'app-badge app-badge-success',
+        verifying: 'app-badge app-badge-warning',
+        processing: 'app-badge app-badge-warning',
+        paused: 'app-badge app-badge-muted',
+        failed: 'app-badge app-badge-danger',
+        empty: 'app-badge app-badge-danger',
+    };
+
+    return map[status] || 'app-badge app-badge-muted';
+}
+
+function renderEmailListRow(list) {
+    return `
+        <tr data-list-id="${list.id}">
+            <td>
+                <div class="font-semibold text-zinc-900">${escapeHtml(list.name)}</div>
+                <div class="text-xs text-zinc-400 mt-0.5">${escapeHtml(list.source_file || '')}</div>
+            </td>
+            <td class="text-zinc-600">${escapeHtml(list.uploader || '—')}</td>
+            <td>${Number(list.total_count || 0).toLocaleString()}</td>
+            <td class="text-emerald-600 font-semibold">${Number(list.valid_count || 0).toLocaleString()}</td>
+            <td class="text-rose-600 font-semibold">${Number(list.invalid_count || 0).toLocaleString()}</td>
+            <td><span class="${listStatusClass(list.status)}">${escapeHtml(list.status || '')}</span></td>
+            <td class="text-right"><a href="${escapeHtml(list.show_url)}" class="app-link text-sm">Open results</a></td>
+        </tr>
+    `;
+}
+
+function deliverabilityStatusClass(status) {
+    const map = {
+        completed: 'app-badge app-badge-success',
+        processing: 'app-badge app-badge-warning',
+        pending: 'app-badge app-badge-muted',
+        failed: 'app-badge app-badge-danger',
+    };
+
+    return map[status] || 'app-badge app-badge-muted';
+}
+
+function renderDeliverabilityRow(test) {
+    const score = test.overall_score != null ? `${test.overall_score}/10` : '—';
+
+    return `
+        <tr data-deliverability-id="${test.id}">
+            <td><a href="${escapeHtml(test.show_url)}" class="app-link font-semibold">${escapeHtml(test.domain)}</a></td>
+            <td class="font-bold">${score}</td>
+            <td><span class="${deliverabilityStatusClass(test.status)}">${escapeHtml(test.status || '')}</span></td>
+            <td class="text-zinc-500 text-sm">${escapeHtml(test.created_at || '')}</td>
+        </tr>
+    `;
+}
+
+function renderReactivationRow(lead, sources, csrf) {
+    const options = Object.entries(sources || {})
+        .map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`)
+        .join('');
+
+    return `
+        <tr data-lead-id="${lead.id}">
+            <td class="font-bold">${escapeHtml(lead.business_name)}</td>
+            <td>${escapeHtml(lead.stage_label || '')}</td>
+            <td class="text-xs text-zinc-500">${escapeHtml(lead.updated_at || '')}</td>
+            <td>
+                <form method="POST" action="/admin/sales-ops/leads/${lead.id}/reactivate" class="flex items-center gap-2">
+                    <input type="hidden" name="_token" value="${escapeHtml(csrf)}">
+                    <select name="source" class="app-input !w-auto text-xs py-1">${options}</select>
+                    <button type="submit" class="app-btn app-btn-primary app-btn-sm">Enroll</button>
+                </form>
+            </td>
+        </tr>
+    `;
+}
+
+function updateReactivationCandidates(reactivation) {
+    const body = document.getElementById('workspace-sync-reactivation-body');
+    if (!body || !Array.isArray(reactivation.candidates)) {
+        return;
+    }
+
+    const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+    const html = reactivation.candidates.length === 0
+        ? ''
+        : reactivation.candidates.map((lead) => renderReactivationRow(lead, reactivation.sources, csrf)).join('');
+
+    if (body.dataset.syncMode === 'patch') {
+        const byId = new Map(reactivation.candidates.map((lead) => [String(lead.id), lead]));
+        body.querySelectorAll('tr[data-lead-id]').forEach((row) => {
+            const lead = byId.get(row.dataset.leadId);
+            if (!lead) {
+                row.remove();
+                return;
+            }
+            const temp = document.createElement('tbody');
+            temp.innerHTML = renderReactivationRow(lead, reactivation.sources, csrf);
+            const fresh = temp.querySelector('tr');
+            if (fresh && fresh.outerHTML !== row.outerHTML) {
+                row.replaceWith(fresh);
+            }
+        });
+        return;
+    }
+
+    smoothHtmlUpdate(body, html);
+}
+
+export function applyToolkitSync(toolkit) {
+    if (!toolkit) {
+        return;
+    }
+
+    const listsBody = document.getElementById('workspace-sync-email-lists-body');
+    if (listsBody && Array.isArray(toolkit.email_lists)) {
+        const html = toolkit.email_lists.length === 0
+            ? ''
+            : toolkit.email_lists.map(renderEmailListRow).join('');
+        if (listsBody.dataset.syncMode === 'patch') {
+            const byId = new Map(toolkit.email_lists.map((list) => [String(list.id), list]));
+            listsBody.querySelectorAll('tr[data-list-id]').forEach((row) => {
+                const list = byId.get(row.dataset.listId);
+                if (!list) {
+                    return;
+                }
+                const temp = document.createElement('tbody');
+                temp.innerHTML = renderEmailListRow(list);
+                const fresh = temp.querySelector('tr');
+                if (fresh && fresh.outerHTML !== row.outerHTML) {
+                    row.replaceWith(fresh);
+                }
+            });
+        } else {
+            smoothHtmlUpdate(listsBody, html);
+        }
+    }
+
+    const deliverabilityBody = document.getElementById('workspace-sync-deliverability-body');
+    if (deliverabilityBody && Array.isArray(toolkit.deliverability_tests)) {
+        smoothHtmlUpdate(
+            deliverabilityBody,
+            toolkit.deliverability_tests.map(renderDeliverabilityRow).join(''),
+        );
+    }
 }
 
 export function initAjaxActivityForms() {

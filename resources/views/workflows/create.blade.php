@@ -44,6 +44,20 @@
                 </div>
             </div>
 
+            <div class="app-field">
+                <span class="app-label">Import mode</span>
+                <div class="space-y-2 mt-2">
+                    <label class="app-checkbox-row">
+                        <input type="radio" name="processing_mode" value="full_pipeline" checked>
+                        <span class="app-checkbox-row-text"><strong>Activate pipeline</strong> — AI enrichment, then round-robin to appointment setters</span>
+                    </label>
+                    <label class="app-checkbox-row">
+                        <input type="radio" name="processing_mode" value="store_only">
+                        <span class="app-checkbox-row-text"><strong>Store only</strong> — save rows to the database without AI (activate later)</span>
+                    </label>
+                </div>
+            </div>
+
             <button type="submit" class="app-btn app-btn-primary w-full">Continue</button>
         </form>
     </div>

@@ -61,19 +61,13 @@
                             <svg class="app-search-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                             <input type="text" name="search" value="{{ request('search') }}" placeholder="Search business, owner…" class="app-input">
                         </div>
-                        <select name="stage" onchange="this.form.submit()" class="app-input !w-auto">
-                            <option value="">All Stages</option>
-                            @foreach($crmStages ?? [] as $value => $label)
-                                <option value="{{ $value }}" {{ request('stage') === $value ? 'selected' : '' }}>{{ $label }}</option>
+                        <select name="phase" onchange="this.form.submit()" class="app-input !w-auto">
+                            <option value="">All phases</option>
+                            @foreach($pipelinePhases ?? [] as $value => $label)
+                                <option value="{{ $value }}" {{ request('phase') === $value ? 'selected' : '' }}>{{ $label }}</option>
                             @endforeach
                         </select>
-                        <select name="tier" onchange="this.form.submit()" class="app-input !w-auto">
-                            <option value="">All Tiers</option>
-                            @foreach($leadTiers ?? [] as $value => $tier)
-                                <option value="{{ $value }}" {{ request('tier') === $value ? 'selected' : '' }}>{{ $tier['label'] }}</option>
-                            @endforeach
-                        </select>
-                        @if(request()->anyFilled(['search', 'stage', 'tier']))
+                        @if(request()->anyFilled(['search', 'phase']))
                             <a href="{{ request()->is('admin*') ? route('admin.workflows.index') : route('portal.dashboard') }}" class="app-btn app-btn-secondary app-btn-sm" title="Clear filters">Clear</a>
                         @endif
                     </form>
@@ -131,8 +125,10 @@
                                             <span class="app-badge app-badge-info">{{ $lead->payment_processor ?: 'Unknown' }}</span>
                                         </td>
                                         <td>
-                                            <div class="text-[10px] font-semibold text-zinc-400 mb-1">{{ \App\Support\SalesOps::tierLabel($lead->tier) }}</div>
-                                            <span class="app-badge app-badge-muted">{{ \App\Support\SalesOps::crmStageLabel($lead->stage) }}</span>
+                                            <span class="app-badge app-badge-muted">{{ \App\Support\SalesOps::pipelinePhaseLabel($lead->pipeline_phase) }}</span>
+                                            @if($lead->setter_status)
+                                                <div class="text-[10px] text-zinc-400 mt-1">{{ \App\Support\SalesOps::setterStatusLabel($lead->setter_status) }}</div>
+                                            @endif
                                         </td>
                                         <td class="text-right">
                                             <a href="{{ route('portal.leads.show', $lead->id) }}" class="app-icon-btn" title="Open lead">

@@ -20,7 +20,7 @@ class WorkspaceContextService
                     'admin_id' => $user->id,
                 ]);
                 $workspace->users()->attach($user->id, [
-                    'role' => 'admin',
+                    'role' => 'super_admin',
                     'status' => 'active',
                     'joined_at' => now(),
                 ]);
@@ -42,7 +42,7 @@ class WorkspaceContextService
         if ($workspace->admin_id === $user->id) {
             if (! $workspace->users()->where('user_id', $user->id)->exists()) {
                 $workspace->users()->attach($user->id, [
-                    'role' => 'admin',
+                    'role' => 'super_admin',
                     'status' => 'active',
                     'joined_at' => now(),
                 ]);
@@ -60,15 +60,15 @@ class WorkspaceContextService
 
     public function ensureIsAdmin(User $user, Workspace $workspace): void
     {
-        if (! $user->isWorkspaceAdmin($workspace->id)) {
+        if (! $user->canAccessAdminPortal($workspace->id)) {
             abort(403);
         }
     }
 
     public function ensureCanManageMembers(User $user, Workspace $workspace): void
     {
-        if (! $user->isWorkspaceAdmin($workspace->id)) {
-            abort(403);
+        if (! $user->isSuperAdmin($workspace->id)) {
+            abort(403, 'Only the workspace Super Admin can manage user accounts.');
         }
     }
 

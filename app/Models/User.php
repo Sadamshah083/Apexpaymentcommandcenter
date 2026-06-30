@@ -2,17 +2,16 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Support\SalesOps;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Foundation\Auth\User as Authenticatable;
-use Illuminate\Notifications\Notifiable;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use App\Support\SalesOps;
+use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Notifications\Notifiable;
 
 #[Fillable(['name', 'email', 'password', 'current_workspace_id'])]
 #[Hidden(['password', 'remember_token'])]
@@ -21,11 +20,6 @@ class User extends Authenticatable
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable;
 
-    /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
     protected function casts(): array
     {
         return [
@@ -46,9 +40,6 @@ class User extends Authenticatable
             ->withTimestamps();
     }
 
-    /**
-     * @return \Illuminate\Support\Collection<int, Workspace>
-     */
     public function switchableWorkspaces()
     {
         $membershipWorkspaces = $this->relationLoaded('workspaces')
@@ -72,6 +63,13 @@ class User extends Authenticatable
             ->values();
     }
 
+    public function adminSwitchableWorkspaces()
+    {
+        return $this->switchableWorkspaces()
+            ->filter(fn (Workspace $workspace) => $this->canAccessAdminPortal($workspace->id))
+            ->values();
+    }
+
     public function assignedLeads(): HasMany
     {
         return $this->hasMany(WorkflowLead::class, 'assigned_user_id');
@@ -82,11 +80,15 @@ class User extends Authenticatable
         return $this->hasMany(PushSubscription::class);
     }
 
-    public function getWorkspaceRole($workspaceId = null)
+    public function getWorkspaceRole(?int $workspaceId = null): ?string
     {
         $workspaceId = $workspaceId ?: $this->current_workspace_id;
         if (! $workspaceId) {
             return null;
+        }
+
+        if ($this->isSuperAdmin($workspaceId)) {
+            return 'super_admin';
         }
 
         if ($this->relationLoaded('workspaces')) {
@@ -106,32 +108,89 @@ class User extends Authenticatable
         return $workspace->pivot->role;
     }
 
-    public function isWorkspaceAdmin(?int $workspaceId = null): bool
+    public function isSuperAdmin(?int $workspaceId = null): bool
     {
         $workspaceId = $workspaceId ?: $this->current_workspace_id;
         if (! $workspaceId) {
             return false;
         }
 
-        if ($this->relationLoaded('currentWorkspace') && $this->currentWorkspace?->id === $workspaceId) {
-            if ($this->currentWorkspace->admin_id === $this->id) {
-                return true;
-            }
-        }
+        $workspace = Workspace::find($workspaceId);
 
-        if ($this->relationLoaded('workspaces')) {
-            $workspace = $this->workspaces->firstWhere('id', $workspaceId);
-            if ($workspace?->admin_id === $this->id) {
-                return true;
-            }
-        } else {
-            $workspace = Workspace::find($workspaceId);
-            if ($workspace?->admin_id === $this->id) {
-                return true;
-            }
-        }
+        return $workspace && $workspace->admin_id === $this->id;
+    }
 
+    public function isAdmin(?int $workspaceId = null): bool
+    {
         return $this->getWorkspaceRole($workspaceId) === 'admin';
+    }
+
+    public function isAppointmentSetter(?int $workspaceId = null): bool
+    {
+        return $this->getWorkspaceRole($workspaceId) === 'appointment_setter';
+    }
+
+    public function isAppointmentSetterTeamLead(?int $workspaceId = null): bool
+    {
+        return $this->getWorkspaceRole($workspaceId) === 'appointment_setter_team_lead';
+    }
+
+    public function isClosersTeamLead(?int $workspaceId = null): bool
+    {
+        return $this->getWorkspaceRole($workspaceId) === 'closers_team_lead';
+    }
+
+    public function isCloser(?int $workspaceId = null): bool
+    {
+        return $this->getWorkspaceRole($workspaceId) === 'closer';
+    }
+
+    public function isAdminOfAnyWorkspace(): bool
+    {
+        if (Workspace::query()->where('admin_id', $this->id)->exists()) {
+            return true;
+        }
+
+        return $this->workspaces()
+            ->wherePivot('role', 'admin')
+            ->wherePivot('status', 'active')
+            ->exists();
+    }
+
+    public function firstAdminWorkspace(): ?Workspace
+    {
+        $owned = Workspace::query()
+            ->where('admin_id', $this->id)
+            ->orderBy('name')
+            ->first();
+
+        if ($owned) {
+            return $owned;
+        }
+
+        return $this->workspaces()
+            ->wherePivot('role', 'admin')
+            ->wherePivot('status', 'active')
+            ->orderBy('workspaces.name')
+            ->first();
+    }
+
+    public function ensureAdminPortalWorkspace(): ?Workspace
+    {
+        if ($this->current_workspace_id && $this->canAccessAdminPortal($this->current_workspace_id)) {
+            return Workspace::find($this->current_workspace_id);
+        }
+
+        $adminWorkspace = $this->firstAdminWorkspace();
+        if (! $adminWorkspace) {
+            return null;
+        }
+
+        if ($this->current_workspace_id !== $adminWorkspace->id) {
+            $this->update(['current_workspace_id' => $adminWorkspace->id]);
+        }
+
+        return $adminWorkspace;
     }
 
     public function hasActiveMembership(?int $workspaceId = null): bool
@@ -142,7 +201,7 @@ class User extends Authenticatable
     public function isSuspendedInWorkspace(?int $workspaceId = null): bool
     {
         $workspaceId = $workspaceId ?: $this->current_workspace_id;
-        if (! $workspaceId) {
+        if (! $workspaceId || $this->isSuperAdmin($workspaceId)) {
             return false;
         }
 
@@ -169,32 +228,34 @@ class User extends Authenticatable
 
     public function canAccessAdminPortal(?int $workspaceId = null): bool
     {
-        return $this->isWorkspaceAdmin($workspaceId);
+        if ($workspaceId) {
+            return $this->isSuperAdmin($workspaceId) || $this->isAdmin($workspaceId);
+        }
+
+        return $this->isAdminOfAnyWorkspace();
     }
 
-    public function canAccessMarketerPortal(?int $workspaceId = null): bool
+    public function canAccessPortal(?int $workspaceId = null): bool
     {
-        return $this->hasActiveMembership($workspaceId);
+        $role = $this->getWorkspaceRole($workspaceId);
+
+        return $role && SalesOps::isPortalRole($role);
     }
 
-    public function isMarketerOnly(?int $workspaceId = null): bool
+    public function portalDashboardRoute(): string
     {
-        return SalesOps::isSdrRole($this->getWorkspaceRole($workspaceId));
+        return match ($this->getWorkspaceRole()) {
+            'appointment_setter' => 'portal.setter.dashboard',
+            'appointment_setter_team_lead' => 'portal.setter-team.dashboard',
+            'closers_team_lead' => 'portal.closer-team.queue',
+            'closer' => 'portal.closer.dashboard',
+            default => 'portal.login',
+        };
     }
 
-    public function isSdr(?int $workspaceId = null): bool
+    /** @deprecated Use canAccessAdminPortal() or isSuperAdmin() */
+    public function isWorkspaceAdmin(?int $workspaceId = null): bool
     {
-        return SalesOps::isSdrRole($this->getWorkspaceRole($workspaceId));
-    }
-
-    public function isAccountExecutive(?int $workspaceId = null): bool
-    {
-        return $this->getWorkspaceRole($workspaceId) === 'account_executive';
-    }
-
-    public function isDataAcquisition(?int $workspaceId = null): bool
-    {
-        return $this->getWorkspaceRole($workspaceId) === 'data_acquisition';
+        return $this->canAccessAdminPortal($workspaceId);
     }
 }
-

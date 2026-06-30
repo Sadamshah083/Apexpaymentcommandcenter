@@ -77,7 +77,9 @@ class PushNotificationController extends Controller
         return response()->json([
             'title' => config('app.name'),
             'body' => 'Your workspace is synchronized.',
-            'url' => route('portal.dashboard'),
+            'url' => $user->isWorkspaceAdmin($user->current_workspace_id)
+                ? route('admin.dashboard')
+                : route('portal.dashboard'),
         ]);
     }
 

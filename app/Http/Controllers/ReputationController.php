@@ -4,27 +4,58 @@ namespace App\Http\Controllers;
 
 use App\Models\EmailList;
 use App\Models\ReputationLog;
+use App\Services\Deliverability\DeliverabilityAnalyzer;
+use App\Services\Workspace\WorkspaceContextService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class ReputationController extends Controller
 {
-    public function index()
+    public function __construct(
+        protected WorkspaceContextService $workspaceContext,
+    ) {}
+
+    public function index(Request $request)
     {
-        $logs = ReputationLog::latest('recorded_at')->paginate(20);
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+
+        $logs = ReputationLog::query()
+            ->where('workspace_id', $workspace->id)
+            ->latest('recorded_at')
+            ->paginate(20);
+
+        $lists = EmailList::query()->where('workspace_id', $workspace->id)->where('total_count', '>', 0);
 
         $hygiene = [
-            'total_lists' => EmailList::count(),
-            'avg_invalid_rate' => $this->averageInvalidRate(),
-            'lists_needing_cleanup' => EmailList::whereRaw('invalid_count > total_count * 0.05')->where('total_count', '>', 0)->count(),
+            'total_lists' => (clone $lists)->count(),
+            'avg_invalid_rate' => $this->averageInvalidRate($workspace->id),
+            'lists_needing_cleanup' => (clone $lists)->whereRaw('invalid_count > total_count * 0.05')->count(),
         ];
 
-        $warmupSchedule = $this->generateWarmupSchedule();
+        $warmupTarget = (int) $request->integer('warmup_target', 50000);
+        $warmupWeeks = (int) $request->integer('warmup_weeks', 6);
+        $warmupSchedule = $this->generateWarmupSchedule($warmupTarget, $warmupWeeks);
 
-        return view('reputation.index', compact('logs', 'hygiene', 'warmupSchedule'));
+        $complianceDomain = $request->string('compliance_domain')->toString();
+        $complianceChecklist = $complianceDomain !== ''
+            ? $this->buildComplianceChecklist($workspace->id, $complianceDomain, app(DeliverabilityAnalyzer::class))
+            : [];
+
+        return view('reputation.index', compact(
+            'logs',
+            'hygiene',
+            'warmupSchedule',
+            'warmupTarget',
+            'warmupWeeks',
+            'complianceDomain',
+            'complianceChecklist',
+        ));
     }
 
     public function storeLog(Request $request)
     {
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+
         $request->validate([
             'domain' => 'required|string|max:255',
             'metric' => 'required|string|max:100',
@@ -33,9 +64,15 @@ class ReputationController extends Controller
             'recorded_at' => 'required|date',
         ]);
 
-        ReputationLog::create($request->only(['domain', 'metric', 'value', 'notes', 'recorded_at']));
+        ReputationLog::create([
+            ...$request->only(['domain', 'metric', 'value', 'notes', 'recorded_at']),
+            'workspace_id' => $workspace->id,
+            'user_id' => Auth::id(),
+        ]);
 
-        return redirect()->route('reputation.index')->with('success', 'Reputation log saved.');
+        $route = request()->is('admin*') ? 'admin.reputation.index' : 'portal.reputation.index';
+
+        return redirect()->route($route)->with('success', 'Reputation log saved.');
     }
 
     public function warmupCalculator(Request $request)
@@ -53,9 +90,29 @@ class ReputationController extends Controller
         return response()->json(['schedule' => $schedule]);
     }
 
-    protected function averageInvalidRate(): float
+    public function complianceCheck(Request $request, DeliverabilityAnalyzer $analyzer)
     {
-        $lists = EmailList::where('total_count', '>', 0)->get();
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+
+        $request->validate([
+            'domain' => 'required|string|max:255',
+        ]);
+
+        $domain = strtolower($request->domain);
+        $checklist = $this->buildComplianceChecklist($workspace->id, $domain, $analyzer);
+
+        return response()->json([
+            'domain' => $domain,
+            'checklist' => $checklist,
+        ]);
+    }
+
+    protected function averageInvalidRate(int $workspaceId): float
+    {
+        $lists = EmailList::query()
+            ->where('workspace_id', $workspaceId)
+            ->where('total_count', '>', 0)
+            ->get();
 
         if ($lists->isEmpty()) {
             return 0;
@@ -64,6 +121,73 @@ class ReputationController extends Controller
         $rates = $lists->map(fn ($l) => ($l->invalid_count / $l->total_count) * 100);
 
         return round($rates->avg(), 2);
+    }
+
+    /**
+     * @return array<int, array{label: string, status: string, detail: string}>
+     */
+    protected function buildComplianceChecklist(int $workspaceId, string $domain, DeliverabilityAnalyzer $analyzer): array
+    {
+        $result = $analyzer->analyze($domain);
+        $latestSpamLog = ReputationLog::query()
+            ->where('workspace_id', $workspaceId)
+            ->where('domain', $domain)
+            ->where('metric', 'spam_rate')
+            ->latest('recorded_at')
+            ->first();
+
+        $checklist = [
+            $this->checklistItem('SPF record configured', $result['spf_result']['status'] ?? 'fail', $result['spf_result']['message'] ?? ''),
+            $this->checklistItem('DKIM signing enabled', $result['dkim_result']['status'] ?? 'fail', $result['dkim_result']['message'] ?? ''),
+            $this->checklistItem('DMARC record published', $result['dmarc_result']['status'] ?? 'fail', $result['dmarc_result']['message'] ?? ''),
+            [
+                'label' => 'One-click List-Unsubscribe header in emails',
+                'status' => 'info',
+                'detail' => 'Verify in your ESP template — cannot be checked from DNS alone.',
+            ],
+        ];
+
+        if ($latestSpamLog) {
+            $spamValue = strtolower((string) $latestSpamLog->value);
+            $spamOk = ! str_contains($spamValue, 'high') && (float) preg_replace('/[^0-9.]/', '', $spamValue) < 0.1;
+            $checklist[] = [
+                'label' => 'Spam rate below 0.1% (from Postmaster log)',
+                'status' => $spamOk ? 'pass' : 'warn',
+                'detail' => 'Latest logged value: '.$latestSpamLog->value.' on '.$latestSpamLog->recorded_at->format('Y-m-d'),
+            ];
+        } else {
+            $checklist[] = [
+                'label' => 'Spam rate below 0.1% (monitor in Postmaster Tools)',
+                'status' => 'warn',
+                'detail' => 'No spam_rate logged yet for this domain.',
+            ];
+        }
+
+        $checklist[] = [
+            'label' => 'Never exceed 0.3% spam rate',
+            'status' => 'info',
+            'detail' => 'Google blocks mitigation above 0.3% — log weekly Postmaster metrics below.',
+        ];
+
+        $checklist[] = [
+            'label' => 'Warm new domains 4–6 weeks before high volume',
+            'status' => 'info',
+            'detail' => 'Use the warmup calculator below to plan your ramp.',
+        ];
+
+        return $checklist;
+    }
+
+    /**
+     * @return array{label: string, status: string, detail: string}
+     */
+    protected function checklistItem(string $label, string $authStatus, string $detail): array
+    {
+        return [
+            'label' => $label,
+            'status' => in_array($authStatus, ['pass'], true) ? 'pass' : (in_array($authStatus, ['warn', 'skip'], true) ? 'warn' : 'fail'),
+            'detail' => $detail,
+        ];
     }
 
     protected function generateWarmupSchedule(int $targetDaily = 50000, int $weeks = 6): array

@@ -9,6 +9,8 @@ class BusinessResearch extends Model
     protected $table = 'business_researches';
 
     protected $fillable = [
+        'workspace_id',
+        'user_id',
         'business_name',
         'address',
         'website',

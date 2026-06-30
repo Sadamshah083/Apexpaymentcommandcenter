@@ -4,7 +4,6 @@ namespace App\Jobs;
 
 use App\Models\Workflow;
 use App\Models\WorkflowLead;
-use App\Services\Workflow\WorkflowLeadDistributor;
 use App\Services\Workspace\WorkspaceSyncService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -25,7 +24,6 @@ class ProcessWorkflowJob implements ShouldQueue
     ) {}
 
     public function handle(
-        WorkflowLeadDistributor $distributor,
         \App\Services\Workflow\WorkflowDataFormatter $formatter,
         WorkspaceSyncService $syncService,
     ): void {
@@ -112,6 +110,8 @@ class ProcessWorkflowJob implements ShouldQueue
 
             $chunks = array_chunk($remainingRows, 50);
             $rowsProcessed = 0;
+            $totalLeadsInserted = WorkflowLead::where('workflow_id', $workflow->id)->count();
+            $now = now();
 
             foreach ($chunks as $chunk) {
                 $workflow->refresh();
@@ -137,16 +137,9 @@ class ProcessWorkflowJob implements ShouldQueue
                 }
 
                 $mappedDataBatch = $formatter->formatRowsBatch($rawRowsBatch, $mapping);
+                $leadsToInsert = [];
 
                 foreach ($rawRowsBatch as $i => $rawRow) {
-                    $workflow->refresh();
-                    if (! $workflow || $workflow->isPaused()) {
-                        $workflow?->update(['ingestion_row_offset' => $offset + $rowsProcessed]);
-                        $this->syncIngestionProgress($workflow, $syncService, $workspace);
-
-                        return;
-                    }
-
                     $spreadsheetRowNumber = $rowNumbers[$i];
                     if ($existingRowNumbers->has($spreadsheetRowNumber)) {
                         continue;
@@ -157,9 +150,11 @@ class ProcessWorkflowJob implements ShouldQueue
                         continue;
                     }
 
-                    $lead = WorkflowLead::create([
+                    $leadsToInsert[] = [
                         'workflow_id' => $workflow->id,
-                        'status' => 'pending',
+                        'import_mode' => $workflow->isStoreOnly() ? 'stored' : 'pipeline',
+                        'pipeline_phase' => 'imported',
+                        'status' => $workflow->isStoreOnly() ? 'completed' : 'pending',
                         'row_number' => $spreadsheetRowNumber,
                         'business_name' => $mappedData['business_name'] ?? '',
                         'address' => $mappedData['address'] ?? null,
@@ -170,19 +165,22 @@ class ProcessWorkflowJob implements ShouldQueue
                         'website' => $mappedData['website'] ?? null,
                         'input_phone' => $mappedData['input_phone'] ?? null,
                         'input_email' => $mappedData['input_email'] ?? null,
-                        'raw_row' => $rawRow,
-                    ]);
+                        'raw_row' => json_encode($rawRow),
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ];
 
                     $existingRowNumbers->put($spreadsheetRowNumber, true);
+                }
 
-                    if (! $workflow->isPaused()) {
-                        ProcessLeadJob::dispatch($lead->id, $workflow->custom_prompt);
-                    }
+                if (! empty($leadsToInsert)) {
+                    WorkflowLead::insert($leadsToInsert);
+                    $totalLeadsInserted += count($leadsToInsert);
                 }
 
                 $workflow->update([
                     'ingestion_row_offset' => $offset + $rowsProcessed,
-                    'total_leads' => WorkflowLead::where('workflow_id', $workflow->id)->count(),
+                    'total_leads' => $totalLeadsInserted,
                 ]);
             }
 
@@ -205,6 +203,17 @@ class ProcessWorkflowJob implements ShouldQueue
                 $syncService->record($workspace, 'workflow.completed', 'workflow', $workflow->id, [
                     'processed_leads' => 0,
                     'failed_leads' => 0,
+                ]);
+
+                return;
+            }
+
+            if ($workflow->isStoreOnly()) {
+                $workflow->update(['status' => 'completed']);
+                $syncService->record($workspace, 'workflow.completed', 'workflow', $workflow->id, [
+                    'processed_leads' => 0,
+                    'failed_leads' => 0,
+                    'store_only' => true,
                 ]);
 
                 return;

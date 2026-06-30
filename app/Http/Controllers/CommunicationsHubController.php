@@ -872,6 +872,42 @@ class CommunicationsHubController extends Controller
 
     }
 
+    public function sendChat(Request $request)
+    {
+        $validated = $request->validate([
+            'owner_user_id' => ['required', 'string'],
+            'chat_channel' => ['nullable', 'string'],
+            'chat_contact' => ['nullable', 'string'],
+            'message' => ['required', 'string', 'max:4096'],
+        ]);
+
+        if (! filled($validated['chat_channel'] ?? null) && ! filled($validated['chat_contact'] ?? null)) {
+            return back()->withInput()->with('error', 'Select a chat channel or contact before sending.');
+        }
+
+        try {
+            $payload = ['message' => $validated['message']];
+
+            if (filled($validated['chat_channel'] ?? null)) {
+                $payload['to_channel'] = $validated['chat_channel'];
+            } else {
+                $payload['to_contact'] = $validated['chat_contact'];
+            }
+
+            $this->zoom->sendTeamChatMessage($validated['owner_user_id'], $payload);
+            $this->data->bustCache();
+
+            return redirect()->route($this->routePrefix().'communications.index', array_filter([
+                'channel' => 'chat',
+                'chat_owner' => $validated['owner_user_id'],
+                'chat_channel' => $validated['chat_channel'] ?? null,
+                'chat_contact' => $validated['chat_contact'] ?? null,
+            ]))->with('success', 'Chat message sent.');
+        } catch (\Throwable $e) {
+            return back()->withInput()->with('error', $this->zoom->humanizeError($e->getMessage()));
+        }
+    }
+
 
 
     protected function chatView(Request $request)

@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Model;
 class ReputationLog extends Model
 {
     protected $fillable = [
+        'workspace_id',
+        'user_id',
         'domain',
         'metric',
         'value',

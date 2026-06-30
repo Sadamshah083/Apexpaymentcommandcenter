@@ -16,10 +16,13 @@ class WorkspaceAuthController extends Controller
     {
         if (Auth::check()) {
             $user = Auth::user();
-            if ($user->isWorkspaceAdmin()) {
+            if ($user->isAdminOfAnyWorkspace()) {
+                $user->ensureAdminPortalWorkspace();
+
                 return redirect()->route('admin.dashboard');
             }
         }
+
         return view('auth.login_admin');
     }
 
@@ -33,26 +36,17 @@ class WorkspaceAuthController extends Controller
         $user = User::where('name', $credentials['username'])->first();
 
         if ($user && Hash::check($credentials['password'], $user->password)) {
-            // Check if user has admin role in their active workspace
             Auth::login($user);
-            
-            // Set up default workspace if none
-            if (!$user->current_workspace_id) {
-                $workspace = $user->workspaces()->first();
-                if ($workspace) {
-                    $user->update(['current_workspace_id' => $workspace->id]);
-                }
+
+            if (! $user->ensureAdminPortalWorkspace()) {
+                Auth::logout();
+
+                return back()->withErrors([
+                    'username' => 'Access denied. Agent accounts must use the agent sign-in page.',
+                ]);
             }
 
-            if ($user->isWorkspaceAdmin()) {
-                return redirect()->route('admin.dashboard')->with('success', 'Logged into Admin Portal.');
-            }
-
-            Auth::logout();
-
-            return back()->withErrors([
-                'username' => 'Access denied. Agent accounts must use the agent sign-in page.',
-            ]);
+            return redirect()->route('admin.dashboard')->with('success', 'Logged into Admin Portal.');
         }
 
         return back()->withErrors([
@@ -97,7 +91,7 @@ class WorkspaceAuthController extends Controller
         ]);
 
         $workspace->users()->attach($user->id, [
-            'role' => 'admin',
+            'role' => 'super_admin',
             'status' => 'active',
             'joined_at' => now(),
         ]);

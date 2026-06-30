@@ -4,13 +4,13 @@
 
 @section('content')
 <div class="mb-6">
-    <a href="{{ route('crm.index') }}" class="text-indigo-600 text-sm">&larr; Back to CRM</a>
+    <a href="{{ route('admin.crm.index') }}" class="text-indigo-600 text-sm">&larr; Back to CRM</a>
     <h2 class="text-2xl font-bold mt-2">Upload Lead Sheet</h2>
     <p class="text-slate-600 text-sm mt-1">Columns are auto-detected — works with <strong>Company Name</strong> or <strong>Business Name</strong>, and address in one column or split (street, city, state, zip).</p>
 </div>
 
 <div class="max-w-xl bg-white rounded-xl shadow-sm border p-6">
-    <form action="{{ route('crm.store') }}" method="POST" enctype="multipart/form-data" class="space-y-4">
+    <form action="{{ route('admin.crm.store') }}" method="POST" enctype="multipart/form-data" class="space-y-4">
         @csrf
 
         <div>

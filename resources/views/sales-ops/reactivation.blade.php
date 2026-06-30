@@ -30,9 +30,9 @@
                             <th>Enroll</th>
                         </tr>
                     </thead>
-                    <tbody>
+                <tbody id="workspace-sync-reactivation-body">
                         @foreach($candidates as $lead)
-                            <tr>
+                            <tr data-lead-id="{{ $lead->id }}">
                                 <td class="font-bold">{{ $lead->business_name }}</td>
                                 <td>{{ \App\Support\SalesOps::crmStageLabel($lead->stage) }}</td>
                                 <td class="text-xs text-zinc-500">{{ $lead->updated_at->diffForHumans() }}</td>

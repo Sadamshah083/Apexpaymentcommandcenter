@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Model;
 class DeliverabilityTest extends Model
 {
     protected $fillable = [
+        'workspace_id',
+        'user_id',
         'domain',
         'sending_ip',
         'dkim_selector',

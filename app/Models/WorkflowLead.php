@@ -10,7 +10,15 @@ class WorkflowLead extends Model
 {
     protected $fillable = [
         'workflow_id',
+        'import_mode',
+        'pipeline_phase',
+        'setter_status',
+        'closer_status',
         'assigned_user_id',
+        'assigned_setter_id',
+        'assigned_closer_id',
+        'appointment_settled_at',
+        'handoff_notes',
         'status',
         'verification_status',
         'verification_snapshot',
@@ -71,6 +79,7 @@ class WorkflowLead extends Model
         'schedule_at' => 'datetime',
         'last_contacted_at' => 'datetime',
         'researched_at' => 'datetime',
+        'appointment_settled_at' => 'datetime',
         'sale_value' => 'decimal:2',
         'monthly_processing_volume' => 'decimal:2',
         'pain_points' => 'array',
@@ -91,6 +100,31 @@ class WorkflowLead extends Model
     public function assignee(): BelongsTo
     {
         return $this->belongsTo(User::class, 'assigned_user_id');
+    }
+
+    public function setter(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'assigned_setter_id');
+    }
+
+    public function closer(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'assigned_closer_id');
+    }
+
+    public function assignments(): HasMany
+    {
+        return $this->hasMany(LeadAssignment::class, 'workflow_lead_id')->latest();
+    }
+
+    public function isSetterLocked(): bool
+    {
+        return in_array($this->pipeline_phase, ['appointment_settled', 'with_closer', 'closed'], true);
+    }
+
+    public function isCloserLocked(): bool
+    {
+        return $this->pipeline_phase === 'closed';
     }
 
     public function verifier(): BelongsTo

@@ -27,31 +27,31 @@
                     <th class="text-right">Actions</th>
                 </tr>
             </thead>
-            <tbody>
+            <tbody id="workspace-sync-email-lists-body" data-sync-mode="{{ $lists->currentPage() > 1 ? 'patch' : 'replace' }}">
                 @forelse($lists as $list)
                     @php
                         $statusClass = match($list->status) {
-                            'completed' => 'bg-emerald-100 text-emerald-800',
-                            'verifying', 'processing' => 'bg-amber-100 text-amber-800 animate-pulse',
-                            'paused' => 'bg-orange-100 text-orange-800',
-                            'failed', 'empty' => 'bg-rose-100 text-rose-800',
-                            default => 'bg-slate-100 text-slate-700',
+                            'completed' => 'app-badge app-badge-success',
+                            'verifying', 'processing' => 'app-badge app-badge-warning',
+                            'paused' => 'app-badge app-badge-muted',
+                            'failed', 'empty' => 'app-badge app-badge-danger',
+                            default => 'app-badge app-badge-muted',
                         };
                     @endphp
-                    <tr>
+                    <tr data-list-id="{{ $list->id }}">
                         <td>
-                            <div class="font-semibold text-slate-900">{{ $list->name }}</div>
-                            <div class="text-xs text-slate-400 mt-0.5">{{ $list->source_file }}</div>
+                            <div class="font-semibold text-zinc-900">{{ $list->name }}</div>
+                            <div class="text-xs text-zinc-400 mt-0.5">{{ $list->source_file }}</div>
                         </td>
-                        <td class="text-slate-600">{{ $list->user?->name ?? '—' }}</td>
+                        <td class="text-zinc-600">{{ $list->user?->name ?? '—' }}</td>
                         <td>{{ number_format($list->total_count) }}</td>
                         <td class="text-emerald-600 font-semibold">{{ number_format($list->valid_count) }}</td>
                         <td class="text-rose-600 font-semibold">{{ number_format($list->invalid_count) }}</td>
                         <td>
-                            <span class="px-2.5 py-1 rounded-full text-xs font-bold uppercase {{ $statusClass }}">{{ $list->status }}</span>
+                            <span class="{{ $statusClass }}">{{ $list->status }}</span>
                         </td>
                         <td class="text-right">
-                            <a href="{{ request()->is('admin*') ? route('admin.lists.show', $list) : route('portal.lists.show', $list) }}" class="text-indigo-600 hover:text-indigo-800 font-semibold text-sm">Open results</a>
+                            <a href="{{ request()->is('admin*') ? route('admin.lists.show', $list) : route('portal.lists.show', $list) }}" class="app-link text-sm">Open results</a>
                         </td>
                     </tr>
                 @empty

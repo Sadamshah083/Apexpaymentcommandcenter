@@ -120,8 +120,8 @@
                 <div class="app-step-header">
                     <span class="app-step-number">2</span>
                     <div>
-                        <h2 class="app-section-title">Assign to team</h2>
-                        <p class="app-section-desc">Approved leads round-robin to selected reps.</p>
+                        <h2 class="app-section-title">Assign to appointment setters</h2>
+                        <p class="app-section-desc">Approved leads round-robin to selected appointment setters.</p>
                     </div>
                 </div>
                 <div class="flex flex-wrap gap-2">
@@ -129,7 +129,7 @@
                         <label class="app-member-chip">
                             <input type="checkbox" name="distribution_users[]" value="{{ $member->id }}" checked>
                             <span class="app-member-chip-name">{{ $member->name }}</span>
-                            <span class="app-member-chip-role">{{ $member->pivot->role }}</span>
+                            <span class="app-member-chip-role">{{ \App\Support\SalesOps::roleLabel($member->pivot->role) }}</span>
                         </label>
                     @endforeach
                 </div>
@@ -142,7 +142,7 @@
                     <span class="app-step-number">3</span>
                     <div>
                         <h2 class="app-section-title">Start enrichment</h2>
-                        <p class="app-section-desc">AI researches each business, verifies contacts, then pauses for your approval.</p>
+                        <p class="app-section-desc">AI researches each business and auto-releases to appointment setters.</p>
                     </div>
                 </div>
 
@@ -186,7 +186,20 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                 </div>
             @endif
 
-            @if(($workflow->pending_verification_count ?? 0) > 0)
+            @if($workflow->isStoreOnly() && $workflow->status === 'completed')
+                <div class="app-alert app-alert-warning flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                        <p class="app-alert-title">Stored import — pipeline not activated</p>
+                        <p class="app-alert-desc">Run AI enrichment and distribute to appointment setters when ready.</p>
+                    </div>
+                    <form method="POST" action="{{ route('admin.workflows.activate', $workflow->id) }}">
+                        @csrf
+                        <button type="submit" class="app-btn app-btn-primary app-btn-sm">Activate pipeline</button>
+                    </form>
+                </div>
+            @endif
+
+            @if(($workflow->pending_verification_count ?? 0) > 0 && $workflow->isFullPipeline())
                 <div class="app-alert app-alert-warning flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
                         <p class="app-alert-title"><span id="workspace-sync-workflow-pending-review">{{ $workflow->pending_verification_count }}</span> leads ready for review</p>

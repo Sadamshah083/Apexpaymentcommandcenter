@@ -33,7 +33,7 @@
                         <th>Score</th>
                     </tr>
                 </thead>
-                <tbody @if($period === 'week') id="workspace-sync-leaderboard-body" data-include-score="1" @endif>
+                <tbody id="workspace-sync-leaderboard-body" data-leaderboard-period="{{ $period }}" data-include-score="1">
                     @forelse($leaderboard as $index => $row)
                         <tr>
                             <td class="font-black text-zinc-900">#{{ $index + 1 }}</td>

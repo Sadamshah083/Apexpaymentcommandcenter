@@ -4,61 +4,104 @@ namespace App\Support;
 
 class SalesOps
 {
-    public static function crmStages(): array
-    {
-        return config('sales_ops.crm_stages', []);
-    }
-
-    public static function crmStageKeys(): array
-    {
-        return array_keys(self::crmStages());
-    }
-
-    public static function crmStageLabel(?string $stage): string
-    {
-        if (! $stage) {
-            return 'New Lead';
-        }
-
-        return self::crmStages()[$stage] ?? ucfirst(str_replace('_', ' ', $stage));
-    }
-
-    public static function tierLabel(?string $tier): string
-    {
-        $tiers = config('sales_ops.lead_tiers', []);
-
-        return $tiers[$tier]['label'] ?? 'Tier 1 – New Leads';
-    }
-
-    public static function tierFromAttempts(int $attempts, bool $isNurture = false): string
-    {
-        if ($isNurture || $attempts > 10) {
-            return 'tier_4';
-        }
-
-        if ($attempts === 0) {
-            return 'tier_1';
-        }
-
-        if ($attempts <= 3) {
-            return 'tier_2';
-        }
-
-        return 'tier_3';
-    }
-
     public static function roleLabel(?string $role): string
     {
         return config('sales_ops.roles')[$role] ?? ucfirst(str_replace('_', ' ', (string) $role));
     }
 
-    public static function sdrRoles(): array
+    public static function pipelinePhaseLabel(?string $phase): string
     {
-        return ['sdr', 'marketer'];
+        return config('sales_ops.pipeline_phases')[$phase] ?? ucfirst(str_replace('_', ' ', (string) $phase));
     }
 
-    public static function isSdrRole(?string $role): bool
+    public static function setterStatusLabel(?string $status): string
     {
-        return in_array($role, self::sdrRoles(), true);
+        return config('sales_ops.setter_statuses')[$status] ?? ucfirst(str_replace('_', ' ', (string) $status));
+    }
+
+    public static function closerStatusLabel(?string $status): string
+    {
+        return config('sales_ops.closer_statuses')[$status] ?? ucfirst(str_replace('_', ' ', (string) $status));
+    }
+
+    public static function isPortalRole(?string $role): bool
+    {
+        return in_array($role, config('sales_ops.portal_roles', []), true);
+    }
+
+    public static function isAdminPortalRole(?string $role): bool
+    {
+        return in_array($role, config('sales_ops.admin_portal_roles', []), true);
+    }
+
+    public static function isAppointmentSetterRole(?string $role): bool
+    {
+        return $role === 'appointment_setter';
+    }
+
+    public static function isCloserRole(?string $role): bool
+    {
+        return $role === 'closer';
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public static function assignableMemberRoles(): array
+    {
+        return collect(config('sales_ops.roles', []))
+            ->except(['super_admin'])
+            ->all();
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public static function creatableMemberRoles(): array
+    {
+        return collect(self::assignableMemberRoles())
+            ->except(['super_admin'])
+            ->all();
+    }
+
+    /** @alias creatableMemberRoles */
+    public static function creatableAgentRoles(): array
+    {
+        return self::creatableMemberRoles();
+    }
+
+    public static function crmStageLabel(?string $stage): string
+    {
+        return ucfirst(str_replace('_', ' ', (string) $stage));
+    }
+
+    public static function tierLabel(?string $tier): string
+    {
+        return ucfirst(str_replace('_', ' ', (string) $tier));
+    }
+
+    /** @return array<string, string> */
+    public static function crmStages(): array
+    {
+        return config('sales_ops.pipeline_phases', []);
+    }
+
+    /** @return list<string> */
+    public static function sdrRoles(): array
+    {
+        return ['appointment_setter'];
+    }
+
+    public static function tierFromAttempts(int $attempts, bool $isNurture = false): string
+    {
+        if ($isNurture) {
+            return 'tier_4';
+        }
+
+        return match (true) {
+            $attempts >= 8 => 'tier_3',
+            $attempts >= 4 => 'tier_2',
+            default => 'tier_1',
+        };
     }
 }

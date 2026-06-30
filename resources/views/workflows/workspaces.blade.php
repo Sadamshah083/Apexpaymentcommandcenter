@@ -10,6 +10,7 @@
     data-members-base="{{ url('/admin/workspaces/'.$activeWorkspace->id.'/members') }}"
     data-workspace-switch-base="{{ url('/admin/workspaces/switch') }}"
     data-csrf-token="{{ csrf_token() }}"
+    data-role-labels='@json(\App\Support\SalesOps::assignableMemberRoles())'
 >
     <div class="flex items-center justify-between gap-4">
         <div>
@@ -105,7 +106,7 @@
                     </div>
                 </div>
 
-                @if(Auth::user()->isWorkspaceAdmin($activeWorkspace->id))
+                @if(auth()->user()->isSuperAdmin($activeWorkspace->id))
                     <div class="app-data-table-footer border-t border-slate-100 !bg-white">
                         <h4 class="text-sm font-bold text-slate-800 mb-2">Add Agent Account</h4>
                         <p class="text-xs text-slate-500 mb-4">Create a username and password. The agent signs in through the {{ config('app.name') }} agent portal.</p>
@@ -120,10 +121,8 @@
                             <input type="password" name="password" required placeholder="Password (min. 6 characters)" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm">
                             <input type="password" name="password_confirmation" required placeholder="Confirm password" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm">
                             <select name="role" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm">
-                                @foreach(config('sales_ops.roles', []) as $value => $label)
-                                    @if($value !== 'admin')
-                                        <option value="{{ $value }}" {{ old('role', 'sdr') === $value ? 'selected' : '' }}>{{ $label }}</option>
-                                    @endif
+                                @foreach(\App\Support\SalesOps::creatableAgentRoles() as $value => $label)
+                                    <option value="{{ $value }}" {{ old('role', 'sdr') === $value ? 'selected' : '' }}>{{ $label }}</option>
                                 @endforeach
                             </select>
                             <button type="submit" class="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-sm">Create Team Account</button>

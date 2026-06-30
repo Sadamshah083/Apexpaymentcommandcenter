@@ -3,11 +3,12 @@
 use App\Http\Controllers\BusinessResearchController;
 use App\Http\Controllers\CommunicationsHubController;
 use App\Http\Controllers\ContentAnalyzerController;
-use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\CrmCampaignController;
 use App\Http\Controllers\DeliverabilityController;
 use App\Http\Controllers\EmailListController;
 use App\Http\Controllers\ReputationController;
 use App\Http\Controllers\WorkflowController;
+use App\Http\Controllers\PipelineController;
 use App\Http\Controllers\PushNotificationController;
 use App\Http\Controllers\SalesOpsController;
 use App\Http\Controllers\WorkspaceAuthController;
@@ -19,6 +20,9 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', function () {
     return redirect()->route('portal.login');
 });
+
+// Shared push fallback for service worker (works for admin + portal sessions)
+Route::middleware('auth')->get('/push/latest', [PushNotificationController::class, 'latest'])->name('push.latest');
 
 // Admin Auth
 Route::prefix('admin')->name('admin.')->group(function () {
@@ -40,7 +44,7 @@ Route::prefix('portal')->name('portal.')->group(function () {
 
 // Protected Admin Routes
 Route::prefix('admin')->name('admin.')->middleware([\App\Http\Middleware\AdminPortalMiddleware::class])->group(function () {
-    Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+    Route::get('/dashboard', fn () => redirect()->route('admin.workflows.index'))->name('dashboard');
 
     Route::prefix('sales-ops')->name('sales-ops.')->group(function () {
         Route::get('/', [SalesOpsController::class, 'index'])->name('index');
@@ -60,9 +64,11 @@ Route::prefix('admin')->name('admin.')->middleware([\App\Http\Middleware\AdminPo
 
     Route::get('deliverability', [DeliverabilityController::class, 'index'])->name('deliverability.index');
     Route::post('deliverability', [DeliverabilityController::class, 'store'])->name('deliverability.store');
+    Route::get('deliverability/{deliverability}/status', [DeliverabilityController::class, 'status'])->name('deliverability.status');
     Route::get('deliverability/{deliverability}', [DeliverabilityController::class, 'show'])->name('deliverability.show');
     Route::post('deliverability/quick-check', [DeliverabilityController::class, 'quickCheck'])->name('deliverability.quick-check');
     Route::post('deliverability/inbox', [DeliverabilityController::class, 'createInbox'])->name('deliverability.inbox');
+    Route::get('deliverability/inbox/{inbox}/status', [DeliverabilityController::class, 'inboxStatus'])->name('deliverability.inbox.status');
 
     Route::get('content-analyzer', [ContentAnalyzerController::class, 'index'])->name('content.index');
     Route::post('content-analyzer', [ContentAnalyzerController::class, 'analyze'])->name('content.analyze');
@@ -71,6 +77,22 @@ Route::prefix('admin')->name('admin.')->middleware([\App\Http\Middleware\AdminPo
     Route::get('reputation', [ReputationController::class, 'index'])->name('reputation.index');
     Route::post('reputation/log', [ReputationController::class, 'storeLog'])->name('reputation.log');
     Route::post('reputation/warmup', [ReputationController::class, 'warmupCalculator'])->name('reputation.warmup');
+    Route::post('reputation/compliance', [ReputationController::class, 'complianceCheck'])->name('reputation.compliance');
+
+    Route::prefix('crm')->name('crm.')->group(function () {
+        Route::get('/', [CrmCampaignController::class, 'index'])->name('index');
+        Route::get('/create', [CrmCampaignController::class, 'create'])->name('create');
+        Route::post('/', [CrmCampaignController::class, 'store'])->name('store');
+        Route::get('/{crm}', [CrmCampaignController::class, 'show'])->name('show');
+        Route::get('/{crm}/progress', [CrmCampaignController::class, 'progress'])->name('progress');
+        Route::post('/{crm}/reupload', [CrmCampaignController::class, 'reupload'])->name('reupload');
+        Route::post('/{crm}/retry-failed', [CrmCampaignController::class, 'retryFailed'])->name('retry-failed');
+        Route::get('/{crm}/export', [CrmCampaignController::class, 'export'])->name('export');
+        Route::delete('/{crm}', [CrmCampaignController::class, 'destroy'])->name('destroy');
+        Route::get('/{crm}/leads/{lead}', [CrmCampaignController::class, 'leadShow'])->name('leads.show');
+        Route::get('/{crm}/leads/{lead}/status', [CrmCampaignController::class, 'leadStatus'])->name('leads.status');
+        Route::post('/{crm}/leads/{lead}/retry', [CrmCampaignController::class, 'retryLead'])->name('leads.retry');
+    });
 
     Route::get('business-research', [BusinessResearchController::class, 'index'])->name('business-research.index');
     Route::post('business-research', [BusinessResearchController::class, 'store'])->name('business-research.store');
@@ -87,6 +109,7 @@ Route::prefix('admin')->name('admin.')->middleware([\App\Http\Middleware\AdminPo
         Route::post('/{workflow}/map', [WorkflowController::class, 'map'])->name('map');
         Route::post('/{workflow}/run', [WorkflowController::class, 'run'])->name('run');
         Route::post('/{workflow}/approve-leads', [WorkflowController::class, 'bulkApproveLeads'])->name('approve-leads');
+        Route::post('/{workflow}/activate', [WorkflowController::class, 'activate'])->name('activate');
         Route::post('/{workflow}/pause', [WorkflowController::class, 'pause'])->name('pause');
         Route::post('/{workflow}/resume', [WorkflowController::class, 'resume'])->name('resume');
         Route::delete('/{workflow}', [WorkflowController::class, 'destroy'])->name('destroy');
@@ -99,8 +122,12 @@ Route::prefix('admin')->name('admin.')->middleware([\App\Http\Middleware\AdminPo
         Route::get('/', [WorkflowController::class, 'workspaceIndex'])->name('index');
         Route::post('/', [WorkflowController::class, 'workspaceStore'])->name('store');
         Route::post('/switch/{workspace}', [WorkflowController::class, 'workspaceSwitch'])->name('switch');
+    });
+
+    Route::prefix('workspaces')->name('workspaces.')->middleware([\App\Http\Middleware\EnsureSuperAdmin::class])->group(function () {
         Route::post('/{workspace}/members', [WorkspaceMemberController::class, 'store'])->name('members.store');
         Route::patch('/{workspace}/members/{member}/role', [WorkspaceMemberController::class, 'updateRole'])->name('members.role');
+        Route::post('/{workspace}/members/{member}/reset-password', [WorkspaceMemberController::class, 'resetPassword'])->name('members.reset-password');
         Route::post('/{workspace}/members/{member}/suspend', [WorkspaceMemberController::class, 'suspend'])->name('members.suspend');
         Route::post('/{workspace}/members/{member}/reactivate', [WorkspaceMemberController::class, 'reactivate'])->name('members.reactivate');
         Route::delete('/{workspace}/members/{member}', [WorkspaceMemberController::class, 'destroy'])->name('members.destroy');
@@ -121,16 +148,22 @@ Route::prefix('admin')->name('admin.')->middleware([\App\Http\Middleware\AdminPo
         Route::get('/zoom/voicemails/{fileId}/media', [CommunicationsHubController::class, 'voicemailMedia'])->name('zoom.voicemails.media');
         Route::post('/zoom/refresh', [CommunicationsHubController::class, 'refreshCache'])->name('zoom.refresh');
         Route::post('/zoom/sms/send', [CommunicationsHubController::class, 'sendSms'])->name('zoom.sms.send');
+        Route::post('/zoom/chat/send', [CommunicationsHubController::class, 'sendChat'])->name('zoom.chat.send');
     });
 });
 
 // Protected Portal Routes
 Route::prefix('portal')->name('portal.')->middleware([\App\Http\Middleware\MarketerPortalMiddleware::class])->group(function () {
-    Route::get('/dashboard', [WorkflowController::class, 'index'])->name('dashboard');
+    Route::get('/dashboard', [PipelineController::class, 'portalDashboard'])->name('dashboard');
 
-    Route::get('/performance', [SalesOpsController::class, 'sdrPerformance'])->name('performance');
-    Route::get('/ae/pipeline', [SalesOpsController::class, 'aePipeline'])->name('ae.pipeline');
-    Route::post('/leads/{lead}/activities', [SalesOpsController::class, 'logActivity'])->name('leads.activities.store');
+    Route::get('/setter', [PipelineController::class, 'setterDashboard'])->name('setter.dashboard');
+    Route::get('/setter-team', [PipelineController::class, 'setterTeamDashboard'])->name('setter-team.dashboard');
+    Route::get('/closer-team', [PipelineController::class, 'closerTeamQueue'])->name('closer-team.queue');
+    Route::get('/closer', [PipelineController::class, 'closerDashboard'])->name('closer.dashboard');
+    Route::post('/leads/{lead}/assign-closer', [PipelineController::class, 'assignCloser'])->name('leads.assign-closer');
+    Route::post('/leads/{lead}/setter-status', [PipelineController::class, 'updateSetterStatus'])->name('leads.setter-status');
+    Route::post('/leads/{lead}/closer-status', [PipelineController::class, 'updateCloserStatus'])->name('leads.closer-status');
+
     Route::post('/workspaces/switch/{workspace}', [WorkflowController::class, 'workspaceSwitch'])->name('workspaces.switch');
 
     Route::get('sync', [WorkspaceSyncController::class, 'poll'])->name('sync.poll');
@@ -156,9 +189,11 @@ Route::prefix('portal')->name('portal.')->middleware([\App\Http\Middleware\Marke
 
     Route::get('deliverability', [DeliverabilityController::class, 'index'])->name('deliverability.index');
     Route::post('deliverability', [DeliverabilityController::class, 'store'])->name('deliverability.store');
+    Route::get('deliverability/{deliverability}/status', [DeliverabilityController::class, 'status'])->name('deliverability.status');
     Route::get('deliverability/{deliverability}', [DeliverabilityController::class, 'show'])->name('deliverability.show');
     Route::post('deliverability/quick-check', [DeliverabilityController::class, 'quickCheck'])->name('deliverability.quick-check');
     Route::post('deliverability/inbox', [DeliverabilityController::class, 'createInbox'])->name('deliverability.inbox');
+    Route::get('deliverability/inbox/{inbox}/status', [DeliverabilityController::class, 'inboxStatus'])->name('deliverability.inbox.status');
 
     Route::get('content-analyzer', [ContentAnalyzerController::class, 'index'])->name('content.index');
     Route::post('content-analyzer', [ContentAnalyzerController::class, 'analyze'])->name('content.analyze');
@@ -167,6 +202,7 @@ Route::prefix('portal')->name('portal.')->middleware([\App\Http\Middleware\Marke
     Route::get('reputation', [ReputationController::class, 'index'])->name('reputation.index');
     Route::post('reputation/log', [ReputationController::class, 'storeLog'])->name('reputation.log');
     Route::post('reputation/warmup', [ReputationController::class, 'warmupCalculator'])->name('reputation.warmup');
+    Route::post('reputation/compliance', [ReputationController::class, 'complianceCheck'])->name('reputation.compliance');
 
     Route::prefix('communications')->name('communications.')->group(function () {
         Route::get('/', [CommunicationsHubController::class, 'index'])->name('index');
@@ -176,5 +212,6 @@ Route::prefix('portal')->name('portal.')->middleware([\App\Http\Middleware\Marke
         Route::get('/zoom/voicemails/{fileId}/media', [CommunicationsHubController::class, 'voicemailMedia'])->name('zoom.voicemails.media');
         Route::post('/zoom/refresh', [CommunicationsHubController::class, 'refreshCache'])->name('zoom.refresh');
         Route::post('/zoom/sms/send', [CommunicationsHubController::class, 'sendSms'])->name('zoom.sms.send');
+        Route::post('/zoom/chat/send', [CommunicationsHubController::class, 'sendChat'])->name('zoom.chat.send');
     });
 });

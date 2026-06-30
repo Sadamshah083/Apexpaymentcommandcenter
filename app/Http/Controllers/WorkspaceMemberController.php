@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Services\Workspace\WorkspaceContextService;
 use App\Services\Workspace\WorkspaceMemberService;
+use App\Support\SalesOps;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -20,10 +21,12 @@ class WorkspaceMemberController extends Controller
 
     public function store(Request $request, Workspace $workspace)
     {
+        $creatableRoles = array_keys(SalesOps::creatableAgentRoles());
+
         $data = $request->validate([
             'username' => 'required|string|max:255',
             'password' => 'required|string|min:6|confirmed',
-            'role' => 'required|in:admin,sdr,marketer,account_executive,data_acquisition',
+            'role' => 'required|in:'.implode(',', $creatableRoles),
         ]);
 
         $member = $this->memberService->createAgent(
@@ -34,25 +37,34 @@ class WorkspaceMemberController extends Controller
             $data['role'],
         );
 
-        $portalLabel = $data['role'] === 'admin'
-            ? 'Admin and Marketer portals'
-            : 'Agent portal only';
-
         return $this->respond(
             $request,
-            "Account \"{$member->name}\" created. Sign in at the agent portal ({$portalLabel}).",
+            "Account \"{$member->name}\" created as ".SalesOps::roleLabel($data['role']).'. They can sign in at the agent portal.',
         );
     }
 
     public function updateRole(Request $request, Workspace $workspace, User $member)
     {
+        $assignableRoles = array_keys(SalesOps::assignableMemberRoles());
+
         $data = $request->validate([
-            'role' => 'required|in:admin,sdr,marketer,account_executive,data_acquisition',
+            'role' => 'required|in:'.implode(',', $assignableRoles),
         ]);
 
         $this->memberService->updateMemberRole($workspace, Auth::user(), $member, $data['role']);
 
-        return $this->respond($request, "Updated role for {$member->name}.");
+        return $this->respond($request, "Updated {$member->name}'s role to ".SalesOps::roleLabel($data['role']).'.');
+    }
+
+    public function resetPassword(Request $request, Workspace $workspace, User $member)
+    {
+        $data = $request->validate([
+            'password' => 'required|string|min:6|confirmed',
+        ]);
+
+        $this->memberService->resetMemberPassword($workspace, Auth::user(), $member, $data['password']);
+
+        return $this->respond($request, "Password reset for {$member->name}.");
     }
 
     public function suspend(Request $request, Workspace $workspace, User $member)

@@ -8,6 +8,7 @@ use App\Models\Workspace;
 use App\Services\Workspace\WorkspaceContextService;
 use App\Services\Workspace\WorkspaceManager;
 use App\Services\Workspace\WorkspaceMemberService;
+use App\Services\Pipeline\LeadPipelineService;
 use App\Services\Workflow\WorkflowDashboardService;
 use App\Services\Workflow\WorkflowLeadService;
 use App\Services\Workflow\WorkflowLeadVerificationService;
@@ -28,6 +29,7 @@ class WorkflowController extends Controller
         protected WorkflowLeadService $leadService,
         protected WorkflowLeadVerificationService $verificationService,
         protected DiscoveryQualificationService $discoveryService,
+        protected LeadPipelineService $pipelineService,
     ) {}
 
     public function index(Request $request)
@@ -38,7 +40,7 @@ class WorkflowController extends Controller
         return view('workflows.index', $this->dashboardService->buildIndexData($workspace, $user, [
             'search' => $request->input('search'),
             'stage' => $request->input('stage'),
-            'tier' => $request->input('tier'),
+            'phase' => $request->input('phase'),
         ]));
     }
 
@@ -54,13 +56,15 @@ class WorkflowController extends Controller
         $request->validate([
             'name' => 'required|string|max:255',
             'file' => 'required|file|mimes:csv,txt,xlsx,xls|max:10240',
+            'processing_mode' => 'required|in:store_only,full_pipeline',
         ]);
 
         $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
         $workflow = $this->workflowService->createFromUpload(
             $workspace,
             $request->input('name'),
-            $request->file('file')
+            $request->file('file'),
+            $request->input('processing_mode')
         );
 
         $workflow = $this->workflowService->applyAutoMappingIfNeeded($workflow);
@@ -134,7 +138,17 @@ class WorkflowController extends Controller
 
         $this->workflowService->resumeProcessing($workflow);
 
-        return redirect()->back()->with('success', 'Pipeline processing resumed.');
+        return redirect()->route('admin.workflows.show', $workflow->id)->with('success', 'Pipeline processing resumed.');
+    }
+
+    public function activate(Workflow $workflow)
+    {
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+        $this->workspaceContext->ensureWorkflowBelongsToWorkspace($workflow, $workspace);
+
+        $this->workflowService->activateStoredPipeline($workflow);
+
+        return redirect()->route('admin.workflows.show', $workflow->id)->with('success', 'Pipeline activated. AI enrichment and setter distribution started.');
     }
 
     public function destroy(Workflow $workflow)
@@ -153,16 +167,21 @@ class WorkflowController extends Controller
         $this->workspaceContext->ensureLeadBelongsToWorkspace($lead, $workspace);
 
         $team = $workspace->users;
-        $lead->load(['workflow.workspace', 'verifier', 'activities.user']);
+        $lead->load(['workflow.workspace', 'verifier', 'activities.user', 'setter', 'closer']);
 
-        $discoveryMissing = $this->discoveryService->missingFields($lead);
-        $crmStages = SalesOps::crmStages();
-        $painPoints = config('sales_ops.pain_points', []);
-        $offerTypes = config('sales_ops.offer_types', []);
+        $user = Auth::user();
+        $setterStatuses = config('sales_ops.setter_statuses', []);
+        $closerStatuses = config('sales_ops.closer_statuses', []);
+        $pipelinePhases = config('sales_ops.pipeline_phases', []);
         $activityTypes = config('sales_ops.activity_types', []);
+        $canEditSetter = $lead->pipeline_phase === 'with_setter'
+            && ($user->isAppointmentSetter($workspace->id) || $user->canAccessAdminPortal($workspace->id));
+        $canEditCloser = $lead->pipeline_phase === 'with_closer'
+            && ($user->isCloser($workspace->id) || $user->canAccessAdminPortal($workspace->id));
 
         return view('workflows.lead_show', compact(
-            'lead', 'team', 'workspace', 'discoveryMissing', 'crmStages', 'painPoints', 'offerTypes', 'activityTypes'
+            'lead', 'team', 'workspace', 'setterStatuses', 'closerStatuses',
+            'pipelinePhases', 'activityTypes', 'canEditSetter', 'canEditCloser', 'user'
         ));
     }
 
@@ -171,58 +190,40 @@ class WorkflowController extends Controller
         $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
         $this->workspaceContext->ensureLeadBelongsToWorkspace($lead, $workspace);
 
-        $stageKeys = implode(',', SalesOps::crmStageKeys());
+        $user = Auth::user();
+
+        if ($request->filled('setter_status')) {
+            $this->pipelineService->updateSetterStatus(
+                $user,
+                $lead,
+                $workspace,
+                $request->input('setter_status'),
+                $request->input('notes')
+            );
+
+            return redirect()->route('portal.leads.show', $lead->id)->with('success', 'Lead status updated.');
+        }
+
+        if ($request->filled('closer_status')) {
+            $this->pipelineService->updateCloserStatus(
+                $user,
+                $lead,
+                $workspace,
+                $request->input('closer_status'),
+                $request->input('notes')
+            );
+
+            return redirect()->route('portal.leads.show', $lead->id)->with('success', 'Lead status updated.');
+        }
 
         $data = $request->validate([
             'business_name' => 'required|string|max:255',
-            'address' => 'nullable|string|max:255',
-            'city' => 'nullable|string|max:100',
-            'state' => 'nullable|string|max:50',
-            'zip_code' => 'nullable|string|max:20',
-            'country' => 'nullable|string|max:50',
-            'website' => 'nullable|string|max:255',
-            'input_phone' => 'nullable|string|max:50',
-            'input_email' => 'nullable|string|email|max:100',
-            'owner_name' => 'nullable|string|max:100',
-            'direct_phone' => 'nullable|string|max:50',
-            'direct_email' => 'nullable|string|max:100',
-            'payment_processor' => 'nullable|string|max:100',
-            'system_integration' => 'nullable|string',
-            'primary_service' => 'nullable|string|max:100',
-            'operating_hours' => 'nullable|string',
-            'stage' => 'required|string|in:'.$stageKeys,
-            'sale_value' => 'nullable|numeric|min:0',
-            'monthly_processing_volume' => 'nullable|numeric|min:0',
-            'current_processor' => 'nullable|string|max:100',
-            'pricing_model' => 'nullable|string|max:100',
-            'contract_expiration_date' => 'nullable|date',
-            'pain_points' => 'nullable|array',
-            'pain_points.*' => 'string',
-            'offer_type' => 'nullable|string',
-            'is_nurture' => 'nullable|boolean',
-            'meeting_qualified' => 'nullable|boolean',
-            'notes' => 'nullable|string',
-            'followup_at' => 'nullable|date',
-            'schedule_at' => 'nullable|date',
-            'assigned_user_id' => 'nullable|exists:users,id',
+            'notes' => 'nullable|string|max:5000',
         ]);
 
-        $data['is_nurture'] = $request->boolean('is_nurture');
-        $data['meeting_qualified'] = $request->boolean('meeting_qualified');
-        $data['tier'] = SalesOps::tierFromAttempts((int) $lead->contact_attempts, $data['is_nurture']);
+        $lead->update($data);
 
-        if ($data['meeting_qualified'] && ! $lead->meeting_qualified_at) {
-            $data['meeting_qualified_at'] = now();
-        }
-
-        $this->leadService->update($lead, $data);
-        $lead->refresh();
-
-        if ($this->discoveryService->isComplete($lead)) {
-            $this->discoveryService->markDiscoveryComplete($lead, Auth::user());
-        }
-
-        return redirect()->route('portal.leads.show', $lead->id)->with('success', 'Lead record updated successfully.');
+        return redirect()->route('portal.leads.show', $lead->id)->with('success', 'Lead record updated.');
     }
 
     public function leadDestroy(WorkflowLead $lead)
@@ -277,7 +278,8 @@ class WorkflowController extends Controller
     public function workspaceIndex()
     {
         $user = Auth::user();
-        $workspaces = $user->switchableWorkspaces();
+        $user->ensureAdminPortalWorkspace();
+        $workspaces = $user->adminSwitchableWorkspaces();
         $activeWorkspace = $this->workspaceContext->resolveActiveWorkspace($user);
 
         $activeWorkspace->load(['admin:id,name,email', 'users'])->loadCount(['workflows', 'users']);
@@ -302,7 +304,19 @@ class WorkflowController extends Controller
 
     public function workspaceSwitch(Workspace $workspace)
     {
-        $this->workspaceManager->switchWorkspace(Auth::user(), $workspace);
+        $user = Auth::user();
+
+        if (request()->is('admin*') && ! $user->isWorkspaceAdmin($workspace->id)) {
+            if (request()->expectsJson()) {
+                return response()->json([
+                    'message' => 'You can only switch to workspaces you administer.',
+                ], 403);
+            }
+
+            abort(403, 'You can only switch to workspaces you administer.');
+        }
+
+        $this->workspaceManager->switchWorkspace($user, $workspace);
 
         if (request()->expectsJson()) {
             return response()->json([

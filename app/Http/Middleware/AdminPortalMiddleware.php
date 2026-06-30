@@ -10,15 +10,21 @@ class AdminPortalMiddleware
 {
     public function handle(Request $request, Closure $next)
     {
-        if (!Auth::check()) {
+        if (! Auth::check()) {
             return redirect()->route('admin.login');
         }
 
         $user = Auth::user();
-        if (! $user->isWorkspaceAdmin()) {
+
+        if (! $user->canAccessAdminPortal()) {
             Auth::logout();
-            return redirect()->route('admin.login')->withErrors(['username' => 'Access denied. Administrator privileges required for this portal.']);
+
+            return redirect()->route('admin.login')->withErrors([
+                'username' => 'Access denied. Admin portal requires Super Admin or Admin role.',
+            ]);
         }
+
+        $user->ensureAdminPortalWorkspace();
 
         return $next($request);
     }

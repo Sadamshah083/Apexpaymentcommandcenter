@@ -2,7 +2,7 @@ import { showToast } from './toast.js';
 import { updateMemberRows } from './member-management.js';
 import { isOsNotificationsEnabled, showOsNotification } from './system-notifications.js';
 import { applyWorkspaceAdminState } from './workspace-admin.js';
-import { applySalesOpsSync, initAjaxActivityForms, TIER_LABELS, smoothWidthUpdate } from './sales-ops-sync.js';
+import { applySalesOpsSync, initAjaxActivityForms, TIER_LABELS, smoothWidthUpdate, applyToolkitSync } from './sales-ops-sync.js';
 
 const WORKFLOW_STATUS_LABELS = {
     mapping: 'Setup',
@@ -718,6 +718,7 @@ export function initWorkspaceSync() {
 
             applyWorkspaceAdminState(data);
             applySalesOpsSync(data);
+            applyToolkitSync(data?.toolkit);
 
             if (workflowId && Array.isArray(data.workflows) && data.workflows.length > 0) {
                 const wf = data.workflows[0];

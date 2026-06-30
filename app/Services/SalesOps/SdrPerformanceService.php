@@ -64,24 +64,50 @@ class SdrPerformanceService
         $start = $period === 'day' ? now()->startOfDay() : now()->startOfWeek();
         $end = $period === 'day' ? now()->endOfDay() : now()->endOfWeek();
 
-        $sdrIds = $workspace->users()
-            ->wherePivot('status', 'active')
-            ->wherePivotIn('role', SalesOps::sdrRoles())
-            ->pluck('users.id');
+        $map = [
+            'dial' => 'dial',
+            'conversation' => 'conversation',
+            'decision_maker' => 'decision_maker',
+            'discovery' => 'discovery',
+            'meeting_booked' => 'meeting_booked',
+        ];
 
-        return $workspace->users()
+        $members = $workspace->users()
             ->wherePivot('status', 'active')
             ->wherePivotIn('role', array_merge(SalesOps::sdrRoles(), ['account_executive']))
-            ->get()
-            ->map(function (User $member) use ($workspace, $start, $end) {
-                $counts = $this->activityCounts($member, $workspace, $start, $end);
+            ->get();
 
-                $funded = WorkflowLead::query()
-                    ->where('assigned_user_id', $member->id)
-                    ->where('stage', 'closed_won')
-                    ->where('updated_at', '>=', $start)
-                    ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspace->id))
-                    ->count();
+        $memberIds = $members->pluck('id')->all();
+
+        $activityRows = LeadActivity::query()
+            ->select('user_id', 'type', DB::raw('count(*) as total'))
+            ->whereIn('user_id', $memberIds)
+            ->whereBetween('created_at', [$start, $end])
+            ->whereIn('type', array_keys($map))
+            ->whereHas('lead.workflow', fn ($q) => $q->where('workspace_id', $workspace->id))
+            ->groupBy('user_id', 'type')
+            ->get()
+            ->groupBy('user_id');
+
+        $fundedCounts = WorkflowLead::query()
+            ->select('assigned_user_id', DB::raw('count(*) as total'))
+            ->whereIn('assigned_user_id', $memberIds)
+            ->where('stage', 'closed_won')
+            ->where('updated_at', '>=', $start)
+            ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspace->id))
+            ->groupBy('assigned_user_id')
+            ->pluck('total', 'assigned_user_id')
+            ->all();
+
+        return $members
+            ->map(function (User $member) use ($workspace, $start, $end, $activityRows, $fundedCounts, $map) {
+                $userActivities = $activityRows->get($member->id) ?? collect();
+                $counts = [];
+                foreach ($map as $type => $key) {
+                    $counts[$key] = (int) ($userActivities->firstWhere('type', $type)?->total ?? 0);
+                }
+
+                $funded = $fundedCounts[$member->id] ?? 0;
 
                 return [
                     'user_id' => $member->id,
@@ -130,17 +156,26 @@ class SdrPerformanceService
     {
         $cap = config('sales_ops.leads_per_sdr', 500);
 
-        return $workspace->users()
+        $members = $workspace->users()
             ->wherePivot('status', 'active')
             ->wherePivotIn('role', SalesOps::sdrRoles())
-            ->get()
-            ->map(function (User $member) use ($workspace, $cap) {
-                $assigned = WorkflowLead::query()
-                    ->where('assigned_user_id', $member->id)
-                    ->where('status', 'completed')
-                    ->whereNotIn('stage', ['closed_won', 'closed_lost'])
-                    ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspace->id))
-                    ->count();
+            ->get();
+
+        $memberIds = $members->pluck('id')->all();
+
+        $assignedCounts = WorkflowLead::query()
+            ->select('assigned_user_id', DB::raw('count(*) as total'))
+            ->whereIn('assigned_user_id', $memberIds)
+            ->where('status', 'completed')
+            ->whereNotIn('stage', ['closed_won', 'closed_lost'])
+            ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspace->id))
+            ->groupBy('assigned_user_id')
+            ->pluck('total', 'assigned_user_id')
+            ->all();
+
+        return $members
+            ->map(function (User $member) use ($workspace, $cap, $assignedCounts) {
+                $assigned = $assignedCounts[$member->id] ?? 0;
 
                 return [
                     'user_id' => $member->id,

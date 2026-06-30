@@ -21,7 +21,7 @@ class WorkflowService
         protected WorkspaceSyncService $syncService,
     ) {}
 
-    public function createFromUpload(Workspace $workspace, string $name, UploadedFile $file): Workflow
+    public function createFromUpload(Workspace $workspace, string $name, UploadedFile $file, string $processingMode = 'full_pipeline'): Workflow
     {
         $storedPath = $file->store('workflows');
         $sheets = [];
@@ -39,6 +39,9 @@ class WorkflowService
         return Workflow::create([
             'workspace_id' => $workspace->id,
             'name' => $name,
+            'processing_mode' => in_array($processingMode, ['store_only', 'full_pipeline'], true)
+                ? $processingMode
+                : 'full_pipeline',
             'original_filename' => $file->getClientOriginalName(),
             'file_path' => $storedPath,
             'sheets' => empty($sheets) ? null : $sheets,
@@ -130,7 +133,10 @@ class WorkflowService
             'workflow' => $workflow,
             'leads' => $leads,
             'headers' => $this->resolveHeaderRow($workflow),
-            'team' => $workspace->users,
+            'team' => $workspace->users()
+                ->wherePivot('role', 'appointment_setter')
+                ->wherePivot('status', 'active')
+                ->get(),
         ];
     }
 
@@ -228,6 +234,57 @@ class WorkflowService
         );
 
         ProcessWorkflowJob::dispatch($workflow->id, $workflow->file_path);
+    }
+
+    public function activateStoredPipeline(Workflow $workflow): void
+    {
+        if (! $workflow->isStoreOnly()) {
+            throw ValidationException::withMessages([
+                'workflow' => 'Only stored imports can be activated.',
+            ]);
+        }
+
+        if ($workflow->isProcessing()) {
+            throw ValidationException::withMessages([
+                'workflow' => 'This pipeline is already processing.',
+            ]);
+        }
+
+        if ($workflow->leads()->count() === 0) {
+            throw ValidationException::withMessages([
+                'workflow' => 'No leads found to activate.',
+            ]);
+        }
+
+        $workflow->update([
+            'processing_mode' => 'full_pipeline',
+            'status' => 'extracting',
+            'processed_leads' => 0,
+            'failed_leads' => 0,
+            'distribution_cursor' => 0,
+        ]);
+
+        $workflow->leads()->update([
+            'status' => 'pending',
+            'pipeline_phase' => 'imported',
+            'import_mode' => 'pipeline',
+            'assigned_user_id' => null,
+            'assigned_setter_id' => null,
+            'assigned_closer_id' => null,
+            'setter_status' => null,
+            'closer_status' => null,
+        ]);
+
+        $this->dispatchPendingLeadJobs($workflow);
+
+        $workflow->loadMissing('workspace');
+        $this->syncService->record(
+            $workflow->workspace,
+            'workflow.activated',
+            'workflow',
+            $workflow->id,
+            ['name' => $workflow->name]
+        );
     }
 
     public function pauseProcessing(Workflow $workflow): void

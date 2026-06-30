@@ -80,7 +80,13 @@ class WorkflowExtractor
                 'timeout' => 240
             ];
 
-            $result = $this->gemini->researchWithGoogleSearch($systemPrompt, $userPrompt, $options);
+            try {
+                $result = $this->gemini->researchWithGoogleSearch($systemPrompt, $userPrompt, $options);
+            } catch (\Exception $e) {
+                Log::warning("Gemini failed in WorkflowExtractor. Falling back to OpenRouter: " . $e->getMessage());
+                $openRouterClient = app(\App\Services\BusinessResearch\OpenRouterClient::class);
+                $result = $openRouterClient->chat($systemPrompt, $userPrompt);
+            }
             $report = $result['content'];
 
             // Parse fields

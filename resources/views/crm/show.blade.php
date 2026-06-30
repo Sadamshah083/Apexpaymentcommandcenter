@@ -4,28 +4,28 @@
 
 @section('content')
 <div class="mb-6">
-    <a href="{{ route('crm.index') }}" class="text-indigo-600 text-sm">&larr; Back to CRM</a>
+    <a href="{{ route('admin.crm.index') }}" class="text-indigo-600 text-sm">&larr; Back to CRM</a>
     <div class="flex flex-wrap justify-between items-start gap-4 mt-2">
         <div>
             <h2 class="text-2xl font-bold">{{ $crm->name }}</h2>
             <p class="text-slate-600 text-sm">{{ $crm->original_filename }} · {{ $crm->total_leads }} leads</p>
         </div>
         <div class="flex flex-wrap gap-2">
-            <form action="{{ route('crm.reupload', $crm) }}" method="POST" enctype="multipart/form-data" class="flex items-center gap-2">
+            <form action="{{ route('admin.crm.reupload', $crm) }}" method="POST" enctype="multipart/form-data" class="flex items-center gap-2">
                 @csrf
                 <label class="text-sm border px-3 py-2 rounded-lg hover:bg-slate-50 cursor-pointer">
                     Update CSV
                     <input type="file" name="file" accept=".csv,.txt" class="hidden" onchange="if(confirm('Re-import CSV? Completed research is kept unless business name or address changed.')) this.form.submit()">
                 </label>
             </form>
-            <a href="{{ route('crm.export', $crm) }}" class="text-sm border px-3 py-2 rounded-lg hover:bg-slate-50">Export CSV</a>
+            <a href="{{ route('admin.crm.export', $crm) }}" class="text-sm border px-3 py-2 rounded-lg hover:bg-slate-50">Export CSV</a>
             @if($crm->failed_count > 0 || $crm->processing_count > 0)
-                <form action="{{ route('crm.retry-failed', $crm) }}" method="POST" onsubmit="return confirm('Re-queue all failed/stuck leads?')">
+                <form action="{{ route('admin.crm.retry-failed', $crm) }}" method="POST" onsubmit="return confirm('Re-queue all failed/stuck leads?')">
                     @csrf
                     <button type="submit" class="text-sm bg-indigo-600 text-white px-3 py-2 rounded-lg">Re-run Failed ({{ $crm->failed_count + $crm->processing_count }})</button>
                 </form>
             @endif
-            <form action="{{ route('crm.destroy', $crm) }}" method="POST" onsubmit="return confirm('Delete this campaign and all leads?')">
+            <form action="{{ route('admin.crm.destroy', $crm) }}" method="POST" onsubmit="return confirm('Delete this campaign and all leads?')">
                 @csrf @method('DELETE')
                 <button type="submit" class="text-sm text-red-600 border border-red-200 px-3 py-2 rounded-lg">Delete</button>
             </form>
@@ -145,20 +145,20 @@
         </div>
         <button type="submit" class="text-sm bg-slate-800 text-white px-4 py-2 rounded-lg">Filter</button>
         @if(request()->hasAny(['q','status','enriched']))
-            <a href="{{ route('crm.show', $crm) }}" class="text-sm text-slate-500 hover:underline">Clear</a>
+            <a href="{{ route('admin.crm.show', $crm) }}" class="text-sm text-slate-500 hover:underline">Clear</a>
         @endif
     </form>
     <div class="flex flex-wrap gap-2 mt-3 pt-3 border-t">
         <span class="text-xs text-slate-500 self-center">Quick:</span>
-        <a href="{{ route('crm.show', [$crm, 'enriched' => 'yes']) }}"
+        <a href="{{ route('admin.crm.show', [$crm, 'enriched' => 'yes']) }}"
             class="text-xs px-3 py-1 rounded-full {{ request('enriched') === 'yes' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100' }}">
             Enriched ({{ $enrichedCount ?? 0 }})
         </a>
-        <a href="{{ route('crm.show', [$crm, 'status' => 'pending']) }}"
+        <a href="{{ route('admin.crm.show', [$crm, 'status' => 'pending']) }}"
             class="text-xs px-3 py-1 rounded-full {{ request('status') === 'pending' ? 'bg-amber-600 text-white' : 'bg-amber-50 text-amber-800 hover:bg-amber-100' }}">
             Pending ({{ $crm->pending_count }})
         </a>
-        <a href="{{ route('crm.show', [$crm, 'status' => 'failed']) }}"
+        <a href="{{ route('admin.crm.show', [$crm, 'status' => 'failed']) }}"
             class="text-xs px-3 py-1 rounded-full {{ request('status') === 'failed' ? 'bg-red-600 text-white' : 'bg-red-50 text-red-800 hover:bg-red-100' }}">
             Failed ({{ $crm->failed_count }})
         </a>
@@ -205,7 +205,7 @@
                         @endif
                     </td>
                     <td>
-                        <a href="{{ route('crm.leads.show', [$crm, $lead]) }}" class="text-indigo-600 hover:underline text-xs">View</a>
+                        <a href="{{ route('admin.crm.leads.show', [$crm, $lead]) }}" class="text-indigo-600 hover:underline text-xs">View</a>
                     </td>
                 </tr>
             @empty
@@ -223,7 +223,7 @@
     const start = window.startProgressPoll;
     if (!start) return;
 
-    start('{{ route('crm.progress', $crm) }}', (data) => {
+    start('{{ route('admin.crm.progress', $crm) }}', (data) => {
         document.getElementById('progress-bar').style.width = data.percent + '%';
         document.getElementById('progress-text').textContent = data.percent + '%';
         document.getElementById('progress-stats').textContent =

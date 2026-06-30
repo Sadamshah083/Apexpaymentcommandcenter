@@ -4,7 +4,7 @@
 
 @section('content')
 <div class="mb-6">
-    <a href="{{ route('crm.show', $crm) }}" class="text-indigo-600 text-sm">&larr; Back to {{ $crm->name }}</a>
+    <a href="{{ route('admin.crm.show', $crm) }}" class="text-indigo-600 text-sm">&larr; Back to {{ $crm->name }}</a>
     <h2 class="text-2xl font-bold mt-2">{{ $lead->business_name }}</h2>
     <p class="text-slate-600 text-sm">Row {{ $lead->row_number }} · {{ $lead->fullAddress() ?: 'No address' }}</p>
 </div>
@@ -13,7 +13,7 @@
     <div id="progress-banner" class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 text-amber-900 text-sm">
         Research in progress… this page will refresh automatically.
         @if($lead->status === 'processing')
-            <form action="{{ route('crm.leads.retry', [$crm, $lead]) }}" method="POST" class="inline ml-2">
+            <form action="{{ route('admin.crm.leads.retry', [$crm, $lead]) }}" method="POST" class="inline ml-2">
                 @csrf
                 <button type="submit" class="text-indigo-700 underline text-xs">Re-run now</button>
             </form>
@@ -25,7 +25,7 @@
     <div class="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
         <p class="font-medium text-red-800">Research failed</p>
         <p class="text-sm text-red-700 mt-1">{{ $lead->error_message }}</p>
-        <form action="{{ route('crm.leads.retry', [$crm, $lead]) }}" method="POST" class="mt-3">
+        <form action="{{ route('admin.crm.leads.retry', [$crm, $lead]) }}" method="POST" class="mt-3">
             @csrf
             <button type="submit" class="text-sm bg-red-600 text-white px-3 py-1 rounded">Retry</button>
         </form>
@@ -116,7 +116,7 @@
     const start = window.startProgressPoll;
     if (!start) return;
 
-    start('{{ route('crm.leads.status', [$crm, $lead]) }}', (data) => {
+    start('{{ route('admin.crm.leads.status', [$crm, $lead]) }}', (data) => {
         if (data.complete) {
             if (window.showToast) {
                 window.showToast('Lead research complete.', 'success');

@@ -2,16 +2,19 @@
 
 namespace App\Services\Workspace;
 
+use App\Models\EmailList;
 use App\Models\LeadActivity;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceSyncEvent;
 use App\Models\Workflow;
 use App\Models\WorkflowLead;
+use App\Models\DeliverabilityTest;
 use App\Services\SalesOps\SdrPerformanceService;
 use App\Support\PipelineProgress;
 use App\Support\SalesOps;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class WorkspaceSyncService
@@ -47,7 +50,10 @@ class WorkspaceSyncService
         ?int $workflowId = null,
         ?int $leadId = null,
     ): array {
-        $fingerprint = $this->fingerprint($workspace, $user, $workflowId, $leadId);
+        $cacheKey = "workspace_sync_fingerprint_{$workspace->id}_{$user->id}_" . ($workflowId ?? 'all') . "_" . ($leadId ?? 'all');
+        $fingerprint = Cache::remember($cacheKey, now()->addSeconds(3), function () use ($workspace, $user, $workflowId, $leadId) {
+            return $this->fingerprint($workspace, $user, $workflowId, $leadId);
+        });
         $latestCursor = (int) (WorkspaceSyncEvent::where('workspace_id', $workspace->id)->max('id') ?? 0);
 
         $events = [];
@@ -133,6 +139,7 @@ class WorkspaceSyncService
             'leads' => $leads->map(fn (WorkflowLead $lead) => $this->serializeLead($lead))->values()->all(),
             'team' => $team->map(fn (User $member) => $this->serializeTeamMember($member, $workspace, $user))->values()->all(),
             'sales_ops' => $this->buildSalesOpsPayload($workspace, $user, $isAdmin),
+            'toolkit' => $this->buildToolkitPayload($workspace, $user),
         ];
 
         if ($leadId) {
@@ -175,6 +182,9 @@ class WorkspaceSyncService
             ? (WorkflowLead::whereIn('workflow_id', $workflowIds)->where('id', $leadId)->value('updated_at') ?? '')
             : '';
 
+        $listStamp = EmailList::where('workspace_id', $workspace->id)->max('updated_at') ?? '';
+        $deliverabilityStamp = DeliverabilityTest::where('workspace_id', $workspace->id)->max('updated_at') ?? '';
+
         return md5(implode('|', [
             $workspace->id,
             $user->id,
@@ -186,6 +196,8 @@ class WorkspaceSyncService
             $eventStamp,
             $activityStamp,
             $leadDetailStamp,
+            $listStamp,
+            $deliverabilityStamp,
             $workspace->updated_at,
         ]));
     }
@@ -231,12 +243,24 @@ class WorkspaceSyncService
         if ($workflowId) {
             $query->where('workflow_id', $workflowId);
         } elseif (! $isAdmin) {
-            $query->where('assigned_user_id', $user->id)
-                ->where('status', 'completed');
+            $role = $user->getWorkspaceRole($workspace->id);
 
-            if ($user->isAccountExecutive()) {
-                $query->whereIn('stage', ['meeting_scheduled', 'proposal_sent', 'follow_up', 'closed_won', 'closed_lost']);
-            }
+            $query->where(function ($q) use ($user, $role) {
+                if ($role === 'appointment_setter') {
+                    $q->where('pipeline_phase', 'with_setter')
+                        ->where('assigned_user_id', $user->id);
+                } elseif ($role === 'appointment_setter_team_lead') {
+                    $q->whereIn('pipeline_phase', ['with_setter', 'appointment_settled', 'with_closer', 'closed'])
+                        ->whereNotNull('assigned_setter_id');
+                } elseif ($role === 'closers_team_lead') {
+                    $q->whereIn('pipeline_phase', ['appointment_settled', 'with_closer', 'closed']);
+                } elseif ($role === 'closer') {
+                    $q->where('pipeline_phase', 'with_closer')
+                        ->where('assigned_user_id', $user->id);
+                } else {
+                    $q->whereRaw('1 = 0');
+                }
+            });
         }
 
         return $query
@@ -302,18 +326,74 @@ class WorkspaceSyncService
         $payload = [];
 
         if ($isAdmin) {
-            $overview = $this->performance->workspaceOverview($workspace);
-            $payload['overview'] = $overview;
-            $payload['leaderboard'] = $this->performance->teamLeaderboard($workspace, 'week')->take(15)->values()->all();
-            $payload['sdr_load'] = $this->performance->sdrLoad($workspace)->values()->all();
+            $workflowIds = $this->workflowIds($workspace);
+            $payload['pipeline_overview'] = WorkflowLead::query()
+                ->whereIn('workflow_id', $workflowIds)
+                ->selectRaw('pipeline_phase, count(*) as total')
+                ->groupBy('pipeline_phase')
+                ->pluck('total', 'pipeline_phase');
         }
 
-        if ($user->isSdr() || $user->isMarketerOnly() || $user->isAccountExecutive()) {
-            $payload['daily'] = $this->performance->dailyMetrics($user, $workspace);
-            $payload['weekly'] = $this->performance->weeklyMetrics($user, $workspace);
+        if ($user->isAppointmentSetter($workspace->id) || $user->isCloser($workspace->id)) {
+            $payload['pipeline'] = [
+                'active_leads' => WorkflowLead::query()
+                    ->whereIn('workflow_id', $this->workflowIds($workspace))
+                    ->where('assigned_user_id', $user->id)
+                    ->whereIn('pipeline_phase', ['with_setter', 'with_closer'])
+                    ->count(),
+            ];
         }
 
         return $payload;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function buildToolkitPayload(Workspace $workspace, User $user): array
+    {
+        $isAdmin = $user->isWorkspaceAdmin($workspace->id);
+
+        return [
+            'email_lists' => EmailList::query()
+                ->where('workspace_id', $workspace->id)
+                ->with('user:id,name')
+                ->latest()
+                ->limit(15)
+                ->get()
+                ->map(fn (EmailList $list) => [
+                    'id' => $list->id,
+                    'name' => $list->name,
+                    'source_file' => $list->source_file,
+                    'uploader' => $list->user?->name,
+                    'total_count' => (int) $list->total_count,
+                    'valid_count' => (int) $list->valid_count,
+                    'invalid_count' => (int) $list->invalid_count,
+                    'status' => $list->status,
+                    'show_url' => $isAdmin
+                        ? route('admin.lists.show', $list->id)
+                        : route('portal.lists.show', $list->id),
+                ])
+                ->values()
+                ->all(),
+            'deliverability_tests' => DeliverabilityTest::query()
+                ->where('workspace_id', $workspace->id)
+                ->latest()
+                ->limit(10)
+                ->get()
+                ->map(fn (DeliverabilityTest $test) => [
+                    'id' => $test->id,
+                    'domain' => $test->domain,
+                    'status' => $test->status,
+                    'overall_score' => $test->overall_score,
+                    'created_at' => $test->created_at?->diffForHumans(),
+                    'show_url' => $isAdmin
+                        ? route('admin.deliverability.show', $test->id)
+                        : route('portal.deliverability.show', $test->id),
+                ])
+                ->values()
+                ->all(),
+        ];
     }
 
     /**
@@ -328,9 +408,10 @@ class WorkspaceSyncService
             'name' => $member->name,
             'email' => $member->email,
             'role' => $member->pivot->role,
+            'role_label' => \App\Support\SalesOps::roleLabel($member->pivot->role),
             'status' => $member->pivot->status ?? 'active',
             'is_owner' => $isOwner,
-            'can_manage' => $viewer->isWorkspaceAdmin($workspace->id) && ! $isOwner,
+            'can_manage' => $viewer->isSuperAdmin($workspace->id) && ! $isOwner,
         ];
     }
 
@@ -357,7 +438,7 @@ class WorkspaceSyncService
      */
     protected function serializeWorkspacesList(User $user, Workspace $activeWorkspace): array
     {
-        return $user->switchableWorkspaces()
+        return $user->adminSwitchableWorkspaces()
             ->map(function (Workspace $workspace) use ($activeWorkspace) {
                 $workspace->loadMissing('admin:id,name');
                 $workspace->loadCount(['workflows', 'users']);
@@ -419,6 +500,12 @@ class WorkspaceSyncService
             'current_processor' => $lead->current_processor,
             'monthly_processing_volume' => $lead->monthly_processing_volume,
             'schedule_at' => $lead->schedule_at?->format('M j, g:i A'),
+            'pipeline_phase' => $lead->pipeline_phase,
+            'pipeline_phase_label' => SalesOps::pipelinePhaseLabel($lead->pipeline_phase),
+            'setter_status' => $lead->setter_status,
+            'setter_status_label' => SalesOps::setterStatusLabel($lead->setter_status),
+            'closer_status' => $lead->closer_status,
+            'closer_status_label' => SalesOps::closerStatusLabel($lead->closer_status),
             'stage' => $lead->stage,
             'stage_label' => SalesOps::crmStageLabel($lead->stage),
             'tier' => $lead->tier,

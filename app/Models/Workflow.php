@@ -12,6 +12,7 @@ class Workflow extends Model
         'workspace_id',
         'name',
         'status',
+        'processing_mode',
         'original_filename',
         'file_path',
         'sheets',
@@ -55,5 +56,15 @@ class Workflow extends Model
     public function isPaused(): bool
     {
         return $this->status === 'paused';
+    }
+
+    public function isStoreOnly(): bool
+    {
+        return $this->processing_mode === 'store_only';
+    }
+
+    public function isFullPipeline(): bool
+    {
+        return $this->processing_mode !== 'store_only';
     }
 }

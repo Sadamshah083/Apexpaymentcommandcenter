@@ -991,6 +991,15 @@ class ZoomApiService
     }
 
     /**
+     * @param  array{message: string, to_channel?: string, to_contact?: string}  $payload
+     * @return array<string, mixed>
+     */
+    public function sendTeamChatMessage(string $userId, array $payload): array
+    {
+        return $this->requestJson('post', '/chat/users/'.$userId.'/messages', [], $payload);
+    }
+
+    /**
      * @param  array<string, mixed>  $row
      * @param  array<string, mixed>  $user
      * @return array<string, mixed>

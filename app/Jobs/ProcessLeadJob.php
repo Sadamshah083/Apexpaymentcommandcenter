@@ -2,8 +2,10 @@
 
 namespace App\Jobs;
 
+use App\Models\User;
 use App\Models\Workflow;
 use App\Models\WorkflowLead;
+use App\Services\Pipeline\PipelineLeadReleaseService;
 use App\Services\Workflow\WorkflowExtractor;
 use App\Services\Workflow\WorkflowLeadAutoVerificationService;
 use App\Services\Workspace\WorkspaceSyncService;
@@ -33,6 +35,7 @@ class ProcessLeadJob implements ShouldQueue
     public function handle(
         WorkflowExtractor $extractor,
         WorkflowLeadAutoVerificationService $autoVerification,
+        PipelineLeadReleaseService $releaseService,
         WorkspaceSyncService $syncService
     ): void {
         $lead = WorkflowLead::find($this->leadId);
@@ -85,11 +88,24 @@ class ProcessLeadJob implements ShouldQueue
 
             $snapshot = $autoVerification->run($lead->fresh(), $workflow);
 
-            SqliteConcurrency::retry(fn () => $lead->update(array_merge($result, [
-                'status' => 'pending_verification',
-                'verification_status' => 'pending',
-                'verification_snapshot' => $snapshot,
-            ])));
+            if ($workflow->isFullPipeline()) {
+                SqliteConcurrency::retry(fn () => $lead->update(array_merge($result, [
+                    'verification_snapshot' => $snapshot,
+                    'pipeline_phase' => 'enriching',
+                    'import_mode' => 'pipeline',
+                ])));
+
+                $actor = User::find($workspace->admin_id) ?? $workspace->admin;
+                if ($actor) {
+                    $releaseService->autoReleaseToSetter($lead->fresh(), $actor);
+                }
+            } else {
+                SqliteConcurrency::retry(fn () => $lead->update(array_merge($result, [
+                    'status' => 'pending_verification',
+                    'verification_status' => 'pending',
+                    'verification_snapshot' => $snapshot,
+                ])));
+            }
         } catch (\Exception $e) {
             if (SqliteConcurrency::causedByLock($e)) {
                 throw $e;

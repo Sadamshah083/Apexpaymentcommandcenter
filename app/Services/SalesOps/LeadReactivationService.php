@@ -4,10 +4,16 @@ namespace App\Services\SalesOps;
 
 use App\Models\WorkflowLead;
 use App\Models\Workspace;
+use App\Services\Workspace\WorkspaceSyncService;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 
 class LeadReactivationService
 {
+    public function __construct(
+        protected WorkspaceSyncService $syncService,
+    ) {}
+
   /**
      * @return Collection<int, WorkflowLead>
      */
@@ -51,6 +57,19 @@ class LeadReactivationService
             'is_nurture' => false,
         ]);
 
-        return $lead->fresh();
+        $lead = $lead->fresh();
+        $workspace = $lead->workflow?->workspace;
+        if ($workspace) {
+            $this->syncService->record(
+                $workspace,
+                'lead.reactivated',
+                'lead',
+                $lead->id,
+                ['source' => $source],
+                Auth::id(),
+            );
+        }
+
+        return $lead;
     }
 }

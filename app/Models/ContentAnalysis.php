@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Model;
 class ContentAnalysis extends Model
 {
     protected $fillable = [
+        'workspace_id',
+        'user_id',
         'title',
         'subject',
         'html_body',

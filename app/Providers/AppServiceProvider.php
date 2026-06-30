@@ -8,8 +8,10 @@ use App\Models\CrmCampaign;
 use App\Models\CrmLead;
 use App\Models\DeliverabilityTest;
 use App\Models\WorkflowLead;
+use App\Policies\WorkflowLeadPolicy;
 use App\Support\SqliteConcurrency;
 use Illuminate\Pagination\Paginator;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
@@ -41,12 +43,10 @@ class AppServiceProvider extends ServiceProvider
         Route::model('crmLead', CrmLead::class);
 
         Route::bind('lead', function (string $value) {
-            if (request()->is('portal*') || request()->routeIs('portal.*')) {
-                return WorkflowLead::findOrFail($value);
-            }
-
-            return CrmLead::findOrFail($value);
+            return WorkflowLead::findOrFail($value);
         });
+
+        Gate::policy(WorkflowLead::class, WorkflowLeadPolicy::class);
     }
 
     protected function configureHttpClient(): void

@@ -1,33 +1,24 @@
-@php
-    $user = auth()->user();
-    $isAe = $user?->isAccountExecutive();
-@endphp
+<x-sidebar.section title="Pipeline">
+    @php
+        $user = auth()->user();
+        $role = $user?->getWorkspaceRole();
+    @endphp
 
-<x-sidebar.section title="SDR Workspace">
-    <x-sidebar.link
-        :href="route('portal.dashboard')"
-        label="My Lead Pool"
-        :active="request()->routeIs('portal.dashboard') || request()->routeIs('portal.leads.*')"
-    >
-        <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'leads'])</x-slot:icon>
-    </x-sidebar.link>
-    <x-sidebar.link
-        :href="route('portal.performance')"
-        label="Daily Performance"
-        :active="request()->routeIs('portal.performance')"
-    >
-        <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'dashboard'])</x-slot:icon>
-    </x-sidebar.link>
+    @if($role === 'appointment_setter')
+        <x-sidebar.link :href="route('portal.setter.dashboard')" label="My Leads" :active="request()->routeIs('portal.setter.*') || request()->routeIs('portal.leads.*')">
+            <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'leads'])</x-slot:icon>
+        </x-sidebar.link>
+    @elseif($role === 'appointment_setter_team_lead')
+        <x-sidebar.link :href="route('portal.setter-team.dashboard')" label="Setter Team" :active="request()->routeIs('portal.setter-team.*')">
+            <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'team'])</x-slot:icon>
+        </x-sidebar.link>
+    @elseif($role === 'closers_team_lead')
+        <x-sidebar.link :href="route('portal.closer-team.queue')" label="Closer Queue" :active="request()->routeIs('portal.closer-team.*')">
+            <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'pipeline'])</x-slot:icon>
+        </x-sidebar.link>
+    @elseif($role === 'closer')
+        <x-sidebar.link :href="route('portal.closer.dashboard')" label="My Closer Leads" :active="request()->routeIs('portal.closer.*') || request()->routeIs('portal.leads.*')">
+            <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'leads'])</x-slot:icon>
+        </x-sidebar.link>
+    @endif
 </x-sidebar.section>
-
-@if($isAe)
-<x-sidebar.section title="Account Executive">
-    <x-sidebar.link
-        :href="route('portal.ae.pipeline')"
-        label="Meetings & Proposals"
-        :active="request()->routeIs('portal.ae.*')"
-    >
-        <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'pipeline'])</x-slot:icon>
-    </x-sidebar.link>
-</x-sidebar.section>
-@endif

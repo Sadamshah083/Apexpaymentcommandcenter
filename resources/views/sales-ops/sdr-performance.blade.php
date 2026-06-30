@@ -1,11 +1,11 @@
 @extends('layouts.portal')
 
-@section('title', 'Daily Performance')
+@section('title', 'SDR Daily Performance')
 
 @section('content')
 <div class="app-page space-y-6">
     <x-page-header
-        title="Daily Performance"
+        title="SDR Daily Performance"
         subtitle="Track progress against activity standards for {{ now()->format('l, M j') }}."
     />
 

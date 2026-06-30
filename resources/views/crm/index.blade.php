@@ -8,7 +8,7 @@
         <h2 class="text-2xl font-bold">Business CRM</h2>
         <p class="text-slate-600 mt-1">Upload CSV leads — AI enriches owner, phone, email, payment processor, and POS data.</p>
     </div>
-    <a href="{{ route('crm.create') }}" class="bg-indigo-600 text-white px-5 py-2 rounded-lg hover:bg-indigo-700">
+    <a href="{{ route('admin.crm.create') }}" class="bg-indigo-600 text-white px-5 py-2 rounded-lg hover:bg-indigo-700">
         Upload CSV
     </a>
 </div>
@@ -52,7 +52,7 @@
             @forelse($campaigns as $campaign)
                 <tr>
                     <td>
-                        <a href="{{ route('crm.show', $campaign) }}" class="font-medium text-indigo-600 hover:underline">
+                        <a href="{{ route('admin.crm.show', $campaign) }}" class="font-medium text-indigo-600 hover:underline">
                             {{ $campaign->name }}
                         </a>
                     </td>
@@ -82,7 +82,7 @@
             @empty
                 <tr>
                     <td colspan="6" class="text-center py-8 text-slate-500">
-                        No campaigns yet. <a href="{{ route('crm.create') }}" class="text-indigo-600">Upload a CSV</a> to start.
+                        No campaigns yet. <a href="{{ route('admin.crm.create') }}" class="text-indigo-600">Upload a CSV</a> to start.
                     </td>
                 </tr>
             @endforelse

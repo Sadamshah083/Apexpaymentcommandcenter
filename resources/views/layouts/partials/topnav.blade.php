@@ -6,7 +6,9 @@
 @php
     $user = Auth::user();
     $workspace = $user?->currentWorkspace;
-    $switchableWorkspaces = $user?->switchableWorkspaces() ?? collect();
+    $switchableWorkspaces = $workspaceManageRoute
+        ? ($user?->adminSwitchableWorkspaces() ?? collect())
+        : ($user?->switchableWorkspaces() ?? collect());
     $workspaceSwitchRoute = $workspaceManageRoute
         ? 'admin.workspaces.switch'
         : 'portal.workspaces.switch';

@@ -24,10 +24,17 @@ const ACTION_COPY = {
         tone: 'warning',
         confirmLabel: 'Update role',
         message: (name, form) => {
-            const nextRole = form?.dataset?.nextRole === 'admin' ? 'administrator' : 'agent';
+            const select = form?.querySelector('[name="role"]');
+            const label = select?.selectedOptions?.[0]?.textContent?.trim() || 'the new role';
 
-            return `Change ${name}'s role to ${nextRole}?`;
+            return `Change ${name}'s role to ${label}?`;
         },
+    },
+    'reset-password': {
+        title: 'Reset password?',
+        tone: 'warning',
+        confirmLabel: 'Update password',
+        message: (name) => `Set a new password for ${name}? They will use it on their next agent portal sign-in.`,
     },
 };
 
@@ -47,10 +54,18 @@ function adminOptions() {
         return null;
     }
 
+    let roleLabels = {};
+    try {
+        roleLabels = JSON.parse(root.dataset.roleLabels || '{}');
+    } catch {
+        roleLabels = {};
+    }
+
     return {
         workspaceId: root.dataset.workspaceId,
         membersBase: root.dataset.membersBase,
         csrf: root.dataset.csrfToken || '',
+        roleLabels,
     };
 }
 
@@ -152,10 +167,28 @@ async function submitMemberForm(form) {
                 || `Could not update ${name}.`;
             showToast(message, 'error');
             row?.classList.remove('member-row-busy');
+
             return;
         }
 
+        if (form.dataset.memberAction === 'role') {
+            const roleEl = row?.querySelector('[data-member-role]');
+            const select = form.querySelector('[name="role"]');
+            if (roleEl && select) {
+                roleEl.textContent = select.selectedOptions[0]?.textContent?.trim() || roleEl.textContent;
+            }
+        }
+
+        if (form.dataset.memberAction === 'reset-password') {
+            form.reset();
+            const details = form.closest('details');
+            if (details) {
+                details.open = false;
+            }
+        }
+
         showToast(payload.message || `${name} updated.`, 'success');
+        row?.classList.remove('member-row-busy');
     } catch {
         showToast(`Network error while updating ${name}.`, 'error');
         row?.classList.remove('member-row-busy');
@@ -216,40 +249,61 @@ function bindConfirmModal() {
     });
 }
 
+function roleOptionsHtml(roleLabels, selectedRole) {
+    return Object.entries(roleLabels).map(([value, label]) => {
+        const selected = value === selectedRole ? 'selected' : '';
+
+        return `<option value="${escapeHtml(value)}" ${selected}>${escapeHtml(label)}</option>`;
+    }).join('');
+}
+
 export function renderAdminMemberRow(member, options) {
     const status = member.status || 'active';
-    const role = member.role || 'marketer';
-    const nextRole = role === 'admin' ? 'marketer' : 'admin';
+    const role = member.role || 'sdr';
+    const roleLabel = member.role_label || options.roleLabels[role] || role;
     const base = options.membersBase;
     const csrf = options.csrf;
     const canManage = member.can_manage;
+    const roleOptions = roleOptionsHtml(options.roleLabels, role);
 
     const actions = canManage
-        ? `<div class="member-row-actions flex flex-wrap items-center gap-2">
-                <form method="POST" action="${escapeHtml(base)}/${member.id}/role" data-member-action="role" data-member-name="${escapeHtml(member.name)}" data-next-role="${nextRole}">
+        ? `<div class="member-row-actions flex flex-col gap-3 w-full sm:w-auto sm:min-w-[280px]">
+                <form method="POST" action="${escapeHtml(base)}/${member.id}/role" data-member-action="role" data-member-name="${escapeHtml(member.name)}" class="flex items-center gap-2">
                     <input type="hidden" name="_token" value="${escapeHtml(csrf)}">
                     <input type="hidden" name="_method" value="PATCH">
-                    <input type="hidden" name="role" value="${nextRole}">
-                    <button type="submit" class="member-action-btn member-action-btn-role">${role === 'admin' ? 'Make agent' : 'Make admin'}</button>
+                    <label class="text-xs text-slate-500 shrink-0">Role</label>
+                    <select name="role" class="member-role-select flex-1 px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs">${roleOptions}</select>
+                    <button type="submit" class="member-action-btn member-action-btn-role text-xs">Save</button>
                 </form>
-                <form method="POST" action="${escapeHtml(base)}/${member.id}/suspend" data-member-action="suspend" data-member-name="${escapeHtml(member.name)}" ${status === 'suspended' ? 'hidden' : ''}>
-                    <input type="hidden" name="_token" value="${escapeHtml(csrf)}">
-                    <button type="submit" class="member-action-btn member-action-btn-suspend">Suspend</button>
-                </form>
-                <form method="POST" action="${escapeHtml(base)}/${member.id}/reactivate" data-member-action="reactivate" data-member-name="${escapeHtml(member.name)}" ${status !== 'suspended' ? 'hidden' : ''}>
-                    <input type="hidden" name="_token" value="${escapeHtml(csrf)}">
-                    <button type="submit" class="member-action-btn member-action-btn-reactivate">Reactivate</button>
-                </form>
-                <form method="POST" action="${escapeHtml(base)}/${member.id}" data-member-action="remove" data-member-name="${escapeHtml(member.name)}">
-                    <input type="hidden" name="_token" value="${escapeHtml(csrf)}">
-                    <input type="hidden" name="_method" value="DELETE">
-                    <button type="submit" class="member-action-btn member-action-btn-remove">Remove</button>
-                </form>
+                <details class="member-reset-password text-xs">
+                    <summary class="cursor-pointer text-indigo-600 font-medium">Reset password</summary>
+                    <form method="POST" action="${escapeHtml(base)}/${member.id}/reset-password" data-member-action="reset-password" data-member-name="${escapeHtml(member.name)}" class="mt-2 space-y-2">
+                        <input type="hidden" name="_token" value="${escapeHtml(csrf)}">
+                        <input type="password" name="password" required minlength="6" placeholder="New password" class="w-full px-2 py-1.5 border border-slate-200 rounded-lg">
+                        <input type="password" name="password_confirmation" required minlength="6" placeholder="Confirm password" class="w-full px-2 py-1.5 border border-slate-200 rounded-lg">
+                        <button type="submit" class="member-action-btn member-action-btn-role w-full">Update password</button>
+                    </form>
+                </details>
+                <div class="flex flex-wrap items-center gap-2">
+                    <form method="POST" action="${escapeHtml(base)}/${member.id}/suspend" data-member-action="suspend" data-member-name="${escapeHtml(member.name)}" ${status === 'suspended' ? 'hidden' : ''}>
+                        <input type="hidden" name="_token" value="${escapeHtml(csrf)}">
+                        <button type="submit" class="member-action-btn member-action-btn-suspend">Suspend</button>
+                    </form>
+                    <form method="POST" action="${escapeHtml(base)}/${member.id}/reactivate" data-member-action="reactivate" data-member-name="${escapeHtml(member.name)}" ${status !== 'suspended' ? 'hidden' : ''}>
+                        <input type="hidden" name="_token" value="${escapeHtml(csrf)}">
+                        <button type="submit" class="member-action-btn member-action-btn-reactivate">Reactivate</button>
+                    </form>
+                    <form method="POST" action="${escapeHtml(base)}/${member.id}" data-member-action="remove" data-member-name="${escapeHtml(member.name)}">
+                        <input type="hidden" name="_token" value="${escapeHtml(csrf)}">
+                        <input type="hidden" name="_method" value="DELETE">
+                        <button type="submit" class="member-action-btn member-action-btn-remove">Remove</button>
+                    </form>
+                </div>
            </div>`
         : '';
 
     return `
-        <div class="member-row py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${status === 'suspended' ? 'member-row-suspended' : ''}" data-member-id="${member.id}">
+        <div class="member-row py-4 flex flex-col sm:flex-row sm:items-start justify-between gap-4 ${status === 'suspended' ? 'member-row-suspended' : ''}" data-member-id="${member.id}" data-member-name="${escapeHtml(member.name)}">
             <div class="member-row-identity min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">
                     <span class="font-bold text-slate-800 text-sm">${escapeHtml(member.name)}</span>
@@ -257,7 +311,7 @@ export function renderAdminMemberRow(member, options) {
                     <span class="member-status-badge member-status-${status}" data-member-status>${status === 'suspended' ? 'Suspended' : (status === 'invited' ? 'Invited' : 'Active')}</span>
                 </div>
                 <div class="text-xs text-slate-400 mt-1 truncate">${escapeHtml(member.email)}</div>
-                <div class="text-xs text-slate-500 mt-0.5" data-member-role>${role === 'marketer' ? 'Agent' : 'Administrator'}</div>
+                <div class="text-xs text-slate-500 mt-0.5" data-member-role>${escapeHtml(roleLabel)}</div>
             </div>
             ${actions}
         </div>
@@ -296,6 +350,7 @@ export function updateMemberRows(container, members) {
 
     if (container.dataset.adminTeam === '1') {
         replaceAdminTeam(container, members);
+
         return;
     }
 
@@ -324,7 +379,12 @@ export function updateMemberRows(container, members) {
 
         const roleEl = row.querySelector('[data-member-role]');
         if (roleEl) {
-            roleEl.textContent = member.role === 'marketer' ? 'Agent' : 'Administrator';
+            roleEl.textContent = member.role_label || member.role || roleEl.textContent;
+        }
+
+        const roleSelect = row.querySelector('[data-member-role-select]');
+        if (roleSelect && member.role) {
+            roleSelect.value = member.role;
         }
 
         const suspendForm = row.querySelector('[data-member-action="suspend"]');
