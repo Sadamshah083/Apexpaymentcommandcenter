@@ -145,7 +145,7 @@ class WorkspaceAuthController extends Controller
             Auth::login($user);
             $user->update(['current_workspace_id' => $activeWorkspace->id]);
 
-            if ($user->canAccessMarketerPortal($activeWorkspace->id)) {
+            if ($user->canAccessPortal($activeWorkspace->id)) {
                 return redirect()->route('portal.dashboard')->with('success', 'Signed in to '.config('app.name').'.');
             }
 
