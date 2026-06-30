@@ -11,6 +11,12 @@
         'fail' => ['&#10007;', 'text-red-600'],
         default => ['i', 'text-blue-600'],
     };
+    $jsStatusIcons = [
+        'pass' => ['&#10003;', 'text-green-600'],
+        'warn' => ['!', 'text-amber-600'],
+        'fail' => ['&#10007;', 'text-red-600'],
+        'info' => ['i', 'text-blue-600'],
+    ];
 @endphp
 <div class="mb-8">
     <h2 class="text-2xl font-bold">Reputation Center</h2>
@@ -42,9 +48,9 @@
         </form>
         <ul id="compliance-list" class="space-y-2 text-sm">
             @forelse($complianceChecklist as $item)
-                @php [$icon, $color] = $statusIcon($item['status']); @endphp
+                @php $iconData = $statusIcon($item['status']); @endphp
                 <li class="flex items-start gap-2">
-                    <span class="{{ $color }}">{!! $icon !!}</span>
+                    <span class="{{ $iconData[1] }}">{!! $iconData[0] !!}</span>
                     <span>
                         <span class="font-medium">{{ $item['label'] }}</span>
                         @if(!empty($item['detail']))
@@ -154,12 +160,7 @@
     const csrf = document.querySelector('meta[name="csrf-token"]')?.content;
     const complianceUrl = @json(route($routePrefix.'reputation.compliance'));
     const warmupUrl = @json(route($routePrefix.'reputation.warmup'));
-    const statusIcon = @json([
-        'pass' => ['&#10003;', 'text-green-600'],
-        'warn' => ['!', 'text-amber-600'],
-        'fail' => ['&#10007;', 'text-red-600'],
-        'info' => ['i', 'text-blue-600'],
-    ]);
+    const statusIcon = @json($jsStatusIcons);
 
     document.getElementById('compliance-form')?.addEventListener('submit', async (event) => {
         event.preventDefault();
