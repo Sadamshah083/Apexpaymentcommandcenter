@@ -161,6 +161,11 @@
     color: #18181b !important;
 }
 
+.app-field input[type="checkbox"],
+.app-field input[type="radio"] {
+    width: auto !important;
+}
+
 .app-input:focus,
 .app-field input:focus,
 .app-field select:focus,
