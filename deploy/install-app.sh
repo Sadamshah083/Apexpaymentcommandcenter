@@ -11,8 +11,14 @@ ADMIN_PASS="${ADMIN_PASS:?ADMIN_PASS required}"
 
 cd "$APP_DIR"
 
-echo "==> Writing production .env..."
-cat > .env <<EOF
+PRESERVE_ENV="${PRESERVE_ENV:-0}"
+if [[ -f .env ]] && [[ "$PRESERVE_ENV" == "1" ]]; then
+  echo "==> Preserving existing .env"
+  DB_PASS="$(grep '^DB_PASSWORD=' .env | cut -d= -f2- | tr -d '"')"
+  ADMIN_PASS="${ADMIN_PASS:-$(grep '^PRODUCTION_ADMIN_PASSWORD=' .env | cut -d= -f2- | tr -d '"' || echo "$ADMIN_PASS")}"
+else
+  echo "==> Writing production .env..."
+  cat > .env <<EOF
 APP_NAME="ApexOne Command Center"
 APP_ENV=production
 APP_KEY=
@@ -48,8 +54,14 @@ PRODUCTION_ADMIN_PASSWORD=${ADMIN_PASS}
 PRODUCTION_ADMIN_EMAIL=admin@apexone.local
 EOF
 
-chown www-data:www-data .env
-chmod 640 .env
+  chown www-data:www-data .env
+  chmod 640 .env
+fi
+
+if [[ ! -f .env ]]; then
+  echo "ERROR: .env missing after install bootstrap" >&2
+  exit 1
+fi
 
 echo "==> Installing PHP dependencies..."
 export COMPOSER_ALLOW_SUPERUSER=1
@@ -62,7 +74,12 @@ rm -rf node_modules
 
 echo "==> Laravel bootstrap..."
 php artisan key:generate --force
-php artisan migrate:fresh --seed --force
+if [[ "$PRESERVE_ENV" == "1" ]]; then
+  php artisan migrate --force
+  php artisan db:seed --class=ApexPaymentsWorkspaceSeeder --force || true
+else
+  php artisan migrate:fresh --seed --force
+fi
 php artisan storage:link || true
 
 echo "==> Creating production admin..."

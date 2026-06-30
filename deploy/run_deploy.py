@@ -143,6 +143,7 @@ def main() -> int:
         f"DB_PASS={shlex.quote(db_pass)} "
         f"ADMIN_PASS={shlex.quote(admin_pass)} "
         f"APP_URL={shlex.quote(APP_URL)} "
+        f"PRESERVE_ENV={shlex.quote(os.environ.get('PRESERVE_ENV', '1' if SKIP_MYSQL else '0'))} "
         f"bash /tmp/apexone-install.sh"
     )
     run(ssh, install_cmd, sudo=True)
