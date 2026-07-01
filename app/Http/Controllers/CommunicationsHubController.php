@@ -872,6 +872,21 @@ class CommunicationsHubController extends Controller
 
     }
 
+    public function transferCall(Request $request, string $uuid)
+    {
+        $validated = $request->validate([
+            'destination' => ['required', 'string', 'max:64'],
+        ]);
+
+        try {
+            $this->zoom->transferCall($uuid, $validated['destination']);
+            return redirect()->route($this->routePrefix().'communications.index', ['mode' => 'calls'])
+                ->with('success', 'Call transferred successfully.');
+        } catch (\Throwable $e) {
+            return back()->with('error', $this->zoom->humanizeError($e->getMessage()));
+        }
+    }
+
     public function sendChat(Request $request)
     {
         $validated = $request->validate([

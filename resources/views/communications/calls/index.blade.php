@@ -96,29 +96,37 @@
                     </div>
                 </div>
                 <div class="ghl-call-card-actions">
-                    @php
-                        $callbackPhone = match ($log['direction'] ?? '') {
-                            'inbound' => $log['from_phone'] ?? null,
-                            'outbound' => $log['to_phone'] ?? null,
-                            default => $log['to_phone'] ?? $log['from_phone'] ?? null,
-                        };
-                    @endphp
-                    @if($callbackPhone)
-                        @include('communications.partials.call-actions', [
-                            'routePrefix' => $routePrefix,
-                            'phone' => $callbackPhone,
-                        ])
-                    @endif
-                    @if(!empty($log['has_recording_media']) && !empty($log['recording_id']))
-                        @include('communications.partials.recording-actions', [
-                            'routePrefix' => $routePrefix,
-                            'recordingId' => $log['recording_id'],
-                            'callReferenceId' => $log['call_reference_id'] ?? $log['recording_id'],
-                            'source' => $log['recording_source'] ?? 'phone',
-                            'hasMedia' => true,
-                        ])
+                    @if(($log['result'] ?? '') === 'Active Call')
+                        <form method="POST" action="{{ route($routePrefix.'communications.morpheus.calls.transfer', ['uuid' => $log['id']]) }}" class="flex items-center gap-2">
+                            @csrf
+                            <input type="text" name="destination" placeholder="Transfer dest (e.g. 8003)" required class="comm-hub-input text-xs py-1 px-2 w-40" style="margin-bottom:0">
+                            <button type="submit" class="comm-hub-btn text-xs py-1 px-3">Transfer</button>
+                        </form>
                     @else
-                        <span class="text-xs text-slate-400">No recording</span>
+                        @php
+                            $callbackPhone = match ($log['direction'] ?? '') {
+                                'inbound' => $log['from_phone'] ?? null,
+                                'outbound' => $log['to_phone'] ?? null,
+                                default => $log['to_phone'] ?? $log['from_phone'] ?? null,
+                            };
+                        @endphp
+                        @if($callbackPhone)
+                            @include('communications.partials.call-actions', [
+                                'routePrefix' => $routePrefix,
+                                'phone' => $callbackPhone,
+                            ])
+                        @endif
+                        @if(!empty($log['has_recording_media']) && !empty($log['recording_id']))
+                            @include('communications.partials.recording-actions', [
+                                'routePrefix' => $routePrefix,
+                                'recordingId' => $log['recording_id'],
+                                'callReferenceId' => $log['call_reference_id'] ?? $log['recording_id'],
+                                'source' => $log['recording_source'] ?? 'phone',
+                                'hasMedia' => true,
+                            ])
+                        @else
+                            <span class="text-xs text-slate-400">No recording</span>
+                        @endif
                     @endif
                 </div>
             </article>

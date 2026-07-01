@@ -55,7 +55,7 @@ class CommunicationsHubTest extends TestCase
             'password' => Hash::make('password123'),
             'current_workspace_id' => $workspace->id,
         ]);
-        $workspace->users()->attach($agent->id, ['role' => 'marketer', 'status' => 'active', 'joined_at' => now()]);
+        $workspace->users()->attach($agent->id, ['role' => 'appointment_setter', 'status' => 'active', 'joined_at' => now()]);
 
         $this->actingAs($agent)
             ->get(route('portal.communications.index'))

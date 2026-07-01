@@ -33,6 +33,11 @@ return [
         ],
     ],
 
+    'morpheus' => [
+        'api_key' => env('MORPHEUS_API_KEY', 'ck_caea4aeef50fcd3d50131c65eb5a13d79e05fcf1aea27305'),
+        'host' => env('MORPHEUS_HOST', 'apexone.morpheus.cx'),
+    ],
+
     'communications' => [
         'cache_ttl_minutes' => (int) env('COMMUNICATIONS_CACHE_TTL', 10),
         'default_days' => (int) env('COMMUNICATIONS_DEFAULT_DAYS', 14),

@@ -9,8 +9,18 @@ use Illuminate\Support\Str;
 
 class ZoomApiService
 {
+    public function isMorpheus(): bool
+    {
+        return filled(config('integrations.morpheus.api_key'))
+            && filled(config('integrations.morpheus.host'));
+    }
+
     public function isConfigured(): bool
     {
+        if ($this->isMorpheus()) {
+            return true;
+        }
+
         return filled(config('integrations.zoom.account_id'))
             && filled(config('integrations.zoom.client_id'))
             && filled(config('integrations.zoom.client_secret'));
@@ -21,6 +31,32 @@ class ZoomApiService
      */
     public function connectionStatus(): array
     {
+        if ($this->isMorpheus()) {
+            try {
+                $host = rtrim(config('integrations.morpheus.host'), '/');
+                $apiKey = config('integrations.morpheus.api_key');
+                $response = Http::withHeaders(['X-API-Key' => $apiKey])
+                    ->acceptJson()
+                    ->timeout(12)
+                    ->get("https://{$host}/api/v1/call-control/users", ['limit' => 1]);
+
+                if ($response->successful()) {
+                    return [
+                        'connected' => true,
+                        'message' => 'Connected to Morpheus CX API.',
+                        'expires_at' => null,
+                    ];
+                }
+                throw new \RuntimeException($response->body());
+            } catch (\Throwable $e) {
+                return [
+                    'connected' => false,
+                    'message' => $e->getMessage(),
+                    'expires_at' => null,
+                ];
+            }
+        }
+
         if (! $this->isConfigured()) {
             return [
                 'connected' => false,
@@ -51,6 +87,13 @@ class ZoomApiService
      */
     public function connectionDiagnostics(): array
     {
+        if ($this->isMorpheus()) {
+            return [
+                'phone_available' => true,
+                'messages' => ['Connected to Morpheus CX Call Control.'],
+            ];
+        }
+
         if (! $this->isConfigured()) {
             return ['phone_available' => false, 'messages' => ['Zoom is not configured.']];
         }
@@ -106,6 +149,39 @@ class ZoomApiService
      */
     public function listUsers(array $filters = []): array
     {
+        if ($this->isMorpheus()) {
+            try {
+                $host = rtrim(config('integrations.morpheus.host'), '/');
+                $apiKey = config('integrations.morpheus.api_key');
+                $response = Http::withHeaders(['X-API-Key' => $apiKey])
+                    ->acceptJson()
+                    ->timeout(12)
+                    ->get("https://{$host}/api/v1/call-control/users", [
+                        'limit' => min((int) ($filters['per_page'] ?? 50), 100),
+                        'search' => $filters['search'] ?? null,
+                    ]);
+
+                if ($response->successful()) {
+                    $users = [];
+                    foreach ($response->json('users') ?? [] as $row) {
+                        $users[] = [
+                            'id' => $row['id'],
+                            'first_name' => $row['first_name'] ?? $row['username'],
+                            'last_name' => $row['last_name'] ?? '',
+                            'email' => $row['email'] ?? '',
+                            'type' => 'user',
+                            'status' => $row['status'] ?? 'active',
+                        ];
+                    }
+                    return [
+                        'users' => $users,
+                        'next_page_token' => null,
+                    ];
+                }
+            } catch (\Throwable $e) {}
+            return ['users' => [], 'next_page_token' => null];
+        }
+
         $response = $this->request('get', '/users', [
             'page_size' => min((int) ($filters['per_page'] ?? 50), 100),
             'next_page_token' => $filters['page_token'] ?? null,
@@ -123,6 +199,44 @@ class ZoomApiService
      */
     public function listPhoneUsers(array $filters = []): array
     {
+        if ($this->isMorpheus()) {
+            try {
+                $host = rtrim(config('integrations.morpheus.host'), '/');
+                $apiKey = config('integrations.morpheus.api_key');
+                $response = Http::withHeaders(['X-API-Key' => $apiKey])
+                    ->acceptJson()
+                    ->timeout(12)
+                    ->get("https://{$host}/api/v1/call-control/extensions");
+
+                if ($response->successful()) {
+                    $users = [];
+                    foreach ($response->json('extensions') ?? [] as $row) {
+                        $phoneNumbers = array_filter([$row['outbound_cid_num'] ?? $row['caller_id_num'] ?? null]);
+                        $users[] = [
+                            'id' => $row['id'],
+                            'name' => $row['caller_id_name'] ?? 'SIP Extension '.$row['extension_num'],
+                            'email' => $row['vm_email'] ?? '',
+                            'extension_number' => $row['extension_num'],
+                            'phone_numbers' => $phoneNumbers,
+                            'default_caller_id' => $phoneNumbers[0] ?? $row['extension_num'],
+                            'status' => $row['status'] ?? 'active',
+                        ];
+                    }
+                    return [
+                        'users' => $users,
+                        'next_page_token' => null,
+                        'warning' => null,
+                    ];
+                }
+            } catch (\Throwable $e) {
+                return [
+                    'users' => [],
+                    'next_page_token' => null,
+                    'warning' => $e->getMessage(),
+                ];
+            }
+        }
+
         try {
             $response = $this->request('get', '/phone/users', [
                 'page_size' => min((int) ($filters['per_page'] ?? 50), 50),
@@ -196,6 +310,45 @@ class ZoomApiService
      */
     public function listCallLogs(array $filters = []): array
     {
+        if ($this->isMorpheus()) {
+            try {
+                $host = rtrim(config('integrations.morpheus.host'), '/');
+                $apiKey = config('integrations.morpheus.api_key');
+                $response = Http::withHeaders(['X-API-Key' => $apiKey])
+                    ->acceptJson()
+                    ->timeout(12)
+                    ->get("https://{$host}/api/v1/call-control/calls");
+
+                if ($response->successful()) {
+                    $logs = [];
+                    foreach ($response->json('calls') ?? [] as $call) {
+                        $logs[] = [
+                            'id' => $call['uuid'],
+                            'direction' => $call['direction'] ?? 'inbound',
+                            'from' => $call['phone_number'] ?? 'Unknown',
+                            'to' => 'Agent',
+                            'start_time' => $call['started_at'] ?? now()->toIso8601String(),
+                            'result' => 'Active Call',
+                            'duration' => now()->diffInSeconds(\Illuminate\Support\Carbon::parse($call['started_at'] ?? now())),
+                            'recording_status' => 'non_recorded',
+                            'raw' => $call,
+                        ];
+                    }
+                    return [
+                        'call_logs' => $logs,
+                        'next_page_token' => null,
+                        'warning' => null,
+                    ];
+                }
+            } catch (\Throwable $e) {
+                return [
+                    'call_logs' => [],
+                    'next_page_token' => null,
+                    'warning' => $e->getMessage(),
+                ];
+            }
+        }
+
         $from = $filters['from'] ?? now()->subDays(30)->toDateString();
         $to = $filters['to'] ?? now()->toDateString();
         $query = [
@@ -336,6 +489,14 @@ class ZoomApiService
      */
     public function listRecordings(array $filters = []): array
     {
+        if ($this->isMorpheus()) {
+            return [
+                'recordings' => [],
+                'next_page_token' => null,
+                'warnings' => [],
+            ];
+        }
+
         $warnings = [];
         $phonePayload = $this->listPhoneRecordings($filters);
 
@@ -401,6 +562,14 @@ class ZoomApiService
      */
     public function listPhoneRecordings(array $filters = []): array
     {
+        if ($this->isMorpheus()) {
+            return [
+                'recordings' => [],
+                'next_page_token' => null,
+                'warning' => null,
+            ];
+        }
+
         $from = $filters['from'] ?? now()->subDays(30)->toDateString();
         $to = $filters['to'] ?? now()->toDateString();
 
@@ -508,6 +677,14 @@ class ZoomApiService
      */
     public function listVoiceMails(array $filters = []): array
     {
+        if ($this->isMorpheus()) {
+            return [
+                'voice_mails' => [],
+                'next_page_token' => null,
+                'warning' => null,
+            ];
+        }
+
         [$from, $to] = $this->clampDateRange(
             $filters['from'] ?? now()->subDays((int) config('integrations.communications.default_days', 14))->toDateString(),
             $filters['to'] ?? now()->toDateString(),
@@ -635,6 +812,14 @@ class ZoomApiService
      */
     public function listSmsSessions(array $filters = []): array
     {
+        if ($this->isMorpheus()) {
+            return [
+                'sessions' => [],
+                'next_page_token' => null,
+                'warning' => null,
+            ];
+        }
+
         $warnings = [];
         $sessions = [];
 
@@ -833,6 +1018,10 @@ class ZoomApiService
      */
     public function listCallQueues(array $filters = []): array
     {
+        if ($this->isMorpheus()) {
+            return ['queues' => [], 'warning' => null];
+        }
+
         try {
             $response = $this->request('get', '/phone/call_queues', [
                 'page_size' => min((int) ($filters['per_page'] ?? 50), 50),
@@ -878,6 +1067,14 @@ class ZoomApiService
      */
     public function listTeamChatChannels(array $filters = []): array
     {
+        if ($this->isMorpheus()) {
+            return [
+                'channels' => [],
+                'next_page_token' => null,
+                'warning' => null,
+            ];
+        }
+
         $channels = [];
         $warnings = [];
 
@@ -2023,6 +2220,14 @@ class ZoomApiService
 
     public function maskedSecret(): string
     {
+        if ($this->isMorpheus()) {
+            $key = (string) config('integrations.morpheus.api_key');
+            if ($key === '') {
+                return '—';
+            }
+            return substr($key, 0, 7) . '••••••••' . substr($key, -4);
+        }
+
         $secret = (string) config('integrations.zoom.client_secret');
 
         if ($secret === '') {
@@ -2034,6 +2239,10 @@ class ZoomApiService
 
     public function webhookSecret(): ?string
     {
+        if ($this->isMorpheus()) {
+            return null;
+        }
+
         $secret = config('integrations.zoom.webhook_secret');
 
         return filled($secret) ? (string) $secret : null;
@@ -2041,6 +2250,10 @@ class ZoomApiService
 
     public function accountId(): ?string
     {
+        if ($this->isMorpheus()) {
+            return 'Morpheus CX Tenant';
+        }
+
         $id = config('integrations.zoom.account_id');
 
         return filled($id) ? (string) $id : null;
@@ -2048,6 +2261,10 @@ class ZoomApiService
 
     public function clientId(): ?string
     {
+        if ($this->isMorpheus()) {
+            return config('integrations.morpheus.host');
+        }
+
         $id = config('integrations.zoom.client_id');
 
         return filled($id) ? (string) $id : null;
@@ -2058,6 +2275,13 @@ class ZoomApiService
      */
     public function requiredScopes(): array
     {
+        if ($this->isMorpheus()) {
+            return [
+                'calls:read' => 'Read active calls',
+                'calls:control' => 'Call transfer, hangup, etc.'
+            ];
+        }
+
         return config('integrations.zoom.required_scopes', []);
     }
 
@@ -2278,5 +2502,27 @@ class ZoomApiService
         }
 
         return Str::limit($zoomMessage, 220);
+    }
+
+    /**
+     * Transfer an active call to a destination extension or number.
+     */
+    public function transferCall(string $uuid, string $destination): array
+    {
+        $host = rtrim(config('integrations.morpheus.host'), '/');
+        $apiKey = config('integrations.morpheus.api_key');
+        
+        $response = Http::withHeaders(['X-API-Key' => $apiKey])
+            ->acceptJson()
+            ->timeout(12)
+            ->post("https://{$host}/api/v1/call-control/calls/{$uuid}/transfer", [
+                'destination' => $destination,
+            ]);
+
+        if (!$response->successful()) {
+            throw new \RuntimeException('Morpheus API error: '.$response->body());
+        }
+
+        return $response->json();
     }
 }
