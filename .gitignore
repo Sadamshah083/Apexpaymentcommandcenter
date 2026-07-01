@@ -27,3 +27,8 @@ Homestead.yaml
 Thumbs.db
 /php83/
 /php83.zip
+
+# Custom ignores
+/scratch/
+/deploy/__pycache__/
+.env.ci-test
