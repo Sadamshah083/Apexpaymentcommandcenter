@@ -103,6 +103,30 @@ class ApexPaymentsPipelineTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_setter_can_save_status_with_note_on_lead_detail(): void
+    {
+        $lead = $this->makeLead();
+
+        $this->actingAs($this->setter)
+            ->post(route('portal.leads.setter-status', $lead), [
+                'setter_status' => 'contacted',
+                'notes' => 'Left voicemail and sent follow-up text.',
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $lead->refresh();
+        $this->assertSame('contacted', $lead->setter_status);
+
+        $this->assertDatabaseHas('lead_activities', [
+            'workflow_lead_id' => $lead->id,
+            'user_id' => $this->setter->id,
+            'type' => 'setter_status_change',
+            'outcome' => 'contacted',
+            'notes' => 'Left voicemail and sent follow-up text.',
+        ]);
+    }
+
     public function test_setter_handoff_moves_lead_to_closer_queue(): void
     {
         $lead = $this->makeLead();
@@ -126,6 +150,7 @@ class ApexPaymentsPipelineTest extends TestCase
         $this->assertSame('appointment_settled', $lead->pipeline_phase);
         $this->assertNull($lead->assigned_user_id);
         $this->assertNotNull($lead->appointment_settled_at);
+        $this->assertStringContainsString('Meeting booked Tuesday', (string) $lead->handoff_notes);
 
         $this->assertDatabaseHas('lead_activities', [
             'workflow_lead_id' => $lead->id,
@@ -138,6 +163,37 @@ class ApexPaymentsPipelineTest extends TestCase
             'type' => 'setter_status_change',
             'outcome' => 'appointment_settled',
         ]);
+    }
+
+    public function test_handoff_compiles_all_setter_notes_for_closers(): void
+    {
+        $lead = $this->makeLead();
+        $service = app(LeadPipelineService::class);
+
+        $service->updateSetterStatus($this->setter, $lead, $this->workspace, 'contacted', 'Left voicemail.');
+        $lead->refresh();
+        $service->updateSetterStatus($this->setter, $lead, $this->workspace, 'follow_up', 'Owner asked to call back Friday.');
+        $lead->refresh();
+        $service->updateSetterStatus($this->setter, $lead, $this->workspace, 'appointment_settled', 'Demo set for Tuesday 2pm.');
+
+        $lead->refresh();
+        $this->assertStringContainsString('Left voicemail.', $lead->handoff_notes);
+        $this->assertStringContainsString('call back Friday', $lead->handoff_notes);
+        $this->assertStringContainsString('Tuesday 2pm', $lead->handoff_notes);
+
+        app(CloserAssignmentService::class)->assign(
+            $this->workspace,
+            $lead,
+            $this->closer,
+            $this->closerTl
+        );
+
+        $this->actingAs($this->closer)
+            ->get(route('portal.leads.show', $lead))
+            ->assertOk()
+            ->assertSee('Setter notes')
+            ->assertSee('Left voicemail.')
+            ->assertSee('call back Friday');
     }
 
     public function test_closer_team_lead_can_assign_closer(): void

@@ -22,7 +22,7 @@ USER = os.environ.get("DEPLOY_USER", "issac")
 PASSWORD = os.environ.get("DEPLOY_PASSWORD", "btdev")
 APP_URL = os.environ.get("APP_URL", f"http://{HOST}")
 
-EXCLUDE_DIRS = {".git", "node_modules", "vendor", "php83", ".cursor", "terminals"}
+EXCLUDE_DIRS = {".git", "node_modules", "vendor", "php83", ".cursor", "terminals", "scratch"}
 EXCLUDE_FILES = {".env", ".env.ci-test", "database/database.sqlite", "public/hot"}
 
 

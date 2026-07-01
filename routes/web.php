@@ -15,6 +15,8 @@ use App\Http\Controllers\SalesOpsController;
 use App\Http\Controllers\WorkspaceAuthController;
 use App\Http\Controllers\WorkspaceMemberController;
 use App\Http\Controllers\WorkspaceSyncController;
+use App\Http\Controllers\ServerMonitoringController;
+use App\Http\Controllers\AdminDashboardController;
 use Illuminate\Support\Facades\Route;
 
 // Redirect root to portal login
@@ -48,15 +50,8 @@ Route::prefix('admin')->name('admin.')->middleware([
     \App\Http\Middleware\AdminPortalMiddleware::class,
     \App\Http\Middleware\EnsureAdminModuleAccess::class,
 ])->group(function () {
-    Route::get('/dashboard', function () {
-        $route = \App\Support\AdminModules::defaultRouteForUser(auth()->user());
-
-        if (! $route) {
-            abort(403, 'No admin modules are assigned to your account.');
-        }
-
-        return redirect()->route($route);
-    })->name('dashboard');
+    Route::get('/dashboard', [AdminDashboardController::class, 'index'])->name('dashboard');
+    Route::get('/dashboard/realtime-data', [AdminDashboardController::class, 'realtimeData'])->name('dashboard.realtime-data');
 
     Route::prefix('sales-ops')->name('sales-ops.')->group(function () {
         Route::get('/', [SalesOpsController::class, 'index'])->name('index');
@@ -166,6 +161,7 @@ Route::prefix('admin')->name('admin.')->middleware([
     Route::post('push/test', [PushNotificationController::class, 'sendTestNotification'])->name('push.test');
 
     Route::get('sync', [WorkspaceSyncController::class, 'poll'])->name('sync.poll');
+    Route::get('server-monitoring', [ServerMonitoringController::class, 'index'])->name('server.monitoring');
 
     Route::prefix('communications')->name('communications.')->group(function () {
         Route::get('/', [CommunicationsHubController::class, 'index'])->name('index');

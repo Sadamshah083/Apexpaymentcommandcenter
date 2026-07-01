@@ -257,14 +257,17 @@ class MarkdownReportParser
         return null;
     }
 
-    public function isValidReport(string $content): bool
+    public function hasReportSchema(string $content): bool
     {
-        $hasSchema = str_contains($content, '### Business Identity')
+        return str_contains($content, '### Business Identity')
             || str_contains($content, '**Direct Owner Name**')
             || str_contains($content, '**Payment Processor**')
             || str_contains($content, 'Direct Owner Name');
+    }
 
-        if (! $hasSchema) {
+    public function isValidReport(string $content): bool
+    {
+        if (! $this->hasReportSchema($content)) {
             return false;
         }
 
@@ -285,7 +288,17 @@ class MarkdownReportParser
         }
 
         $filled = 0;
-        foreach (['payment_processor', 'direct_phone', 'direct_email', 'pos_system', 'field_service_software'] as $field) {
+        foreach ([
+            'payment_processor',
+            'direct_phone',
+            'direct_email',
+            'pos_system',
+            'field_service_software',
+            'primary_service',
+            'business_name_official',
+            'physical_address',
+            'operating_hours',
+        ] as $field) {
             if (! empty($parsed[$field])) {
                 $filled++;
             }

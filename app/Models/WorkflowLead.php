@@ -166,6 +166,29 @@ class WorkflowLead extends Model
         return $this->hasMany(LeadActivity::class, 'workflow_lead_id')->latest();
     }
 
+    /**
+     * Setter status changes in chronological order (oldest first).
+     *
+     * @return \Illuminate\Support\Collection<int, LeadActivity>
+     */
+    public function setterStatusActivities(): \Illuminate\Support\Collection
+    {
+        $activities = $this->relationLoaded('activities')
+            ? $this->activities
+            : $this->activities()->with('user')->get();
+
+        return $activities
+            ->where('type', 'setter_status_change')
+            ->sortBy('created_at')
+            ->values();
+    }
+
+    public function hasSetterHistory(): bool
+    {
+        return $this->setterStatusActivities()->isNotEmpty()
+            || filled($this->handoff_notes);
+    }
+
     public function isAwaitingVerification(): bool
     {
         return $this->status === 'pending_verification';

@@ -25,10 +25,18 @@ class AdminModuleAccessTest extends TestCase
     {
         [$workspace, $manager] = $this->makeAdminMember('manager@example.com', 'manager', ['email_lists', 'reputation']);
 
+        $this->assertTrue($manager->canAccessAdminModule('dashboard', $workspace->id));
         $this->assertFalse($manager->canAccessAdminModule('lead_pipeline', $workspace->id));
         $this->assertTrue($manager->canAccessAdminModule('email_lists', $workspace->id));
         $this->assertTrue($manager->canAccessAdminModule('reputation', $workspace->id));
         $this->assertFalse($manager->canAccessAdminModule('user_management', $workspace->id));
+    }
+
+    public function test_default_admin_route_is_dashboard(): void
+    {
+        [$workspace, $manager] = $this->makeAdminMember('manager@example.com', 'manager', ['email_lists']);
+
+        $this->assertSame('admin.dashboard', AdminModules::defaultRouteForUser($manager, $workspace->id));
     }
 
     public function test_empty_module_permissions_block_admin_portal_access(): void

@@ -36,12 +36,14 @@ EXCLUDE_DIRS = {
     "php83",
     ".cursor",
     "terminals",
+    "scratch",
 }
 EXCLUDE_FILES = {
     ".env",
     ".env.ci-test",
     "database/database.sqlite",
     "public/hot",
+    "php83.zip",
 }
 
 
@@ -74,13 +76,14 @@ def build_tarball() -> bytes:
             rel = path.relative_to(ROOT)
             if rel.parts and rel.parts[0] in EXCLUDE_DIRS:
                 continue
-            if rel.name in EXCLUDE_FILES:
+            if rel.name in EXCLUDE_FILES or rel.name.endswith(".zip"):
                 continue
             if path.is_dir():
                 continue
             tar.add(path, arcname=str(rel).replace("\\", "/"))
     buffer.seek(0)
     return buffer.read()
+
 
 
 def upload_bytes(sftp: paramiko.SFTPClient, remote_path: str, payload: bytes) -> None:

@@ -19,6 +19,7 @@
         'leads' => $leads,
         'statusColumn' => 'closer',
         'showAssignee' => false,
+        'showSetterNotes' => true,
     ])
 </div>
 @endsection

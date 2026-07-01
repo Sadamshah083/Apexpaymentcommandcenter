@@ -1,37 +1,54 @@
 #!/usr/bin/env python3
-"""Set Gemini/OpenRouter keys on production and resume workflow enrichment."""
+"""Set Gemini/OpenRouter keys on production and optionally resume workflow enrichment."""
 
 from __future__ import annotations
 
 import os
-import re
 import shlex
 import sys
 from pathlib import Path
 
-import paramiko
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from deploy._ssh import REMOTE_APP, connect, restart_queue_workers, set_env_vars, sudo_run, sudo_run_batch, upload_files
 
 HOST = os.environ.get("DEPLOY_HOST", "203.215.160.44")
-USER = os.environ.get("DEPLOY_USER", "issac")
-PASSWORD = os.environ.get("DEPLOY_PASSWORD", "btdev")
 WORKFLOW_ID = int(os.environ.get("WORKFLOW_ID", "1"))
 CLEAR_GEMINI = os.environ.get("CLEAR_GEMINI", "").lower() in {"1", "true", "yes"}
+# Only re-queue failed/stuck leads by default. Set RESUME_ALL_IMPORTED=1 to queue every imported lead.
+RESUME_ALL_IMPORTED = os.environ.get("RESUME_ALL_IMPORTED", "").lower() in {"1", "true", "yes"}
 
 WORKFLOW_ENV_DEFAULTS = {
     "WORKFLOW_GEMINI_MODEL": "gemini-2.5-flash",
     "WORKFLOW_GEMINI_FALLBACK_MODELS": "gemini-2.5-pro",
-    "WORKFLOW_GEMINI_MAX_OUTPUT_TOKENS": "2048",
+    "WORKFLOW_GEMINI_MAX_OUTPUT_TOKENS": "4096",
     "WORKFLOW_GEMINI_THINKING_BUDGET": "0",
-    "WORKFLOW_GEMINI_GOOGLE_SEARCH": "false",
+    "WORKFLOW_GEMINI_GOOGLE_SEARCH": "true",
     "WORKFLOW_GEMINI_TIMEOUT": "120",
-    "WORKFLOW_WEB_SEARCH_QUERIES": "2",
-    "WORKFLOW_OPENROUTER_MAX_TOKENS": "2048",
-    "WORKFLOW_OPENROUTER_WEB_SEARCH": "false",
+    "WORKFLOW_WEB_SEARCH_QUERIES": "8",
+    "WORKFLOW_FOLLOW_UP_ENABLED": "true",
+    "WORKFLOW_FOLLOW_UP_MIN_SCORE": "3",
+    "WORKFLOW_OPENROUTER_MAX_TOKENS": "4096",
+    "WORKFLOW_OPENROUTER_WEB_SEARCH": "true",
 }
+
+UPLOAD_PATHS = [
+    "config/workflow_enrichment.php",
+    "app/Services/Workflow/WorkflowExtractor.php",
+    "app/Services/Workflow/WorkflowProviderStatusService.php",
+    "app/Services/BusinessResearch/ResearchInput.php",
+    "app/Services/BusinessResearch/MarkdownReportParser.php",
+    "app/Services/BusinessResearch/ResearchResultSanitizer.php",
+    "app/Services/BusinessResearch/BusinessResearchPrompt.php",
+    "app/Services/BusinessResearch/WebSearchService.php",
+    "app/Services/BusinessResearch/OpenRouterClient.php",
+    "app/Services/BusinessResearch/GeminiClient.php",
+]
 
 
 def load_local_env() -> dict[str, str]:
-    path = Path(__file__).resolve().parents[1] / ".env"
+    path = ROOT / ".env"
     if not path.is_file():
         return {}
     values: dict[str, str] = {}
@@ -47,32 +64,6 @@ def env_or_local(name: str, local: dict[str, str]) -> str:
     return os.environ.get(name, "") or local.get(name, "")
 
 
-def run(ssh: paramiko.SSHClient, command: str) -> str:
-    full = f"echo {shlex.quote(PASSWORD)} | sudo -S bash -lc {shlex.quote(command)}"
-    _, stdout, stderr = ssh.exec_command(full)
-    code = stdout.channel.recv_exit_status()
-    out = stdout.read().decode(errors="replace")
-    err = stderr.read().decode(errors="replace")
-    if code != 0:
-        raise RuntimeError(f"Command failed ({code}):\n{out}\n{err}")
-    return out.strip()
-
-
-def set_env_var(ssh: paramiko.SSHClient, key: str, value: str) -> None:
-    script = f"""
-import pathlib, re
-path = pathlib.Path('/var/www/apexone/.env')
-text = path.read_text()
-env_key = {key!r}
-env_val = {value!r}
-pattern = re.compile(r'^' + re.escape(env_key) + r'=.*$', re.M)
-line = env_key + '=' + env_val
-text = pattern.sub(line, text) if pattern.search(text) else text.rstrip() + '\\n' + line + '\\n'
-path.write_text(text)
-"""
-    run(ssh, f"python3 -c {shlex.quote(script)}")
-
-
 def main() -> int:
     local = load_local_env()
     gemini_api_key = env_or_local("GEMINI_API_KEY", local)
@@ -86,47 +77,37 @@ def main() -> int:
         print("CLEAR_GEMINI requires OPENROUTER_API_KEY as the active provider.", file=sys.stderr)
         return 1
 
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    ssh.connect(HOST, username=USER, password=PASSWORD, timeout=30)
+    ssh = connect()
 
+    env_updates: dict[str, str] = dict(WORKFLOW_ENV_DEFAULTS)
     if gemini_api_key:
         print("Configuring GEMINI_API_KEY...")
-        set_env_var(ssh, "GEMINI_API_KEY", gemini_api_key)
+        env_updates["GEMINI_API_KEY"] = gemini_api_key
     elif CLEAR_GEMINI:
-        print("Clearing GEMINI_API_KEY (use OpenRouter fallback)...")
-        set_env_var(ssh, "GEMINI_API_KEY", "")
+        print("Clearing GEMINI_API_KEY...")
+        env_updates["GEMINI_API_KEY"] = ""
     if openrouter_api_key:
         print("Configuring OPENROUTER_API_KEY...")
-        set_env_var(ssh, "OPENROUTER_API_KEY", openrouter_api_key)
+        env_updates["OPENROUTER_API_KEY"] = openrouter_api_key
 
-    print("Configuring WORKFLOW_* cheap enrichment settings...")
-    for key, value in WORKFLOW_ENV_DEFAULTS.items():
-        set_env_var(ssh, key, value)
+    print("Configuring WORKFLOW_* settings (one SSH call)...")
+    set_env_vars(ssh, env_updates)
 
-    uploads = [
-        ("config/workflow_enrichment.php", "/var/www/apexone/config/workflow_enrichment.php"),
-        ("app/Services/Workflow/WorkflowExtractor.php", "/var/www/apexone/app/Services/Workflow/WorkflowExtractor.php"),
-        ("app/Services/Workflow/WorkflowProviderStatusService.php", "/var/www/apexone/app/Services/Workflow/WorkflowProviderStatusService.php"),
-        ("app/Services/BusinessResearch/OpenRouterClient.php", "/var/www/apexone/app/Services/BusinessResearch/OpenRouterClient.php"),
-    ]
-    base = Path(__file__).resolve().parents[1]
-    sftp = ssh.open_sftp()
-    for local_rel, remote in uploads:
-        local_path = base / local_rel
-        if local_path.is_file():
-            tmp = f"/tmp/{local_path.name}"
-            sftp.put(str(local_path), tmp)
-            run(ssh, f"cp {tmp} {remote} && chown www-data:www-data {remote}")
-    sftp.close()
+    pairs = [(ROOT / rel, rel) for rel in UPLOAD_PATHS if (ROOT / rel).is_file()]
+    print(f"Uploading {len(pairs)} PHP files in one archive...")
+    upload_files(ssh, pairs, app_root=REMOTE_APP)
 
     print("Refreshing Laravel config and queue workers...")
-    run(ssh, "chown www-data:www-data /var/www/apexone/.env")
-    run(ssh, "cd /var/www/apexone && sudo -u www-data php artisan config:clear && sudo -u www-data php artisan config:cache")
-    run(ssh, "systemctl restart apexone-queue")
+    sudo_run_batch(ssh, [
+        f"chown www-data:www-data {REMOTE_APP}/.env",
+        f"cd {REMOTE_APP} && sudo -u www-data php artisan config:clear",
+        f"cd {REMOTE_APP} && sudo -u www-data php artisan config:cache",
+    ])
+    restart_queue_workers(ssh)
 
-    print("Resetting failed leads and resuming enrichment...")
-    php = f"""
+    if RESUME_ALL_IMPORTED:
+        print("RESUME_ALL_IMPORTED=1 — queueing every imported lead (slow for large workflows)...")
+        resume_php = f"""
 require 'vendor/autoload.php';
 $app = require 'bootstrap/app.php';
 $app->make(Illuminate\\Contracts\\Console\\Kernel::class)->bootstrap();
@@ -136,32 +117,46 @@ if (! $workflow) {{ fwrite(STDERR, 'Workflow not found\\n'); exit(1); }}
 App\\Models\\WorkflowLead::where('workflow_id', $workflowId)->where('status', 'failed')->update(['status' => 'imported', 'error_message' => null]);
 App\\Models\\WorkflowLead::where('workflow_id', $workflowId)->where('status', 'extracting')->update(['status' => 'imported']);
 $workflow->update(['status' => 'extracting', 'failed_leads' => 0, 'error_message' => null]);
-$leadIds = App\\Models\\WorkflowLead::where('workflow_id', $workflowId)->where('status', 'imported')->orderBy('row_number')->pluck('id');
-foreach ($leadIds as $leadId) {{
-    App\\Jobs\\ProcessLeadJob::dispatch($leadId, $workflow->custom_prompt);
-}}
-echo 'queued_' . $leadIds->count();
+app(App\\Services\\Workflow\\WorkflowService::class)->dispatchPendingLeadJobs($workflow->fresh());
+echo 'queued_imported';
 """
-    run(ssh, f"cd /var/www/apexone && sudo -u www-data php -r {shlex.quote(php)}")
-
-    db_pass = run(ssh, "grep '^DB_PASSWORD=' /var/www/apexone/.env | cut -d= -f2- | tr -d '\"'")
-    mysql = f"mysql -u apexone -p{shlex.quote(db_pass)} apexone"
-    print(run(ssh, f"{mysql} -e 'SELECT id,status,total_leads,processed_leads,failed_leads FROM workflows WHERE id={WORKFLOW_ID}'"))
-    print(run(ssh, f"{mysql} -e 'SELECT status,COUNT(*) c FROM workflow_leads WHERE workflow_id={WORKFLOW_ID} GROUP BY status'"))
-    print(run(ssh, f"{mysql} -e 'SELECT COUNT(*) pending_jobs FROM jobs'"))
-    verify = """
+    else:
+        print("Re-queueing failed and stuck leads only (fast)...")
+        resume_php = f"""
 require 'vendor/autoload.php';
 $app = require 'bootstrap/app.php';
 $app->make(Illuminate\\Contracts\\Console\\Kernel::class)->bootstrap();
-echo config('gemini.api_key') ? 'gemini_ok' : 'gemini_missing';
-echo ' ';
-echo config('openrouter.api_key') ? 'openrouter_ok' : 'openrouter_missing';
+$workflowId = {WORKFLOW_ID};
+$workflow = App\\Models\\Workflow::find($workflowId);
+if (! $workflow) {{ fwrite(STDERR, 'Workflow not found\\n'); exit(1); }}
+$failedIds = App\\Models\\WorkflowLead::where('workflow_id', $workflowId)->where('status', 'failed')->pluck('id');
+$stuckIds = App\\Models\\WorkflowLead::where('workflow_id', $workflowId)->where('status', 'extracting')
+    ->where('updated_at', '<', now()->subMinutes(10))->pluck('id');
+$retryIds = $failedIds->merge($stuckIds)->unique();
+if ($retryIds->isNotEmpty()) {{
+    App\\Models\\WorkflowLead::whereIn('id', $retryIds)->update(['status' => 'imported', 'error_message' => null]);
+    $workflow->update(['status' => 'extracting', 'error_message' => null]);
+    foreach ($retryIds as $leadId) {{
+        App\\Jobs\\ProcessLeadJob::dispatch($leadId, $workflow->custom_prompt);
+    }}
+}}
+echo 'retried_' . $retryIds->count();
+"""
+
+    print(sudo_run(ssh, f"cd {REMOTE_APP} && sudo -u www-data php -r {shlex.quote(resume_php)}"))
+
+    status_php = f"""
+require 'vendor/autoload.php';
+$app = require 'bootstrap/app.php';
+$app->make(Illuminate\\Contracts\\Console\\Kernel::class)->bootstrap();
+echo 'jobs=' . DB::table('jobs')->count();
+echo ' gemini=' . (config('gemini.api_key') ? 'ok' : 'missing');
 echo ' model=' . (config('workflow_enrichment.gemini_model') ?: config('gemini.model'));
 """
-    print(run(ssh, f"cd /var/www/apexone && sudo -u www-data php -r {shlex.quote(verify)}"))
+    print(sudo_run(ssh, f"cd {REMOTE_APP} && sudo -u www-data php -r {shlex.quote(status_php)}"))
 
     ssh.close()
-    print("Enrichment resumed.")
+    print("Enrichment configure complete.")
     return 0
 
 

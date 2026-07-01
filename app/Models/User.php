@@ -297,6 +297,10 @@ class User extends Authenticatable
             return false;
         }
 
+        if (AdminModules::all()[$module]['always_available'] ?? false) {
+            return true;
+        }
+
         if ($this->isSuperAdmin($workspaceId)) {
             return true;
         }

@@ -44,7 +44,9 @@ class PipelineController extends Controller
             'search' => $request->input('search'),
         ]);
 
-        return view('pipeline.setter.index', compact('workspace', 'leads', 'user'));
+        $setterStatuses = config('sales_ops.setter_statuses', []);
+
+        return view('pipeline.setter.index', compact('workspace', 'leads', 'user', 'setterStatuses'));
     }
 
     public function setterTeamDashboard(Request $request)

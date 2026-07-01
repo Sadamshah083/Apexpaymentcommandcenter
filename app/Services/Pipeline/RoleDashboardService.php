@@ -143,7 +143,7 @@ class RoleDashboardService
     protected function baseQuery(Workspace $workspace, array $filters)
     {
         $query = WorkflowLead::query()
-            ->with(['workflow', 'assignee'])
+            ->with(['workflow', 'assignee', 'setter'])
             ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspace->id))
             ->orderByDesc('updated_at');
 

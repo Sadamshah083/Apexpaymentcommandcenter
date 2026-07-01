@@ -4,6 +4,7 @@ namespace App\Services\BusinessResearch;
 
 use App\Models\BusinessResearch;
 use App\Models\CrmLead;
+use App\Models\WorkflowLead;
 
 class ResearchInput
 {
@@ -43,6 +44,35 @@ class ResearchInput
         return new self(
             businessName: trim($lead->business_name),
             address: $lead->researchAddress() !== 'Not specified' ? $lead->researchAddress() : null,
+            website: $lead->website ? trim($lead->website) : null,
+            sheetContext: $sheetLines ? implode("\n", $sheetLines) : null,
+        );
+    }
+
+    public static function fromWorkflowLead(WorkflowLead $lead): self
+    {
+        $sheetLines = [];
+
+        if ($lead->input_phone) {
+            $sheetLines[] = 'Phone from import: '.$lead->input_phone;
+        }
+        if ($lead->input_email) {
+            $sheetLines[] = 'Email from import: '.$lead->input_email;
+        }
+        if ($lead->owner_name) {
+            $sheetLines[] = 'Owner hint from import: '.$lead->owner_name;
+        }
+
+        $addressParts = array_filter([
+            $lead->address,
+            $lead->city,
+            $lead->state,
+            $lead->zip_code,
+        ]);
+
+        return new self(
+            businessName: trim($lead->business_name),
+            address: $addressParts ? implode(', ', $addressParts) : null,
             website: $lead->website ? trim($lead->website) : null,
             sheetContext: $sheetLines ? implode("\n", $sheetLines) : null,
         );

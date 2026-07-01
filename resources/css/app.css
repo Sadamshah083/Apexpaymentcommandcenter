@@ -2574,3 +2574,18 @@ body.member-confirm-open {
     flex: 1;
     min-width: 0;
 }
+
+.setter-status-details summary::-webkit-details-marker {
+    display: none;
+}
+
+.setter-status-details summary::before {
+    content: '▸';
+    display: inline-block;
+    margin-right: 0.35rem;
+    transition: transform 0.15s ease;
+}
+
+.setter-status-details[open] summary::before {
+    transform: rotate(90deg);
+}

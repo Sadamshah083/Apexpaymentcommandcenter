@@ -12,6 +12,20 @@ class WebSearchService
      */
     public function searchDuckDuckGo(string $query, int $maxResults = 8): array
     {
+        $results = $this->searchDuckDuckGoHtml($query, $maxResults);
+
+        if ($results !== []) {
+            return $results;
+        }
+
+        return $this->searchDuckDuckGoLite($query, $maxResults);
+    }
+
+    /**
+     * @return array<int, array{title: string, url: string, snippet: string}>
+     */
+    protected function searchDuckDuckGoHtml(string $query, int $maxResults): array
+    {
         try {
             $request = Http::timeout(25)
                 ->withHeaders([
@@ -35,6 +49,72 @@ class WebSearchService
         } catch (\Throwable) {
             return [];
         }
+    }
+
+    /**
+     * @return array<int, array{title: string, url: string, snippet: string}>
+     */
+    protected function searchDuckDuckGoLite(string $query, int $maxResults): array
+    {
+        try {
+            $request = Http::timeout(25)
+                ->withHeaders([
+                    'User-Agent' => 'Mozilla/5.0 (compatible; ApexOneEnrichment/1.0)',
+                    'Accept-Language' => 'en-US,en;q=0.9',
+                ]);
+
+            if (app()->isLocal() && config('app.allow_insecure_http_in_local', false)) {
+                $request = $request->withoutVerifying();
+            }
+
+            $response = $request->asForm()->post('https://lite.duckduckgo.com/lite/', [
+                'q' => $query,
+            ]);
+
+            if (! $response->successful()) {
+                return [];
+            }
+
+            return $this->parseDuckDuckGoLiteHtml($response->body(), $maxResults);
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /**
+     * @return array<int, array{title: string, url: string, snippet: string}>
+     */
+    protected function parseDuckDuckGoLiteHtml(string $html, int $maxResults): array
+    {
+        $results = [];
+
+        if (preg_match_all(
+            '/<a[^>]+rel="nofollow"[^>]+href="([^"]+)"[^>]*>(.*?)<\/a>/si',
+            $html,
+            $matches,
+            PREG_SET_ORDER
+        )) {
+            foreach (array_slice($matches, 0, $maxResults * 2) as $match) {
+                $url = html_entity_decode($match[1], ENT_QUOTES, 'UTF-8');
+                $title = trim(strip_tags(html_entity_decode($match[2], ENT_QUOTES, 'UTF-8')));
+
+                if ($title === '' || ! $this->isUsefulUrl($url)) {
+                    continue;
+                }
+
+                $results[] = [
+                    'title' => $title,
+                    'url' => $url,
+                    'snippet' => '',
+                ];
+
+                if (count($results) >= $maxResults) {
+                    break;
+                }
+            }
+        }
+
+        return $results;
     }
 
     /**

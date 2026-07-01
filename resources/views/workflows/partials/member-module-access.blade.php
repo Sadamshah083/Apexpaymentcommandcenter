@@ -56,7 +56,7 @@
                     <p class="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">{{ $section }}</p>
                     <div class="space-y-1.5">
                         @foreach($modules as $module)
-                            @if($module['key'] === 'user_management' && ! $canGrantUserManagement)
+                            @if(($module['always_available'] ?? false) || ($module['key'] === 'user_management' && ! $canGrantUserManagement))
                                 @continue
                             @endif
                             <label class="flex items-start gap-2 text-xs text-slate-600">

@@ -84,6 +84,7 @@ class AdminModules
                 'key' => $key,
                 'label' => $module['label'] ?? $key,
                 'description' => $module['description'] ?? '',
+                'always_available' => (bool) ($module['always_available'] ?? false),
             ];
         }
 

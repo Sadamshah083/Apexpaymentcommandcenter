@@ -31,8 +31,11 @@ class LeadPipelineService
                 && $lead->assigned_setter_id
                 && $this->isSetterOnTeam($workspace, (int) $lead->assigned_setter_id),
             'closers_team_lead' => in_array($lead->pipeline_phase, ['appointment_settled', 'with_closer', 'closed'], true),
-            'closer' => $lead->pipeline_phase === 'with_closer'
-                && (int) $lead->assigned_user_id === $user->id,
+            'closer' => in_array($lead->pipeline_phase, ['with_closer', 'closed'], true)
+                && (
+                    (int) $lead->assigned_user_id === $user->id
+                    || (int) $lead->assigned_closer_id === $user->id
+                ),
             default => false,
         };
     }
@@ -59,21 +62,41 @@ class LeadPipelineService
 
         $lead->update(['setter_status' => $status]);
 
-        if ($notes) {
-            $lead->update(['notes' => $notes]);
-        }
-
         if ($previousStatus !== $status) {
             $this->activities->logStatusChange($lead, $user, 'setter', $previousStatus, $status, $notes);
         } elseif ($notes) {
-            $this->activities->log($lead, $user, 'note', null, $notes);
+            $this->activities->logStatusChange($lead, $user, 'setter', $previousStatus, $status, $notes);
         }
 
         if ($status === 'appointment_settled') {
-            $this->handoffToClosersTeamLead($lead, $user, $notes);
+            $this->handoffToClosersTeamLead($lead->fresh(), $user, $notes);
         }
 
         return $lead->fresh();
+    }
+
+    public function compileSetterNotesSummary(WorkflowLead $lead, ?string $finalNote = null): ?string
+    {
+        $lead->loadMissing(['activities.user']);
+
+        $entries = $lead->setterStatusActivities()
+            ->filter(fn ($activity) => filled($activity->notes))
+            ->map(function ($activity) {
+                $label = SalesOps::setterStatusLabel($activity->statusTo());
+                $when = $activity->created_at
+                    ?->timezone(config('app.timezone'))
+                    ->format('M j, Y g:i A');
+                $who = $activity->user?->name ?? 'Setter';
+
+                return "[{$when}] {$who} · {$label}\n{$activity->notes}";
+            })
+            ->all();
+
+        if ($entries !== []) {
+            return implode("\n\n", $entries);
+        }
+
+        return filled($finalNote) ? trim($finalNote) : null;
     }
 
     public function updateCloserStatus(User $user, WorkflowLead $lead, Workspace $workspace, string $status, ?string $notes = null): WorkflowLead
@@ -117,12 +140,14 @@ class LeadPipelineService
 
     protected function handoffToClosersTeamLead(WorkflowLead $lead, User $user, ?string $notes): void
     {
+        $handoffSummary = $this->compileSetterNotesSummary($lead, $notes);
+
         $lead->update([
             'pipeline_phase' => 'appointment_settled',
             'assigned_user_id' => null,
             'assigned_setter_id' => $lead->assigned_user_id ?: $lead->assigned_setter_id,
             'appointment_settled_at' => now(),
-            'handoff_notes' => $notes,
+            'handoff_notes' => $handoffSummary,
         ]);
 
         LeadAssignment::create([

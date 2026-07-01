@@ -41,18 +41,20 @@
                     <div><span class="text-zinc-500">Processor</span><p class="font-semibold">{{ $lead->payment_processor ?: '—' }}</p></div>
                 </div>
 
-                @if($canEditSetter && ! $lead->isSetterLocked())
-                    <form method="POST" action="{{ route('portal.leads.setter-status', $lead->id) }}" class="space-y-4 border-t border-zinc-100 pt-6">
-                        @csrf
+                @if($canEditSetter)
+                    <div class="border-t border-zinc-100 pt-6 space-y-3">
                         <h2 class="app-section-title">Update setter status</h2>
-                        <select name="setter_status" required class="app-input max-w-xs">
-                            @foreach($setterStatuses as $value => $label)
-                                <option value="{{ $value }}" @selected($lead->setter_status === $value)>{{ $label }}</option>
-                            @endforeach
-                        </select>
-                        <textarea name="notes" rows="3" class="app-input" placeholder="Notes (optional)">{{ $lead->notes }}</textarea>
-                        <button type="submit" class="app-btn app-btn-primary">Save status</button>
-                    </form>
+                        <p class="text-xs text-zinc-500">Pick a status and add a note about what happened. It appears on the timeline below.</p>
+                        @include('pipeline.partials.setter-status-form', [
+                            'lead' => $lead,
+                            'setterStatuses' => $setterStatuses,
+                            'compact' => false,
+                        ])
+                    </div>
+                @endif
+
+                @if($showSetterHistory ?? false)
+                    @include('pipeline.partials.setter-notes-summary', ['lead' => $lead])
                 @endif
 
                 @if($canEditCloser && ! $lead->isCloserLocked())
@@ -66,16 +68,9 @@
                                 @endif
                             @endforeach
                         </select>
-                        <textarea name="notes" rows="3" class="app-input" placeholder="Notes (optional)">{{ $lead->notes }}</textarea>
+                        <textarea name="notes" rows="3" class="app-input" placeholder="What happened on this call or follow-up? (optional)"></textarea>
                         <button type="submit" class="app-btn app-btn-primary">Save status</button>
                     </form>
-                @endif
-
-                @if($lead->handoff_notes)
-                    <div class="border-t border-zinc-100 pt-6">
-                        <h2 class="app-section-title">Handoff notes</h2>
-                        <p class="text-sm text-zinc-700 whitespace-pre-wrap">{{ $lead->handoff_notes }}</p>
-                    </div>
                 @endif
             </div>
 

@@ -9,6 +9,7 @@ Restart=always
 RestartSec=5
 WorkingDirectory=/var/www/apexone
 ExecStart=/usr/bin/php artisan queue:pool --tries=3 --timeout=0
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target

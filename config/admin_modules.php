@@ -11,6 +11,17 @@ return [
     |
     */
     'modules' => [
+        'dashboard' => [
+            'label' => 'Dashboard',
+            'description' => 'Workspace overview, pipeline metrics, and performance',
+            'section' => 'Overview',
+            'default_route' => 'admin.dashboard',
+            'always_available' => true,
+            'routes' => [
+                'admin.dashboard',
+                'admin.dashboard.*',
+            ],
+        ],
         'lead_pipeline' => [
             'label' => 'Lead Pipeline',
             'description' => 'Import leads, workflows, and pipeline overview',
@@ -102,6 +113,16 @@ return [
             'routes' => [
                 'admin.communications.*',
             ],
+        ],
+        'server_monitoring' => [
+            'label' => 'Server Monitoring',
+            'description' => 'Monitor CPU, RAM, Disk usage and background queues',
+            'section' => 'Workspace Admin',
+            'default_route' => 'admin.server.monitoring',
+            'routes' => [
+                'admin.server.monitoring',
+            ],
+            'grantable_by' => ['super_admin'],
         ],
         'user_management' => [
             'label' => 'User Management',

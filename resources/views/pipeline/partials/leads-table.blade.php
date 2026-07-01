@@ -1,7 +1,11 @@
 @php
     use App\Support\SalesOps;
+
     $readOnly = $readOnly ?? false;
     $showAssignee = $showAssignee ?? false;
+    $editableSetterStatus = $editableSetterStatus ?? false;
+    $showSetterNotes = $showSetterNotes ?? false;
+    $setterStatuses = $setterStatuses ?? config('sales_ops.setter_statuses', []);
 @endphp
 
 @if($leads->isEmpty())
@@ -20,6 +24,12 @@
                     @endif
                     <th>Phase</th>
                     <th>Status</th>
+                    @if($showSetterNotes)
+                        <th>Setter notes</th>
+                    @endif
+                    @if($editableSetterStatus)
+                        <th>Update</th>
+                    @endif
                     <th class="text-right">Action</th>
                 </tr>
             </thead>
@@ -46,7 +56,34 @@
                                 {{ SalesOps::setterStatusLabel($lead->setter_status) }}
                             @endif
                         </td>
-                        <td class="text-right">
+                        @if($showSetterNotes)
+                            <td class="text-sm text-zinc-600 max-w-xs align-top">
+                                @if(filled($lead->handoff_notes))
+                                    <p class="line-clamp-3 whitespace-pre-wrap">{{ $lead->handoff_notes }}</p>
+                                @else
+                                    <span class="text-zinc-400">—</span>
+                                @endif
+                            </td>
+                        @endif
+                        @if($editableSetterStatus)
+                            <td class="min-w-[220px] align-top">
+                                @if($lead->pipeline_phase === 'with_setter' && ! $lead->isSetterLocked())
+                                    <details class="setter-status-details">
+                                        <summary class="text-xs font-semibold text-indigo-600 cursor-pointer select-none">Change status</summary>
+                                        <div class="mt-2">
+                                            @include('pipeline.partials.setter-status-form', [
+                                                'lead' => $lead,
+                                                'setterStatuses' => $setterStatuses,
+                                                'compact' => true,
+                                            ])
+                                        </div>
+                                    </details>
+                                @else
+                                    <span class="text-xs text-zinc-400">—</span>
+                                @endif
+                            </td>
+                        @endif
+                        <td class="text-right align-top">
                             <a href="{{ route('portal.leads.show', $lead->id) }}" class="app-btn app-btn-secondary app-btn-sm">Open</a>
                         </td>
                     </tr>

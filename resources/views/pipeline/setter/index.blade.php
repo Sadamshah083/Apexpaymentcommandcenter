@@ -19,6 +19,8 @@
         'leads' => $leads,
         'statusColumn' => 'setter',
         'showAssignee' => false,
+        'editableSetterStatus' => true,
+        'setterStatuses' => $setterStatuses,
     ])
 </div>
 @endsection

@@ -21,7 +21,7 @@
                     <tr>
                         <th>Business</th>
                         <th>Setter</th>
-                        <th>Handoff notes</th>
+                        <th>Setter notes</th>
                         <th class="text-right">Assign</th>
                     </tr>
                 </thead>
@@ -33,7 +33,14 @@
                                 <div class="text-xs text-zinc-400">{{ $lead->city }}{{ $lead->state ? ', '.$lead->state : '' }}</div>
                             </td>
                             <td class="text-sm">{{ $lead->setter?->name ?? '—' }}</td>
-                            <td class="text-sm text-zinc-600 max-w-xs truncate">{{ $lead->handoff_notes ?: '—' }}</td>
+                            <td class="text-sm text-zinc-600 max-w-md align-top">
+                                @if(filled($lead->handoff_notes))
+                                    <p class="whitespace-pre-wrap line-clamp-4">{{ $lead->handoff_notes }}</p>
+                                    <a href="{{ route('portal.leads.show', $lead->id) }}" class="text-xs text-indigo-600 font-medium mt-1 inline-block">View full history</a>
+                                @else
+                                    <span class="text-zinc-400">—</span>
+                                @endif
+                            </td>
                             <td class="text-right">
                                 <form method="POST" action="{{ route('portal.leads.assign-closer', $lead->id) }}" class="flex items-center justify-end gap-2">
                                     @csrf

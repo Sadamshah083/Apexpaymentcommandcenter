@@ -3,164 +3,294 @@
 namespace App\Services\Workflow;
 
 use App\Models\WorkflowLead;
+use App\Services\BusinessResearch\BusinessResearchPrompt;
 use App\Services\BusinessResearch\GeminiClient;
+use App\Services\BusinessResearch\MarkdownReportParser;
+use App\Services\BusinessResearch\OpenRouterClient;
+use App\Services\BusinessResearch\ResearchInput;
+use App\Services\BusinessResearch\ResearchResultSanitizer;
+use App\Services\BusinessResearch\WebSearchService;
 use Illuminate\Support\Facades\Log;
 
 class WorkflowExtractor
 {
     public function __construct(
         protected GeminiClient $gemini,
-        protected \App\Services\BusinessResearch\WebSearchService $webSearch,
+        protected WebSearchService $webSearch,
         protected WorkflowProviderStatusService $providerStatus,
+        protected MarkdownReportParser $markdownParser,
+        protected ResearchResultSanitizer $sanitizer,
+        protected OpenRouterClient $openRouter,
     ) {}
 
     /**
-     * Enrich lead with business intelligence
+     * Enrich lead with business intelligence.
      */
     public function extract(WorkflowLead $lead, ?string $customPrompt = null): array
     {
-        $businessName = $lead->business_name;
-        $location = trim(($lead->city ? $lead->city . ', ' : '') . $lead->state);
-        if (empty($location)) {
-            $location = $lead->address ?: 'United States';
-        }
+        $input = ResearchInput::fromWorkflowLead($lead);
+        $location = $this->resolveLocation($lead);
 
-        // Gather SERP context from DuckDuckGo/Web (Perplexity style)
-        Log::info("Gathering SERP results for: {$businessName} in {$location}");
+        $maxQueries = max(1, (int) config('workflow_enrichment.web_search_queries', 8));
+        Log::info("Gathering web context for: {$input->businessName} in {$location} ({$maxQueries} queries)");
+
         $webContext = $this->webSearch->gatherContext(
-            $businessName,
-            $lead->address ?: $location,
-            $lead->website,
-            max(1, (int) config('workflow_enrichment.web_search_queries', 2))
+            $input->businessName,
+            $input->address ?: $location,
+            $input->website,
+            $maxQueries,
         );
         $contextBlock = $this->webSearch->formatContextBlock($webContext);
 
-        $systemPrompt = "You are a specialized business intelligence data extraction bot. Your sole task is to extract complete, accurate information for the business name provided, synthesizing details from the provided search engine results (SERP) and business web pages.";
+        if (count($webContext) === 0) {
+            Log::warning('Workflow enrichment has no DuckDuckGo context — relying on Gemini Google Search', [
+                'lead_id' => $lead->id,
+                'business' => $input->businessName,
+            ]);
+        }
+
+        $systemPrompt = BusinessResearchPrompt::systemBulk();
 
         if ($customPrompt) {
             $userPrompt = str_replace(
                 ['[INSERT BUSINESS NAME HERE]', '[INSERT CITY/STATE HERE]', '{{ business_name }}', '{{ location }}'],
-                [$businessName, $location, $businessName, $location],
+                [$input->businessName, $location, $input->businessName, $location],
                 $customPrompt
             );
-            $userPrompt .= "\n\n### Web Search Results (SERP Context)\n" . $contextBlock;
+            $userPrompt .= "\n\n### Web Search Results (SERP Context)\n".$contextBlock;
         } else {
-            $userPrompt = "Target Business: {$businessName}\n" .
-                "Target Location (City/State): {$location}\n\n" .
-                "### Web Search Results (SERP Context)\n" .
-                $contextBlock . "\n\n" .
-                "Search for and extract the following data points from the SERP context. You must present the final output using the exact Markdown schema provided below.\n\n" .
-                "### Business Identity & Location\n" .
-                "* **Business Name**: [Extract the official trade name or LLC name. If applicable, provide the hyperlink to their main web domain]\n" .
-                "* **Physical Address**: [Extract the complete street address, suite number, city, state, and zip code]\n" .
-                "* **Primary Service**: [List the core services provided, e.g., Master Barbering, Custom Bridal Tailoring, etc.]\n" .
-                "* **Operating Hours**: [List the operational hours for Monday through Sunday]\n\n" .
-                "### Owner & Contact Information\n" .
-                "* **Direct Owner Name**: [Extract the exact first and last name of the business owner, founder, or managing member. If it is a corporate chain, list the current CEO]\n" .
-                "* **Direct Phone Number**: [Extract the primary operational phone number]\n" .
-                "* **Direct Email Address**: [Extract the public corporate email address. If they do not use an email and route through a specific portal like Facebook or Booksy, explicitly state that and provide the link]\n\n" .
-                "### Payment Processor & Booking Software\n" .
-                "* **Payment Processor**: [Identify the backend payment gateway or processing merchant network being used, e.g., Square, Stripe, Clover, Booksy Card Processing, Toast, etc.]\n" .
-                "* **System Integration**: [Provide a brief, 2-sentence breakdown explaining how their point-of-sale (POS) hardware, booking software, or online invoicing system integrates with that specific payment processor]\n\n" .
-                "STRICT COMPLIANCE RULES:\n" .
-                "1. Do not use generic filler information. If a data point cannot be verified through web searches, output \"Not Publicly Available\".\n" .
-                "2. Ensure you look up the specific location provided to avoid confusing identical business names in different states.\n" .
-                "3. Keep the output clean, highly dense, and completely factual. Do not include introductory or concluding conversational text.";
+            $userPrompt = BusinessResearchPrompt::buildBulk($input, $contextBlock);
         }
 
         try {
-            $models = array_values(array_unique(array_filter(
-                config('workflow_enrichment.gemini_model')
-                    ? [config('workflow_enrichment.gemini_model'), ...config('workflow_enrichment.gemini_fallback_models', [])]
-                    : [config('gemini.model'), 'gemini-2.5-flash', 'gemini-2.5-pro']
-            )));
+            $report = $this->runResearch($userPrompt, $systemPrompt, $webContext);
+            $parsed = $this->markdownParser->parse($report['content']);
 
-            $options = [
-                'models' => $models,
-                'google_search_enabled' => (bool) config('workflow_enrichment.gemini_google_search_enabled', false),
-                'thinking_budget' => (int) config('workflow_enrichment.gemini_thinking_budget', 0),
-                'max_output_tokens' => (int) config('workflow_enrichment.gemini_max_output_tokens', 2048),
-                'timeout' => (int) config('workflow_enrichment.gemini_timeout', 120),
-            ];
-
-            $geminiHealth = $this->providerStatus->getGeminiHealth();
-            $skipGemini = ($geminiHealth['state'] ?? '') === 'depleted'
-                && filled(config('openrouter.api_key'));
-
-            try {
-                if ($skipGemini) {
-                    throw new \RuntimeException('Gemini credits depleted — using OpenRouter fallback.');
+            if ($this->shouldRunFollowUp($parsed) && ! $customPrompt) {
+                $followUpPrompt = BusinessResearchPrompt::buildFollowUp($input, $parsed, $contextBlock);
+                try {
+                    $followUp = $this->runResearch($followUpPrompt, $systemPrompt, $webContext);
+                    $followUpParsed = $this->markdownParser->parse($followUp['content']);
+                    if ($this->scoreParsed($followUpParsed) > $this->scoreParsed($parsed)) {
+                        $report = $followUp;
+                        $parsed = $followUpParsed;
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('Workflow enrichment follow-up pass failed: '.$e->getMessage());
                 }
-
-                $result = $this->gemini->researchWithGoogleSearch($systemPrompt, $userPrompt, $options);
-                $this->providerStatus->clearGeminiError();
-            } catch (\Exception $e) {
-                $this->providerStatus->recordGeminiError($e->getMessage());
-                Log::warning('Gemini failed in WorkflowExtractor. Falling back to OpenRouter: '.$e->getMessage());
-                $openRouterClient = app(\App\Services\BusinessResearch\OpenRouterClient::class);
-                $result = $openRouterClient->chatForPipeline($systemPrompt, $userPrompt);
             }
-            $report = $result['content'];
 
-            // Parse fields
-            $parsed = $this->parseReport($report);
+            $attributes = $this->mapParsedToLeadAttributes($parsed, $report);
 
-            return [
+            return array_merge($attributes, [
                 'status' => 'completed',
-                'markdown_report' => $report,
-                'owner_name' => $parsed['owner_name'],
-                'direct_phone' => $parsed['direct_phone'],
-                'direct_email' => $parsed['direct_email'],
-                'payment_processor' => $parsed['payment_processor'],
-                'system_integration' => $parsed['system_integration'],
-                'primary_service' => $parsed['primary_service'],
-                'operating_hours' => $parsed['operating_hours'],
-                'model_used' => $result['model'],
-                'tokens_used' => $result['tokens'],
-                'researched_at' => now(),
-                'error_message' => null
-            ];
+                'error_message' => null,
+            ]);
         } catch (\Exception $e) {
             $this->providerStatus->recordGeminiError($e->getMessage());
             Log::error("WorkflowExtractor failed for lead {$lead->id}: ".$e->getMessage());
+
             return [
                 'status' => 'failed',
                 'error_message' => $e->getMessage(),
-                'researched_at' => now()
+                'researched_at' => now(),
             ];
         }
     }
 
     /**
-     * Parse fields from the markdown response
+     * @param  array<int, array<string, mixed>>  $webContext
+     * @return array{content: string, model: string, tokens: int|null}
      */
-    protected function parseReport(string $report): array
+    protected function runResearch(string $userPrompt, string $systemPrompt, array $webContext): array
     {
-        $fields = [
-            'owner_name' => 'Direct Owner Name',
-            'direct_phone' => 'Direct Phone Number',
-            'direct_email' => 'Direct Email Address',
-            'payment_processor' => 'Payment Processor',
-            'system_integration' => 'System Integration',
-            'primary_service' => 'Primary Service',
-            'operating_hours' => 'Operating Hours'
+        $models = array_values(array_unique(array_filter(
+            config('workflow_enrichment.gemini_model')
+                ? [config('workflow_enrichment.gemini_model'), ...config('workflow_enrichment.gemini_fallback_models', [])]
+                : [config('gemini.model'), 'gemini-2.5-flash', 'gemini-2.5-pro']
+        )));
+
+        $options = [
+            'models' => $models,
+            'google_search_enabled' => (bool) config('workflow_enrichment.gemini_google_search_enabled', true),
+            'thinking_budget' => (int) config('workflow_enrichment.gemini_thinking_budget', 0),
+            'max_output_tokens' => (int) config('workflow_enrichment.gemini_max_output_tokens', 4096),
+            'timeout' => (int) config('workflow_enrichment.gemini_timeout', 120),
         ];
 
-        $results = [];
+        $geminiHealth = $this->providerStatus->getGeminiHealth();
+        $skipGemini = ($geminiHealth['state'] ?? '') === 'depleted'
+            && filled(config('openrouter.api_key'));
 
-        foreach ($fields as $key => $label) {
-            // Find "* **Label**: value"
-            $pattern = '/\*\s*\*\*' . preg_quote($label, '/') . '\*\*\s*:\s*(.*)/i';
-            if (preg_match($pattern, $report, $matches)) {
-                $val = trim($matches[1]);
-                // Remove bracketed placeholders or clean up md links
-                $val = preg_replace('/^\[|\]$/', '', $val);
-                $results[$key] = $val;
-            } else {
-                $results[$key] = 'Not Publicly Available';
+        try {
+            if ($skipGemini) {
+                throw new \RuntimeException('Gemini credits depleted — using OpenRouter fallback.');
+            }
+
+            $lastGeminiContent = '';
+            for ($attempt = 1; $attempt <= 2; $attempt++) {
+                $result = $this->gemini->researchWithGoogleSearch($systemPrompt, $userPrompt, $options);
+                $this->providerStatus->clearGeminiError();
+
+                $content = $result['content'];
+                if (! empty($result['sources'])) {
+                    $content = $this->appendSourceNotes($content, $result['sources']);
+                }
+                $lastGeminiContent = $content;
+
+                if ($this->isAcceptableResult($content)) {
+                    return [
+                        'content' => $content,
+                        'model' => $result['model'],
+                        'tokens' => $result['tokens'],
+                    ];
+                }
+
+                Log::warning('Gemini enrichment report below acceptance threshold', [
+                    'attempt' => $attempt,
+                    'length' => mb_strlen($content),
+                    'has_schema' => $this->markdownParser->hasReportSchema($content),
+                ]);
+
+                if ($attempt < 2) {
+                    usleep(500_000);
+                }
+            }
+
+            throw new \RuntimeException('Gemini returned an incomplete enrichment report.');
+        } catch (\Exception $e) {
+            $this->providerStatus->recordGeminiError($e->getMessage());
+            Log::warning('Gemini failed in WorkflowExtractor. Falling back to OpenRouter: '.$e->getMessage());
+
+            // DDG context is already in the prompt — plain chat avoids OpenRouter tool-call
+            // responses that never return the markdown schema.
+            $result = $this->openRouter->chat($systemPrompt, $userPrompt);
+
+            if (! $this->isAcceptableResult($result['content'])) {
+                throw new \RuntimeException('OpenRouter fallback returned an incomplete enrichment report.');
+            }
+
+            return [
+                'content' => $result['content'],
+                'model' => $result['model'],
+                'tokens' => $result['tokens'],
+            ];
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $parsed
+     * @param  array{content: string, model: string, tokens: int|null}  $report
+     * @return array<string, mixed>
+     */
+    protected function mapParsedToLeadAttributes(array $parsed, array $report): array
+    {
+        $mapped = $this->sanitizer->sanitize([
+            'owner_name' => $this->displayValue($parsed['owner_name'] ?? null),
+            'direct_phone' => $this->displayValue($parsed['direct_phone'] ?? null),
+            'direct_email' => $this->displayValue($parsed['direct_email'] ?? null),
+            'payment_processor' => $this->displayValue($parsed['payment_processor'] ?? null),
+            'system_integration' => $this->displayValue($parsed['system_integration'] ?? null),
+            'primary_service' => $this->displayValue($parsed['primary_service'] ?? null),
+            'operating_hours' => $this->displayValue($parsed['operating_hours'] ?? null),
+        ]);
+
+        $updates = [
+            'markdown_report' => $report['content'],
+            'model_used' => $report['model'],
+            'tokens_used' => $report['tokens'],
+            'researched_at' => now(),
+            ...$mapped,
+        ];
+
+        if (filled($parsed['physical_address'] ?? null)) {
+            $updates['address'] = $parsed['physical_address'];
+        }
+
+        return $updates;
+    }
+
+    protected function displayValue(?string $value): string
+    {
+        $value = is_string($value) ? trim($value) : '';
+
+        return $value !== '' ? $value : 'Not Publicly Available';
+    }
+
+    protected function resolveLocation(WorkflowLead $lead): string
+    {
+        $location = trim(implode(', ', array_filter([$lead->city, $lead->state])));
+        if ($location !== '') {
+            return $location;
+        }
+
+        return $lead->address ?: 'United States';
+    }
+
+    /**
+     * @param  array<string, mixed>  $parsed
+     */
+    protected function shouldRunFollowUp(array $parsed): bool
+    {
+        if (! config('workflow_enrichment.follow_up_enabled', true)) {
+            return false;
+        }
+
+        return $this->scoreParsed($parsed) < (int) config('workflow_enrichment.follow_up_min_score', 3);
+    }
+
+    /**
+     * @param  array<string, mixed>  $parsed
+     */
+    protected function scoreParsed(array $parsed): int
+    {
+        $score = 0;
+        foreach (['owner_name', 'payment_processor', 'direct_phone', 'direct_email', 'physical_address'] as $field) {
+            if (! empty($parsed[$field])) {
+                $score++;
             }
         }
 
-        return $results;
+        return $score;
+    }
+
+    protected function isAcceptableResult(string $content): bool
+    {
+        if ($this->markdownParser->isValidReport($content)) {
+            return true;
+        }
+
+        if ($this->markdownParser->hasMinimumUsefulData(
+            $this->markdownParser->parse($content)
+        )) {
+            return true;
+        }
+
+        // Gemini often returns the full schema with every field set to "Not Publicly Available"
+        // for hard-to-research leads (food trucks, etc.) — still save the report.
+        if ($this->markdownParser->hasReportSchema($content)) {
+            return true;
+        }
+
+        // GRACEFUL FALLBACK: If the response is sufficiently long (e.g. > 150 chars),
+        // we accept it even if it lacks strict markdown headers. This prevents the pipeline from stalling.
+        return strlen(trim($content)) > 150;
+    }
+
+    /**
+     * @param  array<int, array{title: string, url: string, note: string|null}>  $sources
+     */
+    protected function appendSourceNotes(string $content, array $sources): string
+    {
+        if ($sources === []) {
+            return $content;
+        }
+
+        $lines = ["\n\n--- Gemini grounding sources ---"];
+        foreach (array_slice($sources, 0, 10) as $source) {
+            $lines[] = '- '.($source['title'] ?? 'Source').': '.($source['url'] ?? '');
+        }
+
+        return $content.implode("\n", $lines);
     }
 }

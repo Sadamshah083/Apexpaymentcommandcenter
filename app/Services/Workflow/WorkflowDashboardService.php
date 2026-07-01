@@ -46,6 +46,15 @@ class WorkflowDashboardService
             $leadsQuery->where('pipeline_phase', $filters['phase']);
         }
 
+        if (! empty($filters['assigned_user_id'])) {
+            $userId = $filters['assigned_user_id'];
+            $leadsQuery->where(function ($query) use ($userId) {
+                $query->where('assigned_user_id', $userId)
+                    ->orWhere('assigned_setter_id', $userId)
+                    ->orWhere('assigned_closer_id', $userId);
+            });
+        }
+
         return [
             'workspace' => $workspace,
             'workflows' => $workflows,

@@ -6,9 +6,24 @@
 
     $leadPipelineModules = ['lead_pipeline', 'lead_tags'];
     $emailToolkitModules = ['email_lists', 'deliverability', 'content_analyzer', 'reputation'];
+    $workspaceAdminModules = ['user_management', 'server_monitoring'];
     $showLeadPipeline = collect($leadPipelineModules)->contains(fn (string $module) => $can($module));
     $showEmailToolkit = collect($emailToolkitModules)->contains(fn (string $module) => $can($module));
+    $showWorkspaceAdmin = collect($workspaceAdminModules)->contains(fn (string $module) => $can($module));
+    $showDashboard = $user?->canAccessAdminModule('dashboard', $workspaceId);
 @endphp
+
+@if($showDashboard)
+<x-sidebar.section title="Overview">
+    <x-sidebar.link
+        :href="route('admin.dashboard')"
+        label="Dashboard"
+        :active="request()->routeIs('admin.dashboard*')"
+    >
+        <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'dashboard'])</x-slot:icon>
+    </x-sidebar.link>
+</x-sidebar.section>
+@endif
 
 @if($showLeadPipeline)
 <x-sidebar.section title="Lead Pipeline">
@@ -122,8 +137,9 @@
 </x-sidebar.section>
 @endif
 
-@if($can('user_management'))
+@if($showWorkspaceAdmin)
 <x-sidebar.section title="Workspace Admin">
+    @if($can('user_management'))
     <x-sidebar.link
         :href="route('admin.workspaces.index')"
         label="User Management"
@@ -131,5 +147,15 @@
     >
         <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'team'])</x-slot:icon>
     </x-sidebar.link>
+    @endif
+    @if($can('server_monitoring'))
+    <x-sidebar.link
+        :href="route('admin.server.monitoring')"
+        label="Server Monitoring"
+        :active="request()->routeIs('admin.server.monitoring')"
+    >
+        <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'server'])</x-slot:icon>
+    </x-sidebar.link>
+    @endif
 </x-sidebar.section>
 @endif

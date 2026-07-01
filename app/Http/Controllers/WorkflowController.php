@@ -41,6 +41,7 @@ class WorkflowController extends Controller
             'search' => $request->input('search'),
             'stage' => $request->input('stage'),
             'phase' => $request->input('phase'),
+            'assigned_user_id' => $request->input('assigned_user_id'),
             'refresh_enrichment' => $request->boolean('refresh_enrichment'),
         ]));
     }
@@ -215,18 +216,44 @@ class WorkflowController extends Controller
         $lead->load(['workflow.workspace', 'verifier', 'activities.user', 'setter', 'closer']);
 
         $user = Auth::user();
+
+        if (! $this->pipelineService->canView($user, $lead, $workspace)) {
+            abort(403, 'You do not have access to this lead.');
+        }
+
         $setterStatuses = config('sales_ops.setter_statuses', []);
         $closerStatuses = config('sales_ops.closer_statuses', []);
         $pipelinePhases = config('sales_ops.pipeline_phases', []);
         $activityTypes = config('sales_ops.activity_types', []);
         $canEditSetter = $lead->pipeline_phase === 'with_setter'
-            && ($user->isAppointmentSetter($workspace->id) || $user->canAccessAdminPortal($workspace->id));
+            && ! $lead->isSetterLocked()
+            && (
+                $user->canAccessAdminPortal($workspace->id)
+                || ($user->isAppointmentSetter($workspace->id) && (int) $lead->assigned_user_id === $user->id)
+            );
         $canEditCloser = $lead->pipeline_phase === 'with_closer'
-            && ($user->isCloser($workspace->id) || $user->canAccessAdminPortal($workspace->id));
+            && ! $lead->isCloserLocked()
+            && (
+                $user->canAccessAdminPortal($workspace->id)
+                || (
+                    $user->isCloser($workspace->id)
+                    && (
+                        (int) $lead->assigned_user_id === $user->id
+                        || (int) $lead->assigned_closer_id === $user->id
+                    )
+                )
+            );
+        $showSetterHistory = in_array($lead->pipeline_phase, ['appointment_settled', 'with_closer', 'closed'], true)
+            && $lead->hasSetterHistory()
+            && (
+                $user->isCloser($workspace->id)
+                || $user->isClosersTeamLead($workspace->id)
+                || $user->canAccessAdminPortal($workspace->id)
+            );
 
         return view('workflows.lead_show', compact(
             'lead', 'team', 'workspace', 'setterStatuses', 'closerStatuses',
-            'pipelinePhases', 'activityTypes', 'canEditSetter', 'canEditCloser', 'user'
+            'pipelinePhases', 'activityTypes', 'canEditSetter', 'canEditCloser', 'showSetterHistory', 'user'
         ));
     }
 
