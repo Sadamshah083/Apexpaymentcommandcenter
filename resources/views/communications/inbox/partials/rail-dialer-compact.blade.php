@@ -17,7 +17,7 @@
     @endforeach
 </div>
 
-<a href="#" id="zoom-dial-btn-rail" class="comm-hub-btn ghl-call-btn w-full text-center block" data-zoom-call="1">Call</a>
+<a href="#" id="zoom-dial-btn-rail" class="comm-hub-btn ghl-call-btn w-full text-center block" data-morpheus-call="1">Call</a>
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {

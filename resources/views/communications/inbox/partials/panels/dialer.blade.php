@@ -19,7 +19,7 @@
         <section class="ghl-dialer-panel">
             <label class="comm-hub-label block mb-1" for="dial-caller-id-full">Call from</label>
             <select id="dial-caller-id-full" class="comm-hub-input w-full mb-4">
-                <option value="">Default Zoom Phone line</option>
+                <option value="">Default Morpheus CX line</option>
                 @foreach($phoneUsers ?? [] as $user)
                     @foreach($user['phone_numbers'] as $number)
                         <option value="{{ $number }}" @selected(($defaultCallerId ?? '') === $number)>{{ $user['name'] }} — {{ $number }}</option>
@@ -39,7 +39,7 @@
 
             <div class="ghl-dialer-actions">
                 <button type="button" id="dial-backspace-full" class="comm-hub-btn comm-hub-btn-secondary">Delete</button>
-                <a href="#" id="zoom-dial-btn-full" class="comm-hub-btn ghl-dialer-call-btn" data-zoom-call="1">Call with Zoom Phone</a>
+                <a href="#" id="zoom-dial-btn-full" class="comm-hub-btn ghl-dialer-call-btn" data-morpheus-call="1">Call with Morpheus CX</a>
             </div>
         </section>
     </div>

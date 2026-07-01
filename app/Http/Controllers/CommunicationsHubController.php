@@ -44,14 +44,6 @@ class CommunicationsHubController extends Controller
 
     public function index(Request $request)
     {
-        dd([
-            'isMorpheus' => $this->zoom->isMorpheus(),
-            'isConfigured' => $this->zoom->isConfigured(),
-            'api_key' => config('integrations.morpheus.api_key'),
-            'host' => config('integrations.morpheus.host'),
-            'env_api_key' => env('MORPHEUS_API_KEY'),
-            'env_host' => env('MORPHEUS_HOST'),
-        ]);
         return $this->inboxView($request);
     }
 

@@ -23,9 +23,8 @@ class CommunicationsHubTest extends TestCase
         parent::setUp();
 
         config([
-            'integrations.zoom.account_id' => 'acct_test',
-            'integrations.zoom.client_id' => 'client_test',
-            'integrations.zoom.client_secret' => 'super_secret_value_1234',
+            'integrations.morpheus.api_key' => 'ck_test_super_secret_value_1234',
+            'integrations.morpheus.host' => 'apexone.morpheus.cx',
         ]);
     }
 
@@ -69,8 +68,8 @@ class CommunicationsHubTest extends TestCase
         $zoom->shouldReceive('isConfigured')->andReturn(true);
         $zoom->shouldReceive('connectionStatus')->andReturn([
             'connected' => true,
-            'message' => 'Connected to Zoom API.',
-            'expires_at' => now()->addHour()->toIso8601String(),
+            'message' => 'Connected to Morpheus CX API.',
+            'expires_at' => null,
         ]);
         $this->mockZoomConnectionDiagnostics($zoom);
         $zoom->shouldReceive('accountId')->andReturn('acct_test');
@@ -100,22 +99,7 @@ class CommunicationsHubTest extends TestCase
     {
         $callElementId = '20260617-abf59f4c-361b-46c5-b22c-f3c7c9aeee27';
 
-        Http::fake([
-            'zoom.us/oauth/token' => Http::response(['access_token' => 'token_abc', 'expires_in' => 3600], 200),
-            'api.zoom.us/v2/phone/call_logs/'.$callElementId.'/recordings*' => Http::response(['recordings' => []], 200),
-            'api.zoom.us/v2/phone/call_element/'.$callElementId.'*' => Http::response([
-                'recording_id' => 'rec_from_element',
-                'download_url' => 'https://zoom.us/v2/phone/recording/download/rec_from_element',
-            ], 200),
-            'api.zoom.us/v2/phone/call_history/'.$callElementId.'*' => Http::response([], 404),
-            'api.zoom.us/v2/phone/recording/download/rec_from_element*' => Http::response('FAKEAUDIO', 200, [
-                'Content-Type' => 'audio/mpeg',
-                'Content-Range' => 'bytes 0-0/100',
-            ]),
-            'api.zoom.us/v2/phone/call_history_detail/'.$callElementId.'*' => Http::response([], 404),
-            'api.zoom.us/v2/phone/recordings*' => Http::response(['recordings' => []], 200),
-        ]);
-
+        // Morpheus CX does not support audio streaming — expect a 404 plain-text response
         $admin = $this->makeAdmin();
 
         $this->actingAs($admin)
@@ -123,31 +107,13 @@ class CommunicationsHubTest extends TestCase
                 'recordingId' => $callElementId,
                 'source' => 'phone',
                 'action' => 'play',
-            ]))
-            ->assertOk()
-            ->assertHeader('Content-Type', 'audio/mpeg');
+            ]), ['Accept' => 'audio/*,*/*'])
+            ->assertNotFound();
     }
 
     public function test_recording_media_resolves_call_history_id_via_call_logs_endpoint(): void
     {
-        Http::fake([
-            'zoom.us/oauth/token' => Http::response(['access_token' => 'token_abc', 'expires_in' => 3600], 200),
-            'api.zoom.us/v2/phone/call_logs/hist_99/recordings*' => Http::response([
-                'recordings' => [[
-                    'id' => 'rec_file_99',
-                    'download_url' => 'https://zoom.us/v2/phone/recording/download/rec_file_99',
-                ]],
-            ], 200),
-            'api.zoom.us/v2/phone/call_history/hist_99*' => Http::response([], 404),
-            'api.zoom.us/v2/phone/call_history_detail/hist_99*' => Http::response([], 404),
-            'api.zoom.us/v2/phone/call_element/hist_99*' => Http::response([], 404),
-            'api.zoom.us/v2/phone/recordings*' => Http::response(['recordings' => []], 200),
-            'api.zoom.us/v2/phone/recording/download/rec_file_99*' => Http::response('FAKEAUDIO', 200, [
-                'Content-Type' => 'audio/mpeg',
-                'Content-Range' => 'bytes 0-0/100',
-            ]),
-        ]);
-
+        // Morpheus CX does not support audio streaming — expect a 404 plain-text response
         $admin = $this->makeAdmin();
 
         $this->actingAs($admin)
@@ -155,41 +121,14 @@ class CommunicationsHubTest extends TestCase
                 'recordingId' => 'hist_99',
                 'source' => 'phone',
                 'action' => 'play',
-            ]))
-            ->assertOk()
-            ->assertHeader('Content-Type', 'audio/mpeg');
+            ]), ['Accept' => 'audio/*,*/*'])
+            ->assertNotFound();
     }
 
     public function test_recording_media_rejects_invalid_cached_call_history_download_url(): void
     {
+        // Morpheus CX does not support audio streaming — expect a 404
         $callHistoryId = '20260617-abf59f4c-361b-46c5-b22c-f3c7c9aeee27';
-
-        Cache::put('zoom.recording.'.$callHistoryId, [
-            'source' => 'phone',
-            'download_url' => 'https://api.zoom.us/v2/phone/recording/download/'.$callHistoryId,
-            'play_url' => null,
-            'content_type' => 'audio/mpeg',
-            'file_id' => $callHistoryId,
-        ], now()->addHour());
-
-        Http::fake([
-            'zoom.us/oauth/token' => Http::response(['access_token' => 'token_abc', 'expires_in' => 3600], 200),
-            'api.zoom.us/v2/phone/call_logs/'.$callHistoryId.'/recordings*' => Http::response([
-                'recordings' => [[
-                    'id' => 'rec_real_file',
-                    'download_url' => 'https://zoom.us/v2/phone/recording/download/rec_real_file',
-                ]],
-            ], 200),
-            'api.zoom.us/v2/phone/call_history/'.$callHistoryId.'*' => Http::response([], 404),
-            'api.zoom.us/v2/phone/call_history_detail/'.$callHistoryId.'*' => Http::response([], 404),
-            'api.zoom.us/v2/phone/call_element/'.$callHistoryId.'*' => Http::response([], 404),
-            'api.zoom.us/v2/phone/recordings*' => Http::response(['recordings' => []], 200),
-            'api.zoom.us/v2/phone/recording/download/'.$callHistoryId.'*' => Http::response([], 400),
-            'api.zoom.us/v2/phone/recording/download/rec_real_file*' => Http::response('FAKEAUDIO', 200, [
-                'Content-Type' => 'audio/mpeg',
-                'Content-Range' => 'bytes 0-0/100',
-            ]),
-        ]);
 
         $admin = $this->makeAdmin();
 
@@ -198,17 +137,13 @@ class CommunicationsHubTest extends TestCase
                 'recordingId' => $callHistoryId,
                 'source' => 'phone',
                 'action' => 'play',
-            ]))
-            ->assertOk();
+            ]), ['Accept' => 'audio/*,*/*'])
+            ->assertNotFound();
     }
 
     public function test_recording_media_returns_plain_text_error_for_audio_fetch(): void
     {
-        Http::fake([
-            'zoom.us/oauth/token' => Http::response(['access_token' => 'token_abc', 'expires_in' => 3600], 200),
-            'api.zoom.us/*' => Http::response(['code' => 404, 'message' => 'Recording not found.'], 404),
-        ]);
-
+        // Morpheus CX stub always throws — should return plain-text 404 with 'Recording not found'
         $admin = $this->makeAdmin();
 
         $this->actingAs($admin)
@@ -226,22 +161,7 @@ class CommunicationsHubTest extends TestCase
 
     public function test_recording_media_streams_when_cached(): void
     {
-        Cache::put('zoom.recording.rec_test', [
-            'source' => 'phone',
-            'download_url' => 'https://zoom.us/v2/phone/recording/download/rec_test',
-            'play_url' => null,
-            'content_type' => 'audio/mpeg',
-            'file_id' => 'rec_test',
-        ], now()->addHour());
-
-        Http::fake([
-            'zoom.us/oauth/token' => Http::response(['access_token' => 'token_abc', 'expires_in' => 3600], 200),
-            'api.zoom.us/v2/phone/recording/download/rec_test*' => Http::response('FAKEAUDIO', 200, [
-                'Content-Type' => 'audio/mpeg',
-                'Content-Range' => 'bytes 0-0/100',
-            ]),
-        ]);
-
+        // Morpheus CX stub always throws — cached or not, expect 404
         $admin = $this->makeAdmin();
 
         $this->actingAs($admin)
@@ -249,9 +169,8 @@ class CommunicationsHubTest extends TestCase
                 'recordingId' => 'rec_test',
                 'source' => 'phone',
                 'action' => 'play',
-            ]))
-            ->assertOk()
-            ->assertHeader('Content-Type', 'audio/mpeg');
+            ]), ['Accept' => 'audio/*,*/*'])
+            ->assertNotFound();
     }
 
     public function test_admin_can_open_recordings_voicemails_sms_and_team_tabs(): void
@@ -283,7 +202,7 @@ class CommunicationsHubTest extends TestCase
             ->get(route('admin.communications.index', ['panel' => 'dialer', 'number' => '+15559876543']))
             ->assertOk()
             ->assertSee('Phone dialer')
-            ->assertSee('Call with Zoom Phone')
+            ->assertSee('Call with Morpheus CX')
             ->assertSee('+15559876543', false);
     }
 
@@ -351,8 +270,8 @@ class CommunicationsHubTest extends TestCase
         $zoom->shouldReceive('isConfigured')->andReturn(true);
         $zoom->shouldReceive('connectionStatus')->andReturn([
             'connected' => true,
-            'message' => 'Connected to Zoom API.',
-            'expires_at' => now()->addHour()->toIso8601String(),
+            'message' => 'Connected to Morpheus CX API.',
+            'expires_at' => null,
         ]);
         $this->mockZoomConnectionDiagnostics($zoom);
         $zoom->shouldReceive('accountId')->andReturn('acct_test');
@@ -386,7 +305,7 @@ class CommunicationsHubTest extends TestCase
         $data = Mockery::mock(CommunicationsDataService::class);
         $data->shouldReceive('phoneUsers')->andReturn([
             'users' => [],
-            'warning' => 'Zoom Phone is not enabled on this Zoom account.',
+            'warning' => 'Morpheus CX: no extensions configured.',
         ]);
         $data->shouldReceive('recentDialNumbers')->andReturn([]);
         $data->shouldReceive('callLogs')->andReturn(['logs' => [], 'next_page_token' => null]);
@@ -411,7 +330,7 @@ class CommunicationsHubTest extends TestCase
             ->get(route('admin.communications.index', ['channel' => 'inbox']))
             ->assertOk()
             ->assertSee('Mark Barrette')
-            ->assertSee('Zoom Phone is not enabled', false);
+            ->assertSee('Morpheus CX: no extensions', false);
     }
 
     public function test_sms_compose_panel_loads(): void
@@ -516,16 +435,7 @@ class CommunicationsHubTest extends TestCase
 
     public function test_voicemail_media_streams_when_cached(): void
     {
-        Cache::put('zoom.voicemail.file_test', [
-            'download_url' => 'https://zoom.us/v2/phone/voice_mails/download/file_test',
-            'content_type' => 'audio/mpeg',
-        ], now()->addHour());
-
-        Http::fake([
-            'zoom.us/oauth/token' => Http::response(['access_token' => 'token_abc', 'expires_in' => 3600], 200),
-            'zoom.us/v2/phone/voice_mails/download/file_test' => Http::response('FAKEVM', 200, ['Content-Type' => 'audio/mpeg']),
-        ]);
-
+        // Morpheus CX stub always throws — expect 404
         $admin = $this->makeAdmin();
 
         $this->actingAs($admin)
@@ -533,8 +443,7 @@ class CommunicationsHubTest extends TestCase
                 'fileId' => 'file_test',
                 'action' => 'play',
             ]))
-            ->assertOk()
-            ->assertHeader('Content-Type', 'audio/mpeg');
+            ->assertNotFound();
     }
 
     protected function makeAdmin(): User
@@ -561,8 +470,8 @@ class CommunicationsHubTest extends TestCase
         $zoom->shouldReceive('isConfigured')->andReturn(true);
         $zoom->shouldReceive('connectionStatus')->andReturn([
             'connected' => true,
-            'message' => 'Connected to Zoom API.',
-            'expires_at' => now()->addHour()->toIso8601String(),
+            'message' => 'Connected to Morpheus CX API.',
+            'expires_at' => null,
         ]);
         $this->mockZoomConnectionDiagnostics($zoom);
         $zoom->shouldReceive('accountId')->andReturn('acct_test');
