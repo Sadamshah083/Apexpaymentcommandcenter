@@ -217,6 +217,7 @@ class WorkspaceSyncService
     {
         return $workspace->workflows()
             ->when($workflowId, fn ($q) => $q->where('id', $workflowId))
+            ->with('leadList')
             ->latest()
             ->withCount([
                 'leads as assigned_leads_count' => fn ($query) => $query->whereNotNull('assigned_user_id'),
@@ -238,7 +239,7 @@ class WorkspaceSyncService
 
         $query = WorkflowLead::query()
             ->whereIn('workflow_id', $workflowIds)
-            ->with('assignee:id,name');
+            ->with(['assignee:id,name', 'tags', 'leadList']);
 
         if ($workflowId) {
             $query->where('workflow_id', $workflowId);
@@ -284,6 +285,7 @@ class WorkspaceSyncService
         $lead = WorkflowLead::query()
             ->whereIn('workflow_id', $workflowIds)
             ->where('id', $leadId)
+            ->with(['tags', 'leadList'])
             ->first();
 
         if (! $lead) {
@@ -493,6 +495,8 @@ class WorkspaceSyncService
                 ? (int) round((($workflow->processed_leads + $workflow->failed_leads) / $workflow->total_leads) * 100)
                 : 0,
             'pipeline_steps' => PipelineProgress::steps($workflow),
+            'import_tag_ids' => $workflow->import_tag_ids ?? [],
+            'lead_list_name' => $workflow->leadList?->name,
             'updated_at' => $workflow->updated_at?->toIso8601String(),
         ];
     }
@@ -530,6 +534,15 @@ class WorkspaceSyncService
             'tier_label' => SalesOps::tierLabel($lead->tier),
             'contact_attempts' => (int) $lead->contact_attempts,
             'error_message' => $lead->error_message,
+            'tags' => $lead->relationLoaded('tags')
+                ? $lead->tags->map(fn ($tag) => [
+                    'id' => $tag->id,
+                    'name' => $tag->name,
+                    'color' => $tag->color,
+                ])->values()->all()
+                : [],
+            'lead_list_id' => $lead->lead_list_id,
+            'lead_list_name' => $lead->relationLoaded('leadList') ? $lead->leadList?->name : null,
             'updated_at' => $lead->updated_at?->toIso8601String(),
         ];
     }

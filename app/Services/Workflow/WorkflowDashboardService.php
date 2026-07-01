@@ -19,6 +19,7 @@ class WorkflowDashboardService
     public function buildIndexData(Workspace $workspace, User $user, array $filters = []): array
     {
         $workflows = $workspace->workflows()
+            ->with('leadList')
             ->latest()
             ->paginate(config('pagination.workflows_per_page', 8), ['*'], 'pipelines_page')
             ->withQueryString();
@@ -26,7 +27,7 @@ class WorkflowDashboardService
         $workflowIds = $workspace->workflows()->pluck('id');
 
         $leadsQuery = WorkflowLead::query()
-            ->with('workflow')
+            ->with(['workflow', 'tags', 'leadList'])
             ->whereIn('workflow_id', $workflowIds);
 
         if (! $user->canAccessAdminPortal($workspace->id)) {

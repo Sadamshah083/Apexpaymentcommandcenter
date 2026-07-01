@@ -2,41 +2,41 @@
     use App\Support\AdminModules;
 
     $moduleGroups = AdminModules::groupedForUi();
-    $canGrantUserManagement = auth()->user()?->isSuperAdmin($activeWorkspace->id);
+    $canGrantUserManagement = auth()->user()?->isSuperAdmin($activeWorkspace->id ?? auth()->user()?->current_workspace_id);
 @endphp
 
-<div class="border border-slate-200 rounded-xl p-3 bg-slate-50/80 space-y-3">
+<div class="um-module-panel-inner">
     <div>
-        <p class="text-xs font-bold text-slate-700">Admin feature access</p>
-        <p class="text-[11px] text-slate-500 mt-0.5">Limit which admin modules this account can open.</p>
+        <p class="um-label">Admin feature access</p>
+        <p class="um-panel-desc">Limit which admin modules this account can open.</p>
     </div>
 
-    <div class="flex flex-wrap gap-3 text-xs">
-        <label class="inline-flex items-center gap-2">
+    <div class="um-access-mode">
+        <label class="um-radio-pill">
             <input type="radio" name="access_mode" value="full" checked class="member-access-mode">
             <span>Full access</span>
         </label>
-        <label class="inline-flex items-center gap-2">
+        <label class="um-radio-pill">
             <input type="radio" name="access_mode" value="restricted" class="member-access-mode">
-            <span>Selected modules only</span>
+            <span>Selected modules</span>
         </label>
     </div>
 
-    <div class="member-module-grid space-y-3 hidden" data-module-grid>
+    <div class="member-module-grid um-module-grid hidden" data-module-grid>
         @foreach($moduleGroups as $section => $modules)
-            <div>
-                <p class="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">{{ $section }}</p>
-                <div class="space-y-1.5">
+            <div class="um-module-section">
+                <p class="um-module-section-title">{{ $section }}</p>
+                <div class="um-module-checkboxes">
                     @foreach($modules as $module)
                         @if(($module['always_available'] ?? false) || ($module['key'] === 'user_management' && ! $canGrantUserManagement))
                             @continue
                         @endif
-                        <label class="flex items-start gap-2 text-xs text-slate-600">
-                            <input type="checkbox" name="modules[]" value="{{ $module['key'] }}" class="mt-0.5">
+                        <label class="um-module-check">
+                            <input type="checkbox" name="modules[]" value="{{ $module['key'] }}">
                             <span>
-                                <span class="font-medium text-slate-700">{{ $module['label'] }}</span>
+                                <span class="um-module-check-label">{{ $module['label'] }}</span>
                                 @if($module['description'])
-                                    <span class="block text-[11px] text-slate-400">{{ $module['description'] }}</span>
+                                    <span class="um-module-check-desc">{{ $module['description'] }}</span>
                                 @endif
                             </span>
                         </label>

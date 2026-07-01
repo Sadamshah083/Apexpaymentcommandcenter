@@ -2,7 +2,7 @@
     use App\Support\SalesOps;
 
     $status = $member->pivot->status ?? 'active';
-    $role = $member->pivot->role ?? 'sdr';
+    $role = $member->pivot->role ?? 'appointment_setter';
     $isOwner = $activeWorkspace->admin_id === $member->id;
     $canManageMembership = Auth::user()->canManageWorkspaceMembers($activeWorkspace->id) && ! $isOwner;
     $canAssignModules = Auth::user()->canAssignModulePermissions($activeWorkspace->id) && ! $isOwner;
@@ -11,107 +11,123 @@
     $modulePermissions = $member->getModulePermissions($activeWorkspace->id);
     $moduleSummary = $member->usesRestrictedModuleAccess($activeWorkspace->id)
         ? count($modulePermissions).' module(s)'
-        : (SalesOps::isAdminPortalRole($role) && $role !== 'super_admin' ? 'Full access' : null);
+        : (SalesOps::isAdminPortalRole($role) && $role !== 'super_admin' ? 'Full admin access' : null);
+    $portalType = SalesOps::isAdminPortalRole($role) ? 'admin' : (SalesOps::isPortalRole($role) ? 'agent' : 'other');
+    $initials = strtoupper(substr($member->name, 0, 2));
 @endphp
 
-<div
-    class="member-row py-4 flex flex-col sm:flex-row sm:items-start justify-between gap-4 {{ $status === 'suspended' ? 'member-row-suspended' : '' }}"
+<article
+    class="member-row um-member-card {{ $status === 'suspended' ? 'member-row-suspended um-member-card-suspended' : '' }}"
     data-member-id="{{ $member->id }}"
     data-member-name="{{ $member->name }}"
+    data-member-search="{{ strtolower($member->name.' '.$member->email.' '.$roleLabel) }}"
 >
-    <div class="member-row-identity min-w-0">
-        <div class="flex items-center gap-2 flex-wrap">
-            <span class="font-bold text-slate-800 text-sm">{{ $member->name }}</span>
-            @if($isOwner)
-                <span class="member-owner-badge">Owner</span>
+    <div class="um-member-card-main">
+        <div class="um-member-avatar" aria-hidden="true">{{ $initials }}</div>
+
+        <div class="member-row-identity um-member-info">
+            <div class="um-member-title-row">
+                <h4 class="um-member-name">{{ $member->name }}</h4>
+                @if($isOwner)
+                    <span class="member-owner-badge um-badge um-badge-owner">Owner</span>
+                @endif
+                <span
+                    class="member-status-badge member-status-{{ $status }} um-badge um-badge-status-{{ $status }}"
+                    data-member-status
+                >{{ $status === 'suspended' ? 'Suspended' : ($status === 'invited' ? 'Invited' : 'Active') }}</span>
+                @if($portalType === 'admin')
+                    <span class="um-badge um-badge-portal-admin">Admin portal</span>
+                @elseif($portalType === 'agent')
+                    <span class="um-badge um-badge-portal-agent">Agent portal</span>
+                @endif
+            </div>
+            <p class="um-member-email">{{ $member->email }}</p>
+            <p class="um-member-role" data-member-role>{{ $roleLabel }}</p>
+            @if($moduleSummary)
+                <p class="um-member-modules" data-member-module-summary>{{ $moduleSummary }}</p>
+            @else
+                <p class="um-member-modules hidden" data-member-module-summary></p>
             @endif
-            <span
-                class="member-status-badge member-status-{{ $status }}"
-                data-member-status
-            >{{ $status === 'suspended' ? 'Suspended' : ($status === 'invited' ? 'Invited' : 'Active') }}</span>
         </div>
-        <div class="text-xs text-slate-400 mt-1 truncate">{{ $member->email }}</div>
-        <div class="text-xs text-slate-500 mt-0.5" data-member-role>{{ $roleLabel }}</div>
-        @if($moduleSummary)
-            <div class="text-[11px] text-indigo-600 mt-0.5" data-member-module-summary>{{ $moduleSummary }}</div>
-        @endif
     </div>
 
     @if($canManageMembership || $canAssignModules)
-        <div class="member-row-actions flex flex-col gap-3 w-full sm:w-auto sm:min-w-[280px]">
+        <div class="member-row-actions um-member-actions">
             @if($canManageMembership)
-            <form
-                method="POST"
-                action="{{ route('admin.workspaces.members.role', [$activeWorkspace->id, $member->id]) }}"
-                data-member-action="role"
-                data-member-name="{{ $member->name }}"
-                class="flex items-center gap-2"
-            >
-                @csrf
-                @method('PATCH')
-                <label class="text-xs text-slate-500 shrink-0">Role</label>
-                <select
-                    name="role"
-                    class="member-role-select flex-1 px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
-                    data-member-role-select
-                >
-                    @foreach($assignableRoles as $value => $label)
-                        <option value="{{ $value }}" @selected($role === $value)>{{ $label }}</option>
-                    @endforeach
-                </select>
-                <button type="submit" class="member-action-btn member-action-btn-role text-xs">Save</button>
-            </form>
+                <div class="um-action-group">
+                    <form
+                        method="POST"
+                        action="{{ route('admin.workspaces.members.role', [$activeWorkspace->id, $member->id]) }}"
+                        data-member-action="role"
+                        data-member-name="{{ $member->name }}"
+                        class="um-role-form"
+                    >
+                        @csrf
+                        @method('PATCH')
+                        <label class="um-label um-label-inline">Role</label>
+                        <select
+                            name="role"
+                            class="um-input um-select um-select-sm member-role-select"
+                            data-member-role-select
+                        >
+                            @foreach($assignableRoles as $value => $label)
+                                <option value="{{ $value }}" @selected($role === $value)>{{ $label }}</option>
+                            @endforeach
+                        </select>
+                        <button type="submit" class="um-btn um-btn-ghost um-btn-sm member-action-btn member-action-btn-role">Save</button>
+                    </form>
+                </div>
 
-            <details class="member-reset-password text-xs">
-                <summary class="cursor-pointer text-indigo-600 font-medium">Reset password</summary>
-                <form
-                    method="POST"
-                    action="{{ route('admin.workspaces.members.reset-password', [$activeWorkspace->id, $member->id]) }}"
-                    data-member-action="reset-password"
-                    data-member-name="{{ $member->name }}"
-                    class="mt-2 space-y-2"
-                >
-                    @csrf
-                    <input type="password" name="password" required minlength="6" placeholder="New password" class="w-full px-2 py-1.5 border border-slate-200 rounded-lg">
-                    <input type="password" name="password_confirmation" required minlength="6" placeholder="Confirm password" class="w-full px-2 py-1.5 border border-slate-200 rounded-lg">
-                    <button type="submit" class="member-action-btn member-action-btn-role w-full">Update password</button>
-                </form>
-            </details>
+                <details class="um-details member-reset-password">
+                    <summary>Reset password</summary>
+                    <form
+                        method="POST"
+                        action="{{ route('admin.workspaces.members.reset-password', [$activeWorkspace->id, $member->id]) }}"
+                        data-member-action="reset-password"
+                        data-member-name="{{ $member->name }}"
+                        class="um-form-stack um-form-stack-tight"
+                    >
+                        @csrf
+                        <input type="password" name="password" required minlength="6" placeholder="New password" class="um-input um-input-sm" autocomplete="new-password">
+                        <input type="password" name="password_confirmation" required minlength="6" placeholder="Confirm password" class="um-input um-input-sm" autocomplete="new-password">
+                        <button type="submit" class="um-btn um-btn-ghost um-btn-sm um-btn-block member-action-btn member-action-btn-role">Update password</button>
+                    </form>
+                </details>
 
-            <div class="flex flex-wrap items-center gap-2">
-                <form
-                    method="POST"
-                    action="{{ route('admin.workspaces.members.suspend', [$activeWorkspace->id, $member->id]) }}"
-                    data-member-action="suspend"
-                    data-member-name="{{ $member->name }}"
-                    @if($status === 'suspended') hidden @endif
-                >
-                    @csrf
-                    <button type="submit" class="member-action-btn member-action-btn-suspend">Suspend</button>
-                </form>
+                <div class="um-action-buttons">
+                    <form
+                        method="POST"
+                        action="{{ route('admin.workspaces.members.suspend', [$activeWorkspace->id, $member->id]) }}"
+                        data-member-action="suspend"
+                        data-member-name="{{ $member->name }}"
+                        @if($status === 'suspended') hidden @endif
+                    >
+                        @csrf
+                        <button type="submit" class="member-action-btn member-action-btn-suspend um-btn um-btn-warning um-btn-sm">Suspend</button>
+                    </form>
 
-                <form
-                    method="POST"
-                    action="{{ route('admin.workspaces.members.reactivate', [$activeWorkspace->id, $member->id]) }}"
-                    data-member-action="reactivate"
-                    data-member-name="{{ $member->name }}"
-                    @if($status !== 'suspended') hidden @endif
-                >
-                    @csrf
-                    <button type="submit" class="member-action-btn member-action-btn-reactivate">Reactivate</button>
-                </form>
+                    <form
+                        method="POST"
+                        action="{{ route('admin.workspaces.members.reactivate', [$activeWorkspace->id, $member->id]) }}"
+                        data-member-action="reactivate"
+                        data-member-name="{{ $member->name }}"
+                        @if($status !== 'suspended') hidden @endif
+                    >
+                        @csrf
+                        <button type="submit" class="member-action-btn member-action-btn-reactivate um-btn um-btn-success um-btn-sm">Reactivate</button>
+                    </form>
 
-                <form
-                    method="POST"
-                    action="{{ route('admin.workspaces.members.destroy', [$activeWorkspace->id, $member->id]) }}"
-                    data-member-action="remove"
-                    data-member-name="{{ $member->name }}"
-                >
-                    @csrf
-                    @method('DELETE')
-                    <button type="submit" class="member-action-btn member-action-btn-remove">Remove</button>
-                </form>
-            </div>
+                    <form
+                        method="POST"
+                        action="{{ route('admin.workspaces.members.destroy', [$activeWorkspace->id, $member->id]) }}"
+                        data-member-action="remove"
+                        data-member-name="{{ $member->name }}"
+                    >
+                        @csrf
+                        @method('DELETE')
+                        <button type="submit" class="member-action-btn member-action-btn-remove um-btn um-btn-danger um-btn-sm">Remove</button>
+                    </form>
+                </div>
             @endif
 
             @if($canAssignModules)
@@ -119,4 +135,4 @@
             @endif
         </div>
     @endif
-</div>
+</article>

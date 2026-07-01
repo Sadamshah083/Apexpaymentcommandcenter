@@ -19,6 +19,7 @@
                     &bull; Closer: {{ SalesOps::closerStatusLabel($lead->closer_status) }}
                 @endif
             </p>
+            @include('partials.lead-tag-chips', ['tags' => $lead->tags, 'list' => $lead->leadList])
         </div>
         <a href="{{ route($user->portalDashboardRoute()) }}" class="app-btn app-btn-secondary text-sm">Back</a>
     </div>

@@ -230,6 +230,8 @@ class LeadTagBatchService
 
         if ($tagIds !== []) {
             $this->applyTagFilter($query, $tagIds, $match);
+        } else {
+            $query->whereHas('tags');
         }
 
         if ($status !== null && $status !== '') {

@@ -119,6 +119,7 @@ class WorkflowService
     public function buildShowData(Workflow $workflow, Workspace $workspace, array $options = []): array
     {
         $workflow = $this->applyAutoMappingIfNeeded($workflow);
+        $workflow->load('leadList');
         $workflow->loadCount([
             'leads as assigned_leads_count' => fn ($query) => $query->whereNotNull('assigned_user_id'),
             'leads as pending_verification_count' => fn ($query) => $query->where('status', 'pending_verification'),
@@ -130,7 +131,7 @@ class WorkflowService
         $perPage = min(max((int) ($options['per_page'] ?? config('pagination.pipeline_leads_per_page', 25)), 5), 100);
 
         $leads = $workflow->leads()
-            ->with('tags')
+            ->with(['tags', 'leadList'])
             ->orderByRaw("CASE WHEN status = 'pending_verification' THEN 0 WHEN status = 'extracting' THEN 1 WHEN status = 'completed' THEN 2 WHEN status = 'failed' THEN 3 ELSE 4 END ASC")
             ->orderBy('researched_at', 'desc')
             ->orderBy('row_number', 'asc')

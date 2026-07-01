@@ -11,7 +11,7 @@ class ApexPaymentsWorkspaceSeeder extends Seeder
 {
     public function run(): void
     {
-        $superAdmin = User::firstOrCreate(
+        $superAdmin = User::updateOrCreate(
             ['email' => 'admin_super_91a@apexpayments.com'],
             ['name' => 'admin_super_91a', 'password' => Hash::make('K9#mQ2!vX4$zY7*p')]
         );
@@ -96,7 +96,7 @@ class ApexPaymentsWorkspaceSeeder extends Seeder
         ];
 
         foreach ($accounts as $account) {
-            $user = User::firstOrCreate(
+            $user = User::updateOrCreate(
                 ['email' => $account['email']],
                 ['name' => $account['username'], 'password' => Hash::make($account['password'])]
             );

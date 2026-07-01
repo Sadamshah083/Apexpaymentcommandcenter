@@ -69,6 +69,18 @@ function escapeHtml(value) {
         .replace(/"/g, '&quot;');
 }
 
+function renderLeadTagChips(lead) {
+    const tags = Array.isArray(lead.tags) ? lead.tags : [];
+    const tagHtml = tags.length
+        ? `<div class="flex flex-wrap gap-1 mt-0.5">${tags.map((tag) => `<span class="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-zinc-100 text-zinc-600" style="border-left: 2px solid ${escapeHtml(tag.color || '#6366f1')}">${escapeHtml(tag.name)}</span>`).join('')}</div>`
+        : '';
+    const listHtml = lead.lead_list_name
+        ? `<div class="text-[10px] text-zinc-400 mt-0.5">List: <span class="font-medium text-zinc-600">${escapeHtml(lead.lead_list_name)}</span></div>`
+        : '';
+
+    return `${listHtml}${tagHtml}`;
+}
+
 function renderLeadRow(lead, leadShowBase) {
     const contact = lead.direct_email && lead.direct_email !== 'Not Publicly Available'
         ? `<div class="text-zinc-700">${escapeHtml(lead.direct_email)}</div>`
@@ -88,6 +100,7 @@ function renderLeadRow(lead, leadShowBase) {
                 <div class="font-bold text-zinc-900">${escapeHtml(lead.business_name)}</div>
                 ${lead.address ? `<div class="text-xs text-zinc-500 mt-0.5">${escapeHtml(lead.address)}</div>` : ''}
                 <div class="text-[10px] text-zinc-400 font-normal mt-0.5">${escapeHtml(lead.city)}, ${escapeHtml(lead.state)}</div>
+                ${renderLeadTagChips(lead)}
             </td>
             <td class="font-medium text-zinc-600">${escapeHtml(lead.owner_name || 'Not Found')}</td>
             <td>${contact}${phone}${contactFallback}</td>
@@ -171,6 +184,7 @@ function renderPipelineLeadRow(lead, leadShowBase, csrf) {
             <td>
                 <a href="${leadShowBase}/${lead.id}" class="font-bold text-zinc-900 hover:underline">${escapeHtml(lead.business_name)}</a>
                 ${location ? `<div class="text-xs text-zinc-400 mt-0.5">${escapeHtml(location)}</div>` : ''}
+                ${renderLeadTagChips(lead)}
             </td>
             <td class="text-sm text-zinc-600">${escapeHtml(lead.owner_name || '—')}</td>
             <td class="text-sm text-zinc-600">${contact}</td>
@@ -192,9 +206,12 @@ function renderWorkflowCard(workflow, showBase) {
                 </div>
                 ${renderWorkflowStatusPill(workflow.status)}
             </div>
-            <div class="mt-3 flex items-center justify-between text-xs text-zinc-500">
-                <span>${workflow.processed_leads} / ${workflow.total_leads} processed</span>
-            </div>
+                <div class="mt-3 flex items-center justify-between text-xs text-zinc-500">
+                    <span>${workflow.processed_leads} / ${workflow.total_leads} processed</span>
+                </div>
+                ${workflow.lead_list_name || (Array.isArray(workflow.import_tag_ids) && workflow.import_tag_ids.length)
+                    ? `<div class="mt-2 text-xs text-zinc-500">${workflow.lead_list_name ? `List: <strong class="text-zinc-700">${escapeHtml(workflow.lead_list_name)}</strong>` : ''}${workflow.import_tag_ids?.length ? `<span class="${workflow.lead_list_name ? 'ml-2' : ''}">Tagged import</span>` : ''}</div>`
+                    : ''}
             <div class="mt-3 flex items-center justify-end gap-3">
                 <a href="${showBase}/${workflow.id}" class="app-link text-xs">${openLabel}</a>
                 ${workflowActionForms(workflow, showBase)}

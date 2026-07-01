@@ -234,13 +234,21 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                 </div>
             @endif
 
-            @if(!empty($workflow->import_tag_ids))
+            @if(!empty($workflow->import_tag_ids) || ($leadList ?? null))
                 <div class="app-alert app-alert-info flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
-                        <p class="app-alert-title">Tagged import</p>
-                        <p class="app-alert-desc">Batch enrich or assign all leads with these tags — including from other files.</p>
+                        @if($leadList ?? null)
+                            <p class="app-alert-title">List: {{ $leadList->name }}</p>
+                        @endif
+                        @if(!empty($workflow->import_tag_ids))
+                            <p class="app-alert-desc">Batch enrich or assign all leads with these tags — including from other files.</p>
+                        @elseif($leadList ?? null)
+                            <p class="app-alert-desc">All leads in this import belong to this static list.</p>
+                        @endif
                     </div>
-                    <a href="{{ route('admin.lead-tags.show', ['tag_ids' => $workflow->import_tag_ids]) }}" class="app-btn app-btn-secondary app-btn-sm whitespace-nowrap">Open in Lead Tags</a>
+                    @if(!empty($workflow->import_tag_ids))
+                        <a href="{{ route('admin.lead-tags.show', ['tag_ids' => $workflow->import_tag_ids]) }}" class="app-btn app-btn-secondary app-btn-sm whitespace-nowrap">Open in Lead Tags</a>
+                    @endif
                 </div>
             @endif
 
@@ -371,13 +379,7 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                                         @if($lead->city || $lead->state)
                                             <div class="text-xs text-zinc-400 mt-0.5">{{ $lead->city }}{{ $lead->city && $lead->state ? ', ' : '' }}{{ $lead->state }}</div>
                                         @endif
-                                        @if($lead->tags->isNotEmpty())
-                                            <div class="flex flex-wrap gap-1 mt-1">
-                                                @foreach($lead->tags as $tag)
-                                                    <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-zinc-100 text-zinc-600" style="border-left: 2px solid {{ $tag->color }}">{{ $tag->name }}</span>
-                                                @endforeach
-                                            </div>
-                                        @endif
+                                        @include('partials.lead-tag-chips', ['tags' => $lead->tags, 'list' => $lead->leadList, 'compact' => true])
                                     </td>
                                     <td class="text-sm text-zinc-600">{{ $lead->owner_name ?: '—' }}</td>
                                     <td class="text-sm text-zinc-600">

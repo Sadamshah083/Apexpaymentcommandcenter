@@ -8,15 +8,19 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('workspace_user', function (Blueprint $table) {
-            $table->json('module_permissions')->nullable()->after('joined_at');
-        });
+        if (!Schema::hasColumn('workspace_user', 'module_permissions')) {
+            Schema::table('workspace_user', function (Blueprint $table) {
+                $table->json('module_permissions')->nullable()->after('joined_at');
+            });
+        }
     }
 
     public function down(): void
     {
-        Schema::table('workspace_user', function (Blueprint $table) {
-            $table->dropColumn('module_permissions');
-        });
+        if (Schema::hasColumn('workspace_user', 'module_permissions')) {
+            Schema::table('workspace_user', function (Blueprint $table) {
+                $table->dropColumn('module_permissions');
+            });
+        }
     }
 };

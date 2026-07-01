@@ -158,7 +158,7 @@ class User extends Authenticatable
         }
 
         return $this->workspaces()
-            ->wherePivotIn('role', ['admin', 'manager'])
+            ->wherePivotIn('role', ['super_admin', 'admin', 'manager'])
             ->wherePivot('status', 'active')
             ->get()
             ->contains(fn (Workspace $workspace) => $this->canAccessAdminPortal($workspace->id));
@@ -176,7 +176,7 @@ class User extends Authenticatable
         }
 
         return $this->workspaces()
-            ->wherePivotIn('role', ['admin', 'manager'])
+            ->wherePivotIn('role', ['super_admin', 'admin', 'manager'])
             ->wherePivot('status', 'active')
             ->orderBy('workspaces.name')
             ->first();
@@ -237,6 +237,11 @@ class User extends Authenticatable
     {
         if ($workspaceId) {
             if ($this->isSuperAdmin($workspaceId)) {
+                return true;
+            }
+
+            $role = $this->getWorkspaceRole($workspaceId);
+            if ($role === 'super_admin') {
                 return true;
             }
 

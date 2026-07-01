@@ -46,7 +46,9 @@ class WorkspaceMemberController extends Controller
 
         return $this->respond(
             $request,
-            "Account \"{$member->name}\" created as ".SalesOps::roleLabel($data['role']).'. They can sign in at the agent portal.',
+            SalesOps::isAdminPortalRole($data['role'])
+                ? "Account \"{$member->name}\" created as ".SalesOps::roleLabel($data['role']).'. They can sign in at the admin portal.'
+                : "Account \"{$member->name}\" created as ".SalesOps::roleLabel($data['role']).'. They can sign in at the agent portal.',
         );
     }
 

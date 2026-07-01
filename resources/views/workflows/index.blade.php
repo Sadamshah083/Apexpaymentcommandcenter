@@ -106,6 +106,7 @@
                                             <div class="text-[10px] text-zinc-400 font-normal mt-0.5">
                                                 {{ $lead->city }}, {{ $lead->state }}
                                             </div>
+                                            @include('partials.lead-tag-chips', ['tags' => $lead->tags, 'list' => $lead->leadList, 'compact' => true])
                                         </td>
                                         <td class="font-medium text-zinc-600">
                                             {{ $lead->owner_name ?: 'Not Found' }}
@@ -171,6 +172,18 @@
                                     <span>{{ $wf->processed_leads }} / {{ $wf->total_leads }} processed</span>
                                     <span>{{ $wf->created_at->diffForHumans() }}</span>
                                 </div>
+                                @if($wf->leadList || !empty($wf->import_tag_ids))
+                                    <div class="mt-2 text-xs text-zinc-500">
+                                        @if($wf->leadList)
+                                            <span>List: <strong class="text-zinc-700">{{ $wf->leadList->name }}</strong></span>
+                                        @endif
+                                        @if(!empty($wf->import_tag_ids))
+                                            <span class="{{ $wf->leadList ? 'ml-2' : '' }}">
+                                                <a href="{{ route('admin.lead-tags.show', ['tag_ids' => $wf->import_tag_ids]) }}" class="app-link">Tagged import</a>
+                                            </span>
+                                        @endif
+                                    </div>
+                                @endif
                                 <div class="mt-3 flex items-center justify-end gap-3">
                                     <a href="{{ route('admin.workflows.show', $wf->id) }}" class="app-link text-xs">
                                         {{ $wf->status === 'mapping' ? 'Continue setup' : 'Open' }}

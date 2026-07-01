@@ -51,16 +51,16 @@ export function applyWorkspaceAdminState(data) {
         const switchForm = !active && switchBase
             ? `<form method="POST" action="${escapeHtml(switchBase)}/${workspace.id}" class="workspace-switch-form">
                     <input type="hidden" name="_token" value="${escapeHtml(csrf)}">
-                    <button type="submit" class="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 font-bold border border-slate-200 rounded-lg text-xs">Switch</button>
+                    <button type="submit" class="um-btn um-btn-ghost um-btn-sm">Switch</button>
                </form>`
-            : '<span class="px-2.5 py-1 bg-indigo-100 text-indigo-700 font-bold rounded-lg text-xs">Active</span>';
+            : '<span class="um-badge um-badge-active">Active</span>';
 
         return `
-            <div class="workspace-context-card p-4 rounded-xl border ${active ? 'border-indigo-500 bg-indigo-50/20' : 'border-slate-100 bg-slate-50/50'} flex items-center justify-between" data-workspace-id="${workspace.id}">
-                <div>
-                    <h4 class="font-bold text-slate-800 text-sm">${escapeHtml(workspace.name)}</h4>
-                    <p class="text-xs text-slate-400 mt-0.5">Owner: ${escapeHtml(workspace.admin_name ?? '—')}</p>
-                    <p class="text-[10px] text-slate-400 mt-1">${workspace.workflow_count ?? 0} pipelines · ${workspace.member_count ?? 0} members</p>
+            <div class="um-workspace-card ${active ? 'um-workspace-card-active' : ''}" data-workspace-id="${workspace.id}">
+                <div class="um-workspace-card-body">
+                    <h4 class="um-workspace-name">${escapeHtml(workspace.name)}</h4>
+                    <p class="um-workspace-meta">Owner: ${escapeHtml(workspace.admin_name ?? '—')}</p>
+                    <p class="um-workspace-stats">${workspace.workflow_count ?? 0} pipelines · ${workspace.member_count ?? 0} members</p>
                 </div>
                 ${switchForm}
             </div>
@@ -182,13 +182,14 @@ function bindCreateMemberForm() {
 
             createForm.reset();
             window.showToast?.(payload.message || 'Agent account created.', 'success');
+            window.setTimeout(() => window.location.reload(), 600);
         } catch {
             window.showToast?.('Network error while creating account.', 'error');
         } finally {
             createForm.dataset.submitting = '0';
             if (submitButton) {
                 submitButton.disabled = false;
-                submitButton.textContent = originalText || 'Create Agent Account';
+                submitButton.textContent = originalText || 'Create account';
             }
         }
     });

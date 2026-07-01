@@ -19,6 +19,35 @@ class LeadTagBatchServiceTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_empty_tag_filter_returns_only_tagged_leads(): void
+    {
+        $admin = User::factory()->create();
+        $workspace = Workspace::create(['name' => 'Acme', 'admin_id' => $admin->id]);
+
+        $tag = LeadTag::create(['workspace_id' => $workspace->id, 'name' => 'texas', 'color' => '#6366f1']);
+        $workflow = Workflow::create(['workspace_id' => $workspace->id, 'name' => 'File A', 'status' => 'completed']);
+
+        $tagged = WorkflowLead::create([
+            'workflow_id' => $workflow->id,
+            'status' => 'imported',
+            'row_number' => 1,
+            'business_name' => 'Tagged',
+        ]);
+        $untagged = WorkflowLead::create([
+            'workflow_id' => $workflow->id,
+            'status' => 'imported',
+            'row_number' => 2,
+            'business_name' => 'Untagged',
+        ]);
+
+        $tagged->tags()->attach($tag->id);
+
+        $service = app(LeadTagBatchService::class);
+        $ids = $service->paginateLeads($workspace, [], 'any')->pluck('id')->all();
+
+        $this->assertSame([$tagged->id], $ids);
+    }
+
     public function test_finds_leads_by_tag_across_workflows(): void
     {
         $admin = User::factory()->create();

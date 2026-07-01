@@ -106,6 +106,7 @@ def main() -> int:
     log(f"Archive size: {len(tarball) / 1024 / 1024:.1f} MB")
 
     log("Uploading release...")
+    run(ssh, f"rm -f {REMOTE_TAR}", check=False)
     upload_bytes(sftp, REMOTE_TAR, tarball)
 
     if SKIP_PROVISION:

@@ -21,7 +21,13 @@
                 All tagged leads
             @endif
         </h1>
-        <p class="app-page-subtitle">Leads from every import matching your tag filter — enrich or assign in one batch.</p>
+        <p class="app-page-subtitle">
+            @if($selectedTagIds !== [])
+                Leads from every import matching your tag filter — enrich or assign in one batch.
+            @else
+                Every lead that has at least one tag across all imports.
+            @endif
+        </p>
     </div>
 
     @if(isset($enrichmentStatus))
@@ -159,6 +165,9 @@
                             <input type="hidden" name="tag_ids[]" value="{{ $id }}">
                         @endforeach
                         <input type="hidden" name="match" value="{{ $match }}">
+                        @foreach($listIds as $listId)
+                            <input type="hidden" name="list_ids[]" value="{{ $listId }}">
+                        @endforeach
                         <div class="flex flex-wrap gap-2">
                             @foreach($tags as $tag)
                                 <label class="app-member-chip">

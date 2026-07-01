@@ -35,7 +35,7 @@
 <x-data-table :paginator="$campaigns">
     <x-slot:header>
         <h3 class="app-data-table-title">Campaigns</h3>
-        <a href="{{ route('business-research.index') }}" class="text-sm text-indigo-600 hover:underline">Single business lookup</a>
+        <a href="{{ route('admin.business-research.index') }}" class="text-sm text-indigo-600 hover:underline">Single business lookup</a>
     </x-slot:header>
     <table>
         <thead>

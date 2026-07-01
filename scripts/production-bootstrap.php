@@ -10,8 +10,18 @@ use App\Models\Workspace;
 use Illuminate\Support\Facades\Hash;
 
 $username = env('PRODUCTION_ADMIN_USER', 'admin');
-$password = env('PRODUCTION_ADMIN_PASSWORD');
 $email = env('PRODUCTION_ADMIN_EMAIL', 'admin@apexone.local');
+$password = env('PRODUCTION_ADMIN_PASSWORD') ?: getenv('PRODUCTION_ADMIN_PASSWORD');
+
+if (! $password && file_exists(__DIR__.'/../.env')) {
+    $lines = file(__DIR__.'/../.env');
+    foreach ($lines as $line) {
+        if (strpos(trim($line), 'PRODUCTION_ADMIN_PASSWORD=') === 0) {
+            $password = trim(substr(trim($line), strlen('PRODUCTION_ADMIN_PASSWORD=')), '"\'');
+            break;
+        }
+    }
+}
 
 if (! $password) {
     fwrite(STDERR, "PRODUCTION_ADMIN_PASSWORD is required.\n");

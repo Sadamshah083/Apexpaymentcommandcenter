@@ -30,7 +30,13 @@ const ACTION_COPY = {
             return `Change ${name}'s role to ${label}?`;
         },
     },
-    'modules': {
+    'reset-password': {
+        title: 'Reset password?',
+        tone: 'warning',
+        confirmLabel: 'Update password',
+        message: (name) => `Set a new password for ${name}?`,
+    },
+    modules: {
         title: 'Update module access?',
         tone: 'warning',
         confirmLabel: 'Save module access',
@@ -172,11 +178,38 @@ async function submitMemberForm(form) {
         }
 
         if (form.dataset.memberAction === 'role') {
-            const roleEl = row?.querySelector('[data-member-role]');
-            const select = form.querySelector('[name="role"]');
-            if (roleEl && select) {
-                roleEl.textContent = select.selectedOptions[0]?.textContent?.trim() || roleEl.textContent;
+            window.setTimeout(() => window.location.reload(), 500);
+            row?.classList.remove('member-row-busy');
+            return;
+        }
+
+        if (form.dataset.memberAction === 'suspend' || form.dataset.memberAction === 'reactivate') {
+            const status = form.dataset.memberAction === 'suspend' ? 'suspended' : 'active';
+            const badge = row?.querySelector('[data-member-status]');
+            if (badge) {
+                badge.className = `member-status-badge member-status-${status} um-badge um-badge-status-${status}`;
+                badge.textContent = status === 'suspended' ? 'Suspended' : 'Active';
             }
+            row?.querySelector('[data-member-action="suspend"]')?.toggleAttribute('hidden', status === 'suspended');
+            row?.querySelector('[data-member-action="reactivate"]')?.toggleAttribute('hidden', status !== 'suspended');
+            row?.classList.toggle('member-row-suspended', status === 'suspended');
+            row?.classList.toggle('um-member-card-suspended', status === 'suspended');
+        }
+
+        if (form.dataset.memberAction === 'remove') {
+            row?.classList.add('member-row-removing');
+            window.setTimeout(() => {
+                row?.remove();
+                const list = document.getElementById('workspace-sync-team');
+                if (list && list.querySelectorAll('.member-row').length === 0) {
+                    list.innerHTML = `
+                        <div class="um-empty-state" data-um-empty-members>
+                            <p class="um-empty-title">No team members yet</p>
+                            <p class="um-empty-desc">Create an agent account below to get started.</p>
+                        </div>
+                    `;
+                }
+            }, 320);
         }
 
         if (form.dataset.memberAction === 'modules') {
@@ -184,7 +217,8 @@ async function submitMemberForm(form) {
             const restricted = form.querySelector('[name="access_mode"][value="restricted"]')?.checked;
             const checkedCount = form.querySelectorAll('[name="modules[]"]:checked').length;
             if (summary) {
-                summary.textContent = restricted ? `${checkedCount} module(s)` : 'Full access';
+                summary.textContent = restricted ? `${checkedCount} module(s)` : 'Full admin access';
+                summary.classList.remove('hidden');
             }
         }
 
@@ -354,13 +388,28 @@ export function replaceAdminTeam(container, members) {
         return;
     }
 
-    const html = members.map((member) => renderAdminMemberRow(member, options)).join('');
+    // Full re-render is complex; reload to keep UI in sync with server-rendered cards.
+    if (members.length !== container.querySelectorAll('.member-row').length) {
+        window.location.reload();
+        return;
+    }
 
-    container.classList.add('live-sync-updating');
-    window.requestAnimationFrame(() => {
-        container.innerHTML = html;
-        bindMemberForms();
-        window.requestAnimationFrame(() => container.classList.remove('live-sync-updating'));
+    updateMemberRows(container, members);
+}
+
+function bindMemberSearch() {
+    const input = document.getElementById('um-member-search');
+    const list = document.getElementById('workspace-sync-team');
+    if (!input || !list) {
+        return;
+    }
+
+    input.addEventListener('input', () => {
+        const query = input.value.trim().toLowerCase();
+        list.querySelectorAll('.member-row').forEach((row) => {
+            const haystack = row.dataset.memberSearch || row.textContent?.toLowerCase() || '';
+            row.classList.toggle('um-search-hidden', query !== '' && !haystack.includes(query));
+        });
     });
 }
 
@@ -372,6 +421,7 @@ export function initMemberManagement() {
     bindConfirmModal();
     bindMemberForms();
     bindModuleAccessToggles();
+    bindMemberSearch();
 }
 
 export function updateMemberRows(container, members) {
@@ -404,7 +454,7 @@ export function updateMemberRows(container, members) {
         const status = member.status || 'active';
         const badge = row.querySelector('[data-member-status]');
         if (badge) {
-            badge.className = `member-status-badge member-status-${status}`;
+            badge.className = `member-status-badge member-status-${status} um-badge um-badge-status-${status}`;
             badge.textContent = status === 'suspended' ? 'Suspended' : (status === 'invited' ? 'Invited' : 'Active');
         }
 
@@ -433,6 +483,7 @@ export function updateMemberRows(container, members) {
         }
 
         row.classList.toggle('member-row-suspended', status === 'suspended');
+        row.classList.toggle('um-member-card-suspended', status === 'suspended');
         row.classList.remove('member-row-busy');
     });
 }

@@ -213,7 +213,7 @@ class WorkflowController extends Controller
         $this->workspaceContext->ensureLeadBelongsToWorkspace($lead, $workspace);
 
         $team = $workspace->users;
-        $lead->load(['workflow.workspace', 'verifier', 'activities.user', 'setter', 'closer']);
+        $lead->load(['workflow.workspace', 'verifier', 'activities.user', 'setter', 'closer', 'tags', 'leadList']);
 
         $user = Auth::user();
 

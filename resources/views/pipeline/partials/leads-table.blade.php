@@ -38,6 +38,7 @@
                     <tr>
                         <td>
                             <a href="{{ route('portal.leads.show', $lead->id) }}" class="font-bold text-zinc-900 hover:underline">{{ $lead->business_name }}</a>
+                            @include('partials.lead-tag-chips', ['tags' => $lead->tags ?? collect(), 'list' => $lead->leadList ?? null, 'compact' => true])
                         </td>
                         <td class="text-sm text-zinc-600">{{ $lead->direct_email ?: $lead->input_email ?: '—' }}</td>
                         @if($showAssignee)

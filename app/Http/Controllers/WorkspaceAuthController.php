@@ -151,9 +151,15 @@ class WorkspaceAuthController extends Controller
 
             Auth::logout();
 
+            if ($user->isAdminOfAnyWorkspace()) {
+                return back()->withErrors([
+                    'username' => 'This is an admin account. Sign in at the admin portal instead: '.route('admin.login'),
+                ])->withInput($request->only('username'));
+            }
+
             return back()->withErrors([
                 'username' => 'Access denied. This account is not active in any workspace.',
-            ]);
+            ])->withInput($request->only('username'));
         }
 
         return back()->withErrors([
