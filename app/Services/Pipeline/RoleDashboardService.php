@@ -27,8 +27,16 @@ class RoleDashboardService
             ->pluck('users.id');
 
         return $this->baseQuery($workspace, $filters)
-            ->whereIn('pipeline_phase', ['with_setter', 'appointment_settled', 'with_closer', 'closed'])
-            ->whereIn('assigned_setter_id', $setterIds)
+            ->where(function ($query) use ($setterIds) {
+                $query->where(function ($assigned) use ($setterIds) {
+                    $assigned->whereIn('pipeline_phase', ['with_setter', 'appointment_settled', 'with_closer', 'closed'])
+                        ->whereIn('assigned_setter_id', $setterIds);
+                })->orWhere(function ($unassigned) {
+                    $unassigned->where('pipeline_phase', 'enriched')
+                        ->where('status', 'enriched')
+                        ->whereNull('assigned_user_id');
+                });
+            })
             ->paginate(25)
             ->withQueryString();
     }
@@ -49,6 +57,15 @@ class RoleDashboardService
             ->where('assigned_user_id', $user->id)
             ->paginate(25)
             ->withQueryString();
+    }
+
+    public function availableSetters(Workspace $workspace): Collection
+    {
+        return $workspace->users()
+            ->wherePivot('role', 'appointment_setter')
+            ->wherePivot('status', 'active')
+            ->orderBy('users.name')
+            ->get();
     }
 
     public function availableClosers(Workspace $workspace): Collection
@@ -158,6 +175,18 @@ class RoleDashboardService
 
         if (! empty($filters['phase'])) {
             $query->where('pipeline_phase', $filters['phase']);
+        }
+
+        if (! empty($filters['setter'])) {
+            $query->where('assigned_setter_id', (int) $filters['setter']);
+        }
+
+        if (! empty($filters['closer'])) {
+            $closerId = (int) $filters['closer'];
+            $query->where(function ($q) use ($closerId) {
+                $q->where('assigned_closer_id', $closerId)
+                    ->orWhere('assigned_user_id', $closerId);
+            });
         }
 
         return $query;
