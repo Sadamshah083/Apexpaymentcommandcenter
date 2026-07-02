@@ -1,11 +1,7 @@
 @props(['href', 'active' => false, 'label'])
 
-<a
-    href="{{ $href }}"
-    data-turbo-preload
-    @class(['sidebar-link', 'sidebar-link-active' => $active])
-    @if($active) aria-current="page" @endif
->
+<a href="{{ $href }}" data-turbo-preload @class(['sidebar-link', 'sidebar-link-active' => $active])
+    @if ($active) aria-current="page" @endif>
     @isset($icon)
         <span class="sidebar-link-icon">{!! $icon !!}</span>
     @endisset

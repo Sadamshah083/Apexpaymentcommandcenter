@@ -4,7 +4,7 @@
         $role = $user?->getWorkspaceRole();
     @endphp
 
-    @if($role === 'appointment_setter')
+    @if ($role === 'appointment_setter')
         <x-sidebar.link :href="route('portal.setter.dashboard')" label="My Leads" :active="request()->routeIs('portal.setter.*') || request()->routeIs('portal.leads.*')">
             <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'leads'])</x-slot:icon>
         </x-sidebar.link>
@@ -24,4 +24,15 @@
             <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'leads'])</x-slot:icon>
         </x-sidebar.link>
     @endif
+</x-sidebar.section>
+
+<x-sidebar.section title="Communications">
+    <x-sidebar.link :href="route('portal.communications.index', ['panel' => 'dialer'])" label="Phone Dialer"
+        :active="request()->routeIs('portal.communications.*') && request('panel') === 'dialer'">
+        <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'phone'])</x-slot:icon>
+    </x-sidebar.link>
+    <x-sidebar.link :href="route('portal.communications.index')" label="Inbox & Calls"
+        :active="request()->routeIs('portal.communications.*') && request('panel') !== 'dialer'">
+        <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'communications'])</x-slot:icon>
+    </x-sidebar.link>
 </x-sidebar.section>

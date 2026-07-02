@@ -1,0 +1,14 @@
+/vendor
+/node_modules
+/storage
+/bootstrap/cache
+/public/build
+/public/hot
+/public/fonts-manifest.dev.json
+/scratch
+/deploy/__pycache__
+/reports
+/php83
+*.min.js
+*.min.css
+package-lock.json

@@ -9,7 +9,8 @@ return [
         'portal_url' => env('MORPHEUS_PORTAL_URL'),
         'outbound_prefix' => env('MORPHEUS_OUTBOUND_PREFIX', ''),
         'sip_params' => env('MORPHEUS_SIP_PARAMS', 'user=phone'),
-        'dial_method' => env('MORPHEUS_DIAL_METHOD', 'sip'),
+        'dial_method' => env('MORPHEUS_DIAL_METHOD', 'auto'),
+        'platform_api_key' => env('MORPHEUS_PLATFORM_API_KEY'),
     ],
 
     'communications' => [

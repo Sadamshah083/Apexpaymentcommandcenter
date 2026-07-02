@@ -2,10 +2,15 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\User;
+use App\Services\Communications\CommunicationsAgentService;
+use App\Services\Communications\CommunicationsCallHistoryService;
 use App\Services\Communications\CommunicationsDataService;
 use App\Services\Communications\MorpheusHubService;
 use App\Services\Integrations\ZoomApiService;
+use App\Services\Workspace\WorkspaceContextService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class MorpheusHubController extends Controller
 {
@@ -13,6 +18,9 @@ class MorpheusHubController extends Controller
         protected ZoomApiService $morpheus,
         protected MorpheusHubService $hub,
         protected CommunicationsDataService $data,
+        protected CommunicationsAgentService $agents,
+        protected CommunicationsCallHistoryService $callHistory,
+        protected WorkspaceContextService $workspaceContext,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -35,37 +43,65 @@ class MorpheusHubController extends Controller
         $destination = $clickToCall->normalizePhone($validated['destination']);
         $fromExtension = preg_replace('/\D/', '', $validated['from_extension']) ?: $validated['from_extension'];
         $fallback = $validated['fallback'] ?? 'sip';
-        $dialMethod = (string) config('integrations.morpheus.dial_method', 'api');
+        $dialMethod = (string) config('integrations.morpheus.dial_method', 'auto');
+        $result = ['ok' => false, 'error' => 'Could not place outbound call.'];
+
+        if (in_array($dialMethod, ['api', 'auto'], true)) {
+            $result = $this->morpheus->originateCall($fromExtension, $destination);
+
+            if ($result['ok'] ?? false) {
+                $this->logOutboundDial($request, $fromExtension, $destination, $result['call_uuid'] ?? null);
+                $this->data->bustCache();
+                $this->hub->bustCache();
+
+                if ($request->wantsJson()) {
+                    return response()->json(array_merge(['ok' => true], $result));
+                }
+
+                return redirect()
+                    ->route($this->redirectRoutePrefix($request).'communications.index', ['channel' => 'calls'])
+                    ->with('success', 'Outbound call initiated. Answer your extension/softphone when it rings.');
+            }
+
+            if ($dialMethod === 'api') {
+                if ($request->wantsJson()) {
+                    return response()->json([
+                        'ok' => false,
+                        'error' => $result['error'] ?? 'Could not place outbound call.',
+                        'attempted' => $result['attempted'] ?? [],
+                    ], 422);
+                }
+
+                return back()
+                    ->withInput()
+                    ->with('error', $result['error'] ?? 'Could not place outbound call.');
+            }
+        }
 
         if ($dialMethod === 'sip') {
-            return $this->launchOutboundDial($request, $clickToCall, $destination, $fromExtension, 'sip')
+            $response = $this->launchOutboundDial($request, $clickToCall, $destination, $fromExtension, 'sip')
                 ?? $this->launchOutboundDial($request, $clickToCall, $destination, $fromExtension, 'tel')
                 ?? back()->withInput()->with('error', 'Could not build a dial URL for this number.');
+
+            $this->logOutboundDial($request, $fromExtension, $destination);
+
+            return $response;
         }
 
         if ($dialMethod === 'tel') {
-            return $this->launchOutboundDial($request, $clickToCall, $destination, $fromExtension, 'tel')
+            $response = $this->launchOutboundDial($request, $clickToCall, $destination, $fromExtension, 'tel')
                 ?? back()->withInput()->with('error', 'Could not build a tel: link for this number.');
-        }
 
-        $result = $this->morpheus->originateCall($fromExtension, $destination);
+            $this->logOutboundDial($request, $fromExtension, $destination);
 
-        if ($result['ok'] ?? false) {
-            $this->data->bustCache();
-            $this->hub->bustCache();
-
-            if ($request->wantsJson()) {
-                return response()->json(array_merge(['ok' => true], $result));
-            }
-
-            return redirect()
-                ->route($this->redirectRoutePrefix($request).'communications.index', ['channel' => 'calls'])
-                ->with('success', 'Outbound call initiated. Answer your extension/softphone if it rings first.');
+            return $response;
         }
 
         if ($fallback === 'sip') {
             $launched = $this->launchOutboundDial($request, $clickToCall, $destination, $fromExtension, 'sip');
             if ($launched) {
+                $this->logOutboundDial($request, $fromExtension, $destination);
+
                 return $launched;
             }
         }
@@ -73,6 +109,8 @@ class MorpheusHubController extends Controller
         if ($fallback === 'tel') {
             $launched = $this->launchOutboundDial($request, $clickToCall, $destination, $fromExtension, 'tel');
             if ($launched) {
+                $this->logOutboundDial($request, $fromExtension, $destination);
+
                 return $launched;
             }
         }
@@ -80,14 +118,14 @@ class MorpheusHubController extends Controller
         if ($request->wantsJson()) {
             return response()->json([
                 'ok' => false,
-                'error' => $result['error'] ?? 'Could not place outbound call.',
+                'error' => ($result['error'] ?? null) ?: 'Could not place outbound call.',
                 'attempted' => $result['attempted'] ?? [],
             ], 422);
         }
 
         return back()
             ->withInput()
-            ->with('error', $result['error'] ?? 'Could not place outbound call.');
+            ->with('error', ($result['error'] ?? null) ?: 'Could not place outbound call.');
     }
 
     public function transferCall(Request $request, string $uuid)
@@ -173,7 +211,12 @@ class MorpheusHubController extends Controller
             $payload['note'] = $validated['note'];
         }
 
-        return $this->callAction($request, fn () => $this->morpheus->dispositionCall($uuid, $payload), 'Disposition recorded.');
+        return $this->callAction($request, function () use ($uuid, $payload, $request) {
+            $result = $this->morpheus->dispositionCall($uuid, $payload);
+            $this->recordDispositionHistory($request, $uuid, $payload['disposition'], $payload['note'] ?? null);
+
+            return $result;
+        }, 'Disposition recorded.');
     }
 
     // -------------------------------------------------------------------------
@@ -437,6 +480,97 @@ class MorpheusHubController extends Controller
     }
 
     // -------------------------------------------------------------------------
+    // Phone agents (workspace users + Morpheus extensions)
+    // -------------------------------------------------------------------------
+
+    public function provisionAgent(Request $request, User $user)
+    {
+        $this->ensureCanManageAgents($request);
+
+        $validated = $request->validate([
+            'extension_num' => ['required', 'string', 'max:32'],
+            'sip_password' => ['required', 'string', 'min:8', 'max:128'],
+            'caller_id_name' => ['nullable', 'string', 'max:128'],
+            'caller_id_num' => ['nullable', 'string', 'max:32'],
+            'create_morpheus_user' => ['nullable', 'boolean'],
+        ]);
+
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+        $result = $this->agents->provision($workspace, $user, $validated);
+
+        if (! ($result['ok'] ?? false)) {
+            return back()->withInput()->with('error', $result['error'] ?? 'Could not provision phone line.');
+        }
+
+        $this->data->bustCache();
+        $this->hub->bustCache();
+
+        return back()
+            ->with('success', $result['message'] ?? 'Phone line provisioned.')
+            ->with('provisioned_agent', [
+                'name' => $user->name,
+                'extension_num' => $result['agent']['extension_num'] ?? $validated['extension_num'],
+                'sip_password' => $result['agent']['sip_password'] ?? $validated['sip_password'],
+                'sip_host' => config('integrations.morpheus.sip_host') ?: config('integrations.morpheus.host'),
+            ]);
+    }
+
+    public function updateAgent(Request $request, User $user)
+    {
+        $this->ensureCanManageAgents($request);
+
+        $validated = $request->validate([
+            'sip_password' => ['nullable', 'string', 'min:8', 'max:128'],
+            'caller_id_name' => ['nullable', 'string', 'max:128'],
+            'caller_id_num' => ['nullable', 'string', 'max:32'],
+            'status' => ['nullable', 'string', 'in:active,disabled'],
+        ]);
+
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+        $result = $this->agents->update($workspace, $user, $validated);
+
+        if (! ($result['ok'] ?? false)) {
+            return back()->withInput()->with('error', $result['error'] ?? 'Could not update phone line.');
+        }
+
+        $this->data->bustCache();
+        $this->hub->bustCache();
+
+        return back()->with('success', $result['message'] ?? 'Phone line updated.');
+    }
+
+    public function deprovisionAgent(Request $request, User $user)
+    {
+        $this->ensureCanManageAgents($request);
+
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+        $result = $this->agents->deprovision($workspace, $user);
+
+        if (! ($result['ok'] ?? false)) {
+            return back()->with('error', $result['error'] ?? 'Could not remove phone line.');
+        }
+
+        $this->data->bustCache();
+        $this->hub->bustCache();
+
+        return back()->with('success', $result['message'] ?? 'Phone line removed.');
+    }
+
+    protected function ensureCanManageAgents(Request $request): void
+    {
+        if (! $request->is('admin*')) {
+            abort(403, 'Only admins can manage phone agents.');
+        }
+
+        $user = Auth::user();
+        $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
+
+        if (! $user->canAccessAdminPortal($workspace->id)) {
+            abort(403);
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
@@ -527,5 +661,37 @@ class MorpheusHubController extends Controller
         }
 
         return redirect()->away($url);
+    }
+
+    protected function logOutboundDial(Request $request, string $fromExtension, string $destination, ?string $morpheusCallUuid = null): void
+    {
+        $user = Auth::user();
+        if (! $user) {
+            return;
+        }
+
+        $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
+        if (! $workspace) {
+            return;
+        }
+
+        $this->callHistory->logOutboundDial($workspace, $user, $fromExtension, $destination, $morpheusCallUuid);
+        $this->data->bustCache();
+    }
+
+    protected function recordDispositionHistory(Request $request, string $uuid, string $disposition, ?string $note): void
+    {
+        $user = Auth::user();
+        if (! $user) {
+            return;
+        }
+
+        $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
+        if (! $workspace) {
+            return;
+        }
+
+        $this->callHistory->recordDisposition($workspace, $uuid, $disposition, $note, $user);
+        $this->data->bustCache();
     }
 }

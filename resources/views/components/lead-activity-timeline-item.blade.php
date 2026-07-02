@@ -16,40 +16,42 @@
             </span>
         </div>
 
-        @if($activity->isStatusChange())
+        @if ($activity->isStatusChange())
             @php
                 $role = $activity->statusRole();
                 $from = $activity->statusFrom();
                 $to = $activity->statusTo() ?? $activity->outcome;
-                $label = $role === 'closer'
-                    ? SalesOps::closerStatusLabel($to)
-                    : SalesOps::setterStatusLabel($to);
+                $label = $role === 'closer' ? SalesOps::closerStatusLabel($to) : SalesOps::setterStatusLabel($to);
                 $fromLabel = $from
-                    ? ($role === 'closer' ? SalesOps::closerStatusLabel($from) : SalesOps::setterStatusLabel($from))
+                    ? ($role === 'closer'
+                        ? SalesOps::closerStatusLabel($from)
+                        : SalesOps::setterStatusLabel($from))
                     : null;
             @endphp
             <p class="text-sm text-zinc-700 mt-1">
-                @if($role === 'closer')
+                @if ($role === 'closer')
                     Updated closer status to
                 @else
                     Updated setter status to
                 @endif
                 <span class="inline-flex items-center font-bold text-indigo-700">{{ $label }}</span>
             </p>
-            @if($fromLabel)
+            @if ($fromLabel)
                 <p class="text-xs text-zinc-500 mt-0.5">Previously: {{ $fromLabel }}</p>
             @endif
         @else
             <p class="text-sm text-zinc-700 mt-1">
                 {{ $typeLabels[$activity->type] ?? ucfirst(str_replace('_', ' ', $activity->type)) }}
-                @if($activity->outcome)
+                @if ($activity->outcome)
                     <span class="text-zinc-500">· {{ $activity->outcome }}</span>
                 @endif
             </p>
         @endif
 
-        @if($activity->notes)
-            <p class="text-sm text-zinc-600 mt-2 whitespace-pre-wrap bg-zinc-50 rounded-lg px-3 py-2 border border-zinc-100">{{ $activity->notes }}</p>
+        @if ($activity->notes)
+            <p
+                class="text-sm text-zinc-600 mt-2 whitespace-pre-wrap bg-zinc-50 rounded-lg px-3 py-2 border border-zinc-100">
+                {{ $activity->notes }}</p>
         @endif
     </div>
 </li>

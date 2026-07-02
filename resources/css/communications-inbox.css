@@ -190,7 +190,9 @@
     text-transform: uppercase;
     letter-spacing: 0.03em;
     position: relative;
-    transition: background 0.15s, color 0.15s;
+    transition:
+        background 0.15s,
+        color 0.15s;
 }
 
 .ghl-inbox-nav-item:hover {
@@ -414,9 +416,18 @@
     color: #4338ca;
 }
 
-.ghl-inbox-row-avatar-call { background: linear-gradient(135deg, #dbeafe, #eff6ff); color: #1d4ed8; }
-.ghl-inbox-row-avatar-sms { background: linear-gradient(135deg, #dcfce7, #f0fdf4); color: #15803d; }
-.ghl-inbox-row-avatar-vm { background: linear-gradient(135deg, #fef3c7, #fffbeb); color: #b45309; }
+.ghl-inbox-row-avatar-call {
+    background: linear-gradient(135deg, #dbeafe, #eff6ff);
+    color: #1d4ed8;
+}
+.ghl-inbox-row-avatar-sms {
+    background: linear-gradient(135deg, #dcfce7, #f0fdf4);
+    color: #15803d;
+}
+.ghl-inbox-row-avatar-vm {
+    background: linear-gradient(135deg, #fef3c7, #fffbeb);
+    color: #b45309;
+}
 
 .ghl-inbox-row-body {
     flex: 1;
@@ -545,9 +556,18 @@
     margin-top: 0.25rem;
 }
 
-.ghl-timeline-icon-call { background: #dbeafe; color: #1d4ed8; }
-.ghl-timeline-icon-sms { background: #dcfce7; color: #15803d; }
-.ghl-timeline-icon-voicemail { background: #fef3c7; color: #b45309; }
+.ghl-timeline-icon-call {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+.ghl-timeline-icon-sms {
+    background: #dcfce7;
+    color: #15803d;
+}
+.ghl-timeline-icon-voicemail {
+    background: #fef3c7;
+    color: #b45309;
+}
 
 .ghl-timeline-bubble {
     flex: 1;

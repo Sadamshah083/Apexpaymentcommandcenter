@@ -3,19 +3,26 @@
 namespace App\Services\Communications;
 
 use App\Services\Integrations\ZoomApiService;
+use App\Services\Workspace\WorkspaceContextService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class CommunicationsInboxService
 {
   public const CHANNELS = [
     'inbox' => ['label' => 'Inbox', 'icon' => 'inbox'],
     'calls' => ['label' => 'Calls', 'icon' => 'phone'],
+    'recordings' => ['label' => 'Recordings', 'icon' => 'recording'],
+    'voicemail' => ['label' => 'Voicemail', 'icon' => 'voicemail'],
+    'sms' => ['label' => 'SMS', 'icon' => 'sms'],
+    'chat' => ['label' => 'Team chat', 'icon' => 'team'],
     'queues' => ['label' => 'Queues', 'icon' => 'phone'],
     'conferences' => ['label' => 'Conferences', 'icon' => 'recording'],
     'leads' => ['label' => 'Leads', 'icon' => 'inbox'],
     'campaigns' => ['label' => 'Campaigns', 'icon' => 'team'],
     'lists' => ['label' => 'Lists', 'icon' => 'inbox'],
     'extensions' => ['label' => 'Extensions', 'icon' => 'dial'],
+    'agents' => ['label' => 'Phone agents', 'icon' => 'team'],
     'team' => ['label' => 'Team', 'icon' => 'team'],
   ];
 
@@ -25,6 +32,9 @@ class CommunicationsInboxService
     protected ZoomContactService $contacts,
     protected ZoomClickToCallService $clickToCall,
     protected MorpheusHubService $morpheusHub,
+    protected CommunicationsCallHistoryService $callHistory,
+    protected WorkspaceContextService $workspaceContext,
+    protected CommunicationsAccessService $access,
   ) {}
 
   /**
@@ -35,6 +45,12 @@ class CommunicationsInboxService
     $filters = $this->filters($request);
     $channel = $this->resolveChannel($request);
     $panel = $this->resolvePanel($request, $channel);
+    $user = Auth::user();
+    $scope = $this->access->clampScope($request, $routePrefix, $user, $channel, $panel);
+    $channel = $scope['channel'];
+    $panel = $scope['panel'];
+    $hubAccess = $this->access->viewMeta($user, $routePrefix);
+    $canConfigure = $hubAccess['canConfigure'];
     $errors = [];
     $warnings = [];
 
@@ -52,7 +68,7 @@ class CommunicationsInboxService
         'panel' => $panel,
         'filters' => $filters,
         'routePrefix' => $routePrefix,
-        'channels' => self::CHANNELS,
+        'channels' => $this->access->channelsFor($user, $routePrefix),
         'sidebarItems' => [],
         'contacts' => [],
         'callLogs' => [],
@@ -97,12 +113,13 @@ class CommunicationsInboxService
           'webhookSecret' => $this->zoom->webhookSecret(),
           'requiredScopes' => $this->zoom->requiredScopes(),
         ],
-        'defaultCallerId' => config('integrations.communications.default_caller_id'),
+        'defaultCallerId' => $this->resolveDefaultCallerId(),
         'prefillNumber' => $request->get('number'),
         'error' => $errors !== [] ? implode(' ', array_unique($errors)) : null,
         'warnings' => [],
         'clickToCall' => $this->clickToCall,
         'channelCounts' => [],
+        'hubAccess' => $hubAccess,
       ];
     }
 
@@ -125,6 +142,8 @@ class CommunicationsInboxService
     $morpheusLists = [];
     $morpheusExtensions = [];
     $morpheusUsers = [];
+    $communicationAgents = [];
+    $suggestedExtensionNum = '1001';
     $selectedQueueWaiting = [];
     $selectedConferenceMembers = [];
     $phoneUsers = [];
@@ -208,7 +227,10 @@ class CommunicationsInboxService
           if ($callPayload['warning'] ?? null) {
             $warnings[] = $callPayload['warning'];
           }
-          $callLogs = $this->filterCallLogs($callPayload['logs'], $filters);
+          $callLogs = $this->filterCallLogs(
+            $this->mergeLocalCallHistory($callPayload['logs'], $filters, $warnings),
+            $filters
+          );
           $nextPageToken = $callPayload['next_page_token'];
           $callStats = $this->data->callStatsFromLogs($callLogs);
         } elseif ($callStats === []) {
@@ -278,16 +300,16 @@ class CommunicationsInboxService
           $warnings = array_merge($warnings, $recPayload['warnings'] ?? []);
         }
 
-        if ($channel === 'team' || $channel === 'queues') {
+        if ($canConfigure && ($channel === 'team' || $channel === 'queues')) {
           $morpheusQueues = $this->safeDataLoad(fn () => $this->morpheusHub->queues(), [], $warnings);
           $teamQueues = $morpheusQueues;
         }
 
-        if ($channel === 'conferences') {
+        if ($canConfigure && $channel === 'conferences') {
           $morpheusConferences = $this->safeDataLoad(fn () => $this->morpheusHub->conferences(), [], $warnings);
         }
 
-        if ($channel === 'leads') {
+        if ($canConfigure && $channel === 'leads') {
           $morpheusLeads = $this->safeDataLoad(
             fn () => $this->morpheusHub->leads(['search' => $filters['search'] ?? null]),
             [],
@@ -296,20 +318,37 @@ class CommunicationsInboxService
           $morpheusLists = $this->safeDataLoad(fn () => $this->morpheusHub->lists(), [], $warnings);
         }
 
-        if ($channel === 'campaigns') {
+        if ($canConfigure && $channel === 'campaigns') {
           $morpheusCampaigns = $this->safeDataLoad(fn () => $this->morpheusHub->campaigns(), [], $warnings);
         }
 
-        if ($channel === 'lists') {
+        if ($canConfigure && $channel === 'lists') {
           $morpheusLists = $this->safeDataLoad(fn () => $this->morpheusHub->lists(), [], $warnings);
           $morpheusCampaigns = $this->safeDataLoad(fn () => $this->morpheusHub->campaigns(), [], $warnings);
         }
 
-        if ($channel === 'extensions' || $loadDialerExtras) {
+        if ($canConfigure && ($channel === 'extensions' || $channel === 'agents')) {
+          $morpheusExtensions = $this->safeDataLoad(fn () => $this->morpheusHub->extensions(), [], $warnings);
+        } elseif ($loadDialerExtras && $canConfigure) {
           $morpheusExtensions = $this->safeDataLoad(fn () => $this->morpheusHub->extensions(), [], $warnings);
         }
 
-        if ($channel === 'team') {
+        if ($canConfigure && $channel === 'agents' && auth()->check()) {
+          $communicationAgents = $this->safeDataLoad(function () {
+            $workspace = app(\App\Services\Workspace\WorkspaceContextService::class)
+              ->resolveActiveWorkspace(auth()->user());
+            $agentService = app(CommunicationsAgentService::class);
+
+            return [
+              'agents' => $agentService->listForWorkspace($workspace),
+              'suggested_extension' => $agentService->suggestExtensionNum(),
+            ];
+          }, ['agents' => [], 'suggested_extension' => '1001'], $warnings);
+          $suggestedExtensionNum = $communicationAgents['suggested_extension'] ?? '1001';
+          $communicationAgents = $communicationAgents['agents'] ?? [];
+        }
+
+        if ($canConfigure && $channel === 'team') {
           $teamUsers = collect($this->safeDataLoad(fn () => $this->morpheusHub->users(), [], $warnings))
             ->map(fn (array $user) => [
               'id' => $user['id'] ?? null,
@@ -462,7 +501,7 @@ class CommunicationsInboxService
       'panel' => $panel,
       'filters' => $filters,
       'routePrefix' => $routePrefix,
-      'channels' => self::CHANNELS,
+      'channels' => $this->access->channelsFor($user, $routePrefix),
       'sidebarItems' => $sidebarItems,
       'contacts' => $contacts,
       'callLogs' => $callLogs,
@@ -480,6 +519,8 @@ class CommunicationsInboxService
       'morpheusCampaigns' => $morpheusCampaigns,
       'morpheusLists' => $morpheusLists,
       'morpheusExtensions' => $morpheusExtensions,
+      'communicationAgents' => $communicationAgents,
+      'suggestedExtensionNum' => $suggestedExtensionNum,
       'morpheusUsers' => $morpheusUsers,
       'selectedQueueWaiting' => $selectedQueueWaiting,
       'selectedConferenceMembers' => $selectedConferenceMembers,
@@ -509,12 +550,13 @@ class CommunicationsInboxService
         'webhookSecret' => $this->zoom->webhookSecret(),
         'requiredScopes' => $this->zoom->requiredScopes(),
       ],
-      'defaultCallerId' => config('integrations.communications.default_caller_id'),
+      'defaultCallerId' => $this->resolveDefaultCallerId(),
       'prefillNumber' => $request->get('number'),
       'error' => $errors !== [] ? implode(' ', array_unique($errors)) : null,
       'warnings' => array_values(array_unique($warnings)),
       'clickToCall' => $this->clickToCall,
       'channelCounts' => $channelCounts,
+      'hubAccess' => $hubAccess,
     ];
   }
 
@@ -537,6 +579,7 @@ class CommunicationsInboxService
       'campaigns' => 'campaigns',
       'lists' => 'lists',
       'extensions' => 'extensions',
+      'agents' => 'agents',
       'dialer' => 'inbox',
       'recordings' => 'recordings',
       'voicemails' => 'voicemail',
@@ -674,6 +717,36 @@ class CommunicationsInboxService
     $result = strtolower((string) ($log['result'] ?? ''));
 
     return str_contains($result, 'miss') || str_contains($result, 'no answer');
+  }
+
+  /**
+   * @param  array<int, array<string, mixed>>  $liveLogs
+   * @param  array<string, mixed>  $filters
+   * @param  array<int, string>  $warnings
+   * @return array<int, array<string, mixed>>
+   */
+  protected function mergeLocalCallHistory(array $liveLogs, array $filters, array &$warnings): array
+  {
+    $user = Auth::user();
+    if (! $user) {
+      return $liveLogs;
+    }
+
+    $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
+    if (! $workspace) {
+      return $liveLogs;
+    }
+
+    $history = $this->callHistory->listForHub($workspace, $filters);
+    if ($history === [] && $liveLogs === []) {
+      return $liveLogs;
+    }
+
+    if ($history !== []) {
+      $warnings[] = 'Call history includes Morpheus CDR and hub-logged dials when available.';
+    }
+
+    return $this->callHistory->mergeLiveAndHistory($liveLogs, $history);
   }
 
   /**
@@ -982,5 +1055,15 @@ class CommunicationsInboxService
         ];
       })->values()->all(),
     };
+  }
+
+  protected function resolveDefaultCallerId(): ?string
+  {
+    if (! auth()->check()) {
+      return config('integrations.communications.default_caller_id');
+    }
+
+    return app(CommunicationsAgentService::class)->extensionForUser(auth()->user())
+      ?? config('integrations.communications.default_caller_id');
   }
 }

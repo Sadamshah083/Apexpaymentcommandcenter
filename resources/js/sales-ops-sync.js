@@ -78,13 +78,25 @@ function updateWeeklyMetrics(weekly) {
     }
 
     if (weekly.discoveries) {
-        smoothTextUpdate(document.getElementById('workspace-sync-weekly-discoveries'), `${weekly.discoveries.actual} / ${weekly.discoveries.target}`);
-        smoothWidthUpdate(document.getElementById('workspace-sync-weekly-discoveries-bar'), weekly.discoveries.pct ?? 0);
+        smoothTextUpdate(
+            document.getElementById('workspace-sync-weekly-discoveries'),
+            `${weekly.discoveries.actual} / ${weekly.discoveries.target}`
+        );
+        smoothWidthUpdate(
+            document.getElementById('workspace-sync-weekly-discoveries-bar'),
+            weekly.discoveries.pct ?? 0
+        );
     }
 
     if (weekly.qualified_meetings) {
-        smoothTextUpdate(document.getElementById('workspace-sync-weekly-meetings'), `${weekly.qualified_meetings.actual} / ${weekly.qualified_meetings.target}`);
-        smoothWidthUpdate(document.getElementById('workspace-sync-weekly-meetings-bar'), weekly.qualified_meetings.pct ?? 0);
+        smoothTextUpdate(
+            document.getElementById('workspace-sync-weekly-meetings'),
+            `${weekly.qualified_meetings.actual} / ${weekly.qualified_meetings.target}`
+        );
+        smoothWidthUpdate(
+            document.getElementById('workspace-sync-weekly-meetings-bar'),
+            weekly.qualified_meetings.pct ?? 0
+        );
     }
 }
 
@@ -127,7 +139,10 @@ function updateOverview(overview) {
     }
 
     smoothTextUpdate(document.getElementById('workspace-sync-kpi-active-leads'), overview.total_active_leads ?? 0);
-    smoothTextUpdate(document.getElementById('workspace-sync-kpi-pending-verification'), overview.pending_verification ?? 0);
+    smoothTextUpdate(
+        document.getElementById('workspace-sync-kpi-pending-verification'),
+        overview.pending_verification ?? 0
+    );
     smoothTextUpdate(document.getElementById('workspace-sync-kpi-reactivation'), overview.reactivation_queue ?? 0);
 
     if (overview.tier_breakdown) {
@@ -159,7 +174,10 @@ function updateLeadDetail(detail) {
     }
 
     smoothTextUpdate(document.getElementById('workspace-sync-lead-tier'), detail.tier_label);
-    smoothTextUpdate(document.getElementById('workspace-sync-lead-attempts'), `${detail.contact_attempts} contact attempt(s)`);
+    smoothTextUpdate(
+        document.getElementById('workspace-sync-lead-attempts'),
+        `${detail.contact_attempts} contact attempt(s)`
+    );
     smoothTextUpdate(document.getElementById('workspace-sync-lead-stage'), detail.stage_label);
 
     const activitiesEl = document.getElementById('workspace-sync-lead-activities');
@@ -168,7 +186,7 @@ function updateLeadDetail(detail) {
             activitiesEl,
             detail.activities.length === 0
                 ? '<p class="text-xs text-zinc-400 italic">No activity logged yet.</p>'
-                : detail.activities.map(renderActivityItem).join(''),
+                : detail.activities.map(renderActivityItem).join('')
         );
     }
 }
@@ -190,7 +208,7 @@ export function applySalesOpsSync(data) {
                     leaderboardBody,
                     rows.length === 0
                         ? '<tr><td colspan="9" class="text-center text-zinc-400 py-8">No activity logged yet this period.</td></tr>'
-                        : rows.map((row, index) => renderLeaderboardRow(row, index, { includeScore })).join(''),
+                        : rows.map((row, index) => renderLeaderboardRow(row, index, { includeScore })).join('')
                 );
             }
         }
@@ -201,10 +219,7 @@ export function applySalesOpsSync(data) {
 
         const sdrLoadBody = document.getElementById('workspace-sync-sdr-load-body');
         if (sdrLoadBody && Array.isArray(salesOps.sdr_load)) {
-            smoothHtmlUpdate(
-                sdrLoadBody,
-                salesOps.sdr_load.map(renderSdrLoadRow).join(''),
-            );
+            smoothHtmlUpdate(sdrLoadBody, salesOps.sdr_load.map(renderSdrLoadRow).join(''));
         }
     }
 
@@ -294,9 +309,10 @@ function updateReactivationCandidates(reactivation) {
     }
 
     const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
-    const html = reactivation.candidates.length === 0
-        ? ''
-        : reactivation.candidates.map((lead) => renderReactivationRow(lead, reactivation.sources, csrf)).join('');
+    const html =
+        reactivation.candidates.length === 0
+            ? ''
+            : reactivation.candidates.map((lead) => renderReactivationRow(lead, reactivation.sources, csrf)).join('');
 
     if (body.dataset.syncMode === 'patch') {
         const byId = new Map(reactivation.candidates.map((lead) => [String(lead.id), lead]));
@@ -326,9 +342,7 @@ export function applyToolkitSync(toolkit) {
 
     const listsBody = document.getElementById('workspace-sync-email-lists-body');
     if (listsBody && Array.isArray(toolkit.email_lists)) {
-        const html = toolkit.email_lists.length === 0
-            ? ''
-            : toolkit.email_lists.map(renderEmailListRow).join('');
+        const html = toolkit.email_lists.length === 0 ? '' : toolkit.email_lists.map(renderEmailListRow).join('');
         if (listsBody.dataset.syncMode === 'patch') {
             const byId = new Map(toolkit.email_lists.map((list) => [String(list.id), list]));
             listsBody.querySelectorAll('tr[data-list-id]').forEach((row) => {
@@ -350,10 +364,7 @@ export function applyToolkitSync(toolkit) {
 
     const deliverabilityBody = document.getElementById('workspace-sync-deliverability-body');
     if (deliverabilityBody && Array.isArray(toolkit.deliverability_tests)) {
-        smoothHtmlUpdate(
-            deliverabilityBody,
-            toolkit.deliverability_tests.map(renderDeliverabilityRow).join(''),
-        );
+        smoothHtmlUpdate(deliverabilityBody, toolkit.deliverability_tests.map(renderDeliverabilityRow).join(''));
     }
 }
 

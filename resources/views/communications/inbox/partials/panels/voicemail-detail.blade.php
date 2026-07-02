@@ -1,4 +1,4 @@
-@if($selectedVoicemail ?? null)
+@if ($selectedVoicemail ?? null)
     @php $vm = $selectedVoicemail; @endphp
     <div class="ghl-detail-header">
         <span class="ghl-avatar ghl-avatar-lg">VM</span>
@@ -9,7 +9,7 @@
                 · {{ $vm['status'] ?? 'unknown' }}
             </p>
         </div>
-        @if(!empty($vm['caller_number']))
+        @if (!empty($vm['caller_number']))
             @include('communications.partials.contact-quick-actions', [
                 'routePrefix' => $routePrefix,
                 'phone' => $vm['caller_number'],
@@ -19,7 +19,7 @@
 
     <section class="ghl-card">
         <h3 class="ghl-card-title">Voicemail</h3>
-        @if(!empty($vm['transcription']))
+        @if (!empty($vm['transcription']))
             <p class="text-sm text-zinc-700 mb-4">{{ $vm['transcription'] }}</p>
         @endif
         @include('communications.partials.voicemail-actions', [
@@ -29,5 +29,8 @@
         ])
     </section>
 @else
-    @include('communications.inbox.partials.empty', ['title' => 'Voicemail not found', 'message' => 'Select a voicemail from the list.'])
+    @include('communications.inbox.partials.empty', [
+        'title' => 'Voicemail not found',
+        'message' => 'Select a voicemail from the list.',
+    ])
 @endif

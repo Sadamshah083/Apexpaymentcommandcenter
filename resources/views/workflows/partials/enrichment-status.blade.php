@@ -21,11 +21,13 @@
             <h2 class="app-section-title">AI enrichment providers</h2>
             <p class="app-section-desc">
                 Pipeline uses <strong>{{ $status['pipeline_model'] ?? 'gemini-2.0-flash' }}</strong>
-                (max {{ number_format($status['pipeline_max_tokens'] ?? 2048) }} output tokens) + free DuckDuckGo context.
+                (max {{ number_format($status['pipeline_max_tokens'] ?? 2048) }} output tokens) + free DuckDuckGo
+                context.
             </p>
         </div>
-        @if(request()->routeIs('admin.*'))
-            <a href="{{ request()->fullUrlWithQuery(['refresh_enrichment' => 1]) }}" class="app-btn app-btn-secondary app-btn-sm whitespace-nowrap">
+        @if (request()->routeIs('admin.*'))
+            <a href="{{ request()->fullUrlWithQuery(['refresh_enrichment' => 1]) }}"
+                class="app-btn app-btn-secondary app-btn-sm whitespace-nowrap">
                 Refresh status
             </a>
         @endif
@@ -37,18 +39,20 @@
                 <span class="font-semibold text-zinc-800">Gemini</span>
                 <span class="{{ $geminiBadge }}">{{ $gemini['label'] ?? 'Unknown' }}</span>
             </div>
-            @if($geminiState === 'not_configured')
+            @if ($geminiState === 'not_configured')
                 <p class="text-zinc-500 text-xs">GEMINI_API_KEY not set.</p>
             @else
-                @if($gemini['checked_at'] ?? null)
-                    <p class="text-xs text-zinc-400">Checked {{ \Carbon\Carbon::parse($gemini['checked_at'])->diffForHumans() }}</p>
+                @if ($gemini['checked_at'] ?? null)
+                    <p class="text-xs text-zinc-400">Checked
+                        {{ \Carbon\Carbon::parse($gemini['checked_at'])->diffForHumans() }}</p>
                 @endif
-                @if($gemini['message'] ?? null)
+                @if ($gemini['message'] ?? null)
                     <p class="text-xs text-zinc-600">{{ $gemini['message'] }}</p>
                 @endif
-                @if($geminiState === 'depleted')
+                @if ($geminiState === 'depleted')
                     <p class="text-xs text-rose-700 font-medium">
-                        Top up at <a href="https://aistudio.google.com/app/billing" class="app-link" target="_blank" rel="noopener">AI Studio Billing</a>
+                        Top up at <a href="https://aistudio.google.com/app/billing" class="app-link" target="_blank"
+                            rel="noopener">AI Studio Billing</a>
                         or use OpenRouter fallback.
                     </p>
                 @endif
@@ -62,7 +66,7 @@
                     {{ $openrouter['label'] ?? 'Unknown' }}
                 </span>
             </div>
-            @if($orState === 'not_configured')
+            @if ($orState === 'not_configured')
                 <p class="text-zinc-500 text-xs">OPENROUTER_API_KEY not set — no fallback if Gemini fails.</p>
             @elseif($openrouter['balance'] !== null)
                 <p class="text-xs text-zinc-600">Balance: {{ $openrouter['balance'] }}</p>
@@ -72,14 +76,14 @@
         </div>
     </div>
 
-    @if(($gemini['last_error'] ?? null) && $geminiState !== 'ready')
+    @if (($gemini['last_error'] ?? null) && $geminiState !== 'ready')
         <div class="app-alert app-alert-warning">
             <p class="app-alert-title">Last enrichment error</p>
             <p class="app-alert-desc text-xs font-mono break-all">{{ $gemini['last_error'] }}</p>
         </div>
     @endif
 
-    @if(!($status['configured'] ?? false))
+    @if (!($status['configured'] ?? false))
         <div class="app-alert app-alert-danger">
             <p class="app-alert-desc">{{ $status['message'] ?? 'Configure GEMINI_API_KEY or OPENROUTER_API_KEY.' }}</p>
         </div>

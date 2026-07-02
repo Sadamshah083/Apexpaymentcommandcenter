@@ -17,8 +17,8 @@ EMAIL_CHECKER_IMAP_PASSWORD=your-password
 ```
 
 4. **Queue worker + scheduler** running:
-   - `php artisan queue:work database`
-   - `php artisan schedule:work` (or Windows Task Scheduler for `schedule:run`)
+    - `php artisan queue:work database`
+    - `php artisan schedule:work` (or Windows Task Scheduler for `schedule:run`)
 
 ## How it works
 

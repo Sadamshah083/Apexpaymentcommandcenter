@@ -1,10 +1,10 @@
-@if($selectedCall ?? null)
+@if ($selectedCall ?? null)
     @php
         $log = $selectedCall;
         $callbackPhone = match ($log['direction'] ?? '') {
             'inbound' => $log['from_phone'] ?? null,
             'outbound' => $log['to_phone'] ?? null,
-            default => $log['to_phone'] ?? $log['from_phone'] ?? null,
+            default => $log['to_phone'] ?? ($log['from_phone'] ?? null),
         };
     @endphp
     <div class="ghl-detail-header">
@@ -16,7 +16,7 @@
                 · {{ $log['result'] }} · {{ $log['duration'] }}s
             </p>
         </div>
-        @if($callbackPhone)
+        @if ($callbackPhone)
             @include('communications.partials.contact-quick-actions', [
                 'routePrefix' => $routePrefix,
                 'phone' => $callbackPhone,
@@ -27,12 +27,24 @@
     <section class="ghl-card">
         <h3 class="ghl-card-title">Call details</h3>
         <dl class="ghl-dl">
-            <div><dt>Direction</dt><dd>{{ ucfirst($log['direction'] ?? '—') }}</dd></div>
-            <div><dt>From</dt><dd>{{ $log['from_phone'] ?? $log['from'] ?? '—' }}</dd></div>
-            <div><dt>To</dt><dd>{{ $log['to_phone'] ?? $log['to'] ?? '—' }}</dd></div>
-            <div><dt>Result</dt><dd>{{ $log['result'] ?? '—' }}</dd></div>
+            <div>
+                <dt>Direction</dt>
+                <dd>{{ ucfirst($log['direction'] ?? '—') }}</dd>
+            </div>
+            <div>
+                <dt>From</dt>
+                <dd>{{ $log['from_phone'] ?? ($log['from'] ?? '—') }}</dd>
+            </div>
+            <div>
+                <dt>To</dt>
+                <dd>{{ $log['to_phone'] ?? ($log['to'] ?? '—') }}</dd>
+            </div>
+            <div>
+                <dt>Result</dt>
+                <dd>{{ $log['result'] ?? '—' }}</dd>
+            </div>
         </dl>
-        @if(!empty($log['has_recording_media']) && !empty($log['recording_id']))
+        @if (!empty($log['has_recording_media']) && !empty($log['recording_id']))
             <div class="mt-3">
                 @include('communications.partials.recording-actions', [
                     'routePrefix' => $routePrefix,
@@ -45,7 +57,7 @@
         @endif
     </section>
 
-    @if(($log['result'] ?? '') === 'Active Call')
+    @if (($log['result'] ?? '') === 'Active Call')
         @include('communications.partials.morpheus-call-controls', [
             'routePrefix' => $routePrefix,
             'uuid' => $log['id'],
@@ -56,5 +68,8 @@
         ])
     @endif
 @else
-    @include('communications.inbox.partials.empty', ['title' => 'Call not found', 'message' => 'Select a call from the list.'])
+    @include('communications.inbox.partials.empty', [
+        'title' => 'Call not found',
+        'message' => 'Select a call from the list.',
+    ])
 @endif

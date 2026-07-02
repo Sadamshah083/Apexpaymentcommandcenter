@@ -37,7 +37,16 @@ class User extends Authenticatable
     public function workspaces(): BelongsToMany
     {
         return $this->belongsToMany(Workspace::class, 'workspace_user')
-            ->withPivot('role', 'status', 'invited_at', 'joined_at', 'module_permissions')
+            ->withPivot(
+                'role',
+                'status',
+                'invited_at',
+                'joined_at',
+                'module_permissions',
+                'morpheus_user_id',
+                'morpheus_extension_id',
+                'morpheus_extension_num',
+            )
             ->withTimestamps();
     }
 

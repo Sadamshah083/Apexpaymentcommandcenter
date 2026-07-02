@@ -12,7 +12,10 @@ use Illuminate\Http\Client\PendingRequest;
  * Auth    : X-API-Key header (or Bearer token — we always use the header)
  *
  * Sections implemented (all endpoints from the OpenAPI spec):
- *   - Calls        : list, get
+ *   - Calls        : list, get, originate, click-to-call
+ *   - CDR          : list (call history)
+ *   - Recordings   : list, download
+ *   - Voicemails   : list, download
  *   - Call Actions : hangup, hold, unhold, park, unpark, unbridge,
  *                    transfer, bridge, transfer-to-queue, transfer-to-agent,
  *                    join-conference, disposition
@@ -60,7 +63,24 @@ class ZoomApiService
     /** @return array{phone_available: bool, messages: array<int, string>} */
     public function connectionDiagnostics(): array
     {
-        return ['phone_available' => true, 'messages' => []];
+        $messages = [];
+
+        foreach ([
+            '/cdr' => 'cdr:read (call history)',
+            '/recordings' => 'recordings:read',
+            '/voicemails' => 'voicemails:read',
+        ] as $path => $label) {
+            try {
+                $response = $this->client()->get($this->url($path), ['limit' => 1]);
+                if ($response->status() === 403) {
+                    $messages[] = "Missing permission: {$label}";
+                }
+            } catch (\Throwable $e) {
+                $messages[] = "{$label}: ".$e->getMessage();
+            }
+        }
+
+        return ['phone_available' => true, 'messages' => $messages];
     }
 
     // -------------------------------------------------------------------------
@@ -70,7 +90,24 @@ class ZoomApiService
     public function accountId(): ?string   { return config('integrations.morpheus.host'); }
     public function clientId(): ?string    { return config('integrations.morpheus.api_key'); }
     public function webhookSecret(): ?string { return null; }
-    public function requiredScopes(): array  { return []; }
+    public function requiredScopes(): array
+    {
+        return [
+            'calls:read',
+            'calls:control',
+            'calls:originate',
+            'cdr:read',
+            'recordings:read',
+            'voicemails:read',
+            'queues:read',
+            'conferences:read',
+            'leads:read',
+            'campaigns:read',
+            'lists:read',
+            'users:read',
+            'extensions:read',
+        ];
+    }
     public function clearAccessTokenCache(): void {}
     public function humanizeError(string $msg): string { return $msg; }
 
@@ -115,13 +152,28 @@ class ZoomApiService
     }
 
     /**
-     * Attempt to originate an outbound call from an agent extension.
-     * Morpheus documents live call control only; we probe known originate paths
-     * and return a structured result for the hub dialer.
+     * Click-to-call: rings extension first, then connects destination.
      *
-     * @return array{ok: bool, action?: string, call_uuid?: string, error?: string, attempted?: array<int, string>}
+     * @return array{ok: bool, call_uuid?: string, error?: string, action?: string}
      */
-    public function originateCall(string $fromExtension, string $destination): array
+    public function clickToCall(string $extension, string $destination, array $options = []): array
+    {
+        return $this->postOriginate('/click-to-call', array_merge([
+            'extension' => trim($extension),
+            'destination' => trim($destination),
+        ], array_filter([
+            'caller_id_number' => $options['caller_id_number'] ?? null,
+            'caller_id_name' => $options['caller_id_name'] ?? null,
+            'timeout_sec' => $options['timeout_sec'] ?? null,
+        ])));
+    }
+
+    /**
+     * Originate via click-to-call (extension) or /calls/originate (from/to).
+     *
+     * @return array{ok: bool, call_uuid?: string, error?: string, action?: string, attempted?: array<int, string>}
+     */
+    public function originateCall(string $fromExtension, string $destination, array $options = []): array
     {
         $fromExtension = trim($fromExtension);
         $destination = trim($destination);
@@ -130,50 +182,67 @@ class ZoomApiService
             return ['ok' => false, 'error' => 'Extension and destination are required.'];
         }
 
-        $payloads = [
-            ['/calls/originate', ['extension' => $fromExtension, 'destination' => $destination]],
-            ['/calls/originate', ['extension_num' => $fromExtension, 'destination' => $destination]],
-            ['/calls/originate', ['from_extension' => $fromExtension, 'destination' => $destination]],
-            ['/calls', ['from_extension' => $fromExtension, 'destination' => $destination]],
-            ['/calls', ['extension_num' => $fromExtension, 'to' => $destination]],
-            ['/dial', ['extension_num' => $fromExtension, 'destination' => $destination]],
-            ['/originate', ['extension' => $fromExtension, 'destination' => $destination]],
-        ];
-
         $attempted = [];
-        $lastError = 'Outbound originate is not exposed by the Morpheus Call-Control API. Register your extension in a SIP softphone and dial from the hub.';
+        $extra = array_filter([
+            'caller_id_number' => $options['caller_id_number'] ?? null,
+            'caller_id_name' => $options['caller_id_name'] ?? null,
+            'timeout_sec' => $options['timeout_sec'] ?? null,
+        ]);
 
-        foreach ($payloads as [$path, $body]) {
-            $attempted[] = 'POST '.$path;
+        $click = $this->postOriginate('/click-to-call', array_merge([
+            'extension' => $fromExtension,
+            'destination' => $destination,
+        ], $extra));
+        $attempted[] = 'POST /click-to-call';
+        if ($click['ok'] ?? false) {
+            return array_merge($click, ['attempted' => $attempted]);
+        }
 
-            try {
-                $response = $this->client()->post($this->url($path), $body);
+        $originate = $this->postOriginate('/calls/originate', array_merge([
+            'from' => $fromExtension,
+            'to' => $destination,
+        ], $extra));
+        $attempted[] = 'POST /calls/originate';
 
-                if ($response->status() === 404) {
-                    continue;
-                }
-
-                if ($response->successful()) {
-                    $json = $response->json() ?? [];
-
-                    return array_merge([
-                        'ok' => true,
-                        'action' => 'originate',
-                        'attempted' => $attempted,
-                    ], $json);
-                }
-
-                $lastError = (string) ($response->json('error') ?? $response->body() ?: 'HTTP '.$response->status());
-            } catch (\Throwable $e) {
-                $lastError = $e->getMessage();
-            }
+        if ($originate['ok'] ?? false) {
+            return array_merge($originate, ['attempted' => $attempted]);
         }
 
         return [
             'ok' => false,
-            'error' => $lastError,
+            'error' => $originate['error'] ?? $click['error'] ?? 'Could not originate call.',
             'attempted' => $attempted,
         ];
+    }
+
+    /**
+     * @return array{ok: bool, call_uuid?: string, error?: string, action?: string}
+     */
+    protected function postOriginate(string $path, array $body): array
+    {
+        try {
+            $response = $this->client()->post($this->url($path), $body);
+
+            if ($response->successful()) {
+                $json = $response->json() ?? [];
+
+                return array_merge([
+                    'ok' => (bool) ($json['ok'] ?? true),
+                    'action' => 'originate',
+                ], $json);
+            }
+
+            if ($response->status() === 403) {
+                return ['ok' => false, 'error' => 'API key lacks calls:originate permission.'];
+            }
+
+            return [
+                'ok' => false,
+                'error' => (string) ($response->json('error') ?? 'Originate failed (HTTP '.$response->status().').'),
+            ];
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'error' => $e->getMessage()];
+        }
     }
 
     // =========================================================================
@@ -945,38 +1014,169 @@ class ZoomApiService
     }
 
     // =========================================================================
-    // CALL LOG  (maps to GET /calls for hub compatibility)
+    // CALL LOG  (active calls + CDR history)
     // =========================================================================
 
     /**
-     * List active calls formatted for the hub call-log view.
-     * @return array{logs: array<int, array<string, mixed>>, next_page_token: null}
+     * @return array{logs: array<int, array<string, mixed>>, next_page_token: string|null, warning: string|null}
      */
-    public function listCallLogs(array $filters = []): array
+    public function listCdr(array $filters = []): array
+    {
+        $limit = (int) ($filters['per_page'] ?? 50);
+        $offset = is_numeric($filters['page_token'] ?? null) ? (int) $filters['page_token'] : 0;
+
+        try {
+            $response = $this->client()->get($this->url('/cdr'), array_filter([
+                'from' => $this->cdrTimestamp($filters['from'] ?? null),
+                'to' => $this->cdrTimestamp($filters['to'] ?? null, true),
+                'direction' => $filters['direction'] ?? null,
+                'search' => $filters['search'] ?? null,
+                'limit' => $limit,
+                'offset' => $offset,
+            ], fn ($value) => $value !== null && $value !== ''));
+
+            if ($response->status() === 403) {
+                return [
+                    'logs' => [],
+                    'next_page_token' => null,
+                    'warning' => 'API key lacks cdr:read permission.',
+                ];
+            }
+
+            if (! $response->successful()) {
+                return [
+                    'logs' => [],
+                    'next_page_token' => null,
+                    'warning' => (string) ($response->json('error') ?? null),
+                ];
+            }
+
+            $rows = $response->json('cdr') ?? [];
+            $logs = collect(is_array($rows) ? $rows : [])
+                ->map(fn (array $row) => $this->normalizeCdrRow($row))
+                ->values()
+                ->all();
+
+            $nextPageToken = count($logs) >= $limit ? (string) ($offset + $limit) : null;
+
+            return ['logs' => $logs, 'next_page_token' => $nextPageToken, 'warning' => null];
+        } catch (\Throwable $e) {
+            return ['logs' => [], 'next_page_token' => null, 'warning' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    protected function listActiveCallLogs(): array
     {
         try {
             $response = $this->client()->get($this->url('/calls'));
-            if ($response->successful()) {
-                $logs = [];
-                foreach ($response->json('calls') ?? [] as $row) {
-                    $logs[] = [
-                        'id'         => $row['uuid'],
-                        'direction'  => $row['direction']    ?? 'inbound',
-                        'from'       => $row['caller_name']  ?? $row['phone_number'] ?? '—',
-                        'to'         => $row['callee_name']  ?? '—',
-                        'from_phone' => $row['phone_number'] ?? '',
-                        'to_phone'   => $row['phone_number'] ?? '',
-                        'start_time' => $row['started_at'],
-                        'result'     => $row['status'] === 'active' ? 'Active Call' : ($row['status'] ?? '—'),
-                        'duration'   => $row['duration'] ?? 0,
-                        'recording'  => '—',
-                        'campaign_id'=> $row['campaign_id'] ?? null,
-                    ];
-                }
-                return ['logs' => $logs, 'call_logs' => $logs, 'next_page_token' => null];
+            if (! $response->successful()) {
+                return [];
             }
-        } catch (\Throwable) {}
-        return ['logs' => [], 'call_logs' => [], 'next_page_token' => null];
+
+            $logs = [];
+            foreach ($response->json('calls') ?? [] as $row) {
+                $logs[] = [
+                    'id' => $row['uuid'],
+                    'direction' => $row['direction'] ?? 'inbound',
+                    'from' => $row['caller_name'] ?? $row['phone_number'] ?? '—',
+                    'to' => $row['callee_name'] ?? '—',
+                    'from_phone' => $row['phone_number'] ?? '',
+                    'to_phone' => $row['phone_number'] ?? '',
+                    'start_time' => $row['started_at'] ?? null,
+                    'result' => ($row['status'] ?? '') === 'active' ? 'Active Call' : ($row['status'] ?? '—'),
+                    'duration' => (int) ($row['duration'] ?? 0),
+                    'recording' => '—',
+                    'campaign_id' => $row['campaign_id'] ?? null,
+                    'source' => 'live',
+                    'raw' => $row,
+                ];
+            }
+
+            return $logs;
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /**
+     * Active calls plus CDR history for the hub call-log view.
+     *
+     * @return array{logs: array<int, array<string, mixed>>, call_logs: array<int, array<string, mixed>>, next_page_token: string|null, warning: string|null}
+     */
+    public function listCallLogs(array $filters = []): array
+    {
+        $warning = null;
+        $active = $this->listActiveCallLogs();
+        $cdr = $this->listCdr($filters);
+
+        if (filled($cdr['warning'] ?? null)) {
+            $warning = $cdr['warning'];
+        }
+
+        $activeIds = collect($active)->pluck('id')->filter()->all();
+        $history = collect($cdr['logs'])
+            ->reject(fn (array $row) => in_array($row['id'], $activeIds, true))
+            ->values()
+            ->all();
+
+        $logs = collect($active)
+            ->concat($history)
+            ->sortByDesc(fn (array $row) => $row['start_time'] ?? '')
+            ->values()
+            ->all();
+
+        return [
+            'logs' => $logs,
+            'call_logs' => $logs,
+            'next_page_token' => $cdr['next_page_token'],
+            'warning' => $warning,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function normalizeCdrRow(array $row): array
+    {
+        $callUuid = (string) ($row['call_uuid'] ?? $row['id'] ?? '');
+        $hasRecording = (bool) ($row['has_recording'] ?? false);
+
+        return [
+            'id' => $callUuid !== '' ? $callUuid : (string) ($row['id'] ?? ''),
+            'direction' => $row['direction'] ?? 'inbound',
+            'from' => $row['caller_id_name'] ?? $row['caller_id_number'] ?? '—',
+            'to' => $row['destination_number'] ?? '—',
+            'from_phone' => $row['caller_id_number'] ?? '',
+            'to_phone' => $row['destination_number'] ?? '',
+            'start_time' => $row['start_time'] ?? null,
+            'result' => $row['call_outcome'] ?? $row['disposition_code'] ?? $row['hangup_cause'] ?? '—',
+            'duration' => (int) ($row['billsec'] ?? $row['duration_sec'] ?? 0),
+            'recording' => $hasRecording ? 'Yes' : '—',
+            'has_recording_media' => $hasRecording,
+            'recording_id' => $hasRecording ? $callUuid : null,
+            'call_reference_id' => $callUuid,
+            'campaign_id' => $row['campaign_id'] ?? null,
+            'source' => 'cdr',
+            'raw' => $row,
+        ];
+    }
+
+    protected function cdrTimestamp(?string $date, bool $endOfDay = false): ?string
+    {
+        if (! filled($date)) {
+            return null;
+        }
+
+        try {
+            $parsed = \Carbon\Carbon::parse($date);
+
+            return ($endOfDay ? $parsed->endOfDay() : $parsed->startOfDay())->toIso8601String();
+        } catch (\Throwable) {
+            return $date;
+        }
     }
 
     /**
@@ -1016,7 +1216,7 @@ class ZoomApiService
      */
     public function listPhoneRecordings(array $filters = []): array
     {
-        return ['recordings' => [], 'next_page_token' => null];
+        return $this->listRecordings($filters);
     }
 
     /**
@@ -1024,7 +1224,7 @@ class ZoomApiService
      */
     public function getSmsSessionMessages(string $sessionId, array $filters = []): array
     {
-        return ['messages' => [], 'next_page_token' => null];
+        return app(MorpheusPlatformApiService::class)->getSmsSessionMessages($sessionId, $filters);
     }
 
     /**
@@ -1040,7 +1240,12 @@ class ZoomApiService
      */
     public function getTeamChatMessages(string $ownerUserId, array $filters = []): array
     {
-        return ['messages' => [], 'next_page_token' => null];
+        return app(MorpheusPlatformApiService::class)->getTeamChatMessages($ownerUserId, $filters);
+    }
+
+    protected function platformApi(): MorpheusPlatformApiService
+    {
+        return app(MorpheusPlatformApiService::class);
     }
 
     // =========================================================================
@@ -1049,17 +1254,106 @@ class ZoomApiService
 
     public function listRecordings(array $filters = []): array
     {
-        return ['recordings' => [], 'next_page_token' => null, 'warnings' => []];
+        $warnings = [];
+
+        try {
+            $response = $this->client()->get($this->url('/recordings'), array_filter([
+                'from' => $this->cdrTimestamp($filters['from'] ?? null),
+                'to' => $this->cdrTimestamp($filters['to'] ?? null, true),
+                'direction' => $filters['direction'] ?? null,
+                'search' => $filters['search'] ?? null,
+                'call_uuid' => $filters['call_uuid'] ?? null,
+                'limit' => $filters['per_page'] ?? 50,
+                'offset' => is_numeric($filters['page_token'] ?? null) ? (int) $filters['page_token'] : 0,
+            ], fn ($value) => $value !== null && $value !== ''));
+
+            if ($response->status() === 403) {
+                return [
+                    'recordings' => [],
+                    'next_page_token' => null,
+                    'warnings' => ['API key lacks recordings:read permission.'],
+                ];
+            }
+
+            if (! $response->successful()) {
+                $platform = $this->platformApi()->listRecordings($filters);
+                if (filled($platform['warning'] ?? null)) {
+                    $warnings[] = $platform['warning'];
+                }
+
+                return [
+                    'recordings' => $this->normalizeMorpheusRecordings($platform['recordings'] ?? []),
+                    'next_page_token' => null,
+                    'warnings' => $warnings,
+                ];
+            }
+
+            $rows = $response->json('recordings') ?? [];
+
+            return [
+                'recordings' => $this->normalizeMorpheusRecordings(is_array($rows) ? $rows : []),
+                'next_page_token' => null,
+                'warnings' => $warnings,
+            ];
+        } catch (\Throwable $e) {
+            return ['recordings' => [], 'next_page_token' => null, 'warnings' => [$e->getMessage()]];
+        }
     }
 
     public function listVoiceMails(array $filters = []): array
     {
-        return ['voice_mails' => [], 'next_page_token' => null, 'warning' => null];
+        $status = $filters['status'] ?? null;
+        if ($status === 'unread') {
+            $status = 'new';
+        }
+
+        try {
+            $response = $this->client()->get($this->url('/voicemails'), array_filter([
+                'extension_id' => $filters['extension_id'] ?? null,
+                'status' => $status,
+                'limit' => $filters['per_page'] ?? 50,
+                'offset' => is_numeric($filters['page_token'] ?? null) ? (int) $filters['page_token'] : 0,
+            ], fn ($value) => $value !== null && $value !== ''));
+
+            if ($response->status() === 403) {
+                return [
+                    'voice_mails' => [],
+                    'next_page_token' => null,
+                    'warning' => 'API key lacks voicemails:read permission.',
+                ];
+            }
+
+            if (! $response->successful()) {
+                $platform = $this->platformApi()->listVoiceMails($filters);
+
+                return [
+                    'voice_mails' => $this->normalizeMorpheusVoiceMails($platform['voice_mails'] ?? []),
+                    'next_page_token' => null,
+                    'warning' => $platform['warning'] ?? null,
+                ];
+            }
+
+            $rows = $response->json('voicemails') ?? [];
+
+            return [
+                'voice_mails' => $this->normalizeMorpheusVoiceMails(is_array($rows) ? $rows : []),
+                'next_page_token' => null,
+                'warning' => null,
+            ];
+        } catch (\Throwable $e) {
+            return ['voice_mails' => [], 'next_page_token' => null, 'warning' => $e->getMessage()];
+        }
     }
 
     public function listSmsSessions(array $filters = []): array
     {
-        return ['sessions' => [], 'next_page_token' => null, 'warning' => null];
+        $result = $this->platformApi()->listSmsSessions($filters);
+
+        return [
+            'sessions' => $this->normalizePlatformSmsSessions($result['sessions'] ?? []),
+            'next_page_token' => null,
+            'warning' => $result['warning'] ?? null,
+        ];
     }
 
     public function listCallQueues(array $filters = []): array
@@ -1071,26 +1365,181 @@ class ZoomApiService
 
     public function listTeamChatChannels(array $filters = []): array
     {
-        return ['channels' => [], 'next_page_token' => null, 'warning' => null];
+        return $this->platformApi()->listTeamChatChannels($filters);
     }
 
     public function sendTeamChatMessage(string $userId, array $payload): array
     {
-        return ['success' => false, 'error' => 'Morpheus CX does not support Team Chat.'];
+        if (! $this->isConfigured()) {
+            return ['success' => false, 'error' => 'Morpheus CX is not configured.'];
+        }
+
+        try {
+            $channelId = $payload['channel_id'] ?? $payload['to_channel'] ?? null;
+            $path = $channelId ? "/chat/{$channelId}/messages" : '/chat/messages';
+            $response = Http::timeout((int) config('integrations.communications.http_timeout_seconds', 12))
+                ->acceptJson()
+                ->withHeaders([
+                    'X-API-Key' => (string) (config('integrations.morpheus.platform_api_key')
+                        ?: config('integrations.morpheus.api_key')),
+                ])
+                ->post(
+                    'https://'.config('integrations.morpheus.host').'/api/v1'.$path,
+                    ['message' => $payload['message'] ?? $payload['body'] ?? '']
+                );
+
+            if ($response->successful()) {
+                return ['success' => true, 'message' => $response->json()];
+            }
+
+            return [
+                'success' => false,
+                'error' => (string) ($response->json('error') ?? 'Could not send chat message.'),
+            ];
+        } catch (\Throwable $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
     }
 
     /**
-     * Streaming recordings/voicemails are not available in the Morpheus CX API.
-     * The controller will catch these exceptions and return a 404.
+     * @param  array<int, array<string, mixed>>  $rows
+     * @return array<int, array<string, mixed>>
      */
-    public function streamRecording(string $source, string $recordingId, bool $download = false, ?string $callReferenceId = null): never
+    protected function normalizeMorpheusRecordings(array $rows): array
     {
-        throw new \RuntimeException('Recording not found.');
+        return collect($rows)->map(function (array $row) {
+            $id = (string) ($row['id'] ?? '');
+            $caller = $row['caller_id_number'] ?? $row['caller_id_name'] ?? 'Caller';
+            $dest = $row['destination_number'] ?? 'Callee';
+            $agent = $row['agent'] ?? $row['extension'] ?? null;
+
+            return [
+                'id' => $id,
+                'topic' => trim(($row['direction'] ?? 'call').' · '.$caller.' → '.$dest),
+                'source' => 'phone',
+                'file_type' => 'audio/wav',
+                'start_time' => $row['created_at'] ?? $row['finalized_at'] ?? null,
+                'duration' => (int) ($row['duration_sec'] ?? 0),
+                'host' => $agent ?? $caller,
+                'has_media' => $id !== '',
+                'call_uuid' => $row['call_uuid'] ?? null,
+                'call_history_uuid' => $row['call_uuid'] ?? null,
+                'call_id' => $row['call_uuid'] ?? null,
+                'download_url' => $row['download_url'] ?? null,
+                'raw' => $row,
+            ];
+        })->values()->all();
     }
 
-    public function streamVoicemail(string $fileId, bool $download = false): never
+    /**
+     * @param  array<int, array<string, mixed>>  $rows
+     * @return array<int, array<string, mixed>>
+     */
+    protected function normalizeMorpheusVoiceMails(array $rows): array
     {
-        throw new \RuntimeException('Voicemail not found.');
+        return collect($rows)->map(function (array $row) {
+            $id = (string) ($row['id'] ?? '');
+            $status = $row['status'] ?? 'new';
+
+            return [
+                'id' => $id,
+                'file_id' => $id,
+                'caller' => $row['caller_id_name'] ?? $row['caller_id_number'] ?? 'Unknown',
+                'caller_number' => $row['caller_id_number'] ?? '',
+                'callee' => $row['extension'] ?? '—',
+                'date_time' => $row['created_at'] ?? null,
+                'duration' => (int) ($row['duration_sec'] ?? 0),
+                'status' => $status === 'new' ? 'unread' : $status,
+                'has_media' => $id !== '',
+                'download_url' => $row['download_url'] ?? null,
+                'raw' => $row,
+            ];
+        })->values()->all();
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $rows
+     * @return array<int, array<string, mixed>>
+     */
+    protected function normalizePlatformRecordings(array $rows): array
+    {
+        return $this->normalizeMorpheusRecordings($rows);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $rows
+     * @return array<int, array<string, mixed>>
+     */
+    protected function normalizePlatformVoiceMails(array $rows): array
+    {
+        return $this->normalizeMorpheusVoiceMails($rows);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $rows
+     * @return array<int, array<string, mixed>>
+     */
+    protected function normalizePlatformSmsSessions(array $rows): array
+    {
+        return collect($rows)->map(function (array $row) {
+            $sessionId = (string) ($row['session_id'] ?? $row['id'] ?? '');
+
+            return [
+                'session_id' => $sessionId,
+                'phone_number' => $row['phone_number'] ?? $row['to'] ?? $row['from'] ?? '',
+                'contact_name' => $row['contact_name'] ?? $row['name'] ?? null,
+                'last_message' => $row['last_message'] ?? $row['preview'] ?? '',
+                'last_message_at' => $row['last_message_at'] ?? $row['updated_at'] ?? null,
+                'unread_count' => (int) ($row['unread_count'] ?? 0),
+                'raw' => $row,
+            ];
+        })->values()->all();
+    }
+
+    /**
+     * Stream recording audio from the Morpheus platform API when available.
+     */
+    public function streamRecording(string $source, string $recordingId, bool $download = false, ?string $callReferenceId = null): \Symfony\Component\HttpFoundation\Response
+    {
+        $response = $this->authenticatedMediaGet($this->url("/recordings/{$recordingId}/download"));
+
+        if (! $response->successful()) {
+            throw new \RuntimeException('Recording not found.');
+        }
+
+        $contentType = $response->header('Content-Type') ?: 'audio/wav';
+        $disposition = $download ? 'attachment' : 'inline';
+
+        return response($response->body(), 200, [
+            'Content-Type' => $contentType,
+            'Content-Disposition' => "{$disposition}; filename=\"recording-{$recordingId}.wav\"",
+        ]);
+    }
+
+    public function streamVoicemail(string $fileId, bool $download = false): \Symfony\Component\HttpFoundation\Response
+    {
+        $query = $download ? '' : '?mark_read=1';
+        $path = "/voicemails/{$fileId}/download".$query;
+        $response = $this->authenticatedMediaGet($this->url($path));
+
+        if (! $response->successful()) {
+            throw new \RuntimeException('Voicemail not found.');
+        }
+
+        $contentType = $response->header('Content-Type') ?: 'audio/wav';
+        $disposition = $download ? 'attachment' : 'inline';
+
+        return response($response->body(), 200, [
+            'Content-Type' => $contentType,
+            'Content-Disposition' => "{$disposition}; filename=\"voicemail-{$fileId}.wav\"",
+        ]);
+    }
+
+    protected function authenticatedMediaGet(string $url): \Illuminate\Http\Client\Response
+    {
+        return Http::timeout((int) config('integrations.communications.http_timeout_seconds', 12))
+            ->withHeaders(['X-API-Key' => (string) config('integrations.morpheus.api_key')])
+            ->get($url);
     }
 
     // =========================================================================

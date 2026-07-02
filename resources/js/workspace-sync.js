@@ -2,7 +2,13 @@ import { showToast } from './toast.js';
 import { updateMemberRows } from './member-management.js';
 import { isOsNotificationsEnabled, showOsNotification } from './system-notifications.js';
 import { applyWorkspaceAdminState } from './workspace-admin.js';
-import { applySalesOpsSync, initAjaxActivityForms, TIER_LABELS, smoothWidthUpdate, applyToolkitSync } from './sales-ops-sync.js';
+import {
+    applySalesOpsSync,
+    initAjaxActivityForms,
+    TIER_LABELS,
+    smoothWidthUpdate,
+    applyToolkitSync,
+} from './sales-ops-sync.js';
 
 const WORKFLOW_STATUS_LABELS = {
     mapping: 'Setup',
@@ -42,12 +48,13 @@ function workflowActionForms(workflow, showBase) {
                 <button type="submit" class="app-link text-xs text-amber-700">Pause</button>
            </form>`
         : '';
-    const resumeForm = workflow.status === 'paused'
-        ? `<form method="POST" action="${showBase}/${workflow.id}/resume" class="inline">
+    const resumeForm =
+        workflow.status === 'paused'
+            ? `<form method="POST" action="${showBase}/${workflow.id}/resume" class="inline">
                 <input type="hidden" name="_token" value="${escapeHtml(csrfToken())}">
                 <button type="submit" class="app-link text-xs text-emerald-700">Resume</button>
            </form>`
-        : '';
+            : '';
     const deleteForm = `<form method="POST" action="${showBase}/${workflow.id}" class="inline" onsubmit="return confirm('Delete this pipeline and all lead records from the database?')">
                 <input type="hidden" name="_token" value="${escapeHtml(csrfToken())}">
                 <input type="hidden" name="_method" value="DELETE">
@@ -82,15 +89,18 @@ function renderLeadTagChips(lead) {
 }
 
 function renderLeadRow(lead, leadShowBase) {
-    const contact = lead.direct_email && lead.direct_email !== 'Not Publicly Available'
-        ? `<div class="text-zinc-700">${escapeHtml(lead.direct_email)}</div>`
-        : '';
-    const phone = lead.direct_phone && lead.direct_phone !== 'Not Publicly Available'
-        ? `<div class="text-xs text-zinc-400 mt-0.5">${escapeHtml(lead.direct_phone)}</div>`
-        : '';
-    const contactFallback = (!lead.direct_email && !lead.direct_phone)
-        ? '<span class="text-xs text-zinc-400 italic">None available</span>'
-        : '';
+    const contact =
+        lead.direct_email && lead.direct_email !== 'Not Publicly Available'
+            ? `<div class="text-zinc-700">${escapeHtml(lead.direct_email)}</div>`
+            : '';
+    const phone =
+        lead.direct_phone && lead.direct_phone !== 'Not Publicly Available'
+            ? `<div class="text-xs text-zinc-400 mt-0.5">${escapeHtml(lead.direct_phone)}</div>`
+            : '';
+    const contactFallback =
+        !lead.direct_email && !lead.direct_phone
+            ? '<span class="text-xs text-zinc-400 italic">None available</span>'
+            : '';
     const tierLabel = lead.tier_label || TIER_LABELS[lead.tier] || '';
     const editIcon = `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>`;
 
@@ -157,11 +167,13 @@ const LEAD_PIPELINE_STATUS_LABELS = {
 function renderPipelineLeadRow(lead, leadShowBase, csrf) {
     const status = LEAD_PIPELINE_STATUS_LABELS[lead.status] || (lead.status || '').replace(/_/g, ' ');
     const location = [lead.city, lead.state].filter(Boolean).join(', ');
-    const failureNote = lead.status === 'failed' && lead.error_message
-        ? `<div class="text-xs text-rose-600 mt-1 max-w-xs">${escapeHtml(lead.error_message).slice(0, 120)}</div>`
-        : '';
-    const actions = lead.status === 'pending_verification'
-        ? `<div class="flex items-center justify-end gap-1">
+    const failureNote =
+        lead.status === 'failed' && lead.error_message
+            ? `<div class="text-xs text-rose-600 mt-1 max-w-xs">${escapeHtml(lead.error_message).slice(0, 120)}</div>`
+            : '';
+    const actions =
+        lead.status === 'pending_verification'
+            ? `<div class="flex items-center justify-end gap-1">
                 <form method="POST" action="/admin/leads/${lead.id}/approve">
                     <input type="hidden" name="_token" value="${escapeHtml(csrf)}">
                     <button type="submit" class="app-btn app-btn-success app-btn-sm">Approve</button>
@@ -171,13 +183,18 @@ function renderPipelineLeadRow(lead, leadShowBase, csrf) {
                     <button type="submit" class="app-btn app-btn-ghost-danger app-btn-sm">Reject</button>
                 </form>
            </div>`
-        : (lead.status === 'completed' ? '<span class="text-xs font-semibold text-emerald-700">Released</span>' : '');
+            : lead.status === 'completed'
+              ? '<span class="text-xs font-semibold text-emerald-700">Released</span>'
+              : '';
 
-    const email = lead.direct_email && lead.direct_email !== 'Not Publicly Available' ? escapeHtml(lead.direct_email) : '';
-    const phone = lead.direct_phone && lead.direct_phone !== 'Not Publicly Available' ? escapeHtml(lead.direct_phone) : '';
-    const contact = email || phone
-        ? `${email ? `<div>${email}</div>` : ''}${phone ? `<div class="text-xs text-zinc-400 mt-0.5">${phone}</div>` : ''}`
-        : '<span class="text-zinc-400">—</span>';
+    const email =
+        lead.direct_email && lead.direct_email !== 'Not Publicly Available' ? escapeHtml(lead.direct_email) : '';
+    const phone =
+        lead.direct_phone && lead.direct_phone !== 'Not Publicly Available' ? escapeHtml(lead.direct_phone) : '';
+    const contact =
+        email || phone
+            ? `${email ? `<div>${email}</div>` : ''}${phone ? `<div class="text-xs text-zinc-400 mt-0.5">${phone}</div>` : ''}`
+            : '<span class="text-zinc-400">—</span>';
 
     return `
         <tr data-lead-id="${lead.id}" data-lead-status="${escapeHtml(lead.status || '')}">
@@ -209,9 +226,12 @@ function renderWorkflowCard(workflow, showBase) {
                 <div class="mt-3 flex items-center justify-between text-xs text-zinc-500">
                     <span>${workflow.processed_leads} / ${workflow.total_leads} processed</span>
                 </div>
-                ${workflow.lead_list_name || (Array.isArray(workflow.import_tag_ids) && workflow.import_tag_ids.length)
-                    ? `<div class="mt-2 text-xs text-zinc-500">${workflow.lead_list_name ? `List: <strong class="text-zinc-700">${escapeHtml(workflow.lead_list_name)}</strong>` : ''}${workflow.import_tag_ids?.length ? `<span class="${workflow.lead_list_name ? 'ml-2' : ''}">Tagged import</span>` : ''}</div>`
-                    : ''}
+                ${
+                    workflow.lead_list_name ||
+                    (Array.isArray(workflow.import_tag_ids) && workflow.import_tag_ids.length)
+                        ? `<div class="mt-2 text-xs text-zinc-500">${workflow.lead_list_name ? `List: <strong class="text-zinc-700">${escapeHtml(workflow.lead_list_name)}</strong>` : ''}${workflow.import_tag_ids?.length ? `<span class="${workflow.lead_list_name ? 'ml-2' : ''}">Tagged import</span>` : ''}</div>`
+                        : ''
+                }
             <div class="mt-3 flex items-center justify-end gap-3">
                 <a href="${showBase}/${workflow.id}" class="app-link text-xs">${openLabel}</a>
                 ${workflowActionForms(workflow, showBase)}
@@ -221,7 +241,9 @@ function renderWorkflowCard(workflow, showBase) {
 }
 
 function renderTeam(members) {
-    return members.map((member) => `
+    return members
+        .map(
+            (member) => `
         <div class="py-3 flex items-center justify-between" data-member-id="${member.id}">
             <div>
                 <div class="font-bold text-zinc-900 text-sm">${escapeHtml(member.name)}</div>
@@ -231,15 +253,15 @@ function renderTeam(members) {
                 ${escapeHtml(member.role)}${member.status !== 'active' ? ` (${member.status})` : ''}
             </span>
         </div>
-    `).join('');
+    `
+        )
+        .join('');
 }
 
 const AE_PIPELINE_STAGES = new Set(['meeting_scheduled', 'proposal_sent', 'follow_up', 'closed_won', 'closed_lost']);
 
 function renderAePipelineRow(lead, leadShowBase) {
-    const volume = lead.monthly_processing_volume
-        ? `$${Number(lead.monthly_processing_volume).toLocaleString()}`
-        : '—';
+    const volume = lead.monthly_processing_volume ? `$${Number(lead.monthly_processing_volume).toLocaleString()}` : '—';
     const meeting = lead.schedule_at || '—';
 
     return `
@@ -255,7 +277,8 @@ function renderAePipelineRow(lead, leadShowBase) {
     `;
 }
 
-const PIPELINE_STEP_CHECK = '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>';
+const PIPELINE_STEP_CHECK =
+    '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>';
 
 function syncModeIsPatch(el) {
     return el?.dataset?.syncMode === 'patch';
@@ -291,9 +314,7 @@ function syncTableBody(tbody, items, renderRow, renderArgs = []) {
         return;
     }
 
-    const html = items.length === 0
-        ? ''
-        : items.map((item) => renderRow(item, ...renderArgs)).join('');
+    const html = items.length === 0 ? '' : items.map((item) => renderRow(item, ...renderArgs)).join('');
     smoothHtmlUpdate(tbody, html);
 }
 
@@ -362,7 +383,7 @@ function reapplyPipelineLeadFilter() {
 }
 
 function formatWorkflowProgressLabel(wf) {
-    const done = (wf.attempted_leads ?? ((wf.enriched_leads ?? 0) + (wf.failed_leads ?? 0)));
+    const done = wf.attempted_leads ?? (wf.enriched_leads ?? 0) + (wf.failed_leads ?? 0);
     return `${wf.completion_pct ?? 0}% · ${done} / ${wf.total_leads ?? 0}`;
 }
 
@@ -537,9 +558,10 @@ function maybeShowOsNotification(event, message, leadShowBase, workflowShowBase)
         return;
     }
 
-    const url = event.entity_type === 'workflow_lead' && event.entity_id
-        ? `${leadShowBase}/${event.entity_id}`
-        : workflowShowBase;
+    const url =
+        event.entity_type === 'workflow_lead' && event.entity_id
+            ? `${leadShowBase}/${event.entity_id}`
+            : workflowShowBase;
 
     showOsNotification({
         title: SYNC_EVENT_TITLES[event.type] || 'Workspace update',
@@ -665,7 +687,7 @@ export function initWorkspaceSync() {
             if (leadId) params.set('lead_id', leadId);
 
             const response = await fetch(`${syncUrl}?${params.toString()}`, {
-                headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                 credentials: 'same-origin',
                 signal: syncInflight.signal,
             });
@@ -723,7 +745,7 @@ export function initWorkspaceSync() {
                 } else {
                     smoothHtmlUpdate(
                         workflowsList,
-                        data.workflows.map((wf) => renderWorkflowCard(wf, workflowShowBase)).join(''),
+                        data.workflows.map((wf) => renderWorkflowCard(wf, workflowShowBase)).join('')
                     );
                 }
             }
@@ -743,7 +765,10 @@ export function initWorkspaceSync() {
             if (workflowId && Array.isArray(data.workflows) && data.workflows.length > 0) {
                 const wf = data.workflows[0];
                 smoothHtmlUpdate(workflowStatus, renderWorkflowStatusPill(wf.status));
-                smoothTextUpdate(workflowProgress, String(wf.attempted_leads ?? wf.enriched_leads ?? wf.processed_leads ?? 0));
+                smoothTextUpdate(
+                    workflowProgress,
+                    String(wf.attempted_leads ?? wf.enriched_leads ?? wf.processed_leads ?? 0)
+                );
                 smoothTextUpdate(workflowAssigned, String(wf.assigned_leads ?? 0));
                 smoothTextUpdate(workflowPendingReview, String(wf.pending_verification ?? 0));
                 smoothTextUpdate(workflowPendingReview2, String(wf.pending_verification ?? 0));

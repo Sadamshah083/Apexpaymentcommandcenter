@@ -98,8 +98,10 @@ class CommunicationsDataService
         $index = $this->phoneRecordingFileIndex($filters);
 
         return array_map(function (array $log) use ($index) {
+            $hasRecording = (bool) ($log['raw']['has_recording'] ?? false)
+                || (bool) ($log['has_recording_media'] ?? false);
             $status = strtolower((string) ($log['raw']['recording_status'] ?? ''));
-            $isRecorded = $status !== '' && $status !== 'non_recorded';
+            $isRecorded = $hasRecording || ($status !== '' && $status !== 'non_recorded');
 
             if (! $isRecorded) {
                 return $log;
@@ -149,7 +151,7 @@ class CommunicationsDataService
                             continue;
                         }
 
-                        foreach (['call_history_uuid', 'call_element_id', 'call_log_id', 'call_id', 'id'] as $field) {
+                        foreach (['call_uuid', 'call_history_uuid', 'call_element_id', 'call_log_id', 'call_id', 'id'] as $field) {
                             if (filled($recording[$field] ?? null)) {
                                 $reference = (string) $recording[$field];
                                 $byReference[$reference] = $fileId;

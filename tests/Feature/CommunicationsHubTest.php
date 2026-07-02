@@ -647,4 +647,94 @@ class CommunicationsHubTest extends TestCase
 
         $this->app->instance(CommunicationsDataService::class, $data);
     }
+
+    public function test_portal_agent_sees_limited_communications_channels(): void
+    {
+        $this->mockZoomServices();
+
+        $agent = $this->makePortalAgent('appointment_setter');
+
+        $this->actingAs($agent)
+            ->get(route('portal.communications.index'))
+            ->assertOk()
+            ->assertSee('Phone dialer')
+            ->assertSee('Dial')
+            ->assertDontSee('Phone agents')
+            ->assertDontSee('>Queues<', false);
+    }
+
+    public function test_portal_agent_cannot_open_admin_configuration_channels(): void
+    {
+        $this->mockZoomServices();
+
+        $agent = $this->makePortalAgent('closer');
+
+        $this->actingAs($agent)
+            ->get(route('portal.communications.index', ['channel' => 'queues']))
+            ->assertOk()
+            ->assertDontSee('Create queue');
+    }
+
+    public function test_portal_agent_cannot_refresh_communications_cache(): void
+    {
+        $this->mockZoomServices();
+
+        $agent = $this->makePortalAgent('appointment_setter');
+
+        $this->actingAs($agent)
+            ->post(route('portal.communications.zoom.refresh'))
+            ->assertForbidden();
+    }
+
+    public function test_portal_agent_cannot_create_morpheus_queue(): void
+    {
+        $this->mockZoomServices();
+
+        $agent = $this->makePortalAgent('appointment_setter_team_lead');
+
+        $this->actingAs($agent)
+            ->post(route('portal.communications.morpheus.queues.store'), ['name' => 'Sales'])
+            ->assertForbidden();
+    }
+
+    public function test_portal_agent_can_originate_call(): void
+    {
+        Http::fake([
+            'apexone.morpheus.cx/*' => Http::response(['ok' => true, 'call_uuid' => 'uuid-1'], 200),
+        ]);
+
+        $zoom = Mockery::mock(ZoomApiService::class);
+        $zoom->shouldReceive('isConfigured')->andReturn(true);
+        $zoom->shouldReceive('originateCall')->andReturn(['ok' => true, 'call_uuid' => 'uuid-1']);
+        $zoom->shouldReceive('humanizeError')->andReturnUsing(fn ($m) => $m);
+        $this->app->instance(ZoomApiService::class, $zoom);
+
+        $agent = $this->makePortalAgent('appointment_setter');
+
+        $this->actingAs($agent)
+            ->post(route('portal.communications.morpheus.calls.originate'), [
+                'destination' => '5551234567',
+                'from_extension' => '1001',
+            ])
+            ->assertRedirect();
+    }
+
+    protected function makePortalAgent(string $role): User
+    {
+        $owner = User::factory()->create();
+        $workspace = Workspace::create(['name' => 'Acme', 'admin_id' => $owner->id]);
+        $workspace->users()->attach($owner->id, ['role' => 'admin', 'status' => 'active', 'joined_at' => now()]);
+
+        $agent = User::factory()->create([
+            'current_workspace_id' => $workspace->id,
+        ]);
+        $workspace->users()->attach($agent->id, [
+            'role' => $role,
+            'status' => 'active',
+            'joined_at' => now(),
+            'morpheus_extension_num' => '1001',
+        ]);
+
+        return $agent;
+    }
 }

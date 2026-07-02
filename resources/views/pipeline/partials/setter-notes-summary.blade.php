@@ -12,9 +12,9 @@
         </p>
     </div>
 
-    @if($activities->isNotEmpty())
+    @if ($activities->isNotEmpty())
         <ol class="lead-timeline">
-            @foreach($activities as $activity)
+            @foreach ($activities as $activity)
                 <x-lead-activity-timeline-item :activity="$activity" />
             @endforeach
         </ol>

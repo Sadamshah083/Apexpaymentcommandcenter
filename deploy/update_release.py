@@ -77,6 +77,7 @@ def main() -> int:
     log("Backing up .env and extracting release...")
     run(ssh, f"test -f {REMOTE_APP}/.env && cp {REMOTE_APP}/.env /tmp/apexone.env.bak || true", sudo=True)
     run(ssh, f"tar -xzf {REMOTE_TAR} -C {REMOTE_APP}", sudo=True)
+    run(ssh, f"test -f {REMOTE_APP}/public/index.php && test -f {REMOTE_APP}/artisan", sudo=True)
     run(ssh, f"test -f /tmp/apexone.env.bak && cp /tmp/apexone.env.bak {REMOTE_APP}/.env || true", sudo=True)
     run(ssh, f"chown -R www-data:www-data {REMOTE_APP}", sudo=True)
 

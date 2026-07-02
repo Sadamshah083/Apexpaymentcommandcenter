@@ -14,6 +14,10 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->trustProxies(at: '*');
 
+        $middleware->alias([
+            'communications.admin' => \App\Http\Middleware\EnsureCommunicationsAdminAccess::class,
+        ]);
+
         $middleware->web(append: [
             \App\Http\Middleware\EagerLoadAuthenticatedUser::class,
         ]);

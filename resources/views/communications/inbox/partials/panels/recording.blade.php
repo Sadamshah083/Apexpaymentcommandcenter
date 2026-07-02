@@ -1,4 +1,4 @@
-@if($selectedRecording ?? null)
+@if ($selectedRecording ?? null)
     @php $rec = $selectedRecording; @endphp
     <div class="ghl-detail-header">
         <span class="ghl-avatar ghl-avatar-lg">R</span>
@@ -13,7 +13,7 @@
 
     <section class="ghl-card">
         <h3 class="ghl-card-title">Playback</h3>
-        @if(!empty($rec['has_media']) && !empty($rec['id']))
+        @if (!empty($rec['has_media']) && !empty($rec['id']))
             @include('communications.partials.recording-actions', [
                 'routePrefix' => $routePrefix,
                 'recordingId' => $rec['id'],
@@ -26,5 +26,8 @@
         @endif
     </section>
 @else
-    @include('communications.inbox.partials.empty', ['title' => 'Recording not found', 'message' => 'Select a recording from the list.'])
+    @include('communications.inbox.partials.empty', [
+        'title' => 'Recording not found',
+        'message' => 'Select a recording from the list.',
+    ])
 @endif

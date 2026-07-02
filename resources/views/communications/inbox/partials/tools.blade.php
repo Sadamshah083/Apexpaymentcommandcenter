@@ -11,28 +11,32 @@
             ])
         </div>
 
-        @if(!empty($callStats))
+        @if (!empty($callStats))
             <div>
                 <h3 class="ghl-inbox-rail-title">Call summary</h3>
                 <div class="ghl-inbox-rail-stats">
-                    <div><span class="ghl-inbox-rail-stat-value">{{ $callStats['total'] ?? 0 }}</span><span class="ghl-inbox-rail-stat-label">Total</span></div>
-                    <div><span class="ghl-inbox-rail-stat-value">{{ $callStats['inbound'] ?? 0 }}</span><span class="ghl-inbox-rail-stat-label">Inbound</span></div>
-                    <div><span class="ghl-inbox-rail-stat-value">{{ $callStats['outbound'] ?? 0 }}</span><span class="ghl-inbox-rail-stat-label">Outbound</span></div>
-                    <div><span class="ghl-inbox-rail-stat-value">{{ $callStats['missed'] ?? 0 }}</span><span class="ghl-inbox-rail-stat-label">Missed</span></div>
+                    <div><span class="ghl-inbox-rail-stat-value">{{ $callStats['total'] ?? 0 }}</span><span
+                            class="ghl-inbox-rail-stat-label">Total</span></div>
+                    <div><span class="ghl-inbox-rail-stat-value">{{ $callStats['inbound'] ?? 0 }}</span><span
+                            class="ghl-inbox-rail-stat-label">Inbound</span></div>
+                    <div><span class="ghl-inbox-rail-stat-value">{{ $callStats['outbound'] ?? 0 }}</span><span
+                            class="ghl-inbox-rail-stat-label">Outbound</span></div>
+                    <div><span class="ghl-inbox-rail-stat-value">{{ $callStats['missed'] ?? 0 }}</span><span
+                            class="ghl-inbox-rail-stat-label">Missed</span></div>
                 </div>
             </div>
         @endif
 
-        @if(!empty($phoneUsers))
+        @if (!empty($phoneUsers))
             <div>
                 <h3 class="ghl-inbox-rail-title">Phone lines</h3>
                 <div class="ghl-team-list" style="max-height: 10rem;">
-                    @foreach($phoneUsers as $user)
-                        @foreach($user['phone_numbers'] as $number)
+                    @foreach ($phoneUsers as $user)
+                        @foreach ($user['phone_numbers'] as $number)
                             <div class="ghl-team-row" style="padding: 0.35rem 0;">
                                 <span class="text-xs font-semibold text-zinc-800 truncate">{{ $user['name'] }}</span>
-                                <a href="{{ route($routePrefix.'communications.index', array_merge($baseQuery, ['panel' => 'dialer', 'number' => $number])) }}"
-                                   class="comm-hub-link text-xs">{{ $number }}</a>
+                                <a href="{{ route($routePrefix . 'communications.index', array_merge($baseQuery, ['panel' => 'dialer', 'number' => $number])) }}"
+                                    class="comm-hub-link text-xs">{{ $number }}</a>
                             </div>
                         @endforeach
                     @endforeach
@@ -40,7 +44,7 @@
             </div>
         @endif
 
-        <a href="{{ route($routePrefix.'communications.index', array_merge($baseQuery, ['panel' => 'dialer'])) }}"
-           class="comm-hub-btn comm-hub-btn-secondary w-full text-center comm-hub-btn-sm">Full dialer</a>
+        <a href="{{ route($routePrefix . 'communications.index', array_merge($baseQuery, ['panel' => 'dialer'])) }}"
+            class="comm-hub-btn comm-hub-btn-secondary w-full text-center comm-hub-btn-sm">Full dialer</a>
     </div>
 </aside>

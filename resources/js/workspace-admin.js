@@ -46,16 +46,18 @@ export function applyWorkspaceAdminState(data) {
     const switchBase = root.dataset.workspaceSwitchBase || '';
     const csrf = root.dataset.csrfToken || '';
 
-    const html = data.workspaces.map((workspace) => {
-        const active = workspace.is_active;
-        const switchForm = !active && switchBase
-            ? `<form method="POST" action="${escapeHtml(switchBase)}/${workspace.id}" class="workspace-switch-form">
+    const html = data.workspaces
+        .map((workspace) => {
+            const active = workspace.is_active;
+            const switchForm =
+                !active && switchBase
+                    ? `<form method="POST" action="${escapeHtml(switchBase)}/${workspace.id}" class="workspace-switch-form">
                     <input type="hidden" name="_token" value="${escapeHtml(csrf)}">
                     <button type="submit" class="um-btn um-btn-ghost um-btn-sm">Switch</button>
                </form>`
-            : '<span class="um-badge um-badge-active">Active</span>';
+                    : '<span class="um-badge um-badge-active">Active</span>';
 
-        return `
+            return `
             <div class="um-workspace-card ${active ? 'um-workspace-card-active' : ''}" data-workspace-id="${workspace.id}">
                 <div class="um-workspace-card-body">
                     <h4 class="um-workspace-name">${escapeHtml(workspace.name)}</h4>
@@ -65,7 +67,8 @@ export function applyWorkspaceAdminState(data) {
                 ${switchForm}
             </div>
         `;
-    }).join('');
+        })
+        .join('');
 
     list.classList.add('live-sync-updating');
     window.requestAnimationFrame(() => {
@@ -173,9 +176,12 @@ function bindCreateMemberForm() {
             const payload = await response.json().catch(() => ({}));
 
             if (!response.ok) {
-                const message = payload.message
-                    || Object.values(payload.errors || {}).flat().join(' ')
-                    || 'Could not create agent account.';
+                const message =
+                    payload.message ||
+                    Object.values(payload.errors || {})
+                        .flat()
+                        .join(' ') ||
+                    'Could not create agent account.';
                 window.showToast?.(message, 'error');
                 return;
             }

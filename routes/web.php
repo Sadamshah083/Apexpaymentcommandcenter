@@ -171,7 +171,9 @@ Route::prefix('admin')->name('admin.')->middleware([
         Route::get('/zoom/export/logs', [CommunicationsHubController::class, 'exportLogs'])->name('zoom.export.logs');
         Route::get('/zoom/recordings/{recordingId}/media', [CommunicationsHubController::class, 'recordingMedia'])->name('zoom.recordings.media');
         Route::get('/zoom/voicemails/{fileId}/media', [CommunicationsHubController::class, 'voicemailMedia'])->name('zoom.voicemails.media');
-        Route::post('/zoom/refresh', [CommunicationsHubController::class, 'refreshCache'])->name('zoom.refresh');
+        Route::post('/zoom/refresh', [CommunicationsHubController::class, 'refreshCache'])
+            ->middleware('communications.admin')
+            ->name('zoom.refresh');
         Route::post('/zoom/sms/send', [CommunicationsHubController::class, 'sendSms'])->name('zoom.sms.send');
         Route::post('/zoom/chat/send', [CommunicationsHubController::class, 'sendChat'])->name('zoom.chat.send');
         $registerMorpheusHub();
@@ -239,7 +241,9 @@ Route::prefix('portal')->name('portal.')->middleware([\App\Http\Middleware\Marke
         Route::get('/zoom/export/logs', [CommunicationsHubController::class, 'exportLogs'])->name('zoom.export.logs');
         Route::get('/zoom/recordings/{recordingId}/media', [CommunicationsHubController::class, 'recordingMedia'])->name('zoom.recordings.media');
         Route::get('/zoom/voicemails/{fileId}/media', [CommunicationsHubController::class, 'voicemailMedia'])->name('zoom.voicemails.media');
-        Route::post('/zoom/refresh', [CommunicationsHubController::class, 'refreshCache'])->name('zoom.refresh');
+        Route::post('/zoom/refresh', [CommunicationsHubController::class, 'refreshCache'])
+            ->middleware('communications.admin')
+            ->name('zoom.refresh');
         Route::post('/zoom/sms/send', [CommunicationsHubController::class, 'sendSms'])->name('zoom.sms.send');
         Route::post('/zoom/chat/send', [CommunicationsHubController::class, 'sendChat'])->name('zoom.chat.send');
         $registerMorpheusHub();

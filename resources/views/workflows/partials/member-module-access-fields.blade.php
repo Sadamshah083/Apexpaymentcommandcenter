@@ -2,7 +2,9 @@
     use App\Support\AdminModules;
 
     $moduleGroups = AdminModules::groupedForUi();
-    $canGrantUserManagement = auth()->user()?->isSuperAdmin($activeWorkspace->id ?? auth()->user()?->current_workspace_id);
+    $canGrantUserManagement = auth()
+        ->user()
+        ?->isSuperAdmin($activeWorkspace->id ?? auth()->user()?->current_workspace_id);
 @endphp
 
 <div class="um-module-panel-inner">
@@ -23,19 +25,19 @@
     </div>
 
     <div class="member-module-grid um-module-grid hidden" data-module-grid>
-        @foreach($moduleGroups as $section => $modules)
+        @foreach ($moduleGroups as $section => $modules)
             <div class="um-module-section">
                 <p class="um-module-section-title">{{ $section }}</p>
                 <div class="um-module-checkboxes">
-                    @foreach($modules as $module)
-                        @if(($module['always_available'] ?? false) || ($module['key'] === 'user_management' && ! $canGrantUserManagement))
+                    @foreach ($modules as $module)
+                        @if (($module['always_available'] ?? false) || ($module['key'] === 'user_management' && !$canGrantUserManagement))
                             @continue
                         @endif
                         <label class="um-module-check">
                             <input type="checkbox" name="modules[]" value="{{ $module['key'] }}">
                             <span>
                                 <span class="um-module-check-label">{{ $module['label'] }}</span>
-                                @if($module['description'])
+                                @if ($module['description'])
                                     <span class="um-module-check-desc">{{ $module['description'] }}</span>
                                 @endif
                             </span>

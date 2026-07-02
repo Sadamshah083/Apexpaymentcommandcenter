@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Append missing MORPHEUS_* keys to production .env without overwriting existing values."""
+"""Append missing MORPHEUS_* keys to production .env (never overwrites existing keys)."""
 
 from __future__ import annotations
 
@@ -27,38 +27,57 @@ DEFAULTS = {
 }
 
 
-def run(ssh: paramiko.SSHClient, command: str) -> str:
-    _, stdout, stderr = ssh.exec_command(command)
+def sudo_cat(ssh: paramiko.SSHClient, path: str) -> str:
+    cmd = f"echo btdev | sudo -S cat {shlex.quote(path)}"
+    _, stdout, _ = ssh.exec_command(cmd)
     stdout.channel.recv_exit_status()
     return stdout.read().decode(errors="replace")
+
+
+def sudo_write(ssh: paramiko.SSHClient, path: str, content: str) -> None:
+    tmp = "/tmp/apexone.env.merged"
+    sftp = ssh.open_sftp()
+    with sftp.file(tmp, "w") as remote:
+        remote.write(content)
+    sftp.close()
+    sudo_run_batch(ssh, [
+        f"cp {tmp} {path}",
+        f"chown www-data:www-data {path}",
+        f"chmod 640 {path}",
+    ])
+
+
+def parse_keys(text: str) -> set[str]:
+    keys: set[str] = set()
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        keys.add(line.split("=", 1)[0].strip())
+    return keys
 
 
 def main() -> int:
     api_key = os.environ.get("MORPHEUS_API_KEY", "").strip()
     ssh = connect()
 
-    existing = run(ssh, f"sudo grep -E '^[A-Z_]+=' {ENV_PATH} 2>/dev/null | cut -d= -f1 | sort -u || true")
-    present = {line.strip() for line in existing.splitlines() if line.strip()}
+    existing_text = sudo_cat(ssh, ENV_PATH)
+    present = parse_keys(existing_text)
 
-    to_add: list[str] = []
+    additions: list[str] = []
     for key, value in DEFAULTS.items():
         if key not in present:
-            to_add.append(f"{key}={value}")
+            additions.append(f"{key}={value}")
 
     if "MORPHEUS_API_KEY" not in present and api_key:
-        to_add.append(f"MORPHEUS_API_KEY={api_key}")
+        additions.append(f"MORPHEUS_API_KEY={api_key}")
 
-    if not to_add:
+    if not additions:
         print("No Morpheus env keys to add (all present).")
     else:
-        block = "\\n".join(to_add)
-        cmd = (
-            f"printf '%s\\n' {shlex.quote(block)} | "
-            f"sudo tee -a {ENV_PATH} > /dev/null && "
-            f"sudo chown www-data:www-data {ENV_PATH}"
-        )
-        run(ssh, cmd)
-        print(f"Appended {len(to_add)} Morpheus env key(s): {', '.join(line.split('=')[0] for line in to_add)}")
+        merged = existing_text.rstrip() + "\n\n# Morpheus CX\n" + "\n".join(additions) + "\n"
+        sudo_write(ssh, ENV_PATH, merged)
+        print(f"Added {len(additions)} key(s): {', '.join(line.split('=')[0] for line in additions)}")
 
     sudo_run_batch(ssh, [
         f"cd {REMOTE_APP} && sudo -u www-data php artisan config:clear",

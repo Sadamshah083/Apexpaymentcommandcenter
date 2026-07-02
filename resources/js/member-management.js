@@ -5,7 +5,8 @@ const ACTION_COPY = {
         title: 'Suspend account?',
         tone: 'warning',
         confirmLabel: 'Suspend account',
-        message: (name) => `${name} will immediately lose access to the agent portal. Their assigned leads stay in the workspace until you reassign them.`,
+        message: (name) =>
+            `${name} will immediately lose access to the agent portal. Their assigned leads stay in the workspace until you reassign them.`,
     },
     reactivate: {
         title: 'Reactivate account?',
@@ -86,9 +87,10 @@ function setModalIcon(tone) {
     }
 
     icon.className = `member-confirm-icon member-confirm-icon-${tone}`;
-    icon.innerHTML = tone === 'error'
-        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v4m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4c-.77-1.33-2.69-1.33-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z"/></svg>'
-        : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"/></svg>';
+    icon.innerHTML =
+        tone === 'error'
+            ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v4m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4c-.77-1.33-2.69-1.33-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z"/></svg>'
+            : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"/></svg>';
 }
 
 function openConfirmModal(form) {
@@ -168,9 +170,12 @@ async function submitMemberForm(form) {
         const payload = await response.json().catch(() => ({}));
 
         if (!response.ok) {
-            const message = payload.message
-                || Object.values(payload.errors || {}).flat().join(' ')
-                || `Could not update ${name}.`;
+            const message =
+                payload.message ||
+                Object.values(payload.errors || {})
+                    .flat()
+                    .join(' ') ||
+                `Could not update ${name}.`;
             showToast(message, 'error');
             row?.classList.remove('member-row-busy');
 
@@ -314,11 +319,13 @@ function bindConfirmModal() {
 }
 
 function roleOptionsHtml(roleLabels, selectedRole) {
-    return Object.entries(roleLabels).map(([value, label]) => {
-        const selected = value === selectedRole ? 'selected' : '';
+    return Object.entries(roleLabels)
+        .map(([value, label]) => {
+            const selected = value === selectedRole ? 'selected' : '';
 
-        return `<option value="${escapeHtml(value)}" ${selected}>${escapeHtml(label)}</option>`;
-    }).join('');
+            return `<option value="${escapeHtml(value)}" ${selected}>${escapeHtml(label)}</option>`;
+        })
+        .join('');
 }
 
 export function renderAdminMemberRow(member, options) {
@@ -372,7 +379,7 @@ export function renderAdminMemberRow(member, options) {
                 <div class="flex items-center gap-2 flex-wrap">
                     <span class="font-bold text-slate-800 text-sm">${escapeHtml(member.name)}</span>
                     ${member.is_owner ? '<span class="member-owner-badge">Owner</span>' : ''}
-                    <span class="member-status-badge member-status-${status}" data-member-status>${status === 'suspended' ? 'Suspended' : (status === 'invited' ? 'Invited' : 'Active')}</span>
+                    <span class="member-status-badge member-status-${status}" data-member-status>${status === 'suspended' ? 'Suspended' : status === 'invited' ? 'Invited' : 'Active'}</span>
                 </div>
                 <div class="text-xs text-slate-400 mt-1 truncate">${escapeHtml(member.email)}</div>
                 <div class="text-xs text-slate-500 mt-0.5" data-member-role>${escapeHtml(roleLabel)}</div>
@@ -455,7 +462,7 @@ export function updateMemberRows(container, members) {
         const badge = row.querySelector('[data-member-status]');
         if (badge) {
             badge.className = `member-status-badge member-status-${status} um-badge um-badge-status-${status}`;
-            badge.textContent = status === 'suspended' ? 'Suspended' : (status === 'invited' ? 'Invited' : 'Active');
+            badge.textContent = status === 'suspended' ? 'Suspended' : status === 'invited' ? 'Invited' : 'Active';
         }
 
         const roleEl = row.querySelector('[data-member-role]');

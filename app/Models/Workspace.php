@@ -19,7 +19,16 @@ class Workspace extends Model
     public function users(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'workspace_user')
-            ->withPivot('role', 'status', 'invited_at', 'joined_at', 'module_permissions')
+            ->withPivot(
+                'role',
+                'status',
+                'invited_at',
+                'joined_at',
+                'module_permissions',
+                'morpheus_user_id',
+                'morpheus_extension_id',
+                'morpheus_extension_num',
+            )
             ->withTimestamps();
     }
 

@@ -49,11 +49,13 @@ self.addEventListener('push', function (event) {
         fetch('/push/latest', { credentials: 'include' })
             .then((response) => response.json())
             .then((data) => showSystemNotification(data))
-            .catch(() => showSystemNotification({
-                title: 'Workspace update',
-                body: 'You have a new update in your workspace.',
-                url: '/',
-            }))
+            .catch(() =>
+                showSystemNotification({
+                    title: 'Workspace update',
+                    body: 'You have a new update in your workspace.',
+                    url: '/',
+                })
+            )
     );
 });
 
