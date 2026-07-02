@@ -13,6 +13,7 @@ class DatabaseSeeder extends Seeder
             FreeProviderDomainSeeder::class,
             SpamRuleSeeder::class,
             DisposableDomainSeeder::class,
+            ApexPaymentsWorkspaceSeeder::class,
         ]);
     }
 }

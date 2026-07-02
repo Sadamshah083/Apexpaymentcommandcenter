@@ -101,10 +101,10 @@ echo "==> Laravel bootstrap..."
 php artisan key:generate --force
 if [[ "$PRESERVE_ENV" == "1" ]]; then
   php artisan migrate --force
-  php artisan db:seed --class=ApexPaymentsWorkspaceSeeder --force || true
 else
   php artisan migrate:fresh --seed --force
 fi
+php artisan db:seed --class=ApexPaymentsWorkspaceSeeder --force
 php artisan storage:link || true
 
 echo "==> Creating production admin..."
