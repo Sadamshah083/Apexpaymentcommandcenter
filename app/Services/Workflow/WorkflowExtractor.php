@@ -80,7 +80,7 @@ class WorkflowExtractor
                 }
             }
 
-            $attributes = $this->mapParsedToLeadAttributes($parsed, $report);
+            $attributes = $this->mapParsedToLeadAttributes($parsed, $report, $lead);
 
             return array_merge($attributes, [
                 'status' => 'completed',
@@ -183,7 +183,7 @@ class WorkflowExtractor
      * @param  array{content: string, model: string, tokens: int|null}  $report
      * @return array<string, mixed>
      */
-    protected function mapParsedToLeadAttributes(array $parsed, array $report): array
+    protected function mapParsedToLeadAttributes(array $parsed, array $report, WorkflowLead $lead): array
     {
         $mapped = $this->sanitizer->sanitize([
             'owner_name' => $this->displayValue($parsed['owner_name'] ?? null),
@@ -194,6 +194,14 @@ class WorkflowExtractor
             'primary_service' => $this->displayValue($parsed['primary_service'] ?? null),
             'operating_hours' => $this->displayValue($parsed['operating_hours'] ?? null),
         ]);
+
+        if ($mapped['direct_phone'] === 'Not Publicly Available' && filled($lead->input_phone)) {
+            $mapped['direct_phone'] = trim((string) $lead->input_phone);
+        }
+
+        if ($mapped['direct_email'] === 'Not Publicly Available' && filled($lead->input_email)) {
+            $mapped['direct_email'] = trim((string) $lead->input_email);
+        }
 
         $updates = [
             'markdown_report' => $report['content'],

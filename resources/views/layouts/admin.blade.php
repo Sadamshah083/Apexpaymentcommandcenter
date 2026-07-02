@@ -13,6 +13,7 @@
     @auth
 data-workspace-id="{{ auth()->user()->current_workspace_id }}"
         data-workspace-sync-url="{{ route('admin.sync.poll') }}"
+        data-workspace-sync-stream-url="{{ route('admin.sync.stream') }}"
         data-lead-show-base="{{ url('/portal/leads') }}"
         data-workflow-show-base="{{ url('/admin/workflows') }}"
         data-push-vapid-key-url="{{ route('admin.push.vapid') }}"

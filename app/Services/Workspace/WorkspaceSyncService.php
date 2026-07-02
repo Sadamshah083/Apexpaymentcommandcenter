@@ -14,7 +14,6 @@ use App\Services\SalesOps\SdrPerformanceService;
 use App\Support\PipelineProgress;
 use App\Support\SalesOps;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class WorkspaceSyncService
@@ -50,10 +49,7 @@ class WorkspaceSyncService
         ?int $workflowId = null,
         ?int $leadId = null,
     ): array {
-        $cacheKey = "workspace_sync_fingerprint_{$workspace->id}_{$user->id}_" . ($workflowId ?? 'all') . "_" . ($leadId ?? 'all');
-        $fingerprint = Cache::remember($cacheKey, now()->addSeconds(3), function () use ($workspace, $user, $workflowId, $leadId) {
-            return $this->fingerprint($workspace, $user, $workflowId, $leadId);
-        });
+        $fingerprint = $this->fingerprint($workspace, $user, $workflowId, $leadId);
         $latestCursor = (int) (WorkspaceSyncEvent::where('workspace_id', $workspace->id)->max('id') ?? 0);
 
         $events = [];
@@ -476,8 +472,9 @@ class WorkspaceSyncService
 
     protected function serializeWorkflow(Workflow $workflow): array
     {
-        $enriched = ($workflow->processed_leads ?? 0) + ($workflow->pending_verification_count ?? 0);
-        $attempted = $enriched + ($workflow->failed_leads ?? 0);
+        $enriched = (int) ($workflow->enriched_leads ?? 0);
+        $failed = (int) ($workflow->failed_leads ?? 0);
+        $attempted = $enriched + $failed;
 
         return [
             'id' => $workflow->id,
@@ -486,13 +483,13 @@ class WorkspaceSyncService
             'original_filename' => $workflow->original_filename,
             'total_leads' => $workflow->total_leads,
             'processed_leads' => $workflow->processed_leads,
-            'failed_leads' => $workflow->failed_leads,
+            'failed_leads' => $failed,
             'enriched_leads' => $enriched,
             'attempted_leads' => $attempted,
             'assigned_leads' => (int) ($workflow->assigned_leads_count ?? 0),
             'pending_verification' => (int) ($workflow->pending_verification_count ?? 0),
             'completion_pct' => $workflow->total_leads > 0
-                ? (int) round((($workflow->processed_leads + $workflow->failed_leads) / $workflow->total_leads) * 100)
+                ? (int) round(($attempted / $workflow->total_leads) * 100)
                 : 0,
             'pipeline_steps' => PipelineProgress::steps($workflow),
             'import_tag_ids' => $workflow->import_tag_ids ?? [],
@@ -516,6 +513,8 @@ class WorkspaceSyncService
             'city' => $lead->city,
             'state' => $lead->state,
             'owner_name' => $lead->owner_name,
+            'input_email' => $lead->input_email,
+            'input_phone' => $lead->input_phone,
             'direct_email' => $lead->direct_email,
             'direct_phone' => $lead->direct_phone,
             'payment_processor' => $lead->payment_processor,

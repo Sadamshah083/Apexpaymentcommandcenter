@@ -2,13 +2,7 @@ import { showToast } from './toast.js';
 import { updateMemberRows } from './member-management.js';
 import { isOsNotificationsEnabled, showOsNotification } from './system-notifications.js';
 import { applyWorkspaceAdminState } from './workspace-admin.js';
-import {
-    applySalesOpsSync,
-    initAjaxActivityForms,
-    TIER_LABELS,
-    smoothWidthUpdate,
-    applyToolkitSync,
-} from './sales-ops-sync.js';
+import { applySalesOpsSync, initAjaxActivityForms, TIER_LABELS, smoothWidthUpdate, applyToolkitSync } from './sales-ops-sync.js';
 
 const WORKFLOW_STATUS_LABELS = {
     mapping: 'Setup',
@@ -48,13 +42,12 @@ function workflowActionForms(workflow, showBase) {
                 <button type="submit" class="app-link text-xs text-amber-700">Pause</button>
            </form>`
         : '';
-    const resumeForm =
-        workflow.status === 'paused'
-            ? `<form method="POST" action="${showBase}/${workflow.id}/resume" class="inline">
+    const resumeForm = workflow.status === 'paused'
+        ? `<form method="POST" action="${showBase}/${workflow.id}/resume" class="inline">
                 <input type="hidden" name="_token" value="${escapeHtml(csrfToken())}">
                 <button type="submit" class="app-link text-xs text-emerald-700">Resume</button>
            </form>`
-            : '';
+        : '';
     const deleteForm = `<form method="POST" action="${showBase}/${workflow.id}" class="inline" onsubmit="return confirm('Delete this pipeline and all lead records from the database?')">
                 <input type="hidden" name="_token" value="${escapeHtml(csrfToken())}">
                 <input type="hidden" name="_method" value="DELETE">
@@ -88,19 +81,28 @@ function renderLeadTagChips(lead) {
     return `${listHtml}${tagHtml}`;
 }
 
+function resolveLeadContact(lead) {
+    const email = lead.direct_email && lead.direct_email !== 'Not Publicly Available'
+        ? lead.direct_email
+        : (lead.input_email || '');
+    const phone = lead.direct_phone && lead.direct_phone !== 'Not Publicly Available'
+        ? lead.direct_phone
+        : (lead.input_phone || '');
+
+    return { email: String(email || '').trim(), phone: String(phone || '').trim() };
+}
+
 function renderLeadRow(lead, leadShowBase) {
-    const contact =
-        lead.direct_email && lead.direct_email !== 'Not Publicly Available'
-            ? `<div class="text-zinc-700">${escapeHtml(lead.direct_email)}</div>`
-            : '';
-    const phone =
-        lead.direct_phone && lead.direct_phone !== 'Not Publicly Available'
-            ? `<div class="text-xs text-zinc-400 mt-0.5">${escapeHtml(lead.direct_phone)}</div>`
-            : '';
-    const contactFallback =
-        !lead.direct_email && !lead.direct_phone
-            ? '<span class="text-xs text-zinc-400 italic">None available</span>'
-            : '';
+    const contactInfo = resolveLeadContact(lead);
+    const contact = contactInfo.email
+        ? `<div class="text-zinc-700">${escapeHtml(contactInfo.email)}</div>`
+        : '';
+    const phone = contactInfo.phone
+        ? `<div class="text-xs text-zinc-400 mt-0.5">${escapeHtml(contactInfo.phone)}</div>`
+        : '';
+    const contactFallback = (!contactInfo.email && !contactInfo.phone)
+        ? '<span class="text-xs text-zinc-400 italic">None available</span>'
+        : '';
     const tierLabel = lead.tier_label || TIER_LABELS[lead.tier] || '';
     const editIcon = `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>`;
 
@@ -167,13 +169,11 @@ const LEAD_PIPELINE_STATUS_LABELS = {
 function renderPipelineLeadRow(lead, leadShowBase, csrf) {
     const status = LEAD_PIPELINE_STATUS_LABELS[lead.status] || (lead.status || '').replace(/_/g, ' ');
     const location = [lead.city, lead.state].filter(Boolean).join(', ');
-    const failureNote =
-        lead.status === 'failed' && lead.error_message
-            ? `<div class="text-xs text-rose-600 mt-1 max-w-xs">${escapeHtml(lead.error_message).slice(0, 120)}</div>`
-            : '';
-    const actions =
-        lead.status === 'pending_verification'
-            ? `<div class="flex items-center justify-end gap-1">
+    const failureNote = lead.status === 'failed' && lead.error_message
+        ? `<div class="text-xs text-rose-600 mt-1 max-w-xs">${escapeHtml(lead.error_message).slice(0, 120)}</div>`
+        : '';
+    const actions = lead.status === 'pending_verification'
+        ? `<div class="flex items-center justify-end gap-1">
                 <form method="POST" action="/admin/leads/${lead.id}/approve">
                     <input type="hidden" name="_token" value="${escapeHtml(csrf)}">
                     <button type="submit" class="app-btn app-btn-success app-btn-sm">Approve</button>
@@ -183,18 +183,14 @@ function renderPipelineLeadRow(lead, leadShowBase, csrf) {
                     <button type="submit" class="app-btn app-btn-ghost-danger app-btn-sm">Reject</button>
                 </form>
            </div>`
-            : lead.status === 'completed'
-              ? '<span class="text-xs font-semibold text-emerald-700">Released</span>'
-              : '';
+        : (lead.status === 'completed' ? '<span class="text-xs font-semibold text-emerald-700">Released</span>' : '');
 
-    const email =
-        lead.direct_email && lead.direct_email !== 'Not Publicly Available' ? escapeHtml(lead.direct_email) : '';
-    const phone =
-        lead.direct_phone && lead.direct_phone !== 'Not Publicly Available' ? escapeHtml(lead.direct_phone) : '';
-    const contact =
-        email || phone
-            ? `${email ? `<div>${email}</div>` : ''}${phone ? `<div class="text-xs text-zinc-400 mt-0.5">${phone}</div>` : ''}`
-            : '<span class="text-zinc-400">—</span>';
+    const contactInfo = resolveLeadContact(lead);
+    const email = contactInfo.email ? escapeHtml(contactInfo.email) : '';
+    const phone = contactInfo.phone ? escapeHtml(contactInfo.phone) : '';
+    const contact = email || phone
+        ? `${email ? `<div>${email}</div>` : ''}${phone ? `<div class="text-xs text-zinc-400 mt-0.5">${phone}</div>` : ''}`
+        : '<span class="text-zinc-400">—</span>';
 
     return `
         <tr data-lead-id="${lead.id}" data-lead-status="${escapeHtml(lead.status || '')}">
@@ -226,12 +222,9 @@ function renderWorkflowCard(workflow, showBase) {
                 <div class="mt-3 flex items-center justify-between text-xs text-zinc-500">
                     <span>${workflow.processed_leads} / ${workflow.total_leads} processed</span>
                 </div>
-                ${
-                    workflow.lead_list_name ||
-                    (Array.isArray(workflow.import_tag_ids) && workflow.import_tag_ids.length)
-                        ? `<div class="mt-2 text-xs text-zinc-500">${workflow.lead_list_name ? `List: <strong class="text-zinc-700">${escapeHtml(workflow.lead_list_name)}</strong>` : ''}${workflow.import_tag_ids?.length ? `<span class="${workflow.lead_list_name ? 'ml-2' : ''}">Tagged import</span>` : ''}</div>`
-                        : ''
-                }
+                ${workflow.lead_list_name || (Array.isArray(workflow.import_tag_ids) && workflow.import_tag_ids.length)
+                    ? `<div class="mt-2 text-xs text-zinc-500">${workflow.lead_list_name ? `List: <strong class="text-zinc-700">${escapeHtml(workflow.lead_list_name)}</strong>` : ''}${workflow.import_tag_ids?.length ? `<span class="${workflow.lead_list_name ? 'ml-2' : ''}">Tagged import</span>` : ''}</div>`
+                    : ''}
             <div class="mt-3 flex items-center justify-end gap-3">
                 <a href="${showBase}/${workflow.id}" class="app-link text-xs">${openLabel}</a>
                 ${workflowActionForms(workflow, showBase)}
@@ -241,9 +234,7 @@ function renderWorkflowCard(workflow, showBase) {
 }
 
 function renderTeam(members) {
-    return members
-        .map(
-            (member) => `
+    return members.map((member) => `
         <div class="py-3 flex items-center justify-between" data-member-id="${member.id}">
             <div>
                 <div class="font-bold text-zinc-900 text-sm">${escapeHtml(member.name)}</div>
@@ -253,15 +244,15 @@ function renderTeam(members) {
                 ${escapeHtml(member.role)}${member.status !== 'active' ? ` (${member.status})` : ''}
             </span>
         </div>
-    `
-        )
-        .join('');
+    `).join('');
 }
 
 const AE_PIPELINE_STAGES = new Set(['meeting_scheduled', 'proposal_sent', 'follow_up', 'closed_won', 'closed_lost']);
 
 function renderAePipelineRow(lead, leadShowBase) {
-    const volume = lead.monthly_processing_volume ? `$${Number(lead.monthly_processing_volume).toLocaleString()}` : '—';
+    const volume = lead.monthly_processing_volume
+        ? `$${Number(lead.monthly_processing_volume).toLocaleString()}`
+        : '—';
     const meeting = lead.schedule_at || '—';
 
     return `
@@ -277,8 +268,7 @@ function renderAePipelineRow(lead, leadShowBase) {
     `;
 }
 
-const PIPELINE_STEP_CHECK =
-    '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>';
+const PIPELINE_STEP_CHECK = '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>';
 
 function syncModeIsPatch(el) {
     return el?.dataset?.syncMode === 'patch';
@@ -314,7 +304,9 @@ function syncTableBody(tbody, items, renderRow, renderArgs = []) {
         return;
     }
 
-    const html = items.length === 0 ? '' : items.map((item) => renderRow(item, ...renderArgs)).join('');
+    const html = items.length === 0
+        ? ''
+        : items.map((item) => renderRow(item, ...renderArgs)).join('');
     smoothHtmlUpdate(tbody, html);
 }
 
@@ -383,7 +375,7 @@ function reapplyPipelineLeadFilter() {
 }
 
 function formatWorkflowProgressLabel(wf) {
-    const done = wf.attempted_leads ?? (wf.enriched_leads ?? 0) + (wf.failed_leads ?? 0);
+    const done = (wf.attempted_leads ?? ((wf.enriched_leads ?? 0) + (wf.failed_leads ?? 0)));
     return `${wf.completion_pct ?? 0}% · ${done} / ${wf.total_leads ?? 0}`;
 }
 
@@ -558,10 +550,9 @@ function maybeShowOsNotification(event, message, leadShowBase, workflowShowBase)
         return;
     }
 
-    const url =
-        event.entity_type === 'workflow_lead' && event.entity_id
-            ? `${leadShowBase}/${event.entity_id}`
-            : workflowShowBase;
+    const url = event.entity_type === 'workflow_lead' && event.entity_id
+        ? `${leadShowBase}/${event.entity_id}`
+        : workflowShowBase;
 
     showOsNotification({
         title: SYNC_EVENT_TITLES[event.type] || 'Workspace update',
@@ -605,6 +596,7 @@ function notifySyncEvents(events, workspaceId, seenIds, leadShowBase, workflowSh
 
 let syncTimer = null;
 let syncInflight = null;
+let syncEventSource = null;
 let syncVisibilityHandler = null;
 let syncRequestHandler = null;
 
@@ -615,6 +607,10 @@ export function teardownWorkspaceSync() {
     }
     syncInflight?.abort();
     syncInflight = null;
+    if (syncEventSource) {
+        syncEventSource.close();
+        syncEventSource = null;
+    }
     if (syncVisibilityHandler) {
         document.removeEventListener('visibilitychange', syncVisibilityHandler);
         syncVisibilityHandler = null;
@@ -630,6 +626,7 @@ export function initWorkspaceSync() {
 
     const root = document.body;
     const syncUrl = root.dataset.workspaceSyncUrl;
+    const streamUrl = root.dataset.workspaceSyncStreamUrl;
     if (!syncUrl) return;
 
     const workspaceId = root.dataset.workspaceId || 'default';
@@ -659,7 +656,11 @@ export function initWorkspaceSync() {
     initAjaxActivityForms();
 
     function onSyncRequest() {
-        schedulePoll(0);
+        if (syncEventSource) {
+            connectStream();
+        } else {
+            schedulePoll(0);
+        }
     }
 
     syncRequestHandler = onSyncRequest;
@@ -670,6 +671,86 @@ export function initWorkspaceSync() {
             window.clearTimeout(syncTimer);
         }
         syncTimer = window.setTimeout(poll, ms);
+    }
+
+    function applySyncPayload(data) {
+        updateSyncIndicator('live');
+
+        if (typeof data.cursor === 'number' && data.cursor >= cursor) {
+            cursor = data.cursor;
+            saveStoredCursor(workspaceId, cursor);
+        }
+
+        if (Array.isArray(data.events) && data.events.length > 0) {
+            if (hasSyncedOnce) {
+                notifySyncEvents(data.events, workspaceId, seenEventIds, leadShowBase, workflowShowBase);
+            } else {
+                markEventsSeen(workspaceId, data.events, seenEventIds);
+            }
+        }
+
+        if (!data.changed) {
+            hasSyncedOnce = true;
+            sessionStorage.setItem(readyStorageKey(workspaceId), '1');
+            return;
+        }
+
+        version = data.version;
+        hasSyncedOnce = true;
+        sessionStorage.setItem(readyStorageKey(workspaceId), '1');
+
+        if (leadsBody && Array.isArray(data.leads)) {
+            syncTableBody(leadsBody, data.leads, renderLeadRow, [leadShowBase]);
+        }
+
+        if (pipelineLeadsBody && Array.isArray(data.leads)) {
+            syncTableBody(pipelineLeadsBody, data.leads, renderPipelineLeadRow, [leadShowBase, csrfToken()]);
+            reapplyPipelineLeadFilter();
+        }
+
+        if (aePipelineBody && Array.isArray(data.leads)) {
+            const aeLeads = data.leads.filter((lead) => AE_PIPELINE_STAGES.has(lead.stage));
+            syncTableBody(aePipelineBody, aeLeads, renderAePipelineRow, [leadShowBase]);
+        }
+
+        if (workflowsList && Array.isArray(data.workflows)) {
+            if (syncModeIsPatch(workflowsList)) {
+                patchWorkflowCards(workflowsList, data.workflows, workflowShowBase);
+            } else {
+                smoothHtmlUpdate(
+                    workflowsList,
+                    data.workflows.map((wf) => renderWorkflowCard(wf, workflowShowBase)).join(''),
+                );
+            }
+        }
+
+        if (teamList && Array.isArray(data.team)) {
+            if (teamList.dataset.adminTeam === '1' || teamList.dataset.staticTeam === '1') {
+                updateMemberRows(teamList, data.team);
+            } else {
+                smoothHtmlUpdate(teamList, renderTeam(data.team));
+            }
+        }
+
+        applyWorkspaceAdminState(data);
+        applySalesOpsSync(data);
+        applyToolkitSync(data?.toolkit);
+
+        if (workflowId && Array.isArray(data.workflows) && data.workflows.length > 0) {
+            const wf = data.workflows[0];
+            smoothHtmlUpdate(workflowStatus, renderWorkflowStatusPill(wf.status));
+            smoothTextUpdate(workflowProgress, String(wf.attempted_leads ?? wf.enriched_leads ?? wf.processed_leads ?? 0));
+            smoothTextUpdate(workflowAssigned, String(wf.assigned_leads ?? 0));
+            smoothTextUpdate(workflowPendingReview, String(wf.pending_verification ?? 0));
+            smoothTextUpdate(workflowPendingReview2, String(wf.pending_verification ?? 0));
+            smoothWidthUpdate(workflowProgressBar, wf.completion_pct ?? 0);
+            if (workflowProgressLabel) {
+                smoothTextUpdate(workflowProgressLabel, formatWorkflowProgressLabel(wf));
+            }
+            updatePipelineProgress(wf);
+        }
+
+        document.dispatchEvent(new CustomEvent('workspace:sync', { detail: data }));
     }
 
     async function poll() {
@@ -687,7 +768,7 @@ export function initWorkspaceSync() {
             if (leadId) params.set('lead_id', leadId);
 
             const response = await fetch(`${syncUrl}?${params.toString()}`, {
-                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                 credentials: 'same-origin',
                 signal: syncInflight.signal,
             });
@@ -699,87 +780,7 @@ export function initWorkspaceSync() {
             }
 
             const data = await response.json();
-            updateSyncIndicator('live');
-
-            if (typeof data.cursor === 'number' && data.cursor >= cursor) {
-                cursor = data.cursor;
-                saveStoredCursor(workspaceId, cursor);
-            }
-
-            if (Array.isArray(data.events) && data.events.length > 0) {
-                if (hasSyncedOnce) {
-                    notifySyncEvents(data.events, workspaceId, seenEventIds, leadShowBase, workflowShowBase);
-                } else {
-                    markEventsSeen(workspaceId, data.events, seenEventIds);
-                }
-            }
-
-            if (!data.changed) {
-                hasSyncedOnce = true;
-                sessionStorage.setItem(readyStorageKey(workspaceId), '1');
-                schedulePoll(document.hidden ? SYNC_HIDDEN_MS : SYNC_ACTIVE_MS);
-                return;
-            }
-
-            version = data.version;
-            hasSyncedOnce = true;
-            sessionStorage.setItem(readyStorageKey(workspaceId), '1');
-
-            if (leadsBody && Array.isArray(data.leads)) {
-                syncTableBody(leadsBody, data.leads, renderLeadRow, [leadShowBase]);
-            }
-
-            if (pipelineLeadsBody && Array.isArray(data.leads)) {
-                syncTableBody(pipelineLeadsBody, data.leads, renderPipelineLeadRow, [leadShowBase, csrfToken()]);
-                reapplyPipelineLeadFilter();
-            }
-
-            if (aePipelineBody && Array.isArray(data.leads)) {
-                const aeLeads = data.leads.filter((lead) => AE_PIPELINE_STAGES.has(lead.stage));
-                syncTableBody(aePipelineBody, aeLeads, renderAePipelineRow, [leadShowBase]);
-            }
-
-            if (workflowsList && Array.isArray(data.workflows)) {
-                if (syncModeIsPatch(workflowsList)) {
-                    patchWorkflowCards(workflowsList, data.workflows, workflowShowBase);
-                } else {
-                    smoothHtmlUpdate(
-                        workflowsList,
-                        data.workflows.map((wf) => renderWorkflowCard(wf, workflowShowBase)).join('')
-                    );
-                }
-            }
-
-            if (teamList && Array.isArray(data.team)) {
-                if (teamList.dataset.adminTeam === '1' || teamList.dataset.staticTeam === '1') {
-                    updateMemberRows(teamList, data.team);
-                } else {
-                    smoothHtmlUpdate(teamList, renderTeam(data.team));
-                }
-            }
-
-            applyWorkspaceAdminState(data);
-            applySalesOpsSync(data);
-            applyToolkitSync(data?.toolkit);
-
-            if (workflowId && Array.isArray(data.workflows) && data.workflows.length > 0) {
-                const wf = data.workflows[0];
-                smoothHtmlUpdate(workflowStatus, renderWorkflowStatusPill(wf.status));
-                smoothTextUpdate(
-                    workflowProgress,
-                    String(wf.attempted_leads ?? wf.enriched_leads ?? wf.processed_leads ?? 0)
-                );
-                smoothTextUpdate(workflowAssigned, String(wf.assigned_leads ?? 0));
-                smoothTextUpdate(workflowPendingReview, String(wf.pending_verification ?? 0));
-                smoothTextUpdate(workflowPendingReview2, String(wf.pending_verification ?? 0));
-                smoothWidthUpdate(workflowProgressBar, wf.completion_pct ?? 0);
-                if (workflowProgressLabel) {
-                    smoothTextUpdate(workflowProgressLabel, formatWorkflowProgressLabel(wf));
-                }
-                updatePipelineProgress(wf);
-            }
-
-            document.dispatchEvent(new CustomEvent('workspace:sync', { detail: data }));
+            applySyncPayload(data);
             schedulePoll(document.hidden ? SYNC_HIDDEN_MS : SYNC_ACTIVE_MS);
         } catch (error) {
             if (error?.name === 'AbortError') {
@@ -791,12 +792,77 @@ export function initWorkspaceSync() {
         }
     }
 
+    function buildStreamUrl() {
+        const params = new URLSearchParams();
+        if (version) params.set('v', version);
+        params.set('cursor', String(cursor));
+        if (workflowId) params.set('workflow_id', workflowId);
+        if (leadId) params.set('lead_id', leadId);
+
+        return `${streamUrl}?${params.toString()}`;
+    }
+
+    function connectStream() {
+        if (!streamUrl || typeof EventSource === 'undefined') {
+            schedulePoll(0);
+            return;
+        }
+
+        if (syncEventSource) {
+            syncEventSource.close();
+            syncEventSource = null;
+        }
+
+        updateSyncIndicator('syncing');
+
+        const source = new EventSource(buildStreamUrl());
+        syncEventSource = source;
+
+        source.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                applySyncPayload(data);
+            } catch (error) {
+                console.debug('Workspace sync stream parse failed', error);
+            }
+        };
+
+        source.addEventListener('reconnect', () => {
+            source.close();
+            if (syncEventSource === source) {
+                syncEventSource = null;
+            }
+            window.setTimeout(connectStream, 500);
+        });
+
+        source.onerror = () => {
+            source.close();
+            if (syncEventSource === source) {
+                syncEventSource = null;
+            }
+            updateSyncIndicator('paused');
+            schedulePoll(SYNC_ERROR_MS);
+        };
+
+        source.onopen = () => {
+            updateSyncIndicator('live');
+        };
+    }
+
     syncVisibilityHandler = () => {
         if (!document.hidden) {
-            schedulePoll(0);
+            if (syncEventSource) {
+                connectStream();
+            } else {
+                schedulePoll(0);
+            }
         }
     };
     document.addEventListener('visibilitychange', syncVisibilityHandler);
 
-    schedulePoll(0);
+    if (streamUrl && typeof EventSource !== 'undefined') {
+        connectStream();
+    } else {
+        schedulePoll(0);
+    }
 }

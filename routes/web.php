@@ -161,6 +161,7 @@ Route::prefix('admin')->name('admin.')->middleware([
     Route::post('push/test', [PushNotificationController::class, 'sendTestNotification'])->name('push.test');
 
     Route::get('sync', [WorkspaceSyncController::class, 'poll'])->name('sync.poll');
+    Route::get('sync/stream', [WorkspaceSyncController::class, 'stream'])->name('sync.stream');
     Route::get('server-monitoring', [ServerMonitoringController::class, 'index'])->name('server.monitoring');
 
     Route::prefix('communications')->name('communications.')->group(function () {
@@ -196,6 +197,7 @@ Route::prefix('portal')->name('portal.')->middleware([\App\Http\Middleware\Marke
     Route::post('/workspaces/switch/{workspace}', [WorkflowController::class, 'workspaceSwitch'])->name('workspaces.switch');
 
     Route::get('sync', [WorkspaceSyncController::class, 'poll'])->name('sync.poll');
+    Route::get('sync/stream', [WorkspaceSyncController::class, 'stream'])->name('sync.stream');
 
     Route::get('/leads/{lead}', [WorkflowController::class, 'leadShow'])->name('leads.show');
     Route::post('/leads/{lead}', [WorkflowController::class, 'leadUpdate'])->name('leads.update');
