@@ -16,16 +16,21 @@ class PipelineProgress
         $enriched = (int) ($workflow->enriched_leads ?? 0);
         $attempted = $enriched + $failed;
         $assigned = (int) ($workflow->assigned_leads_count ?? 0);
+        $importedPending = (int) ($workflow->imported_leads_count ?? 0);
+        $extractingPending = (int) ($workflow->extracting_leads_count ?? 0);
+        $totalLeads = (int) ($workflow->total_leads ?? 0);
 
-        $importDone = $workflow->status !== 'mapping' && ($workflow->ingestion_complete || $workflow->total_leads > 0);
-        $enrichActive = in_array($workflow->status, ['extracting', 'pending'], true)
-            && $workflow->runsEnrichmentOnImport();
-        $enrichSkipped = $workflow->isImportOnly() && $importDone && $enriched === 0 && $failed === 0;
-        $enrichDone = $enriched > 0 || $failed > 0
-            || ($importDone && ! $workflow->runsEnrichmentOnImport() && ! $enrichActive);
+        $importDone = $workflow->status !== 'mapping' && ($workflow->ingestion_complete || $totalLeads > 0);
+        $enrichActive = $workflow->runsEnrichmentOnImport()
+            && ($importedPending > 0 || $extractingPending > 0 || in_array($workflow->status, ['extracting', 'pending'], true));
+        $enrichSkipped = $workflow->isImportOnly() && $importDone && $attempted === 0 && ! $enrichActive;
+        $enrichDone = $totalLeads > 0
+            ? ($attempted >= $totalLeads && ! $enrichActive)
+            : ($importDone && ! $workflow->runsEnrichmentOnImport() && ! $enrichActive);
         $reviewActive = $pending > 0;
-        $reviewDone = $importDone && $pending === 0 && $enriched > 0;
-        $distributeDone = $assigned > 0;
+        $reviewDone = $enrichDone && $pending === 0 && $enriched > 0;
+        $remaining = (int) ($workflow->ready_to_distribute_count ?? max(0, $enriched - $assigned));
+        $distributeDone = $enrichDone && $remaining === 0 && $assigned > 0;
 
         return [
             [
@@ -56,7 +61,9 @@ class PipelineProgress
                 'label' => 'Distribute',
                 'done' => $distributeDone && $workflow->status === 'completed',
                 'active' => $assigned > 0 && $pending === 0,
-                'detail' => $assigned.' assigned',
+                'detail' => $assigned > 0
+                    ? $assigned.' / '.$workflow->total_leads.' assigned'
+                    : ($enrichDone ? '0 assigned' : '—'),
             ],
         ];
     }

@@ -49,10 +49,11 @@ class WorkspaceSyncService
         ?int $cursor = null,
         ?int $workflowId = null,
         ?int $leadId = null,
+        ?string $syncScope = null,
     ): array {
-        $cacheKey = "workspace_sync_fingerprint_{$workspace->id}_{$user->id}_" . ($workflowId ?? 'all') . "_" . ($leadId ?? 'all');
-        $fingerprint = Cache::remember($cacheKey, now()->addSeconds(3), function () use ($workspace, $user, $workflowId, $leadId) {
-            return $this->fingerprint($workspace, $user, $workflowId, $leadId);
+        $cacheKey = "workspace_sync_fingerprint_{$workspace->id}_{$user->id}_" . ($workflowId ?? 'all') . "_" . ($leadId ?? 'all') . "_" . ($syncScope ?? 'full');
+        $fingerprint = Cache::remember($cacheKey, now()->addSeconds(3), function () use ($workspace, $user, $workflowId, $leadId, $syncScope) {
+            return $this->fingerprint($workspace, $user, $workflowId, $leadId, $syncScope);
         });
         $latestCursor = (int) (WorkspaceSyncEvent::where('workspace_id', $workspace->id)->max('id') ?? 0);
 
@@ -84,7 +85,7 @@ class WorkspaceSyncService
             ];
         }
 
-        $state = $this->buildState($workspace, $user, $cursor, $workflowId, $leadId, $fingerprint, $latestCursor, $events);
+        $state = $this->buildState($workspace, $user, $cursor, $workflowId, $leadId, $fingerprint, $latestCursor, $events, $syncScope);
 
         return [
             'changed' => $version === null || $state['version'] !== $version || ! empty($events),
@@ -105,15 +106,17 @@ class WorkspaceSyncService
         string $fingerprint,
         int $latestCursor,
         ?array $events = null,
+        ?string $syncScope = null,
     ): array {
         $isAdmin = $user->isWorkspaceAdmin($workspace->id);
         $workflowIds = $this->workflowIds($workspace);
+        $isListScope = $syncScope === 'list';
 
         if ($events === null) {
             $events = WorkspaceSyncEvent::where('workspace_id', $workspace->id)
                 ->when($cursor !== null, fn ($q) => $q->where('id', '>', $cursor))
                 ->orderBy('id')
-                ->limit(50)
+                ->limit($isListScope ? 20 : 50)
                 ->get()
                 ->map(fn (WorkspaceSyncEvent $event) => [
                     'id' => $event->id,
@@ -127,20 +130,28 @@ class WorkspaceSyncService
                 ->all();
         }
 
-        $workflows = $this->loadWorkflows($workspace, $workflowId);
-        $leads = $this->loadLeads($workspace, $workflowIds, $user, $isAdmin, $workflowId);
-        $team = $workspace->users()->get(['users.id', 'users.name', 'users.email']);
+        $workflows = $this->loadWorkflows($workspace, $workflowId, $isListScope);
+        $leads = $isListScope
+            ? collect()
+            : $this->loadLeads($workspace, $workflowIds, $user, $isAdmin, $workflowId);
 
         $state = [
             'version' => $fingerprint,
             'cursor' => $latestCursor,
             'events' => $events,
-            'workflows' => $workflows->map(fn (Workflow $wf) => $this->serializeWorkflow($wf))->values()->all(),
+            'workflows' => $workflows->map(fn (Workflow $wf) => $this->serializeWorkflow($wf, $isListScope))->values()->all(),
             'leads' => $leads->map(fn (WorkflowLead $lead) => $this->serializeLead($lead))->values()->all(),
-            'team' => $team->map(fn (User $member) => $this->serializeTeamMember($member, $workspace, $user))->values()->all(),
-            'sales_ops' => $this->buildSalesOpsPayload($workspace, $user, $isAdmin),
-            'toolkit' => $this->buildToolkitPayload($workspace, $user),
         ];
+
+        if ($isListScope || ($workflowId && ! $leadId)) {
+            return $state;
+        }
+
+        $team = $workspace->users()->get(['users.id', 'users.name', 'users.email']);
+
+        $state['team'] = $team->map(fn (User $member) => $this->serializeTeamMember($member, $workspace, $user))->values()->all();
+        $state['sales_ops'] = $this->buildSalesOpsPayload($workspace, $user, $isAdmin);
+        $state['toolkit'] = $this->buildToolkitPayload($workspace, $user);
 
         if ($leadId) {
             $state['lead_detail'] = $this->buildLeadDetailPayload($leadId, $workflowIds);
@@ -154,23 +165,31 @@ class WorkspaceSyncService
         return $state;
     }
 
-    protected function fingerprint(Workspace $workspace, User $user, ?int $workflowId, ?int $leadId): string
+    protected function fingerprint(Workspace $workspace, User $user, ?int $workflowId, ?int $leadId, ?string $syncScope = null): string
     {
         $workflowIds = $this->workflowIds($workspace);
-
-        $leadStamp = $workflowIds->isEmpty()
-            ? ''
-            : (WorkflowLead::whereIn('workflow_id', $workflowIds)->max('updated_at') ?? '');
 
         $workflowStamp = Workflow::where('workspace_id', $workspace->id)
             ->when($workflowId, fn ($q) => $q->where('id', $workflowId))
             ->max('updated_at') ?? '';
 
+        $eventStamp = WorkspaceSyncEvent::where('workspace_id', $workspace->id)->max('id') ?? 0;
+
+        if ($syncScope === 'list') {
+            return md5(implode('|', [
+                $workspace->id,
+                $workflowStamp,
+                $eventStamp,
+            ]));
+        }
+
+        $leadStamp = $workflowIds->isEmpty()
+            ? ''
+            : (WorkflowLead::whereIn('workflow_id', $workflowIds)->max('updated_at') ?? '');
+
         $teamStamp = DB::table('workspace_user')
             ->where('workspace_id', $workspace->id)
             ->max('updated_at');
-
-        $eventStamp = WorkspaceSyncEvent::where('workspace_id', $workspace->id)->max('id') ?? 0;
 
         $activityStamp = $workflowIds->isEmpty()
             ? 0
@@ -213,15 +232,48 @@ class WorkspaceSyncService
     /**
      * @return Collection<int, Workflow>
      */
-    protected function loadWorkflows(Workspace $workspace, ?int $workflowId): Collection
+    protected function loadWorkflows(Workspace $workspace, ?int $workflowId, bool $light = false): Collection
     {
-        return $workspace->workflows()
+        $query = $workspace->workflows()
             ->when($workflowId, fn ($q) => $q->where('id', $workflowId))
-            ->with('leadList')
-            ->latest()
+            ->with('leadList:id,name')
+            ->latest();
+
+        if ($light) {
+            return $query
+                ->select([
+                    'id',
+                    'workspace_id',
+                    'name',
+                    'original_filename',
+                    'status',
+                    'total_leads',
+                    'processed_leads',
+                    'enriched_leads',
+                    'failed_leads',
+                    'import_tag_ids',
+                    'lead_list_id',
+                    'updated_at',
+                ])
+                ->withCount([
+                    'leads as assigned_leads_count' => fn ($query) => $query->whereNotNull('assigned_user_id'),
+                    'leads as ready_to_assign_count' => fn ($query) => $query
+                        ->where('status', 'enriched')
+                        ->whereNull('assigned_user_id'),
+                ])
+                ->limit((int) config('pagination.workflows_per_page', 8))
+                ->get();
+        }
+
+        return $query
             ->withCount([
                 'leads as assigned_leads_count' => fn ($query) => $query->whereNotNull('assigned_user_id'),
+                'leads as ready_to_assign_count' => fn ($query) => $query
+                    ->where('status', 'enriched')
+                    ->whereNull('assigned_user_id'),
                 'leads as pending_verification_count' => fn ($query) => $query->where('status', 'pending_verification'),
+                'leads as imported_leads_count' => fn ($query) => $query->where('status', 'imported'),
+                'leads as extracting_leads_count' => fn ($query) => $query->where('status', 'extracting'),
             ])
             ->limit($workflowId ? 1 : 12)
             ->get();
@@ -268,7 +320,7 @@ class WorkspaceSyncService
             ->orderBy('tier')
             ->orderByRaw("CASE WHEN status = 'pending_verification' THEN 0 WHEN status = 'extracting' THEN 1 WHEN status = 'completed' THEN 2 WHEN status = 'failed' THEN 3 ELSE 4 END ASC")
             ->orderByDesc('updated_at')
-            ->limit($workflowId ? 50 : 100)
+            ->limit($workflowId ? 25 : 100)
             ->get();
     }
 
@@ -474,35 +526,51 @@ class WorkspaceSyncService
             ->all();
     }
 
-    protected function serializeWorkflow(Workflow $workflow): array
+    protected function serializeWorkflow(Workflow $workflow, bool $light = false): array
     {
-        $enriched = ($workflow->processed_leads ?? 0) + ($workflow->pending_verification_count ?? 0);
-        $attempted = $enriched + ($workflow->failed_leads ?? 0);
+        $enriched = (int) ($workflow->enriched_leads ?? 0);
+        $failed = (int) ($workflow->failed_leads ?? 0);
+        $attempted = $enriched + $failed;
 
-        return [
+        $payload = [
             'id' => $workflow->id,
             'name' => $workflow->name,
             'status' => $workflow->status,
             'original_filename' => $workflow->original_filename,
             'total_leads' => $workflow->total_leads,
             'processed_leads' => $workflow->processed_leads,
-            'failed_leads' => $workflow->failed_leads,
+            'failed_leads' => $failed,
             'enriched_leads' => $enriched,
             'attempted_leads' => $attempted,
-            'assigned_leads' => (int) ($workflow->assigned_leads_count ?? 0),
-            'pending_verification' => (int) ($workflow->pending_verification_count ?? 0),
             'completion_pct' => $workflow->total_leads > 0
-                ? (int) round((($workflow->processed_leads + $workflow->failed_leads) / $workflow->total_leads) * 100)
+                ? (int) round(($attempted / $workflow->total_leads) * 100)
                 : 0,
-            'pipeline_steps' => PipelineProgress::steps($workflow),
             'import_tag_ids' => $workflow->import_tag_ids ?? [],
             'lead_list_name' => $workflow->leadList?->name,
+            'discarded_duplicates' => (int) ($workflow->discarded_duplicates ?? 0),
+            'assigned_leads' => (int) ($workflow->assigned_leads_count ?? 0),
+            'ready_to_assign' => (int) ($workflow->ready_to_assign_count ?? 0),
             'updated_at' => $workflow->updated_at?->toIso8601String(),
+        ];
+
+        if ($light) {
+            return $payload;
+        }
+
+        return [
+            ...$payload,
+            'imported_leads' => (int) ($workflow->imported_leads_count ?? 0),
+            'extracting_leads' => (int) ($workflow->extracting_leads_count ?? 0),
+            'assigned_leads' => (int) ($workflow->assigned_leads_count ?? 0),
+            'pending_verification' => (int) ($workflow->pending_verification_count ?? 0),
+            'pipeline_steps' => PipelineProgress::steps($workflow),
         ];
     }
 
     protected function serializeLead(WorkflowLead $lead): array
     {
+        $display = \App\Support\LeadContactDisplay::for($lead);
+
         return [
             'id' => $lead->id,
             'workflow_id' => $lead->workflow_id,
@@ -515,7 +583,15 @@ class WorkspaceSyncService
             'address' => $lead->address,
             'city' => $lead->city,
             'state' => $lead->state,
-            'owner_name' => $lead->owner_name,
+            'owner_name' => $display['owner'] ?? $lead->owner_name,
+            'display_owner' => $display['owner'],
+            'display_email' => $display['email'],
+            'display_phone' => $display['phone'],
+            'display_social_media' => $display['social_media'],
+            'display_website' => $display['website'],
+            'display_processor' => $display['processor'],
+            'input_email' => $lead->input_email,
+            'input_phone' => $lead->input_phone,
             'direct_email' => $lead->direct_email,
             'direct_phone' => $lead->direct_phone,
             'payment_processor' => $lead->payment_processor,

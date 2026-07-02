@@ -7,8 +7,10 @@ use App\Models\WorkflowLead;
 use App\Services\Pipeline\LeadImportDedupService;
 use App\Services\Pipeline\LeadSegmentationService;
 use App\Services\Workspace\WorkspaceSyncService;
+use App\Support\SpreadsheetChunkReadFilter;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -17,8 +19,9 @@ class ProcessWorkflowJob implements ShouldQueue
 {
     use Queueable;
 
-    public int $tries = 2;
-    public int $timeout = 3600;
+    public int $tries = 3;
+
+    public int $timeout = 600;
 
     public function __construct(
         public int $workflowId,
@@ -31,8 +34,6 @@ class ProcessWorkflowJob implements ShouldQueue
         LeadSegmentationService $segmentation,
         WorkspaceSyncService $syncService,
     ): void {
-        set_time_limit(3600);
-
         $workflow = Workflow::find($this->workflowId);
         if (! $workflow) {
             return;
@@ -44,7 +45,7 @@ class ProcessWorkflowJob implements ShouldQueue
 
         if ($workflow->ingestion_complete) {
             if ($workflow->runsEnrichmentOnImport()) {
-                $this->dispatchPendingLeadJobs($workflow);
+                $this->dispatchEnrichmentJobs($workflow);
             }
 
             return;
@@ -62,48 +63,33 @@ class ProcessWorkflowJob implements ShouldQueue
             return;
         }
 
+        $chunkSize = max(50, (int) config('workflow.import_chunk_size', 250));
+
         try {
             $workflow->update(['status' => 'extracting']);
 
-            $reader = IOFactory::createReaderForFile($fullPath);
-            $reader->setReadDataOnly(true);
-
-            if ($workflow->selected_sheet) {
-                $reader->setLoadSheetsOnly([$workflow->selected_sheet]);
-            }
-
-            $spreadsheet = $reader->load($fullPath);
-            $sheet = $spreadsheet->getActiveSheet();
-            $rows = [];
-
-            foreach ($sheet->getRowIterator() as $row) {
-                $cellIterator = $row->getCellIterator();
-                $cellIterator->setIterateOnlyExistingCells(false);
-                $rowData = [];
-                foreach ($cellIterator as $cell) {
-                    $rowData[] = $cell->getValue();
-                }
-                $rows[] = $rowData;
-            }
-
-            if (empty($rows)) {
+            $headers = $this->readHeaderRow($fullPath, $workflow->selected_sheet);
+            if ($headers === []) {
                 $workflow->update([
                     'status' => 'failed',
-                    'error_message' => 'No rows found in sheet.',
+                    'error_message' => 'No header row found in sheet.',
                 ]);
 
                 return;
             }
 
-            $headers = array_map(
-                fn ($val) => $val !== null ? trim((string) $val) : '',
-                $rows[0]
-            );
-
-            $dataRows = array_slice($rows, 1);
             $mapping = $workflow->column_mapping ?? [];
             $offset = (int) ($workflow->ingestion_row_offset ?? 0);
-            $remainingRows = array_slice($dataRows, $offset);
+            $dataStartRow = 2 + $offset;
+            $dataEndRow = $dataStartRow + $chunkSize - 1;
+
+            $dataRows = $this->readRowRange($fullPath, $workflow->selected_sheet, $dataStartRow, $dataEndRow);
+            if ($dataRows === []) {
+                $this->finalizeIngestion($workflow, $workspace, $syncService);
+
+                return;
+            }
+
             $existingRowNumbers = WorkflowLead::where('workflow_id', $workflow->id)
                 ->pluck('row_number')
                 ->flip();
@@ -111,135 +97,118 @@ class ProcessWorkflowJob implements ShouldQueue
             $batchPhones = [];
             $discardedDuplicates = (int) ($workflow->discarded_duplicates ?? 0);
             $importTagIds = $workflow->import_tag_ids ?? [];
-
-            Log::info("Processing workflow {$workflow->id} from row offset {$offset}");
-
-            $chunks = array_chunk($remainingRows, 50);
+            $now = now()->toDateTimeString();
             $rowsProcessed = 0;
-            $totalLeadsInserted = WorkflowLead::where('workflow_id', $workflow->id)->count();
-            $now = now();
+            $insertPayloads = [];
+            $insertedRowNumbers = [];
+            $totalLeadsInserted = (int) $workflow->total_leads;
 
-            foreach ($chunks as $chunk) {
-                $workflow->refresh();
-                if (! $workflow || $workflow->isPaused()) {
-                    return;
+            $rawRowsBatch = [];
+            $rowNumbers = [];
+
+            foreach ($dataRows as $rowData) {
+                $rawRow = [];
+                foreach ($headers as $index => $header) {
+                    if ($header !== '') {
+                        $rawRow[$header] = $rowData[$index] ?? null;
+                    }
+                }
+                $rawRowsBatch[] = $rawRow;
+                $rowNumbers[] = $dataStartRow + $rowsProcessed;
+                $rowsProcessed++;
+            }
+
+            $mappedDataBatch = $formatter->formatRowsBatch($rawRowsBatch, $mapping);
+
+            foreach ($rawRowsBatch as $i => $rawRow) {
+                $spreadsheetRowNumber = $rowNumbers[$i];
+                if ($existingRowNumbers->has($spreadsheetRowNumber)) {
+                    continue;
                 }
 
-                $rawRowsBatch = [];
-                $rowNumbers = [];
-
-                foreach ($chunk as $rowData) {
-                    $rawRow = [];
-                    foreach ($headers as $index => $header) {
-                        if ($header !== '') {
-                            $rawRow[$header] = $rowData[$index] ?? null;
-                        }
-                    }
-                    $rawRowsBatch[] = $rawRow;
-                    $rowNumbers[] = $offset + $rowsProcessed + 2;
-                    $rowsProcessed++;
+                $mappedData = $mappedDataBatch[$i] ?? [];
+                if (empty($mappedData['business_name'])) {
+                    continue;
                 }
 
-                $mappedDataBatch = $formatter->formatRowsBatch($rawRowsBatch, $mapping);
-                $insertedLeadIds = [];
+                if ($dedup->shouldDiscard($workspace->id, $mappedData['input_phone'] ?? null, $batchPhones)) {
+                    $discardedDuplicates++;
 
-                foreach ($rawRowsBatch as $i => $rawRow) {
-                    $spreadsheetRowNumber = $rowNumbers[$i];
-                    if ($existingRowNumbers->has($spreadsheetRowNumber)) {
-                        continue;
-                    }
-
-                    $mappedData = $mappedDataBatch[$i] ?? [];
-                    if (empty($mappedData['business_name'])) {
-                        continue;
-                    }
-
-                    if ($dedup->shouldDiscard($workspace->id, $mappedData['input_phone'] ?? null, $batchPhones)) {
-                        $discardedDuplicates++;
-
-                        continue;
-                    }
-
-                    $phoneFields = $dedup->formatPhoneForStorage($mappedData['input_phone'] ?? null);
-
-                    $lead = WorkflowLead::create([
-                        'workflow_id' => $workflow->id,
-                        'lead_list_id' => $workflow->lead_list_id,
-                        'import_mode' => $workflow->isImportOnly() ? 'stored' : 'pipeline',
-                        'pipeline_phase' => 'imported',
-                        'status' => 'imported',
-                        'row_number' => $spreadsheetRowNumber,
-                        'business_name' => $mappedData['business_name'] ?? '',
-                        'address' => $mappedData['address'] ?? null,
-                        'city' => $mappedData['city'] ?? null,
-                        'state' => $mappedData['state'] ?? null,
-                        'zip_code' => $mappedData['zip_code'] ?? null,
-                        'country' => $mappedData['country'] ?? null,
-                        'website' => $mappedData['website'] ?? null,
-                        'input_phone' => $phoneFields['input_phone'],
-                        'normalized_phone' => $phoneFields['normalized_phone'],
-                        'input_email' => $mappedData['input_email'] ?? null,
-                        'raw_row' => $rawRow,
-                    ]);
-
-                    $insertedLeadIds[] = $lead->id;
-                    $existingRowNumbers->put($spreadsheetRowNumber, true);
-                    $totalLeadsInserted++;
+                    continue;
                 }
 
-                if ($insertedLeadIds !== [] && $importTagIds !== []) {
+                $phoneFields = $dedup->formatPhoneForStorage($mappedData['input_phone'] ?? null);
+
+                $insertPayloads[] = [
+                    'workflow_id' => $workflow->id,
+                    'lead_list_id' => $workflow->lead_list_id,
+                    'import_mode' => $workflow->isImportOnly() ? 'stored' : 'pipeline',
+                    'pipeline_phase' => 'imported',
+                    'status' => 'imported',
+                    'row_number' => $spreadsheetRowNumber,
+                    'business_name' => $mappedData['business_name'] ?? '',
+                    'owner_name' => $this->cleanImportValue($mappedData['owner_name'] ?? null),
+                    'address' => $mappedData['address'] ?? null,
+                    'city' => $mappedData['city'] ?? null,
+                    'state' => $mappedData['state'] ?? null,
+                    'zip_code' => $mappedData['zip_code'] ?? null,
+                    'country' => $mappedData['country'] ?? null,
+                    'website' => $mappedData['website'] ?? null,
+                    'input_phone' => $phoneFields['input_phone'],
+                    'normalized_phone' => $phoneFields['normalized_phone'],
+                    'input_email' => $mappedData['input_email'] ?? null,
+                    'raw_row' => json_encode($rawRow),
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+                $insertedRowNumbers[] = $spreadsheetRowNumber;
+                $existingRowNumbers->put($spreadsheetRowNumber, true);
+                $totalLeadsInserted++;
+            }
+
+            if ($insertPayloads !== []) {
+                foreach (array_chunk($insertPayloads, 100) as $chunk) {
+                    DB::table('workflow_leads')->insert($chunk);
+                }
+
+                if ($importTagIds !== []) {
+                    $insertedLeadIds = WorkflowLead::query()
+                        ->where('workflow_id', $workflow->id)
+                        ->whereIn('row_number', $insertedRowNumbers)
+                        ->pluck('id')
+                        ->all();
                     $segmentation->attachTagsToLeads($insertedLeadIds, $importTagIds);
                 }
-
-                $workflow->update([
-                    'ingestion_row_offset' => $offset + $rowsProcessed,
-                    'total_leads' => $totalLeadsInserted,
-                    'discarded_duplicates' => $discardedDuplicates,
-                ]);
             }
 
-            $workflow->refresh();
-            if (! $workflow || $workflow->isPaused()) {
-                return;
-            }
+            $newOffset = $offset + $rowsProcessed;
+            $hasMoreRows = count($dataRows) === $chunkSize;
 
-            $totalLeads = WorkflowLead::where('workflow_id', $workflow->id)->count();
             $workflow->update([
-                'ingestion_complete' => true,
-                'ingestion_row_offset' => count($dataRows),
-                'total_leads' => $totalLeads,
+                'ingestion_row_offset' => $newOffset,
+                'total_leads' => $totalLeadsInserted,
                 'discarded_duplicates' => $discardedDuplicates,
+                'ingestion_complete' => ! $hasMoreRows,
             ]);
 
-            if ($totalLeads === 0) {
-                $workflow->update(['status' => 'completed']);
-                $syncService->record($workspace, 'workflow.completed', 'workflow', $workflow->id, [
-                    'processed_leads' => 0,
-                    'failed_leads' => 0,
-                ]);
+            $syncService->record($workspace, 'workflow.import_progress', 'workflow', $workflow->id, [
+                'name' => $workflow->name,
+                'total_leads' => $totalLeadsInserted,
+                'offset' => $newOffset,
+            ]);
+
+            if ($hasMoreRows) {
+                self::dispatch($workflow->id, $this->filePath)->delay(now()->addSecond());
 
                 return;
             }
 
-            if ($workflow->isImportOnly()) {
-                $workflow->update(['status' => 'completed']);
-                $syncService->record($workspace, 'workflow.completed', 'workflow', $workflow->id, [
-                    'processed_leads' => 0,
-                    'failed_leads' => 0,
-                    'import_only' => true,
-                    'discarded_duplicates' => $discardedDuplicates,
-                ]);
-
-                return;
-            }
-
-            if ($workflow->runsEnrichmentOnImport()) {
-                $this->dispatchPendingLeadJobs($workflow);
-            } else {
-                $workflow->update(['status' => 'completed']);
-            }
+            $this->finalizeIngestion($workflow->fresh(), $workspace, $syncService, $dedup);
         } catch (\Throwable $e) {
-            Log::error('Workflow processing error: '.$e->getMessage());
+            Log::error('Workflow processing error: '.$e->getMessage(), [
+                'workflow_id' => $workflow->id,
+                'trace' => $e->getTraceAsString(),
+            ]);
             $workflow?->update([
                 'status' => 'failed',
                 'error_message' => $e->getMessage(),
@@ -247,14 +216,127 @@ class ProcessWorkflowJob implements ShouldQueue
         }
     }
 
-    protected function dispatchPendingLeadJobs(Workflow $workflow): void
-    {
-        WorkflowLead::where('workflow_id', $workflow->id)
-            ->where('status', 'imported')
-            ->orderBy('row_number')
-            ->pluck('id')
-            ->each(fn (int $leadId) => ProcessLeadJob::dispatch($leadId, $workflow->custom_prompt));
+    protected function finalizeIngestion(
+        Workflow $workflow,
+        $workspace,
+        WorkspaceSyncService $syncService,
+    ): void {
 
-        $workflow->update(['status' => 'extracting']);
+        $totalLeads = WorkflowLead::where('workflow_id', $workflow->id)->count();
+        $workflow->update([
+            'ingestion_complete' => true,
+            'total_leads' => $totalLeads,
+        ]);
+
+        if ($totalLeads === 0) {
+            $workflow->update(['status' => 'completed']);
+            $syncService->record($workspace, 'workflow.completed', 'workflow', $workflow->id, [
+                'processed_leads' => 0,
+                'failed_leads' => 0,
+            ]);
+
+            return;
+        }
+
+        if ($workflow->isImportOnly()) {
+            $workflow->update(['status' => 'completed']);
+            $syncService->record($workspace, 'workflow.completed', 'workflow', $workflow->id, [
+                'processed_leads' => 0,
+                'failed_leads' => 0,
+                'import_only' => true,
+            ]);
+
+            return;
+        }
+
+        if ($workflow->runsEnrichmentOnImport()) {
+            $this->dispatchEnrichmentJobs($workflow);
+        } else {
+            $workflow->update(['status' => 'completed']);
+        }
+    }
+
+    protected function dispatchEnrichmentJobs(Workflow $workflow): void
+    {
+        DispatchWorkflowLeadEnrichmentJob::dispatch($workflow->id);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function readHeaderRow(string $fullPath, ?string $sheetName): array
+    {
+        $rows = $this->readRowRange($fullPath, $sheetName, 1, 1);
+        if ($rows === []) {
+            return [];
+        }
+
+        return array_map(
+            fn ($val) => $val !== null ? trim((string) $val) : '',
+            $rows[0]
+        );
+    }
+
+    /**
+     * @return array<int, array<int, mixed>>
+     */
+    protected function readRowRange(string $fullPath, ?string $sheetName, int $startRow, int $endRow): array
+    {
+        $reader = IOFactory::createReaderForFile($fullPath);
+        $reader->setReadDataOnly(true);
+        $reader->setReadFilter(new SpreadsheetChunkReadFilter($startRow, $endRow));
+
+        if ($sheetName) {
+            $reader->setLoadSheetsOnly([$sheetName]);
+        }
+
+        $spreadsheet = $reader->load($fullPath);
+        $sheet = $spreadsheet->getActiveSheet();
+        $rows = [];
+
+        foreach ($sheet->getRowIterator($startRow, $endRow) as $row) {
+            $cellIterator = $row->getCellIterator();
+            $cellIterator->setIterateOnlyExistingCells(false);
+            $rowData = [];
+            foreach ($cellIterator as $cell) {
+                $rowData[] = $cell->getValue();
+            }
+            if ($this->rowHasContent($rowData)) {
+                $rows[] = $rowData;
+            }
+        }
+
+        $spreadsheet->disconnectWorksheets();
+        unset($spreadsheet);
+
+        return $rows;
+    }
+
+    /**
+     * @param  array<int, mixed>  $rowData
+     */
+    protected function rowHasContent(array $rowData): bool
+    {
+        foreach ($rowData as $value) {
+            if ($value !== null && trim((string) $value) !== '') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function cleanImportValue(mixed $value): ?string
+    {
+        if ($value === null || ! is_scalar($value)) {
+            return null;
+        }
+
+        $value = trim((string) $value);
+        if ($value === '' || strtolower($value) === 'none found') {
+            return null;
+        }
+
+        return $value;
     }
 }

@@ -1,11 +1,12 @@
 @php
     $compact = $compact ?? false;
     $inputClass = $compact ? 'app-input app-input-sm' : 'app-input';
+    $routePrefix = $routePrefix ?? 'portal';
 @endphp
 
 <form
     method="POST"
-    action="{{ route('portal.leads.setter-status', $lead->id) }}"
+    action="{{ route("{$routePrefix}.leads.setter-status", $lead->id) }}"
     class="setter-status-form space-y-2 {{ $compact ? 'setter-status-form-compact' : 'space-y-3' }}"
 >
     @csrf

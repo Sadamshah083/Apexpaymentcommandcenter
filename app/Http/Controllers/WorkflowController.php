@@ -8,13 +8,15 @@ use App\Models\Workspace;
 use App\Services\Workspace\WorkspaceContextService;
 use App\Services\Workspace\WorkspaceManager;
 use App\Services\Workspace\WorkspaceMemberService;
+use App\Services\Pipeline\SetterDistributionService;
 use App\Services\Pipeline\LeadPipelineService;
 use App\Services\Workflow\WorkflowDashboardService;
 use App\Services\Workflow\WorkflowLeadService;
 use App\Services\Workflow\WorkflowLeadVerificationService;
 use App\Services\Workflow\WorkflowService;
 use App\Services\SalesOps\DiscoveryQualificationService;
-use App\Support\SalesOps;
+use App\Support\LeadRoute;
+use App\Support\WorkflowAssignmentRoles;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -30,6 +32,7 @@ class WorkflowController extends Controller
         protected WorkflowLeadVerificationService $verificationService,
         protected DiscoveryQualificationService $discoveryService,
         protected LeadPipelineService $pipelineService,
+        protected SetterDistributionService $setterDistribution,
     ) {}
 
     public function index(Request $request)
@@ -43,6 +46,7 @@ class WorkflowController extends Controller
             'phase' => $request->input('phase'),
             'assigned_user_id' => $request->input('assigned_user_id'),
             'refresh_enrichment' => $request->boolean('refresh_enrichment'),
+            'include_leads' => false,
         ]));
     }
 
@@ -157,6 +161,54 @@ class WorkflowController extends Controller
         return redirect()->route('admin.workflows.show', $workflow->id)->with('success', "{$count} enriched leads distributed to appointment setters.");
     }
 
+    public function assignLeads(Request $request, Workflow $workflow)
+    {
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+        $this->workspaceContext->ensureWorkflowBelongsToWorkspace($workflow, $workspace);
+
+        $data = $request->validate([
+            'team_lead_id' => 'required|integer|exists:users,id',
+            'lead_count' => 'required|integer|min:1|max:500',
+        ]);
+
+        $teamLead = $workspace->users()
+            ->where('users.id', $data['team_lead_id'])
+            ->wherePivot('status', 'active')
+            ->wherePivotIn('role', WorkflowAssignmentRoles::teamLeadRoles())
+            ->first();
+
+        if (! $teamLead) {
+            return redirect()->back()->withErrors(['team_lead_id' => 'Selected user is not an active team lead in this workspace.']);
+        }
+
+        if ($teamLead->getWorkspaceRole($workspace->id) !== WorkflowAssignmentRoles::setterTeamLeadRole()) {
+            return redirect()->back()->withErrors([
+                'team_lead_id' => 'Enriched import leads must be assigned to an Appointment Setter Team Lead. Closers Team Lead handles settled appointments.',
+            ]);
+        }
+
+        $available = $this->setterDistribution->unassignedWorkflowLeadCount($workflow);
+        if ($available === 0) {
+            return redirect()->back()->withErrors(['lead_count' => 'No unassigned enriched leads remain in this import.']);
+        }
+
+        $assigned = $this->setterDistribution->assignWorkflowLeadsToTeamLead(
+            $workspace,
+            $workflow,
+            $teamLead,
+            (int) $data['lead_count'],
+            Auth::user(),
+        );
+
+        if ($assigned === 0) {
+            return redirect()->back()->withErrors(['lead_count' => 'No leads could be assigned. Ensure active appointment setters exist on this team.']);
+        }
+
+        return redirect()
+            ->back()
+            ->with('success', "Assigned {$assigned} lead(s) to {$teamLead->name}'s setter team.");
+    }
+
     public function pause(Workflow $workflow)
     {
         $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
@@ -248,13 +300,17 @@ class WorkflowController extends Controller
             && (
                 $user->isCloser($workspace->id)
                 || $user->isClosersTeamLead($workspace->id)
+                || $user->isAppointmentSetterTeamLead($workspace->id)
+                || $user->isAppointmentSetter($workspace->id)
                 || $user->canAccessAdminPortal($workspace->id)
             );
 
         return view('workflows.lead_show', compact(
             'lead', 'team', 'workspace', 'setterStatuses', 'closerStatuses',
             'pipelinePhases', 'activityTypes', 'canEditSetter', 'canEditCloser', 'showSetterHistory', 'user'
-        ));
+        ) + [
+            'isAdminView' => LeadRoute::isAdminContext(),
+        ]);
     }
 
     public function leadUpdate(Request $request, WorkflowLead $lead)
@@ -273,7 +329,7 @@ class WorkflowController extends Controller
                 $request->input('notes')
             );
 
-            return redirect()->route('portal.leads.show', $lead->id)->with('success', 'Lead status updated.');
+            return redirect()->to(LeadRoute::show($lead))->with('success', 'Lead status updated.');
         }
 
         if ($request->filled('closer_status')) {
@@ -285,7 +341,7 @@ class WorkflowController extends Controller
                 $request->input('notes')
             );
 
-            return redirect()->route('portal.leads.show', $lead->id)->with('success', 'Lead status updated.');
+            return redirect()->to(LeadRoute::show($lead))->with('success', 'Lead status updated.');
         }
 
         $data = $request->validate([
@@ -295,7 +351,7 @@ class WorkflowController extends Controller
 
         $lead->update($data);
 
-        return redirect()->route('portal.leads.show', $lead->id)->with('success', 'Lead record updated.');
+        return redirect()->to(LeadRoute::show($lead))->with('success', 'Lead record updated.');
     }
 
     public function leadDestroy(WorkflowLead $lead)

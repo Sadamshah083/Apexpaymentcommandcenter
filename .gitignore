@@ -27,6 +27,8 @@ Homestead.yaml
 Thumbs.db
 /php83/
 /php83.zip
+/composer.phar
+.prettier-cache
 
 # Custom ignores
 /scratch/

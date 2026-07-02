@@ -30,7 +30,7 @@
     @if($can('lead_pipeline'))
     <x-sidebar.link
         :href="route('admin.workflows.index')"
-        label="Import & Overview"
+        label="Import & Enrichment"
         :active="request()->routeIs('admin.workflows.*')"
     >
         <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'pipeline'])</x-slot:icon>

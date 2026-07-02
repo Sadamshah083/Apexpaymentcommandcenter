@@ -7,10 +7,12 @@
     <title>@yield('title', 'Dashboard') - {{ config('app.name') }}</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
-<body class="bg-cream-100 text-warmgrey-900 min-h-screen font-sans antialiased" data-turbo-prefetch="true"
+<body class="bg-cream-100 text-warmgrey-900 min-h-screen font-sans antialiased" data-turbo-prefetch="{{ app()->environment('local') ? 'false' : 'true' }}"
     @auth
         data-workspace-id="{{ auth()->user()->current_workspace_id }}"
         data-workspace-sync-url="{{ route('portal.sync.poll') }}"
+        data-workspace-sync-stream-url="{{ route('portal.sync.stream') }}"
+        data-workspace-sync-use-poll="{{ app()->environment('local') ? '1' : '0' }}"
         data-lead-show-base="{{ url('/portal/leads') }}"
         data-workflow-show-base="{{ url('/admin/workflows') }}"
         data-push-vapid-key-url="{{ route('portal.push.vapid') }}"

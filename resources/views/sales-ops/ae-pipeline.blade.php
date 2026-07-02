@@ -31,7 +31,7 @@
                         <td>{{ $lead->monthly_processing_volume ? '$'.number_format($lead->monthly_processing_volume) : '—' }}</td>
                         <td>{{ $lead->current_processor ?: '—' }}</td>
                         <td class="text-xs">{{ $lead->schedule_at?->format('M j, g:i A') ?: '—' }}</td>
-                        <td><a href="{{ route('portal.leads.show', $lead->id) }}" class="app-link text-sm">Open</a></td>
+                        <td><a href="{{ route('portal.leads.show', $lead->id) }}" class="app-link text-sm">Details</a></td>
                     </tr>
                 @endforeach
             </tbody>

@@ -5,13 +5,13 @@ namespace App\Jobs;
 use App\Models\User;
 use App\Models\Workflow;
 use App\Models\WorkflowLead;
-use App\Services\Pipeline\PipelineLeadReleaseService;
 use App\Services\Workflow\WorkflowExtractor;
 use App\Services\Workflow\WorkflowLeadAutoVerificationService;
 use App\Services\Workspace\WorkspaceSyncService;
 use App\Support\SqliteConcurrency;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -20,7 +20,7 @@ class ProcessLeadJob implements ShouldQueue
     use Queueable;
 
     public int $tries = 5;
-    public int $timeout = 180;
+    public int $timeout = 120;
 
     public function backoff(): array
     {
@@ -30,12 +30,13 @@ class ProcessLeadJob implements ShouldQueue
     public function __construct(
         public int $leadId,
         public ?string $customPrompt = null
-    ) {}
+    ) {
+        $this->onQueue('enrichment');
+    }
 
     public function handle(
         WorkflowExtractor $extractor,
         WorkflowLeadAutoVerificationService $autoVerification,
-        PipelineLeadReleaseService $releaseService,
         WorkspaceSyncService $syncService
     ): void {
         $lead = WorkflowLead::find($this->leadId);
@@ -86,30 +87,21 @@ class ProcessLeadJob implements ShouldQueue
                 return;
             }
 
-            $snapshot = $autoVerification->run($lead->fresh(), $workflow);
+            $snapshot = config('workflow_enrichment.skip_auto_verification', true)
+                ? [
+                    'ran_at' => now()->toIso8601String(),
+                    'skipped' => true,
+                    'reason' => 'Skipped during bulk enrichment for speed',
+                ]
+                : $autoVerification->run($lead->fresh(), $workflow);
 
-            if ($workflow->shouldAutoAssignSetters()) {
-                SqliteConcurrency::retry(fn () => $lead->update(array_merge($result, [
-                    'verification_snapshot' => $snapshot,
-                    'pipeline_phase' => 'enriched',
-                    'import_mode' => 'pipeline',
-                    'status' => 'enriched',
-                ])));
-                SqliteConcurrency::retry(fn () => $workflow->increment('enriched_leads'));
-
-                $actor = User::find($workspace->admin_id) ?? $workspace->admin;
-                if ($actor) {
-                    $releaseService->releaseToSetter($lead->fresh(), $actor);
-                }
-            } else {
-                SqliteConcurrency::retry(fn () => $lead->update(array_merge($result, [
-                    'status' => 'enriched',
-                    'pipeline_phase' => 'enriched',
-                    'verification_snapshot' => $snapshot,
-                    'import_mode' => 'pipeline',
-                ])));
-                SqliteConcurrency::retry(fn () => $workflow->increment('enriched_leads'));
-            }
+            SqliteConcurrency::retry(fn () => $lead->update(array_merge($result, [
+                'status' => 'enriched',
+                'pipeline_phase' => 'enriched',
+                'verification_snapshot' => $snapshot,
+                'import_mode' => 'pipeline',
+            ])));
+            SqliteConcurrency::retry(fn () => $workflow->increment('enriched_leads'));
         } catch (\Exception $e) {
             if (SqliteConcurrency::causedByLock($e)) {
                 throw $e;
@@ -128,6 +120,17 @@ class ProcessLeadJob implements ShouldQueue
 
     protected function syncWorkflowProgress(Workflow $workflow, $workspace, WorkspaceSyncService $syncService): void
     {
+        $workflow->refresh();
+        $attempted = (int) $workflow->enriched_leads + (int) $workflow->failed_leads;
+        $mightBeDone = $workflow->total_leads > 0 && $attempted >= $workflow->total_leads;
+        $every = max(1, (int) config('workflow.enrichment_completion_check_every', 5));
+        $counterKey = "workflow_completion_check_{$workflow->id}";
+        $tick = (int) Cache::increment($counterKey);
+
+        if (! $mightBeDone && ($tick % $every) !== 0) {
+            return;
+        }
+
         DB::transaction(function () use ($workflow, $workspace, $syncService) {
             $locked = Workflow::lockForUpdate()->find($workflow->id);
             if (! $locked) {
@@ -149,7 +152,7 @@ class ProcessLeadJob implements ShouldQueue
             $enrichmentDone = $locked->total_leads > 0
                 && ($locked->enriched_leads + $locked->failed_leads) >= $locked->total_leads;
 
-            if ($enrichmentDone && $locked->status === 'extracting') {
+            if ($enrichmentDone && in_array($locked->status, ['extracting', 'pending'], true)) {
                 $locked->update(['status' => 'completed']);
                 $syncService->record($workspace, 'workflow.completed', 'workflow', $locked->id, [
                     'name' => $locked->name,

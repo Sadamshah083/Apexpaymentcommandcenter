@@ -14,8 +14,10 @@ class LeadImportDedupServiceTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_discards_duplicate_in_same_batch(): void
+    public function test_discards_duplicate_in_same_batch_when_dedup_enabled(): void
     {
+        config(['workflow.skip_phone_dedup' => false]);
+
         $service = new LeadImportDedupService;
         $batch = [];
 
@@ -23,10 +25,21 @@ class LeadImportDedupServiceTest extends TestCase
         $this->assertTrue($service->shouldDiscard(1, '(555) 111-2222', $batch));
     }
 
-    public function test_discards_phone_already_in_workspace(): void
+    public function test_skips_dedup_by_default_to_import_every_row(): void
     {
+        $service = new LeadImportDedupService;
+        $batch = [];
+
+        $this->assertFalse($service->shouldDiscard(1, '+1 555-111-2222', $batch));
+        $this->assertFalse($service->shouldDiscard(1, '(555) 111-2222', $batch));
+    }
+
+    public function test_discards_phone_already_in_workspace_when_dedup_enabled(): void
+    {
+        config(['workflow.skip_phone_dedup' => false, 'workflow.skip_cross_import_phone_dedup' => false]);
+
         $admin = User::factory()->create();
-        $workspace = Workspace::factory()->create(['admin_id' => $admin->id]);
+        $workspace = Workspace::create(['name' => 'Test WS', 'admin_id' => $admin->id]);
         Workflow::create([
             'workspace_id' => $workspace->id,
             'name' => 'Import',

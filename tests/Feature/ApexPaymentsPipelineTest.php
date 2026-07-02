@@ -288,6 +288,128 @@ class ApexPaymentsPipelineTest extends TestCase
         );
     }
 
+    public function test_setter_distribution_prefers_lowest_load(): void
+    {
+        $setter2 = $this->attachUser('setter2', 'appointment_setter');
+        $workflow = Workflow::create([
+            'workspace_id' => $this->workspace->id,
+            'name' => 'Load Test',
+            'status' => 'extracting',
+            'processing_mode' => 'full_pipeline',
+            'distribution_cursor' => 0,
+        ]);
+
+        WorkflowLead::create([
+            'workflow_id' => $workflow->id,
+            'row_number' => 1,
+            'business_name' => 'Existing',
+            'status' => 'completed',
+            'pipeline_phase' => 'with_setter',
+            'setter_status' => 'new',
+            'assigned_user_id' => $this->setter->id,
+            'assigned_setter_id' => $this->setter->id,
+        ]);
+        WorkflowLead::create([
+            'workflow_id' => $workflow->id,
+            'row_number' => 2,
+            'business_name' => 'Existing 2',
+            'status' => 'completed',
+            'pipeline_phase' => 'with_setter',
+            'setter_status' => 'new',
+            'assigned_user_id' => $this->setter->id,
+            'assigned_setter_id' => $this->setter->id,
+        ]);
+
+        $incoming = WorkflowLead::create([
+            'workflow_id' => $workflow->id,
+            'row_number' => 3,
+            'business_name' => 'Incoming',
+            'status' => 'completed',
+            'pipeline_phase' => 'enriching',
+        ]);
+
+        app(SetterDistributionService::class)->assignNext($this->workspace, $incoming, $workflow);
+
+        $this->assertSame($setter2->id, $incoming->fresh()->assigned_user_id);
+    }
+
+    public function test_setter_team_lead_can_assign_leads_manually(): void
+    {
+        $setter2 = $this->attachUser('setter2', 'appointment_setter');
+        $setterTl = $this->attachUser('settertl', 'appointment_setter_team_lead');
+        $workflow = Workflow::create([
+            'workspace_id' => $this->workspace->id,
+            'name' => 'Assign Test',
+            'status' => 'completed',
+            'processing_mode' => 'full_pipeline',
+        ]);
+
+        foreach (range(1, 5) as $row) {
+            WorkflowLead::create([
+                'workflow_id' => $workflow->id,
+                'row_number' => $row,
+                'business_name' => "Lead {$row}",
+                'status' => 'enriched',
+                'pipeline_phase' => 'enriched',
+            ]);
+        }
+
+        $this->actingAs($setterTl)
+            ->post(route('portal.setter-team.assign-leads'), [
+                'setter_id' => $setter2->id,
+                'lead_count' => 3,
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $this->assertSame(3, WorkflowLead::query()->where('assigned_user_id', $setter2->id)->count());
+        $this->assertSame(2, app(SetterDistributionService::class)->unassignedLeadCount($this->workspace));
+    }
+
+    public function test_setter_team_lead_can_view_unassigned_lead_details(): void
+    {
+        $setterTl = $this->attachUser('settertl', 'appointment_setter_team_lead');
+        $workflow = Workflow::create([
+            'workspace_id' => $this->workspace->id,
+            'name' => 'Unassigned',
+            'status' => 'completed',
+            'processing_mode' => 'full_pipeline',
+        ]);
+
+        $lead = WorkflowLead::create([
+            'workflow_id' => $workflow->id,
+            'row_number' => 1,
+            'business_name' => 'Unassigned Lead',
+            'status' => 'enriched',
+            'pipeline_phase' => 'enriched',
+        ]);
+
+        $this->actingAs($setterTl)
+            ->get(route('portal.leads.show', $lead))
+            ->assertOk()
+            ->assertSee('All activity');
+    }
+
+    public function test_setter_team_lead_can_view_assigned_lead_details(): void
+    {
+        $setterTl = $this->attachUser('settertl', 'appointment_setter_team_lead');
+        $lead = $this->makeLead();
+
+        $this->actingAs($setterTl)
+            ->get(route('portal.leads.show', $lead))
+            ->assertOk()
+            ->assertSee('All activity');
+    }
+
+    public function test_portal_user_hitting_admin_route_is_redirected_not_logged_out(): void
+    {
+        $this->actingAs($this->setter)
+            ->get(route('admin.dashboard'))
+            ->assertRedirect(route('portal.dashboard'));
+
+        $this->assertAuthenticatedAs($this->setter);
+    }
+
     public function test_role_dashboard_routes(): void
     {
         $this->actingAs($this->setter)

@@ -10,24 +10,26 @@ class WebSearchService
     /**
      * @return array<int, array{title: string, url: string, snippet: string}>
      */
-    public function searchDuckDuckGo(string $query, int $maxResults = 8): array
+    public function searchDuckDuckGo(string $query, int $maxResults = 8, ?int $timeoutSeconds = null): array
     {
-        $results = $this->searchDuckDuckGoHtml($query, $maxResults);
+        $timeoutSeconds ??= (int) config('workflow_enrichment.web_search_timeout', 12);
+
+        $results = $this->searchDuckDuckGoHtml($query, $maxResults, $timeoutSeconds);
 
         if ($results !== []) {
             return $results;
         }
 
-        return $this->searchDuckDuckGoLite($query, $maxResults);
+        return $this->searchDuckDuckGoLite($query, $maxResults, $timeoutSeconds);
     }
 
     /**
      * @return array<int, array{title: string, url: string, snippet: string}>
      */
-    protected function searchDuckDuckGoHtml(string $query, int $maxResults): array
+    protected function searchDuckDuckGoHtml(string $query, int $maxResults, int $timeoutSeconds = 12): array
     {
         try {
-            $request = Http::timeout(25)
+            $request = Http::timeout($timeoutSeconds)
                 ->withHeaders([
                     'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
                     'Accept-Language' => 'en-US,en;q=0.9',
@@ -54,10 +56,10 @@ class WebSearchService
     /**
      * @return array<int, array{title: string, url: string, snippet: string}>
      */
-    protected function searchDuckDuckGoLite(string $query, int $maxResults): array
+    protected function searchDuckDuckGoLite(string $query, int $maxResults, int $timeoutSeconds = 12): array
     {
         try {
-            $request = Http::timeout(25)
+            $request = Http::timeout($timeoutSeconds)
                 ->withHeaders([
                     'User-Agent' => 'Mozilla/5.0 (compatible; ApexOneEnrichment/1.0)',
                     'Accept-Language' => 'en-US,en;q=0.9',
@@ -215,10 +217,11 @@ class WebSearchService
     {
         $queries = $this->buildSearchQueries($businessName, $address, $website);
         $maxQueries = $maxQueries ?? config('business_research.max_search_queries', 14);
+        $pauseMs = max(0, (int) config('workflow_enrichment.web_search_pause_ms', 100));
         $allResults = [];
 
         foreach (array_slice($queries, 0, $maxQueries) as $query) {
-            foreach ($this->searchDuckDuckGo($query, 6) as $result) {
+            foreach ($this->searchDuckDuckGo($query, 4) as $result) {
                 $key = md5($result['url']);
                 if (! isset($allResults[$key])) {
                     $allResults[$key] = array_merge($result, [
@@ -227,10 +230,12 @@ class WebSearchService
                     ]);
                 }
             }
-            usleep(250000);
+            if ($pauseMs > 0) {
+                usleep($pauseMs * 1000);
+            }
         }
 
-        if ($website) {
+        if ($website && ! (bool) config('workflow_enrichment.fast_mode', true)) {
             $pageText = $this->fetchPageText($website);
             if ($pageText) {
                 $allResults['website_'.md5($website)] = [

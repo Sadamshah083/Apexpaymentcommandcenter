@@ -351,8 +351,8 @@ class WorkflowServiceTest extends TestCase
         $workflow->refresh();
         $this->assertEquals('extracting', $workflow->status);
 
-        Queue::assertPushed(\App\Jobs\ProcessLeadJob::class, function ($job) use ($pendingLead) {
-            return $job->leadId === $pendingLead->id;
+        Queue::assertPushed(\App\Jobs\DispatchWorkflowLeadEnrichmentJob::class, function ($job) use ($workflow) {
+            return $job->workflowId === $workflow->id;
         });
     }
 

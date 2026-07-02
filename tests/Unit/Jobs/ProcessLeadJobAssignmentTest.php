@@ -25,6 +25,7 @@ class ProcessLeadJobAssignmentTest extends TestCase
 
     public function test_enriched_lead_queues_for_manual_verification_without_pre_assignment(): void
     {
+        config(['workflow_enrichment.skip_auto_verification' => false]);
         $admin = User::factory()->create();
         $agent = User::factory()->create();
         $workspace = Workspace::create(['name' => 'Acme', 'admin_id' => $admin->id]);

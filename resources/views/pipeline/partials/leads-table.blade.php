@@ -1,4 +1,5 @@
 @php
+    use App\Support\LeadContactDisplay;
     use App\Support\SalesOps;
 
     $readOnly = $readOnly ?? false;
@@ -18,6 +19,8 @@
             <thead>
                 <tr>
                     <th>Business</th>
+                    <th>Email</th>
+                    <th>Social Media</th>
                     <th>Contact</th>
                     @if($showAssignee)
                         <th>Assignee</th>
@@ -35,14 +38,25 @@
             </thead>
             <tbody>
                 @foreach($leads as $lead)
+                    @php
+                        $contact = LeadContactDisplay::for($lead);
+                    @endphp
                     <tr>
                         <td>
-                            <a href="{{ route('portal.leads.show', $lead->id) }}" class="font-bold text-zinc-900 hover:underline">{{ $lead->business_name }}</a>
+                            <a href="{{ route('portal.leads.show', $lead->id) }}" data-turbo="false" class="font-bold text-zinc-900 hover:underline">{{ $lead->business_name }}</a>
                             @include('partials.lead-tag-chips', ['tags' => $lead->tags ?? collect(), 'list' => $lead->leadList ?? null, 'compact' => true])
                         </td>
-                        <td class="text-sm text-zinc-600">{{ $lead->direct_email ?: $lead->input_email ?: '—' }}</td>
+                        <td class="text-sm text-zinc-600">{{ LeadContactDisplay::cell($contact['email']) ?: '—' }}</td>
+                        <td class="text-sm text-zinc-600">{{ LeadContactDisplay::cell($contact['social_media']) ?: '—' }}</td>
+                        <td class="text-sm text-zinc-600">{{ LeadContactDisplay::cell($contact['phone']) ?: '—' }}</td>
                         @if($showAssignee)
-                            <td class="text-sm">{{ $lead->assignee?->name ?? $lead->setter?->name ?? '—' }}</td>
+                            <td class="text-sm">
+                                @if($lead->pipeline_phase === 'enriched' && ! $lead->assigned_user_id)
+                                    <span class="text-amber-700 font-medium">Unassigned</span>
+                                @else
+                                    {{ $lead->assignee?->name ?? $lead->setter?->name ?? '—' }}
+                                @endif
+                            </td>
                         @endif
                         <td class="text-sm">{{ SalesOps::pipelinePhaseLabel($lead->pipeline_phase) }}</td>
                         <td class="text-sm">
@@ -85,7 +99,7 @@
                             </td>
                         @endif
                         <td class="text-right align-top">
-                            <a href="{{ route('portal.leads.show', $lead->id) }}" class="app-btn app-btn-secondary app-btn-sm">Open</a>
+                            <a href="{{ route('portal.leads.show', $lead->id) }}" data-turbo="false" class="app-btn app-btn-secondary app-btn-sm">Details</a>
                         </td>
                     </tr>
                 @endforeach

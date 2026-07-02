@@ -8,6 +8,8 @@ import { initFormLoading } from './form-loading.js';
 import { initMemberManagement } from './member-management.js';
 import { initWorkspaceAdmin } from './workspace-admin.js';
 import { startProgressPoll } from './realtime-poll.js';
+import { initWorkflowUpload } from './workflow-upload.js';
+import { initAdminDashboard, teardownAdminDashboard } from './admin-dashboard.js';
 
 window.startProgressPoll = startProgressPoll;
 
@@ -35,6 +37,8 @@ function boot() {
     initFormLoading();
     initMemberManagement();
     initWorkspaceAdmin();
+    initWorkflowUpload();
+    initAdminDashboard();
 }
 
 if (document.readyState === 'loading') {
@@ -50,5 +54,10 @@ document.addEventListener('turbo:load', () => {
     initFormLoading();
     initMemberManagement();
     initWorkspaceAdmin();
+    initWorkflowUpload();
+    initAdminDashboard();
 });
-document.addEventListener('turbo:before-cache', teardownWorkspaceSync);
+document.addEventListener('turbo:before-cache', () => {
+    teardownWorkspaceSync();
+    teardownAdminDashboard();
+});

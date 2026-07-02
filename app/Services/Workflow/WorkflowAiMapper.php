@@ -60,6 +60,21 @@ class WorkflowAiMapper
     }
 
     /**
+     * Fast header mapping without calling Gemini (used on upload for instant response).
+     *
+     * @return array{headers: array<int, mixed>, mapping: array<string, string|null>}
+     */
+    public function fastMap(string $filePath, ?string $sheetName = null): array
+    {
+        $headers = $this->getHeaderRow($filePath, $sheetName);
+
+        return [
+            'headers' => $headers,
+            'mapping' => $this->heuristicMap($headers),
+        ];
+    }
+
+    /**
      * Map headers to universal format using Gemini, with heuristic fallback.
      */
     public function autoMap(string $filePath, ?string $sheetName = null): array
@@ -125,8 +140,16 @@ class WorkflowAiMapper
             'zip_code' => ['zip code' => 100, 'postal code' => 100, 'zip' => 90, 'postcode' => 90],
             'country' => ['country' => 100],
             'website' => ['website' => 100, 'url' => 90, 'domain' => 85, 'web' => 70],
-            'input_phone' => ['phone' => 100, 'mobile' => 90, 'telephone' => 90, 'cell' => 85],
+            'input_phone' => ['phone' => 100, 'mobile' => 90, 'telephone' => 90, 'cell' => 85, 'phone number' => 100, 'phone_number' => 100],
             'input_email' => ['email' => 100, 'e-mail' => 100, 'mail' => 70],
+            'owner_name' => [
+                'owner name' => 100,
+                'owner' => 95,
+                'contact name' => 95,
+                'primary contact' => 90,
+                'proprietor' => 85,
+                'manager' => 70,
+            ],
         ];
 
         foreach ($fieldPatterns as $field => $patterns) {
@@ -299,6 +322,7 @@ class WorkflowAiMapper
             'website' => null,
             'input_phone' => null,
             'input_email' => null,
+            'owner_name' => null,
         ];
     }
 

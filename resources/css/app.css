@@ -239,8 +239,48 @@
     color: #71717a;
 }
 
-.app-table-wrap[data-min-width="900px"] table {
-    min-width: 900px;
+.app-table-wrap[data-min-width="1150px"] table {
+    min-width: 1150px;
+}
+
+.import-workflows-table {
+    min-width: 1280px;
+}
+
+.import-workflows-table th.col-assign,
+.import-workflows-table td.col-assign {
+    min-width: 88px;
+    width: 88px;
+    text-align: center;
+}
+
+.import-workflows-table th.col-actions,
+.import-workflows-table td.col-actions {
+    min-width: 260px;
+    width: 260px;
+}
+
+.import-workflows-table .import-workflows-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+    gap: 0.375rem;
+    white-space: nowrap;
+}
+
+.import-workflows-table .import-workflows-actions form {
+    display: inline-flex;
+    margin: 0;
+}
+
+.app-table-wrap[data-min-width="1280px"] table {
+    min-width: 1280px;
+}
+
+.app-data-table .app-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .app-table-wrap[data-min-width="640px"] table {
@@ -1023,6 +1063,69 @@
     min-width: 0;
 }
 
+.sidebar-team-members {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    margin: 0.15rem 0 0.5rem 1.35rem;
+}
+
+.sidebar-team-heading {
+    margin: 0.35rem 0 0.15rem 1.35rem;
+    font-size: 0.625rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #a1a1aa;
+}
+
+.sidebar-team-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.4rem 0.55rem;
+    border-radius: 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #52525b;
+    text-decoration: none;
+}
+
+.sidebar-team-link:hover {
+    background: #f4f4f5;
+    color: #18181b;
+}
+
+.sidebar-team-link-active {
+    background: #eef2ff;
+    color: #4338ca;
+}
+
+.sidebar-team-link-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sidebar-team-link-count {
+    flex-shrink: 0;
+    min-width: 1.35rem;
+    padding: 0.1rem 0.35rem;
+    border-radius: 9999px;
+    background: #f4f4f5;
+    font-size: 0.625rem;
+    font-weight: 700;
+    text-align: center;
+    color: #3f3f46;
+}
+
+.sidebar-team-link-active .sidebar-team-link-count {
+    background: #e0e7ff;
+    color: #4338ca;
+}
+
 .app-sidebar-logout:hover {
     background: #be123c;
     border-color: #be123c;
@@ -1576,18 +1679,28 @@ html {
 }
 
 /* Pipeline stepper (GHL / HubSpot style) */
+.pipeline-progress {
+    padding-bottom: 1.25rem;
+    margin-bottom: 0.25rem;
+    border-bottom: 1px solid #e4e4e7;
+}
+
 .pipeline-steps {
     display: flex;
     align-items: flex-start;
-    justify-content: space-between;
-    gap: 0.25rem;
-    padding: 0.5rem 0;
+    justify-content: center;
+    width: 100%;
+    gap: 0;
+    padding: 0.25rem 0 0.5rem;
 }
 
 .pipeline-step {
-    flex: 1;
+    flex: 0 0 auto;
+    min-width: 4.5rem;
+    max-width: 7rem;
     text-align: center;
-    min-width: 0;
+    position: relative;
+    z-index: 1;
 }
 
 .pipeline-step-dot {
@@ -1600,7 +1713,7 @@ html {
     justify-content: center;
     font-size: 0.75rem;
     font-weight: 700;
-    background: #f4f4f5;
+    background: #fafafa;
     color: #a1a1aa;
     border: 2px solid #e4e4e7;
     transition: all 0.2s ease;
@@ -1629,32 +1742,41 @@ html {
     font-size: 0.75rem;
     font-weight: 700;
     color: #71717a;
+    padding-bottom: 0.15rem;
+    border-bottom: 2px solid transparent;
 }
 
-.pipeline-step.is-active .pipeline-step-label,
+.pipeline-step.is-active .pipeline-step-label {
+    color: #18181b;
+    border-bottom-color: #18181b;
+}
+
 .pipeline-step.is-done .pipeline-step-label {
     color: #18181b;
+    border-bottom-color: #10b981;
 }
 
 .pipeline-step-detail {
     font-size: 0.6875rem;
     color: #a1a1aa;
-    margin-top: 0.15rem;
+    margin-top: 0.35rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
 .pipeline-steps-connector {
-    flex: 0 0 1.5rem;
-    height: 2px;
+    flex: 1 1 0;
+    min-width: 1.25rem;
+    height: 3px;
     background: #e4e4e7;
-    margin-top: 1rem;
-    border-radius: 1px;
+    margin-top: calc(1rem - 1.5px);
+    border-radius: 9999px;
+    align-self: flex-start;
 }
 
 .pipeline-steps-connector.is-done {
-    background: #10b981;
+    background: linear-gradient(90deg, #10b981 0%, #34d399 100%);
 }
 
 /* Legacy alias — use .app-filter-pills in markup */
@@ -1976,6 +2098,11 @@ body.app-loading-open {
 
 body.member-confirm-open {
     overflow: hidden;
+}
+
+.assign-leads-panel {
+    width: min(100%, 28rem);
+    text-align: left;
 }
 
 .member-confirm-modal {

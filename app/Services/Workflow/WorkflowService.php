@@ -2,6 +2,7 @@
 
 namespace App\Services\Workflow;
 
+use App\Jobs\DispatchWorkflowLeadEnrichmentJob;
 use App\Jobs\ProcessLeadJob;
 use App\Jobs\ProcessWorkflowJob;
 use App\Models\Workflow;
@@ -33,7 +34,12 @@ class WorkflowService
         $sheets = [];
 
         try {
-            $sheets = $this->aiMapper->getFileSheets(Storage::disk('local')->path($storedPath));
+            $ext = strtolower($file->getClientOriginalExtension());
+            if (! in_array($ext, ['xlsx', 'xls'], true)) {
+                $sheets = [];
+            } else {
+                $sheets = $this->aiMapper->getFileSheets(Storage::disk('local')->path($storedPath));
+            }
         } catch (\Throwable $e) {
             Log::debug('Workflow upload has no spreadsheet sheets', [
                 'workspace_id' => $workspace->id,
@@ -70,7 +76,7 @@ class WorkflowService
         }
 
         try {
-            $autoMap = $this->aiMapper->autoMap(
+            $autoMap = $this->aiMapper->fastMap(
                 Storage::disk('local')->path($workflow->file_path),
                 $workflow->selected_sheet
             );
@@ -124,6 +130,7 @@ class WorkflowService
             'leads as assigned_leads_count' => fn ($query) => $query->whereNotNull('assigned_user_id'),
             'leads as pending_verification_count' => fn ($query) => $query->where('status', 'pending_verification'),
             'leads as imported_leads_count' => fn ($query) => $query->where('status', 'imported'),
+            'leads as extracting_leads_count' => fn ($query) => $query->where('status', 'extracting'),
             'leads as enriched_leads_count' => fn ($query) => $query->where('status', 'enriched'),
             'leads as ready_to_distribute_count' => fn ($query) => $query->where('status', 'enriched')->whereNull('assigned_user_id'),
         ]);
@@ -138,6 +145,8 @@ class WorkflowService
             ->paginate($perPage)
             ->withQueryString();
 
+        $dashboard = app(\App\Services\Pipeline\RoleDashboardService::class);
+
         return [
             'workflow' => $workflow,
             'leads' => $leads,
@@ -145,7 +154,15 @@ class WorkflowService
             'team' => $workspace->users()
                 ->wherePivot('role', 'appointment_setter')
                 ->wherePivot('status', 'active')
+                ->orderBy('users.name')
                 ->get(),
+            'teamLeads' => \App\Support\WorkflowAssignmentRoles::teamLeadsFor($workspace),
+            'setters' => $workspace->users()
+                ->wherePivot('role', 'appointment_setter')
+                ->wherePivot('status', 'active')
+                ->orderBy('users.name')
+                ->get(),
+            'setterTeamMetrics' => $dashboard->setterTeamMetrics($workspace),
             'leadTags' => $this->segmentation->workspaceTags($workspace),
             'leadList' => $workflow->leadList,
             'enrichmentConfigured' => $this->providerStatus->isEnrichmentConfigured(),
@@ -496,11 +513,7 @@ class WorkflowService
 
     public function dispatchPendingLeadJobs(Workflow $workflow): void
     {
-        WorkflowLead::where('workflow_id', $workflow->id)
-            ->where('status', 'imported')
-            ->orderBy('row_number')
-            ->pluck('id')
-            ->each(fn (int $leadId) => ProcessLeadJob::dispatch($leadId, $workflow->custom_prompt));
+        DispatchWorkflowLeadEnrichmentJob::dispatch($workflow->id);
     }
 
     public function retryFailedLeads(Workflow $workflow): void

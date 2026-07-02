@@ -27,10 +27,16 @@ class LeadPipelineService
         return match ($role) {
             'appointment_setter' => $lead->pipeline_phase === 'with_setter'
                 && (int) $lead->assigned_user_id === $user->id,
-            'appointment_setter_team_lead' => in_array($lead->pipeline_phase, ['with_setter', 'appointment_settled', 'with_closer', 'closed'], true)
-                && $lead->assigned_setter_id
-                && $this->isSetterOnTeam($workspace, (int) $lead->assigned_setter_id),
-            'closers_team_lead' => in_array($lead->pipeline_phase, ['appointment_settled', 'with_closer', 'closed'], true),
+            'appointment_setter_team_lead' => in_array($lead->pipeline_phase, ['enriched', 'with_setter', 'appointment_settled', 'with_closer', 'closed'], true)
+                && (
+                    ($lead->pipeline_phase === 'enriched' && ! $lead->assigned_user_id)
+                    || $this->setterBelongsToTeam($workspace, $lead)
+                ),
+            'closers_team_lead' => in_array($lead->pipeline_phase, ['appointment_settled', 'with_closer', 'closed'], true)
+                && (
+                    $lead->pipeline_phase !== 'with_closer'
+                    || $this->closerBelongsToTeam($workspace, $lead)
+                ),
             'closer' => in_array($lead->pipeline_phase, ['with_closer', 'closed'], true)
                 && (
                     (int) $lead->assigned_user_id === $user->id
@@ -165,6 +171,27 @@ class LeadPipelineService
         return $workspace->users()
             ->where('users.id', $setterUserId)
             ->wherePivot('role', 'appointment_setter')
+            ->exists();
+    }
+
+    protected function setterBelongsToTeam(Workspace $workspace, WorkflowLead $lead): bool
+    {
+        $setterId = (int) ($lead->assigned_setter_id ?: $lead->assigned_user_id);
+
+        return $setterId > 0 && $this->isSetterOnTeam($workspace, $setterId);
+    }
+
+    protected function closerBelongsToTeam(Workspace $workspace, WorkflowLead $lead): bool
+    {
+        $closerId = (int) ($lead->assigned_closer_id ?: $lead->assigned_user_id);
+
+        if ($closerId <= 0) {
+            return true;
+        }
+
+        return $workspace->users()
+            ->where('users.id', $closerId)
+            ->wherePivot('role', 'closer')
             ->exists();
     }
 }

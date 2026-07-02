@@ -10,6 +10,7 @@ use App\Services\BusinessResearch\OpenRouterClient;
 use App\Services\BusinessResearch\ResearchInput;
 use App\Services\BusinessResearch\ResearchResultSanitizer;
 use App\Services\BusinessResearch\WebSearchService;
+use App\Support\LeadContactDisplay;
 use Illuminate\Support\Facades\Log;
 
 class WorkflowExtractor
@@ -31,15 +32,19 @@ class WorkflowExtractor
         $input = ResearchInput::fromWorkflowLead($lead);
         $location = $this->resolveLocation($lead);
 
-        $maxQueries = max(1, (int) config('workflow_enrichment.web_search_queries', 8));
+        $fastMode = (bool) config('workflow_enrichment.fast_mode', true);
+        $configuredQueries = max(0, (int) config('workflow_enrichment.web_search_queries', 2));
+        $maxQueries = $fastMode ? min(1, $configuredQueries) : max(1, $configuredQueries);
         Log::info("Gathering web context for: {$input->businessName} in {$location} ({$maxQueries} queries)");
 
-        $webContext = $this->webSearch->gatherContext(
-            $input->businessName,
-            $input->address ?: $location,
-            $input->website,
-            $maxQueries,
-        );
+        $webContext = $maxQueries > 0
+            ? $this->webSearch->gatherContext(
+                $input->businessName,
+                $input->address ?: $location,
+                $input->website,
+                $maxQueries,
+            )
+            : [];
         $contextBlock = $this->webSearch->formatContextBlock($webContext);
 
         if (count($webContext) === 0) {
@@ -64,13 +69,13 @@ class WorkflowExtractor
 
         try {
             $report = $this->runResearch($userPrompt, $systemPrompt, $webContext);
-            $parsed = $this->markdownParser->parse($report['content']);
+            $parsed = $this->markdownParser->parseContent($report['content']);
 
             if ($this->shouldRunFollowUp($parsed) && ! $customPrompt) {
                 $followUpPrompt = BusinessResearchPrompt::buildFollowUp($input, $parsed, $contextBlock);
                 try {
                     $followUp = $this->runResearch($followUpPrompt, $systemPrompt, $webContext);
-                    $followUpParsed = $this->markdownParser->parse($followUp['content']);
+                    $followUpParsed = $this->markdownParser->parseContent($followUp['content']);
                     if ($this->scoreParsed($followUpParsed) > $this->scoreParsed($parsed)) {
                         $report = $followUp;
                         $parsed = $followUpParsed;
@@ -80,7 +85,7 @@ class WorkflowExtractor
                 }
             }
 
-            $attributes = $this->mapParsedToLeadAttributes($parsed, $report);
+            $attributes = $this->mapParsedToLeadAttributes($parsed, $report, $lead);
 
             return array_merge($attributes, [
                 'status' => 'completed',
@@ -89,6 +94,13 @@ class WorkflowExtractor
         } catch (\Exception $e) {
             $this->providerStatus->recordGeminiError($e->getMessage());
             Log::error("WorkflowExtractor failed for lead {$lead->id}: ".$e->getMessage());
+
+            if ($this->hasSpreadsheetContactData($lead)) {
+                return array_merge($this->buildSpreadsheetFallbackAttributes($lead, $e->getMessage()), [
+                    'status' => 'completed',
+                    'error_message' => null,
+                ]);
+            }
 
             return [
                 'status' => 'failed',
@@ -122,13 +134,16 @@ class WorkflowExtractor
         $skipGemini = ($geminiHealth['state'] ?? '') === 'depleted'
             && filled(config('openrouter.api_key'));
 
+        $lastGeminiContent = '';
+
         try {
             if ($skipGemini) {
                 throw new \RuntimeException('Gemini credits depleted — using OpenRouter fallback.');
             }
 
             $lastGeminiContent = '';
-            for ($attempt = 1; $attempt <= 2; $attempt++) {
+            $maxAttempts = max(1, (int) config('workflow_enrichment.gemini_max_attempts', 1));
+            for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
                 $result = $this->gemini->researchWithGoogleSearch($systemPrompt, $userPrompt, $options);
                 $this->providerStatus->clearGeminiError();
 
@@ -152,7 +167,7 @@ class WorkflowExtractor
                     'has_schema' => $this->markdownParser->hasReportSchema($content),
                 ]);
 
-                if ($attempt < 2) {
+                if ($attempt < $maxAttempts) {
                     usleep(500_000);
                 }
             }
@@ -165,13 +180,19 @@ class WorkflowExtractor
             // DDG context is already in the prompt — plain chat avoids OpenRouter tool-call
             // responses that never return the markdown schema.
             $result = $this->openRouter->chat($systemPrompt, $userPrompt);
+            $content = $result['content'] ?? '';
 
-            if (! $this->isAcceptableResult($result['content'])) {
+            if (! $this->isAcceptableResult($content) && filled($lastGeminiContent ?? '') && $this->isAcceptableResult($lastGeminiContent)) {
+                $content = $lastGeminiContent;
+                $result['model'] = $result['model'] ?? 'gemini-partial';
+            }
+
+            if (! $this->isAcceptableResult($content)) {
                 throw new \RuntimeException('OpenRouter fallback returned an incomplete enrichment report.');
             }
 
             return [
-                'content' => $result['content'],
+                'content' => $content,
                 'model' => $result['model'],
                 'tokens' => $result['tokens'],
             ];
@@ -183,7 +204,7 @@ class WorkflowExtractor
      * @param  array{content: string, model: string, tokens: int|null}  $report
      * @return array<string, mixed>
      */
-    protected function mapParsedToLeadAttributes(array $parsed, array $report): array
+    protected function mapParsedToLeadAttributes(array $parsed, array $report, WorkflowLead $lead): array
     {
         $mapped = $this->sanitizer->sanitize([
             'owner_name' => $this->displayValue($parsed['owner_name'] ?? null),
@@ -195,6 +216,14 @@ class WorkflowExtractor
             'operating_hours' => $this->displayValue($parsed['operating_hours'] ?? null),
         ]);
 
+        if ($mapped['direct_phone'] === 'Not Publicly Available' && filled($lead->input_phone)) {
+            $mapped['direct_phone'] = trim((string) $lead->input_phone);
+        }
+
+        if ($mapped['direct_email'] === 'Not Publicly Available' && filled($lead->input_email)) {
+            $mapped['direct_email'] = trim((string) $lead->input_email);
+        }
+
         $updates = [
             'markdown_report' => $report['content'],
             'model_used' => $report['model'],
@@ -205,6 +234,10 @@ class WorkflowExtractor
 
         if (filled($parsed['physical_address'] ?? null)) {
             $updates['address'] = $parsed['physical_address'];
+        }
+
+        if (filled($parsed['website'] ?? null) && LeadContactDisplay::isUnavailable($lead->website)) {
+            $updates['website'] = $parsed['website'];
         }
 
         return $updates;
@@ -261,7 +294,7 @@ class WorkflowExtractor
         }
 
         if ($this->markdownParser->hasMinimumUsefulData(
-            $this->markdownParser->parse($content)
+            $this->markdownParser->parseContent($content)
         )) {
             return true;
         }
@@ -275,6 +308,37 @@ class WorkflowExtractor
         // GRACEFUL FALLBACK: If the response is sufficiently long (e.g. > 150 chars),
         // we accept it even if it lacks strict markdown headers. This prevents the pipeline from stalling.
         return strlen(trim($content)) > 150;
+    }
+
+    protected function hasSpreadsheetContactData(WorkflowLead $lead): bool
+    {
+        return filled($lead->input_phone)
+            || filled($lead->input_email)
+            || filled($lead->business_name);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function buildSpreadsheetFallbackAttributes(WorkflowLead $lead, string $reason): array
+    {
+        $location = $this->resolveLocation($lead);
+        $markdown = "## Business Profile\n"
+            ."- **Business Name:** {$lead->business_name}\n"
+            ."- **Location:** {$location}\n"
+            ."- **Direct Phone:** ".($lead->input_phone ?: 'Not Publicly Available')."\n"
+            ."- **Direct Email:** ".($lead->input_email ?: 'Not Publicly Available')."\n"
+            ."- **Owner Name:** Not Publicly Available\n"
+            ."- **Payment Processor:** Unknown\n"
+            ."\n---\n_Spreadsheet fallback used after AI enrichment could not complete: {$reason}_";
+
+        $parsed = $this->markdownParser->parseContent($markdown);
+
+        return $this->mapParsedToLeadAttributes($parsed, [
+            'content' => $markdown,
+            'model' => 'spreadsheet-fallback',
+            'tokens' => null,
+        ], $lead);
     }
 
     /**

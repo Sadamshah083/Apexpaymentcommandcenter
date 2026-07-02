@@ -122,6 +122,7 @@ Route::prefix('admin')->name('admin.')->middleware([
         Route::post('/{workflow}/retry-failed', [WorkflowController::class, 'retryFailed'])->name('retry-failed');
         Route::post('/{workflow}/enrich', [WorkflowController::class, 'enrich'])->name('enrich');
         Route::post('/{workflow}/distribute', [WorkflowController::class, 'distribute'])->name('distribute');
+        Route::post('/{workflow}/assign-leads', [WorkflowController::class, 'assignLeads'])->name('assign-leads');
         Route::delete('/{workflow}', [WorkflowController::class, 'destroy'])->name('destroy');
     });
 
@@ -135,6 +136,10 @@ Route::prefix('admin')->name('admin.')->middleware([
 
     Route::post('leads/{lead}/approve', [WorkflowController::class, 'approveLead'])->name('leads.approve');
     Route::post('leads/{lead}/reject', [WorkflowController::class, 'rejectLead'])->name('leads.reject');
+    Route::get('leads/{lead}', [WorkflowController::class, 'leadShow'])->name('leads.show');
+    Route::post('leads/{lead}', [WorkflowController::class, 'leadUpdate'])->name('leads.update');
+    Route::post('leads/{lead}/setter-status', [PipelineController::class, 'updateSetterStatus'])->name('leads.setter-status');
+    Route::post('leads/{lead}/closer-status', [PipelineController::class, 'updateCloserStatus'])->name('leads.closer-status');
 
     Route::prefix('workspaces')->name('workspaces.')->group(function () {
         Route::get('/', [WorkflowController::class, 'workspaceIndex'])->name('index');
@@ -161,6 +166,7 @@ Route::prefix('admin')->name('admin.')->middleware([
     Route::post('push/test', [PushNotificationController::class, 'sendTestNotification'])->name('push.test');
 
     Route::get('sync', [WorkspaceSyncController::class, 'poll'])->name('sync.poll');
+    Route::get('sync/stream', [WorkspaceSyncController::class, 'stream'])->name('sync.stream');
     Route::get('server-monitoring', [ServerMonitoringController::class, 'index'])->name('server.monitoring');
 
     Route::prefix('communications')->name('communications.')->group(function () {
@@ -184,6 +190,7 @@ Route::prefix('portal')->name('portal.')->middleware([\App\Http\Middleware\Marke
 
     Route::get('/setter', [PipelineController::class, 'setterDashboard'])->name('setter.dashboard');
     Route::get('/setter-team', [PipelineController::class, 'setterTeamDashboard'])->name('setter-team.dashboard');
+    Route::post('/setter-team/assign-leads', [PipelineController::class, 'assignSetterLeads'])->name('setter-team.assign-leads');
     Route::get('/closer-team', [PipelineController::class, 'closerTeamDashboard'])->name('closer-team.dashboard');
     Route::get('/closer-team/queue', [PipelineController::class, 'closerTeamQueue'])->name('closer-team.queue');
     Route::get('/closer', [PipelineController::class, 'closerDashboard'])->name('closer.dashboard');
@@ -194,6 +201,7 @@ Route::prefix('portal')->name('portal.')->middleware([\App\Http\Middleware\Marke
     Route::post('/workspaces/switch/{workspace}', [WorkflowController::class, 'workspaceSwitch'])->name('workspaces.switch');
 
     Route::get('sync', [WorkspaceSyncController::class, 'poll'])->name('sync.poll');
+    Route::get('sync/stream', [WorkspaceSyncController::class, 'stream'])->name('sync.stream');
 
     Route::get('/leads/{lead}', [WorkflowController::class, 'leadShow'])->name('leads.show');
     Route::post('/leads/{lead}', [WorkflowController::class, 'leadUpdate'])->name('leads.update');

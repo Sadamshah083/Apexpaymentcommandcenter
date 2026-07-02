@@ -10,10 +10,12 @@ use App\Models\DeliverabilityTest;
 use App\Models\WorkflowLead;
 use App\Policies\WorkflowLeadPolicy;
 use App\Support\SqliteConcurrency;
+use App\View\Composers\PortalSidebarComposer;
 use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -47,6 +49,8 @@ class AppServiceProvider extends ServiceProvider
         });
 
         Gate::policy(WorkflowLead::class, WorkflowLeadPolicy::class);
+
+        View::composer('layouts.partials.sidebar-nav-portal', PortalSidebarComposer::class);
     }
 
     protected function configureHttpClient(): void

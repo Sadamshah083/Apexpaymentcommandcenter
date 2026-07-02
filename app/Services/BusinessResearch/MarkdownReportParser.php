@@ -9,6 +9,44 @@ class MarkdownReportParser
      */
     public function parse(string $markdown): array
     {
+        return $this->parseContent($markdown);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function parseContent(string $content): array
+    {
+        $trimmed = $this->normalizeReportContent($content);
+        if ($trimmed !== '' && str_starts_with($trimmed, '{')) {
+            $json = json_decode($trimmed, true);
+            if (is_array($json)) {
+                return $this->normalizeJsonPayload($json);
+            }
+        }
+
+        return $this->parseMarkdown($content);
+    }
+
+    protected function normalizeReportContent(string $content): string
+    {
+        $trimmed = trim($content);
+        if ($trimmed === '') {
+            return '';
+        }
+
+        if (preg_match('/^```(?:json)?\s*([\s\S]*?)\s*```$/i', $trimmed, $match)) {
+            return trim($match[1]);
+        }
+
+        return $trimmed;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function parseMarkdown(string $markdown): array
+    {
         $fields = [
             'business_name_official' => $this->extractField($markdown, 'Business Name'),
             'physical_address' => $this->extractField($markdown, 'Physical Address'),
@@ -32,6 +70,71 @@ class MarkdownReportParser
         $fields['franchise_brand'] = $this->extractFranchiseBrand($markdown);
 
         return $fields;
+    }
+
+    /**
+     * @param  array<string, mixed>  $json
+     * @return array<string, mixed>
+     */
+    protected function normalizeJsonPayload(array $json): array
+    {
+        $fields = [
+            'business_name_official' => $this->scalarField($json['business_name'] ?? null),
+            'physical_address' => $this->scalarField($json['address'] ?? $json['physical_address'] ?? null),
+            'primary_service' => $this->scalarField($json['primary_service'] ?? null),
+            'operating_hours' => $this->scalarField($json['operating_hours'] ?? null),
+            'owner_name' => $this->scalarField($json['owner_name'] ?? null),
+            'direct_phone' => $this->scalarField($json['phone_number'] ?? $json['direct_phone'] ?? null),
+            'direct_email' => $this->scalarField($json['owner_email'] ?? $json['direct_email'] ?? null),
+            'payment_processor' => $this->scalarField($json['payment_processor'] ?? null),
+            'system_integration' => $this->scalarField($json['booking_pos_software'] ?? $json['system_integration'] ?? null),
+            'website' => $this->scalarField($json['website'] ?? null),
+        ];
+
+        $fields['phones'] = $this->toPhoneList($fields['direct_phone']);
+        $fields['emails'] = $this->toEmailList($fields['direct_email']);
+        $fields['business_type'] = $fields['primary_service'];
+        $fields['field_service_software'] = $fields['system_integration'];
+        $fields['pos_system'] = $fields['system_integration'];
+        $fields['summary'] = $this->buildSummary($fields);
+        $fields['confidence'] = $this->estimateConfidence($fields);
+        $fields['is_franchise'] = false;
+        $fields['franchise_brand'] = null;
+
+        return $fields;
+    }
+
+    protected function scalarField(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (is_array($value)) {
+            $parts = [];
+            foreach ($value as $item) {
+                $scalar = $this->scalarField($item);
+                if ($scalar !== null) {
+                    $parts[] = $scalar;
+                }
+            }
+
+            $value = $parts === [] ? null : implode(', ', array_unique($parts));
+        } elseif (! is_scalar($value)) {
+            return null;
+        } else {
+            $value = trim((string) $value);
+        }
+
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if ($this->isUnavailable($value)) {
+            return null;
+        }
+
+        return $value;
     }
 
     protected function extractField(string $markdown, string $label): ?string
@@ -136,9 +239,13 @@ class MarkdownReportParser
         return trim(substr($raw, 0, $earliest));
     }
 
-    protected function isUnavailable(string $value): bool
+    protected function isUnavailable(mixed $value): bool
     {
-        $lower = strtolower($value);
+        if ($value === null || ! is_scalar($value)) {
+            return true;
+        }
+
+        $lower = strtolower(trim((string) $value));
 
         return str_contains($lower, 'not publicly available')
             || str_contains($lower, 'not available')
@@ -185,17 +292,17 @@ class MarkdownReportParser
     {
         $parts = [];
 
-        if (! empty($fields['owner_name'])) {
-            $parts[] = 'Owner: '.$fields['owner_name'];
+        if ($owner = $this->scalarField($fields['owner_name'] ?? null)) {
+            $parts[] = 'Owner: '.$owner;
         }
-        if (! empty($fields['payment_processor'])) {
-            $parts[] = 'Processor: '.$fields['payment_processor'];
+        if ($processor = $this->scalarField($fields['payment_processor'] ?? null)) {
+            $parts[] = 'Processor: '.$processor;
         }
-        if (! empty($fields['field_service_software'])) {
-            $parts[] = 'Software: '.$fields['field_service_software'];
+        if ($software = $this->scalarField($fields['field_service_software'] ?? null)) {
+            $parts[] = 'Software: '.$software;
         }
-        if (! empty($fields['system_integration'])) {
-            $parts[] = mb_substr($fields['system_integration'], 0, 200);
+        if ($integration = $this->scalarField($fields['system_integration'] ?? null)) {
+            $parts[] = mb_substr($integration, 0, 200);
         }
 
         return implode('. ', $parts) ?: 'See full report below.';

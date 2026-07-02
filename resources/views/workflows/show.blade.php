@@ -4,6 +4,8 @@
 
 @section('content')
 @php
+    use App\Support\LeadContactDisplay;
+
     $attempted = ($workflow->enriched_leads ?? 0) + ($workflow->failed_leads ?? 0);
     $pct = $workflow->total_leads > 0
         ? (int) round(($attempted / $workflow->total_leads) * 100)
@@ -85,7 +87,7 @@
                             @endforeach
                         </select>
                     </div>
-                    @foreach(['city' => 'City', 'state' => 'State', 'input_phone' => 'Phone', 'input_email' => 'Email', 'website' => 'Website'] as $key => $label)
+                    @foreach(['owner_name' => 'Owner / Contact', 'city' => 'City', 'state' => 'State', 'input_phone' => 'Phone', 'input_email' => 'Email', 'website' => 'Website'] as $key => $label)
                         <div class="app-field">
                             <label class="app-label">{{ $label }}</label>
                             <select name="mapping[{{ $key }}]" class="app-input">
@@ -155,8 +157,8 @@
                     <p class="app-field-hint">Comma-separated. Tags trace leads across imports — use them for batch enrich and assign in Lead Tags.</p>
                 </div>
 
-                <input type="hidden" name="verification_toggles[email]" value="1">
-                <input type="hidden" name="verification_toggles[domain]" value="1">
+                <input type="hidden" name="verification_toggles[email]" value="0">
+                <input type="hidden" name="verification_toggles[domain]" value="0">
             </div>
 
             <div class="app-card app-card-padded space-y-4 border-zinc-300">
@@ -228,9 +230,9 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
             @endif
 
             @if(($workflow->discarded_duplicates ?? 0) > 0)
-                <div class="app-alert app-alert-info">
-                    <p class="app-alert-title">{{ number_format($workflow->discarded_duplicates) }} duplicate phone numbers skipped</p>
-                    <p class="app-alert-desc">Rows with the same US number as an existing lead in this workspace were not imported.</p>
+                <div class="app-alert app-alert-warning">
+                    <p class="app-alert-title">{{ number_format($workflow->discarded_duplicates) }} rows were skipped on a previous import (duplicate phones)</p>
+                    <p class="app-alert-desc">Delete this import and re-upload the CSV to import every row. Phone duplicate skipping is now disabled for new imports.</p>
                 </div>
             @endif
 
@@ -252,6 +254,13 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                 </div>
             @endif
 
+            @if($readyToDistribute > 0 && ! $workflow->isProcessing())
+                <div class="app-alert app-alert-info">
+                    <p class="app-alert-title">{{ number_format($readyToDistribute) }} of {{ number_format($workflow->total_leads) }} leads still need assignment</p>
+                    <p class="app-alert-desc">Assign all leads to setters below. They will appear in Active leads only after assignment is complete.</p>
+                </div>
+            @endif
+
             @if($importedCount > 0 && ! $workflow->isProcessing() && ($enrichmentConfigured ?? false))
                 <div class="app-alert app-alert-warning flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
@@ -264,28 +273,6 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                             <button type="submit" class="app-btn app-btn-primary app-btn-sm whitespace-nowrap">Start enrichment</button>
                         </form>
                     @endif
-                </div>
-            @endif
-
-            @if($readyToDistribute > 0 && ! $workflow->isProcessing())
-                <div class="app-card app-card-padded space-y-4 border-emerald-200 bg-emerald-50/40">
-                    <div>
-                        <h3 class="app-section-title text-emerald-900">Distribute to appointment setters</h3>
-                        <p class="app-section-desc">{{ number_format($readyToDistribute) }} enriched leads ready · round-robin to selected setters</p>
-                    </div>
-                    <form method="POST" action="{{ route('admin.workflows.distribute', $workflow->id) }}" class="space-y-4">
-                        @csrf
-                        <div class="flex flex-wrap gap-2">
-                            @foreach($team as $member)
-                                <label class="app-member-chip">
-                                    <input type="checkbox" name="distribution_users[]" value="{{ $member->id }}" checked>
-                                    <span class="app-member-chip-name">{{ $member->name }}</span>
-                                    <span class="app-member-chip-role">{{ \App\Support\SalesOps::roleLabel($member->pivot->role) }}</span>
-                                </label>
-                            @endforeach
-                        </div>
-                        <button type="submit" class="app-btn app-btn-primary app-btn-sm">Distribute {{ number_format($readyToDistribute) }} leads</button>
-                    </form>
                 </div>
             @endif
 
@@ -346,9 +333,17 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
             <span id="workspace-sync-workflow-assigned" class="hidden">{{ $workflow->assigned_leads_count ?? 0 }}</span>
         </div>
 
+        @include('workflows.partials.assign-to-team', [
+            'workflow' => $workflow,
+            'readyToDistribute' => $readyToDistribute,
+            'teamLeads' => $teamLeads ?? collect(),
+            'setters' => $setters ?? collect(),
+            'setterTeamMetrics' => $setterTeamMetrics ?? [],
+        ])
+
         <div class="app-card app-card-padded">
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
-                <h2 class="app-section-title">Leads</h2>
+                <h2 class="app-section-title">All enriched data</h2>
                 <div class="app-filter-pills pipeline-lead-filters" id="pipeline-lead-filters" role="tablist">
                     <button type="button" class="is-active" data-filter="all">All</button>
                     <button type="button" data-filter="imported">Imported</button>
@@ -360,12 +355,14 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
             </div>
 
             @if($workflow->total_leads > 0 || $leads->isNotEmpty())
-                <x-data-table :paginator="$leads" min-width="640px">
+                <x-data-table :paginator="$leads" min-width="960px">
                     <table>
                         <thead>
                             <tr>
                                 <th>Business</th>
                                 <th>Owner</th>
+                                <th>Email</th>
+                                <th>Social Media</th>
                                 <th>Contact</th>
                                 <th>Status</th>
                                 <th class="text-right">Action</th>
@@ -373,26 +370,19 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                         </thead>
                         <tbody id="workspace-sync-pipeline-leads">
                             @forelse($leads as $lead)
+                                @php($display = LeadContactDisplay::for($lead))
                                 <tr data-lead-id="{{ $lead->id }}" data-lead-status="{{ $lead->status }}">
                                     <td>
-                                        <a href="{{ route('portal.leads.show', $lead->id) }}" class="font-bold text-zinc-900 hover:underline">{{ $lead->business_name }}</a>
+                                        <a href="{{ \App\Support\LeadRoute::show($lead, true) }}" class="font-bold text-zinc-900 hover:underline">{{ $lead->business_name }}</a>
                                         @if($lead->city || $lead->state)
                                             <div class="text-xs text-zinc-400 mt-0.5">{{ $lead->city }}{{ $lead->city && $lead->state ? ', ' : '' }}{{ $lead->state }}</div>
                                         @endif
                                         @include('partials.lead-tag-chips', ['tags' => $lead->tags, 'list' => $lead->leadList, 'compact' => true])
                                     </td>
-                                    <td class="text-sm text-zinc-600">{{ $lead->owner_name ?: '—' }}</td>
-                                    <td class="text-sm text-zinc-600">
-                                        @if($lead->direct_email && $lead->direct_email !== 'Not Publicly Available')
-                                            <div>{{ $lead->direct_email }}</div>
-                                        @endif
-                                        @if($lead->direct_phone && $lead->direct_phone !== 'Not Publicly Available')
-                                            <div class="text-xs text-zinc-400 mt-0.5">{{ $lead->direct_phone }}</div>
-                                        @endif
-                                        @if((!$lead->direct_email || $lead->direct_email === 'Not Publicly Available') && (!$lead->direct_phone || $lead->direct_phone === 'Not Publicly Available'))
-                                            <span class="text-zinc-400">—</span>
-                                        @endif
-                                    </td>
+                                    <td class="text-sm text-zinc-600">{{ LeadContactDisplay::cell($display['owner']) ?: '—' }}</td>
+                                    <td class="text-sm text-zinc-600">{{ LeadContactDisplay::cell($display['email']) ?: '—' }}</td>
+                                    <td class="text-sm text-zinc-600">{{ LeadContactDisplay::cell($display['social_media']) ?: '—' }}</td>
+                                    <td class="text-sm text-zinc-600">{{ LeadContactDisplay::cell($display['phone']) ?: '—' }}</td>
                                     <td>
                                         <x-lead-pipeline-badge :status="$lead->status" />
                                         @if($lead->status === 'failed' && $lead->error_message)
@@ -400,6 +390,8 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                                         @endif
                                     </td>
                                     <td class="text-right whitespace-nowrap">
+                                        <div class="flex items-center justify-end gap-2">
+                                            <a href="{{ \App\Support\LeadRoute::show($lead, true) }}" class="app-btn app-btn-secondary app-btn-sm">Details</a>
                                         @if($lead->status === 'pending_verification')
                                             <div class="flex items-center justify-end gap-1">
                                                 <form method="POST" action="{{ route('admin.leads.approve', $lead->id) }}">
@@ -414,6 +406,7 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                                         @elseif($lead->status === 'completed')
                                             <span class="text-xs font-semibold text-emerald-700">Released</span>
                                         @endif
+                                        </div>
                                     </td>
                                 </tr>
                             @empty

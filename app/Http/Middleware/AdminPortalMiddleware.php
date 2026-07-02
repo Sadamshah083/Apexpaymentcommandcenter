@@ -17,6 +17,10 @@ class AdminPortalMiddleware
         $user = Auth::user();
 
         if (! $user->canAccessAdminPortal()) {
+            if ($user->canAccessPortal()) {
+                return redirect()->route('portal.dashboard');
+            }
+
             Auth::logout();
 
             return redirect()->route('admin.login')->withErrors([

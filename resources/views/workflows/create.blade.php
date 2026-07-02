@@ -16,6 +16,7 @@
               enctype="multipart/form-data"
               class="space-y-5"
               data-form-loading
+              data-workflow-upload
               data-loading-title="Uploading file"
               data-loading-message="Reading your spreadsheet and mapping columns…"
               data-loading-button-text="Uploading…">
@@ -31,7 +32,7 @@
             <div class="app-field">
                 <label class="app-label">File</label>
                 <div class="app-upload-zone">
-                    <input type="file" name="file" id="file" required accept=".csv,.xlsx,.xls,.txt" onchange="updateFileLabel(this)">
+                    <input type="file" name="file" id="file" required accept=".csv,.xlsx,.xls,.txt">
                     <div id="upload-placeholder" class="space-y-2">
                         <div class="app-icon-circle">
                             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
@@ -41,7 +42,7 @@
                     </div>
                     <div id="file-selected" class="hidden space-y-1">
                         <p class="text-sm font-bold text-zinc-900" id="file-name"></p>
-                        <button type="button" onclick="resetUpload()" class="app-link text-xs">Change file</button>
+                        <button type="button" data-reset-upload class="app-link text-xs">Change file</button>
                     </div>
                 </div>
             </div>
@@ -50,19 +51,4 @@
         </form>
     </div>
 </div>
-
-<script>
-    function updateFileLabel(input) {
-        if (!input.files?.[0]) return;
-        document.getElementById('file-name').textContent = input.files[0].name;
-        document.getElementById('upload-placeholder').classList.add('hidden');
-        document.getElementById('file-selected').classList.remove('hidden');
-    }
-    function resetUpload() {
-        const input = document.getElementById('file');
-        input.value = '';
-        document.getElementById('upload-placeholder').classList.remove('hidden');
-        document.getElementById('file-selected').classList.add('hidden');
-    }
-</script>
 @endsection

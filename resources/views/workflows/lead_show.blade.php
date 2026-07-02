@@ -1,10 +1,14 @@
-@extends('layouts.portal')
+@extends($isAdminView ? 'layouts.admin' : 'layouts.portal')
 
 @section('title', $lead->business_name)
 
 @section('content')
 @php
+    use App\Support\LeadContactDisplay;
+    use App\Support\LeadRoute;
     use App\Support\SalesOps;
+
+    $contact = LeadContactDisplay::for($lead);
 @endphp
 <div class="app-page space-y-6">
     <div class="app-page-header flex items-center justify-between">
@@ -18,10 +22,17 @@
                 @if($lead->closer_status)
                     &bull; Closer: {{ SalesOps::closerStatusLabel($lead->closer_status) }}
                 @endif
+                @if($lead->setter)
+                    &bull; Assigned: {{ $lead->setter->name }}
+                @endif
             </p>
             @include('partials.lead-tag-chips', ['tags' => $lead->tags, 'list' => $lead->leadList])
         </div>
-        <a href="{{ route($user->portalDashboardRoute()) }}" class="app-btn app-btn-secondary text-sm">Back</a>
+        @if($isAdminView)
+            <a href="{{ route('admin.workflows.show', $lead->workflow_id) }}" class="app-btn app-btn-secondary text-sm">Back to import</a>
+        @else
+            <a href="{{ route($user->portalDashboardRoute()) }}" class="app-btn app-btn-secondary text-sm" data-turbo="false">Back</a>
+        @endif
     </div>
 
     @if($lead->isSetterLocked() && $user->isAppointmentSetter($workspace->id))
@@ -34,12 +45,17 @@
         <div class="lg:col-span-2 space-y-6">
             <div class="app-card app-card-padded space-y-6">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                    <div><span class="text-zinc-500">Owner</span><p class="font-semibold">{{ $lead->owner_name ?: '—' }}</p></div>
-                    <div><span class="text-zinc-500">Email</span><p class="font-semibold">{{ $lead->direct_email ?: $lead->input_email ?: '—' }}</p></div>
-                    <div><span class="text-zinc-500">Phone</span><p class="font-semibold">{{ $lead->direct_phone ?: $lead->input_phone ?: '—' }}</p></div>
-                    <div><span class="text-zinc-500">Website</span><p class="font-semibold">{{ $lead->website ?: '—' }}</p></div>
-                    <div><span class="text-zinc-500">Location</span><p class="font-semibold">{{ trim(($lead->city ?: '').', '.($lead->state ?: ''), ', ') ?: '—' }}</p></div>
-                    <div><span class="text-zinc-500">Processor</span><p class="font-semibold">{{ $lead->payment_processor ?: '—' }}</p></div>
+                    <div><span class="text-zinc-500">Owner</span><p class="font-semibold">{{ LeadContactDisplay::label($contact['owner'], '') }}</p></div>
+                    <div><span class="text-zinc-500">Email</span><p class="font-semibold break-all">{{ LeadContactDisplay::label($contact['email'], '') }}</p></div>
+                    <div><span class="text-zinc-500">Social Media</span><p class="font-semibold break-all">{{ LeadContactDisplay::label($contact['social_media'], '') }}</p></div>
+                    <div><span class="text-zinc-500">Contact</span><p class="font-semibold">{{ LeadContactDisplay::label($contact['phone'], '') }}</p></div>
+                    <div><span class="text-zinc-500">Website</span><p class="font-semibold break-all">{{ LeadContactDisplay::label($contact['website'], '') }}</p></div>
+                    <div><span class="text-zinc-500">Address</span><p class="font-semibold">{{ LeadContactDisplay::label($contact['address']) }}</p></div>
+                    <div><span class="text-zinc-500">Location</span><p class="font-semibold">{{ LeadContactDisplay::label($contact['location']) }}</p></div>
+                    <div><span class="text-zinc-500">Processor</span><p class="font-semibold">{{ LeadContactDisplay::label($contact['processor']) }}</p></div>
+                    @if($contact['pos_system'])
+                        <div><span class="text-zinc-500">POS / Booking</span><p class="font-semibold">{{ $contact['pos_system'] }}</p></div>
+                    @endif
                 </div>
 
                 @if($canEditSetter)
@@ -50,6 +66,7 @@
                             'lead' => $lead,
                             'setterStatuses' => $setterStatuses,
                             'compact' => false,
+                            'routePrefix' => $isAdminView ? 'admin' : 'portal',
                         ])
                     </div>
                 @endif
@@ -59,7 +76,7 @@
                 @endif
 
                 @if($canEditCloser && ! $lead->isCloserLocked())
-                    <form method="POST" action="{{ route('portal.leads.closer-status', $lead->id) }}" class="space-y-4 border-t border-zinc-100 pt-6">
+                    <form method="POST" action="{{ route(LeadRoute::name('closer-status', $isAdminView), $lead->id) }}" class="space-y-4 border-t border-zinc-100 pt-6">
                         @csrf
                         <h2 class="app-section-title">Update closer status</h2>
                         <select name="closer_status" required class="app-input max-w-xs">
@@ -75,7 +92,7 @@
                 @endif
             </div>
 
-            @if($lead->markdown_report)
+            @if(LeadContactDisplay::shouldDisplayEnrichmentReport($lead->markdown_report))
                 <div class="app-card app-card-padded prose prose-sm max-w-none">
                     {!! \Illuminate\Support\Str::markdown($lead->markdown_report) !!}
                 </div>

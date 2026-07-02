@@ -65,15 +65,15 @@ class WorkflowProviderStatusService
      *     openrouter: array<string, mixed>
      * }
      */
-    public function getEnrichmentStatus(bool $refresh = false): array
+    public function getEnrichmentStatus(bool $refresh = false, bool $probe = true): array
     {
         if ($refresh) {
             Cache::forget(self::GEMINI_HEALTH_CACHE_KEY);
             Cache::forget('workflow.openrouter_balance');
         }
 
-        $gemini = $this->getGeminiHealth();
-        $openRouter = $this->getOpenRouterHealth();
+        $gemini = $this->getGeminiHealth($refresh || $probe);
+        $openRouter = $this->getOpenRouterHealth($refresh || $probe);
 
         return [
             'configured' => $this->isEnrichmentConfigured(),
@@ -88,7 +88,7 @@ class WorkflowProviderStatusService
     /**
      * @return array{state: string, label: string, message: string|null, last_error: string|null, checked_at: string|null, probe_model: string|null}
      */
-    public function getGeminiHealth(): array
+    public function getGeminiHealth(bool $probe = true): array
     {
         if (! filled(config('gemini.api_key'))) {
             return [
@@ -98,6 +98,22 @@ class WorkflowProviderStatusService
                 'last_error' => Cache::get(self::GEMINI_ERROR_CACHE_KEY),
                 'checked_at' => null,
                 'probe_model' => null,
+            ];
+        }
+
+        if (! $probe) {
+            $cached = Cache::get(self::GEMINI_HEALTH_CACHE_KEY);
+            if (is_array($cached)) {
+                return $cached;
+            }
+
+            return [
+                'state' => 'cached_unknown',
+                'label' => 'Cached status unavailable',
+                'message' => 'Use Refresh status to probe Gemini without slowing page load.',
+                'last_error' => Cache::get(self::GEMINI_ERROR_CACHE_KEY),
+                'checked_at' => null,
+                'probe_model' => (string) config('workflow_enrichment.gemini_model', 'gemini-2.0-flash'),
             ];
         }
 
@@ -137,7 +153,7 @@ class WorkflowProviderStatusService
     /**
      * @return array{state: string, label: string, balance: mixed, message: string|null}
      */
-    protected function getOpenRouterHealth(): array
+    protected function getOpenRouterHealth(bool $fetchBalance = true): array
     {
         if (! filled(config('openrouter.api_key'))) {
             return [
@@ -148,7 +164,7 @@ class WorkflowProviderStatusService
             ];
         }
 
-        $balance = $this->getOpenRouterBalance();
+        $balance = $fetchBalance ? $this->getOpenRouterBalance() : Cache::get('workflow.openrouter_balance');
 
         return [
             'state' => $balance !== null ? 'ready' : 'unknown',

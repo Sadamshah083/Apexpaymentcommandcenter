@@ -1,5 +1,3 @@
-@props(['paginator'])
-
 @if ($paginator->total() > 0)
     <div {{ $attributes->merge(['class' => 'app-pagination']) }}>
         <p class="app-pagination-summary">
@@ -9,8 +7,6 @@
             <span class="font-semibold text-slate-700">{{ number_format($paginator->total()) }}</span>
         </p>
 
-        @if ($paginator->hasPages())
-            {{ $paginator->links() }}
-        @endif
+        {{ $paginator->links() }}
     </div>
 @endif
