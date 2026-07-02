@@ -28,9 +28,23 @@ class WorkspaceSyncController extends Controller
                 $request->has('cursor') ? $request->integer('cursor') : null,
                 $request->integer('workflow_id') ?: null,
                 $request->integer('lead_id') ?: null,
-                $request->query('scope') === 'lite' ? 'lite' : 'full',
+                $this->resolveSyncScope($request),
             )
         );
+    }
+
+    protected function resolveSyncScope(Request $request): string
+    {
+        if ($request->query('scope') === 'lite') {
+            return 'lite';
+        }
+
+        $syncScope = $request->query('sync_scope');
+        if (in_array($syncScope, ['list', 'off'], true)) {
+            return $syncScope;
+        }
+
+        return 'full';
     }
 
     /**
@@ -47,7 +61,7 @@ class WorkspaceSyncController extends Controller
 
         $workflowId = $request->integer('workflow_id') ?: null;
         $leadId = $request->integer('lead_id') ?: null;
-        $scope = $request->query('scope') === 'lite' ? 'lite' : 'full';
+        $scope = $this->resolveSyncScope($request);
 
         return response()->stream(function () use ($request, $workspace, $user, $workflowId, $leadId, $scope) {
             if (function_exists('set_time_limit')) {
@@ -83,7 +97,7 @@ class WorkspaceSyncController extends Controller
                     $idleChecks++;
                 }
 
-                usleep(500000);
+                usleep($scope === 'list' ? 2_000_000 : 500_000);
             }
 
             echo "event: reconnect\ndata: {}\n\n";

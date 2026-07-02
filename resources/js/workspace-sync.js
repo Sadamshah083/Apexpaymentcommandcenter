@@ -559,6 +559,7 @@ function formatWorkflowProgressLabel(wf) {
 }
 
 const SYNC_ACTIVE_MS = 2000;
+const SYNC_LITE_MS = 15000;
 const SYNC_HIDDEN_MS = 10000;
 const SYNC_ERROR_MS = 4000;
 
@@ -789,6 +790,11 @@ const SYNC_TARGET_IDS = [
 ];
 
 function pageNeedsWorkspaceSync() {
+    const root = document.body;
+    if (root.dataset.workspaceSyncScope === 'lite' && root.dataset.workspaceSyncUrl) {
+        return true;
+    }
+
     const pageContext = document.getElementById('workspace-sync-page');
     if (pageContext?.dataset.syncScope === 'off') {
         return false;
@@ -829,16 +835,17 @@ export function initWorkspaceSync() {
     const streamUrl = root.dataset.workspaceSyncStreamUrl;
     const pollUrl = root.dataset.workspaceSyncUrl;
     const usePoll = root.dataset.workspaceSyncUsePoll === '1';
+    const syncLite = root.dataset.workspaceSyncScope === 'lite';
 
     if (!pageNeedsWorkspaceSync()) {
         return;
     }
 
-    if (usePoll && !pollUrl) {
+    if ((syncLite || usePoll) && !pollUrl) {
         return;
     }
 
-    if (!usePoll && (!streamUrl || typeof EventSource === 'undefined')) {
+    if (!syncLite && !usePoll && (!streamUrl || typeof EventSource === 'undefined')) {
         return;
     }
 
@@ -850,7 +857,7 @@ export function initWorkspaceSync() {
     const pageContext = document.getElementById('workspace-sync-page');
     const workflowId = pageContext?.dataset.workflowId || root.dataset.workspaceWorkflowId || null;
     const leadId = pageContext?.dataset.leadId || root.dataset.workspaceLeadId || null;
-    const syncScope = pageContext?.dataset.syncScope || null;
+    const syncScope = syncLite ? 'lite' : (pageContext?.dataset.syncScope || null);
     const leadShowBase = root.dataset.leadShowBase || '/portal/leads';
     const workflowShowBase = root.dataset.workflowShowBase || '/admin/workflows';
 
@@ -875,7 +882,11 @@ export function initWorkspaceSync() {
         params.set('cursor', String(cursor));
         if (workflowId) params.set('workflow_id', workflowId);
         if (leadId) params.set('lead_id', leadId);
-        if (syncScope) params.set('sync_scope', syncScope);
+        if (syncLite) {
+            params.set('scope', 'lite');
+        } else if (syncScope) {
+            params.set('sync_scope', syncScope);
+        }
 
         return `${base}?${params.toString()}`;
     }
@@ -936,7 +947,9 @@ export function initWorkspaceSync() {
             }
         }
 
-        if (syncScope !== 'list') {
+        if (syncLite) {
+            applyToolkitSync(data?.toolkit);
+        } else if (syncScope !== 'list') {
             applyWorkspaceAdminState(data);
             applySalesOpsSync(data);
             applyToolkitSync(data?.toolkit);
@@ -981,7 +994,7 @@ export function initWorkspaceSync() {
             return;
         }
 
-        const pollInterval = syncScope === 'list' ? 5000 : 3000;
+        const pollInterval = syncLite ? SYNC_LITE_MS : (syncScope === 'list' ? 5000 : 3000);
         const hiddenInterval = 10000;
 
         try {
@@ -1079,8 +1092,12 @@ export function initWorkspaceSync() {
     };
     document.addEventListener('visibilitychange', syncVisibilityHandler);
 
-    if (usePoll) {
-        connectPoll();
+    if (syncLite || usePoll) {
+        if (syncLite && 'requestIdleCallback' in window) {
+            requestIdleCallback(connectPoll, { timeout: 2500 });
+        } else {
+            connectPoll();
+        }
     } else {
         connectStream();
     }
