@@ -16,7 +16,7 @@
     const showPlayError = (detail = '') => {
         const suffix = detail ? ` ${detail}` : '';
         window.showToast?.(
-            `Could not play audio.${suffix} Try Download, or run php artisan zoom:clear-token --cache and refresh.`,
+            `Could not play audio.${suffix} Recording media is not available via Morpheus CX.`,
             'error'
         );
     };

@@ -44,6 +44,17 @@
             </div>
         @endif
     </section>
+
+    @if(($log['result'] ?? '') === 'Active Call')
+        @include('communications.partials.morpheus-call-controls', [
+            'routePrefix' => $routePrefix,
+            'uuid' => $log['id'],
+            'log' => $log,
+            'morpheusQueues' => $morpheusQueues ?? [],
+            'morpheusUsers' => $morpheusUsers ?? [],
+            'morpheusConferences' => $morpheusConferences ?? [],
+        ])
+    @endif
 @else
     @include('communications.inbox.partials.empty', ['title' => 'Call not found', 'message' => 'Select a call from the list.'])
 @endif

@@ -69,6 +69,42 @@
         </div>
         @break
 
+    @case('queues')
+        <div class="ghl-inbox-conversation-scroll">
+            @include('communications.inbox.partials.panels.queues')
+        </div>
+        @break
+
+    @case('conferences')
+        <div class="ghl-inbox-conversation-scroll">
+            @include('communications.inbox.partials.panels.conferences')
+        </div>
+        @break
+
+    @case('leads')
+        <div class="ghl-inbox-conversation-scroll">
+            @include('communications.inbox.partials.panels.leads')
+        </div>
+        @break
+
+    @case('campaigns')
+        <div class="ghl-inbox-conversation-scroll">
+            @include('communications.inbox.partials.panels.campaigns')
+        </div>
+        @break
+
+    @case('lists')
+        <div class="ghl-inbox-conversation-scroll">
+            @include('communications.inbox.partials.panels.lists')
+        </div>
+        @break
+
+    @case('extensions')
+        <div class="ghl-inbox-conversation-scroll">
+            @include('communications.inbox.partials.panels.extensions')
+        </div>
+        @break
+
     @case('settings')
         <div class="ghl-inbox-conversation-scroll ghl-inbox-settings">
             @include('communications.inbox.partials.panels.settings')

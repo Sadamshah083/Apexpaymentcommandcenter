@@ -47,8 +47,7 @@
                         <p>No SMS sessions found.</p>
                         @if(empty($error))
                             <p class="text-xs text-zinc-500 mt-2">
-                                Add <code>phone:read:list_sms_sessions:admin</code> (or <code>phone_sms:read:admin</code>)
-                                in Zoom Marketplace, then run <code>php artisan zoom:clear-token --cache</code>.
+                                SMS is not available through the Morpheus CX Call-Control API.
                             </p>
                         @endif
                     </div>
@@ -152,7 +151,7 @@
                                 <label class="comm-hub-label block mb-1" for="sms-message">Message</label>
                                 <textarea id="sms-message" name="message" rows="3" class="comm-hub-input w-full" required maxlength="1600" placeholder="Type your message…">{{ old('message') }}</textarea>
                             </div>
-                            <p class="text-xs text-zinc-500">Requires <code>phone:read:sms_message:admin</code> in Zoom. Server-to-server apps may only send from the app owner's line.</p>
+                            <p class="text-xs text-zinc-500">SMS is not available through the Morpheus CX Call-Control API.</p>
                             <button type="submit" class="comm-hub-btn">Send SMS</button>
                         </form>
                     </section>

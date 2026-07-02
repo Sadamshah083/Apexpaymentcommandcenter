@@ -18,7 +18,7 @@
         <section class="app-card app-card-padded">
             <div class="flex items-center justify-between mb-4">
                 <div>
-                    <h2 class="text-lg font-bold text-zinc-900">Zoom users</h2>
+                    <h2 class="text-lg font-bold text-zinc-900">Morpheus users</h2>
                     <p class="text-sm text-zinc-500">{{ count($users) }} active users</p>
                 </div>
             </div>
@@ -49,7 +49,7 @@
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="4" class="ghl-empty py-8">No Zoom users returned.</td>
+                                <td colspan="4" class="ghl-empty py-8">No Morpheus users returned.</td>
                             </tr>
                         @endforelse
                     </tbody>
@@ -87,7 +87,7 @@
                         @endif
                     </article>
                 @empty
-                    <div class="ghl-empty py-8">No call queues found. Add the call queue scope in Zoom Marketplace.</div>
+                    <div class="ghl-empty py-8">No call queues found. Check Morpheus CX queue configuration.</div>
                 @endforelse
             </div>
         </section>

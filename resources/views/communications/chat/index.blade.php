@@ -46,9 +46,7 @@
                         <p>No Team Chat channels found.</p>
                         @if(empty($error))
                             <p class="text-xs text-zinc-500 mt-2">
-                                Add <code>team_chat:read:list_user_channels:admin</code> and
-                                <code>team_chat:read:list_user_messages:admin</code> in Zoom Marketplace, then run
-                                <code>php artisan zoom:clear-token --cache</code>.
+                                Team chat is not available through the Morpheus CX Call-Control API.
                             </p>
                         @endif
                     </div>
@@ -70,7 +68,7 @@
                     <div class="min-w-0 flex-1">
                         <h2 class="text-xl font-bold text-zinc-900 truncate">{{ $selectedThread['label'] }}</h2>
                         <p class="text-sm text-zinc-500 mt-0.5">
-                            {{ $selectedThread['owner_name'] ?? 'Zoom user' }}
+                            {{ $selectedThread['owner_name'] ?? 'Morpheus user' }}
                             · {{ $selectedThread['type'] ?? ($selectedThread['thread_type'] ?? 'channel') }}
                             @if(!empty($selectedThread['member_count']))
                                 · {{ (int) $selectedThread['member_count'] }} members
@@ -113,7 +111,7 @@
                 <div class="ghl-detail-empty">
                     <div class="ghl-detail-empty-icon" aria-hidden="true">💬</div>
                     <h2 class="app-page-title text-lg">Select a channel</h2>
-                    <p class="app-page-subtitle max-w-sm">Choose a Zoom Team Chat channel to read the conversation history.</p>
+                    <p class="app-page-subtitle max-w-sm">Choose a team chat channel to read the conversation history.</p>
                 </div>
             @endif
         </main>

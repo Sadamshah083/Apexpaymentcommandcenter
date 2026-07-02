@@ -164,6 +164,8 @@ Route::prefix('admin')->name('admin.')->middleware([
     Route::get('server-monitoring', [ServerMonitoringController::class, 'index'])->name('server.monitoring');
 
     Route::prefix('communications')->name('communications.')->group(function () {
+        $registerMorpheusHub = require __DIR__.'/morpheus-communications.php';
+
         Route::get('/', [CommunicationsHubController::class, 'index'])->name('index');
         Route::get('/contacts/{contactKey}', [CommunicationsHubController::class, 'showContact'])->name('contacts.show')->where('contactKey', '.*');
         Route::get('/zoom/export/logs', [CommunicationsHubController::class, 'exportLogs'])->name('zoom.export.logs');
@@ -172,6 +174,7 @@ Route::prefix('admin')->name('admin.')->middleware([
         Route::post('/zoom/refresh', [CommunicationsHubController::class, 'refreshCache'])->name('zoom.refresh');
         Route::post('/zoom/sms/send', [CommunicationsHubController::class, 'sendSms'])->name('zoom.sms.send');
         Route::post('/zoom/chat/send', [CommunicationsHubController::class, 'sendChat'])->name('zoom.chat.send');
+        $registerMorpheusHub();
     });
 });
 
@@ -229,6 +232,8 @@ Route::prefix('portal')->name('portal.')->middleware([\App\Http\Middleware\Marke
     Route::post('reputation/compliance', [ReputationController::class, 'complianceCheck'])->name('reputation.compliance');
 
     Route::prefix('communications')->name('communications.')->group(function () {
+        $registerMorpheusHub = require __DIR__.'/morpheus-communications.php';
+
         Route::get('/', [CommunicationsHubController::class, 'index'])->name('index');
         Route::get('/contacts/{contactKey}', [CommunicationsHubController::class, 'showContact'])->name('contacts.show')->where('contactKey', '.*');
         Route::get('/zoom/export/logs', [CommunicationsHubController::class, 'exportLogs'])->name('zoom.export.logs');
@@ -237,5 +242,6 @@ Route::prefix('portal')->name('portal.')->middleware([\App\Http\Middleware\Marke
         Route::post('/zoom/refresh', [CommunicationsHubController::class, 'refreshCache'])->name('zoom.refresh');
         Route::post('/zoom/sms/send', [CommunicationsHubController::class, 'sendSms'])->name('zoom.sms.send');
         Route::post('/zoom/chat/send', [CommunicationsHubController::class, 'sendChat'])->name('zoom.chat.send');
+        $registerMorpheusHub();
     });
 });

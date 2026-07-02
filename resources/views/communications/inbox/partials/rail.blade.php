@@ -2,7 +2,9 @@
     <div class="ghl-inbox-rail-section">
         <h3 class="ghl-inbox-rail-title">Quick dial</h3>
         @include('communications.inbox.partials.rail-dialer-compact', [
+            'routePrefix' => $routePrefix,
             'phoneUsers' => $phoneUsers,
+            'morpheusExtensions' => $morpheusExtensions ?? [],
             'defaultCallerId' => $defaultCallerId,
             'prefillNumber' => $prefillNumber,
         ])

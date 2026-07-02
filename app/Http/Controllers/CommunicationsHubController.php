@@ -8,6 +8,8 @@ namespace App\Http\Controllers;
 
 use App\Services\Communications\CommunicationsDataService;
 
+use App\Services\Communications\MorpheusHubService;
+
 use App\Services\Communications\ZoomContactService;
 
 use App\Services\Communications\CommunicationsInboxService;
@@ -396,7 +398,7 @@ class CommunicationsHubController extends Controller
 
         } else {
 
-            $error = 'Zoom is not configured.';
+            $error = 'Morpheus CX is not configured.';
 
         }
 
@@ -437,7 +439,7 @@ class CommunicationsHubController extends Controller
         $warning = null;
 
         $phoneUsers = [];
-
+        $morpheusExtensions = [];
         $recentNumbers = [];
 
         $prefillNumber = $request->get('number');
@@ -455,6 +457,7 @@ class CommunicationsHubController extends Controller
                 $warning = $payload['warning'];
 
                 $recentNumbers = $this->data->recentDialNumbers($filters);
+                $morpheusExtensions = app(\App\Services\Communications\MorpheusHubService::class)->extensions();
 
             } catch (\Throwable $e) {
 
@@ -464,7 +467,7 @@ class CommunicationsHubController extends Controller
 
         } else {
 
-            $error = 'Zoom is not configured.';
+            $error = 'Morpheus CX is not configured.';
 
         }
 
@@ -479,6 +482,8 @@ class CommunicationsHubController extends Controller
             'filters' => $filters,
 
             'phoneUsers' => $phoneUsers,
+
+            'morpheusExtensions' => $morpheusExtensions,
 
             'recentNumbers' => $recentNumbers,
 
@@ -534,7 +539,7 @@ class CommunicationsHubController extends Controller
 
         } else {
 
-            $error = 'Zoom is not configured.';
+            $error = 'Morpheus CX is not configured.';
 
         }
 
@@ -598,7 +603,7 @@ class CommunicationsHubController extends Controller
 
         } else {
 
-            $error = 'Zoom is not configured.';
+            $error = 'Morpheus CX is not configured.';
 
         }
 
@@ -703,7 +708,7 @@ class CommunicationsHubController extends Controller
 
         } else {
 
-            $error = 'Zoom is not configured.';
+            $error = 'Morpheus CX is not configured.';
 
         }
 
@@ -746,16 +751,14 @@ class CommunicationsHubController extends Controller
     {
 
         $this->data->bustCache();
+        app(MorpheusHubService::class)->bustCache();
 
         $this->zoom->clearAccessTokenCache();
 
         \Illuminate\Support\Facades\Cache::forget('zoom.connection.diagnostics');
 
-
-
         return redirect()->route($this->routePrefix().'communications.index', ['channel' => 'inbox', 'panel' => 'settings'])
-
-            ->with('success', 'Communications cache refreshed. Fresh Zoom data will load on your next tab visit.');
+            ->with('success', 'Communications cache refreshed. Fresh Morpheus CX data will load on your next visit.');
 
     }
 
@@ -867,21 +870,6 @@ class CommunicationsHubController extends Controller
 
         }
 
-    }
-
-    public function transferCall(Request $request, string $uuid)
-    {
-        $validated = $request->validate([
-            'destination' => ['required', 'string', 'max:64'],
-        ]);
-
-        try {
-            $this->zoom->transferCall($uuid, $validated['destination']);
-            return redirect()->route($this->routePrefix().'communications.index', ['mode' => 'calls'])
-                ->with('success', 'Call transferred successfully.');
-        } catch (\Throwable $e) {
-            return back()->with('error', $this->zoom->humanizeError($e->getMessage()));
-        }
     }
 
     public function sendChat(Request $request)
@@ -1024,7 +1012,7 @@ class CommunicationsHubController extends Controller
 
         } else {
 
-            $error = 'Zoom is not configured.';
+            $error = 'Morpheus CX is not configured.';
 
         }
 
@@ -1130,7 +1118,7 @@ class CommunicationsHubController extends Controller
 
         } else {
 
-            $error = 'Zoom is not configured.';
+            $error = 'Morpheus CX is not configured.';
 
         }
 
@@ -1180,7 +1168,7 @@ class CommunicationsHubController extends Controller
 
             'requiredScopes' => $this->zoom->requiredScopes(),
 
-            'error' => $this->zoom->isConfigured() ? null : 'Zoom is not configured.',
+            'error' => $this->zoom->isConfigured() ? null : 'Morpheus CX is not configured.',
 
         ]);
 

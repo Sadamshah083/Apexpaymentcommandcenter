@@ -10,15 +10,19 @@
 
         'calls' => 'Calls',
 
+        'queues' => 'Queues',
+
+        'conferences' => 'Conferences',
+
+        'leads' => 'Leads',
+
+        'campaigns' => 'Campaigns',
+
+        'lists' => 'Lists',
+
+        'extensions' => 'Extensions',
+
         'dialer' => 'Dialer',
-
-        'recordings' => 'Recordings',
-
-        'voicemails' => 'Voicemails',
-
-        'sms' => 'SMS',
-
-        'chat' => 'Chat',
 
         'team' => 'Team',
 
@@ -36,7 +40,7 @@
 
         <h1 class="ghl-hub-title">Communications Hub</h1>
 
-        <p class="ghl-hub-subtitle">Zoom Phone contacts, dialer, calls, recordings, voicemails, SMS, and Team Chat</p>
+        <p class="ghl-hub-subtitle">Morpheus CX — live calls, dialer, queues, conferences, and CRM</p>
 
     </div>
 
@@ -44,7 +48,12 @@
 
         @foreach($tabs as $tabMode => $label)
 
-            <a href="{{ route($routePrefix.'communications.index', ['mode' => $tabMode]) }}"
+            <a href="{{ route($routePrefix.'communications.index', match($tabMode) {
+                'dialer' => ['panel' => 'dialer'],
+                'settings' => ['panel' => 'settings'],
+                'contacts' => ['channel' => 'inbox'],
+                default => ['channel' => $tabMode],
+            }) }}"
 
                class="ghl-hub-nav-link {{ $mode === $tabMode ? 'ghl-hub-nav-link-active' : '' }}">{{ $label }}</a>
 
@@ -53,5 +62,4 @@
     </nav>
 
 </div>
-
 

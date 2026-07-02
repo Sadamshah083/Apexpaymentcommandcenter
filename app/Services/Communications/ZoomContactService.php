@@ -19,7 +19,7 @@ class ZoomContactService
     public function buildIndexPayload(array $filters = []): array
     {
         if (! $this->zoom->isConfigured()) {
-            return ['contacts' => [], 'call_logs' => [], 'error' => 'Zoom is not configured.', 'next_page_token' => null];
+            return ['contacts' => [], 'call_logs' => [], 'error' => 'Morpheus CX is not configured.', 'next_page_token' => null];
         }
 
         $users = [];
@@ -64,7 +64,7 @@ class ZoomContactService
     public function buildShowPayload(string $contactKey, array $filters = []): array
     {
         if (! $this->zoom->isConfigured()) {
-            return ['contact' => null, 'timeline' => [], 'stats' => [], 'error' => 'Zoom is not configured.'];
+            return ['contact' => null, 'timeline' => [], 'stats' => [], 'error' => 'Morpheus CX is not configured.'];
         }
 
         try {

@@ -3,8 +3,13 @@
 return [
 
     'morpheus' => [
-        'api_key' => env('MORPHEUS_API_KEY', 'ck_caea4aeef50fcd3d50131c65eb5a13d79e05fcf1aea27305'),
+        'api_key' => env('MORPHEUS_API_KEY'),
         'host' => env('MORPHEUS_HOST', 'apexone.morpheus.cx'),
+        'sip_host' => env('MORPHEUS_SIP_HOST'),
+        'portal_url' => env('MORPHEUS_PORTAL_URL'),
+        'outbound_prefix' => env('MORPHEUS_OUTBOUND_PREFIX', ''),
+        'sip_params' => env('MORPHEUS_SIP_PARAMS', 'user=phone'),
+        'dial_method' => env('MORPHEUS_DIAL_METHOD', 'sip'),
     ],
 
     'communications' => [

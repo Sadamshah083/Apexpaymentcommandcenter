@@ -86,9 +86,7 @@
                 <p>No voicemails in this date range.</p>
                 @if(empty($error))
                     <p class="text-sm text-zinc-500 mt-2 max-w-md mx-auto">
-                        Zoom only returns voicemails from the last 30 days per query. Widen the date range, confirm
-                        <code class="text-xs">phone:read:list_voicemails:admin</code> is enabled, then run
-                        <code class="text-xs">php artisan zoom:clear-token --cache</code>.
+                        Voicemail playback is not available through the Morpheus CX Call-Control API.
                     </p>
                 @endif
             </div>

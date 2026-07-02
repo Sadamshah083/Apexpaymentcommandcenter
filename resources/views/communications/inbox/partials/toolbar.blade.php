@@ -46,7 +46,7 @@
 
         <form method="POST" action="{{ route($routePrefix.'communications.zoom.refresh') }}">
             @csrf
-            <button type="submit" class="comm-hub-btn comm-hub-btn-secondary comm-hub-btn-sm" title="Refresh Zoom data">Refresh</button>
+            <button type="submit" class="comm-hub-btn comm-hub-btn-secondary comm-hub-btn-sm" title="Refresh Morpheus CX data">Refresh</button>
         </form>
 
         <a href="{{ route($routePrefix.'communications.zoom.export.logs', ['from' => $filters['from'], 'to' => $filters['to']]) }}"

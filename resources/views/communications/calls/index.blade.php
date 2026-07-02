@@ -3,6 +3,16 @@
 @section('title', 'Communications Hub — Calls')
 
 @section('content')
+@php
+    $hub = app(\App\Services\Communications\MorpheusHubService::class);
+    $morpheusQueues = $morpheusQueues ?? $hub->queues();
+    $morpheusUsers = $morpheusUsers ?? collect($hub->users())->map(fn ($u) => [
+        'id' => $u['id'] ?? null,
+        'name' => trim(($u['first_name'] ?? '').' '.($u['last_name'] ?? '')) ?: ($u['email'] ?? 'Agent'),
+        'email' => $u['email'] ?? null,
+    ])->values()->all();
+    $morpheusConferences = $morpheusConferences ?? $hub->conferences();
+@endphp
 <div class="ghl-hub">
     @include('communications.partials.hub-tabs', ['mode' => 'calls', 'routePrefix' => $routePrefix])
 
@@ -46,8 +56,8 @@
 
     <div class="ghl-calls-toolbar">
         <div>
-            <h2 class="text-lg font-bold text-slate-900">Recent calls</h2>
-            <p class="text-sm text-slate-500">{{ count($callLogs) }} on this page · last {{ config('integrations.communications.default_days', 14) }} days</p>
+            <h2 class="text-lg font-bold text-slate-900">Active calls</h2>
+            <p class="text-sm text-slate-500">{{ count($callLogs) }} live call{{ count($callLogs) === 1 ? '' : 's' }} from Morpheus CX</p>
         </div>
         <form method="GET" class="flex flex-wrap gap-2 items-end">
             <input type="hidden" name="mode" value="calls">
@@ -97,11 +107,14 @@
                 </div>
                 <div class="ghl-call-card-actions">
                     @if(($log['result'] ?? '') === 'Active Call')
-                        <form method="POST" action="{{ route($routePrefix.'communications.morpheus.calls.transfer', ['uuid' => $log['id']]) }}" class="flex items-center gap-2">
-                            @csrf
-                            <input type="text" name="destination" placeholder="Transfer dest (e.g. 8003)" required class="comm-hub-input text-xs py-1 px-2 w-40" style="margin-bottom:0">
-                            <button type="submit" class="comm-hub-btn text-xs py-1 px-3">Transfer</button>
-                        </form>
+                        @include('communications.partials.morpheus-call-controls', [
+                            'routePrefix' => $routePrefix,
+                            'uuid' => $log['id'],
+                            'log' => $log,
+                            'morpheusQueues' => $morpheusQueues ?? [],
+                            'morpheusUsers' => $morpheusUsers ?? [],
+                            'morpheusConferences' => $morpheusConferences ?? [],
+                        ])
                     @else
                         @php
                             $callbackPhone = match ($log['direction'] ?? '') {
@@ -131,7 +144,7 @@
                 </div>
             </article>
         @empty
-            <div class="ghl-empty py-16">No calls in this date range.</div>
+            <div class="ghl-empty py-16">No active calls right now.</div>
         @endforelse
     </div>
 

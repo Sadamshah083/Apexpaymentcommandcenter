@@ -69,7 +69,7 @@ class CommunicationsDataService
                     $warning = $payload['warning'];
                 }
 
-                foreach ($payload['call_logs'] as $row) {
+                foreach ($payload['logs'] ?? $payload['call_logs'] ?? [] as $row) {
                     $logs[] = $this->zoom->normalizeCallLog($row);
                 }
 
@@ -390,7 +390,7 @@ class CommunicationsDataService
             return false;
         }
 
-        // Do not cache empty phone/channel payloads — avoids stale blanks after Zoom fixes.
+        // Do not cache empty phone/channel payloads — avoids stale blanks after integration fixes.
         return false;
     }
 }

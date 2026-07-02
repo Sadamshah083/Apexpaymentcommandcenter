@@ -10,10 +10,12 @@ class CommunicationsInboxService
   public const CHANNELS = [
     'inbox' => ['label' => 'Inbox', 'icon' => 'inbox'],
     'calls' => ['label' => 'Calls', 'icon' => 'phone'],
-    'sms' => ['label' => 'SMS', 'icon' => 'sms'],
-    'voicemail' => ['label' => 'Voicemail', 'icon' => 'voicemail'],
-    'chat' => ['label' => 'Chat', 'icon' => 'chat'],
-    'recordings' => ['label' => 'Recordings', 'icon' => 'recording'],
+    'queues' => ['label' => 'Queues', 'icon' => 'phone'],
+    'conferences' => ['label' => 'Conferences', 'icon' => 'recording'],
+    'leads' => ['label' => 'Leads', 'icon' => 'inbox'],
+    'campaigns' => ['label' => 'Campaigns', 'icon' => 'team'],
+    'lists' => ['label' => 'Lists', 'icon' => 'inbox'],
+    'extensions' => ['label' => 'Extensions', 'icon' => 'dial'],
     'team' => ['label' => 'Team', 'icon' => 'team'],
   ];
 
@@ -22,6 +24,7 @@ class CommunicationsInboxService
     protected CommunicationsDataService $data,
     protected ZoomContactService $contacts,
     protected ZoomClickToCallService $clickToCall,
+    protected MorpheusHubService $morpheusHub,
   ) {}
 
   /**
@@ -37,10 +40,10 @@ class CommunicationsInboxService
 
     $connection = $this->zoom->isConfigured()
       ? $this->zoom->connectionStatus()
-      : ['connected' => false, 'message' => 'Zoom is not configured.', 'expires_at' => null];
+      : ['connected' => false, 'message' => 'Morpheus CX is not configured.', 'expires_at' => null];
 
     if (! $this->zoom->isConfigured()) {
-      $errors[] = 'Zoom is not configured.';
+      $errors[] = 'Morpheus CX is not configured.';
     }
 
     if ($panel === 'settings') {
@@ -61,6 +64,15 @@ class CommunicationsInboxService
         'teamUsers' => [],
         'teamQueues' => [],
         'queueWarning' => null,
+        'morpheusQueues' => [],
+        'morpheusConferences' => [],
+        'morpheusLeads' => [],
+        'morpheusCampaigns' => [],
+        'morpheusLists' => [],
+        'morpheusExtensions' => [],
+        'morpheusUsers' => [],
+        'selectedQueueWaiting' => [],
+        'selectedConferenceMembers' => [],
         'phoneUsers' => [],
         'recentNumbers' => [],
         'nextPageToken' => null,
@@ -106,6 +118,15 @@ class CommunicationsInboxService
     $teamUsers = [];
     $teamQueues = [];
     $queueWarning = null;
+    $morpheusQueues = [];
+    $morpheusConferences = [];
+    $morpheusLeads = [];
+    $morpheusCampaigns = [];
+    $morpheusLists = [];
+    $morpheusExtensions = [];
+    $morpheusUsers = [];
+    $selectedQueueWaiting = [];
+    $selectedConferenceMembers = [];
     $phoneUsers = [];
     $recentNumbers = [];
     $nextPageToken = null;
@@ -257,15 +278,42 @@ class CommunicationsInboxService
           $warnings = array_merge($warnings, $recPayload['warnings'] ?? []);
         }
 
-        if ($channel === 'team') {
-          $teamUsers = collect($this->safeDataLoad(
-            fn () => $this->data->users(),
+        if ($channel === 'team' || $channel === 'queues') {
+          $morpheusQueues = $this->safeDataLoad(fn () => $this->morpheusHub->queues(), [], $warnings);
+          $teamQueues = $morpheusQueues;
+        }
+
+        if ($channel === 'conferences') {
+          $morpheusConferences = $this->safeDataLoad(fn () => $this->morpheusHub->conferences(), [], $warnings);
+        }
+
+        if ($channel === 'leads') {
+          $morpheusLeads = $this->safeDataLoad(
+            fn () => $this->morpheusHub->leads(['search' => $filters['search'] ?? null]),
             [],
             $warnings,
-          ))
+          );
+          $morpheusLists = $this->safeDataLoad(fn () => $this->morpheusHub->lists(), [], $warnings);
+        }
+
+        if ($channel === 'campaigns') {
+          $morpheusCampaigns = $this->safeDataLoad(fn () => $this->morpheusHub->campaigns(), [], $warnings);
+        }
+
+        if ($channel === 'lists') {
+          $morpheusLists = $this->safeDataLoad(fn () => $this->morpheusHub->lists(), [], $warnings);
+          $morpheusCampaigns = $this->safeDataLoad(fn () => $this->morpheusHub->campaigns(), [], $warnings);
+        }
+
+        if ($channel === 'extensions' || $loadDialerExtras) {
+          $morpheusExtensions = $this->safeDataLoad(fn () => $this->morpheusHub->extensions(), [], $warnings);
+        }
+
+        if ($channel === 'team') {
+          $teamUsers = collect($this->safeDataLoad(fn () => $this->morpheusHub->users(), [], $warnings))
             ->map(fn (array $user) => [
               'id' => $user['id'] ?? null,
-              'name' => trim(($user['first_name'] ?? '').' '.($user['last_name'] ?? '')) ?: ($user['email'] ?? 'Zoom user'),
+              'name' => trim(($user['first_name'] ?? '').' '.($user['last_name'] ?? '')) ?: ($user['email'] ?? 'Morpheus user'),
               'email' => $user['email'] ?? null,
               'type' => $user['type'] ?? 'user',
               'status' => $user['status'] ?? 'active',
@@ -273,16 +321,34 @@ class CommunicationsInboxService
             ])
             ->values()
             ->all();
-          $queuePayload = $this->safeDataLoad(
-            fn () => $this->data->callQueues($filters),
-            ['queues' => [], 'warning' => null],
+          $morpheusUsers = $teamUsers;
+        }
+
+        if (in_array($channel, ['calls', 'inbox', 'queues', 'conferences'], true)) {
+          $morpheusQueues = $morpheusQueues ?: $this->safeDataLoad(fn () => $this->morpheusHub->queues(), [], $warnings);
+          $morpheusConferences = $morpheusConferences ?: $this->safeDataLoad(fn () => $this->morpheusHub->conferences(), [], $warnings);
+          $morpheusUsers = $morpheusUsers ?: collect($this->safeDataLoad(fn () => $this->morpheusHub->users(), [], $warnings))
+            ->map(fn (array $user) => [
+              'id' => $user['id'] ?? null,
+              'name' => trim(($user['first_name'] ?? '').' '.($user['last_name'] ?? '')) ?: ($user['email'] ?? 'Agent'),
+              'email' => $user['email'] ?? null,
+            ])->values()->all();
+        }
+
+        if ($request->filled('queue') && $channel === 'queues') {
+          $selectedQueueWaiting = $this->safeDataLoad(
+            fn () => $this->morpheusHub->queueWaiting((string) $request->get('queue')),
+            [],
             $warnings,
           );
-          $teamQueues = $queuePayload['queues'];
-          $queueWarning = $queuePayload['warning'];
-          if ($queuePayload['warning']) {
-            $warnings[] = $queuePayload['warning'];
-          }
+        }
+
+        if ($request->filled('conference') && $channel === 'conferences') {
+          $selectedConferenceMembers = $this->safeDataLoad(
+            fn () => $this->morpheusHub->conferenceMembers((string) $request->get('conference')),
+            [],
+            $warnings,
+          );
         }
 
         $sidebarItems = $this->buildSidebarItems(
@@ -294,6 +360,12 @@ class CommunicationsInboxService
           $chatChannels,
           $recordings,
           $teamUsers,
+          $morpheusQueues,
+          $morpheusConferences,
+          $morpheusLeads,
+          $morpheusCampaigns,
+          $morpheusLists,
+          $morpheusExtensions,
           $request,
           $routePrefix,
         );
@@ -373,6 +445,12 @@ class CommunicationsInboxService
           $summarySms,
           $chatChannels,
           $recordings,
+          $morpheusQueues,
+          $morpheusConferences,
+          $morpheusLeads,
+          $morpheusCampaigns,
+          $morpheusLists,
+          $morpheusExtensions,
         );
       } catch (\Throwable $e) {
         $errors[] = $this->zoom->humanizeError($e->getMessage());
@@ -396,6 +474,15 @@ class CommunicationsInboxService
       'teamUsers' => $teamUsers,
       'teamQueues' => $teamQueues,
       'queueWarning' => $queueWarning ?? null,
+      'morpheusQueues' => $morpheusQueues,
+      'morpheusConferences' => $morpheusConferences,
+      'morpheusLeads' => $morpheusLeads,
+      'morpheusCampaigns' => $morpheusCampaigns,
+      'morpheusLists' => $morpheusLists,
+      'morpheusExtensions' => $morpheusExtensions,
+      'morpheusUsers' => $morpheusUsers,
+      'selectedQueueWaiting' => $selectedQueueWaiting,
+      'selectedConferenceMembers' => $selectedConferenceMembers,
       'phoneUsers' => $phoneUsers,
       'recentNumbers' => $recentNumbers,
       'nextPageToken' => $nextPageToken,
@@ -444,6 +531,12 @@ class CommunicationsInboxService
     return match ($mode) {
       'contacts', 'inbox', '' => 'inbox',
       'calls' => 'calls',
+      'queues' => 'queues',
+      'conferences' => 'conferences',
+      'leads' => 'leads',
+      'campaigns' => 'campaigns',
+      'lists' => 'lists',
+      'extensions' => 'extensions',
       'dialer' => 'inbox',
       'recordings' => 'recordings',
       'voicemails' => 'voicemail',
@@ -499,6 +592,12 @@ class CommunicationsInboxService
 
     return match ($channel) {
       'team' => 'team',
+      'queues' => 'queues',
+      'conferences' => 'conferences',
+      'leads' => 'leads',
+      'campaigns' => 'campaigns',
+      'lists' => 'lists',
+      'extensions' => 'extensions',
       'recordings' => 'recordings',
       'voicemail' => 'voicemails',
       'calls' => 'calls',
@@ -612,12 +711,24 @@ class CommunicationsInboxService
     array $summarySms,
     array $chatChannels,
     array $recordings,
+    array $queues = [],
+    array $conferences = [],
+    array $leads = [],
+    array $campaigns = [],
+    array $lists = [],
+    array $extensions = [],
   ): array {
     return [
       'inbox' => count($contacts),
       'calls' => count($callLogs) ?: (int) ($summaryStats['total'] ?? 0),
       'calls_total' => (int) ($summaryStats['total'] ?? 0),
       'calls_missed' => (int) ($summaryStats['missed'] ?? 0),
+      'queues' => count($queues),
+      'conferences' => count($conferences),
+      'leads' => count($leads),
+      'campaigns' => count($campaigns),
+      'lists' => count($lists),
+      'extensions' => count($extensions),
       'sms' => count($summarySms),
       'voicemail' => count($summaryVms),
       'voicemail_unread' => collect($summaryVms)->where('status', 'unread')->count(),
@@ -639,6 +750,12 @@ class CommunicationsInboxService
     array $chatChannels,
     array $recordings,
     array $teamUsers,
+    array $queues,
+    array $conferences,
+    array $leads,
+    array $campaigns,
+    array $lists,
+    array $extensions,
     Request $request,
     string $routePrefix,
   ): array {
@@ -749,6 +866,103 @@ class CommunicationsInboxService
           'avatar' => strtoupper(substr($user['name'] ?? 'U', 0, 2)),
           'active' => false,
           'url' => route($routePrefix.'communications.index', array_merge($baseQuery, ['channel' => 'team'])),
+        ];
+      })->values()->all(),
+
+      'queues' => collect($queues)->map(function (array $queue) use ($baseQuery, $routePrefix, $request) {
+        $id = $queue['id'] ?? null;
+
+        return [
+          'key' => 'queue:'.$id,
+          'kind' => 'queue',
+          'label' => $queue['name'] ?? 'Queue',
+          'subtitle' => ($queue['waiting'] ?? 0).' waiting · '.($queue['longest_wait_sec'] ?? 0).'s',
+          'time' => null,
+          'badge' => $queue['status'] ?? null,
+          'avatar' => 'Q',
+          'active' => $request->get('queue') === $id,
+          'url' => route($routePrefix.'communications.index', array_merge($baseQuery, ['queue' => $id])),
+        ];
+      })->values()->all(),
+
+      'conferences' => collect($conferences)->map(function (array $room) use ($baseQuery, $routePrefix, $request) {
+        $id = $room['id'] ?? null;
+
+        return [
+          'key' => 'conf:'.$id,
+          'kind' => 'conference',
+          'label' => $room['name'] ?? 'Conference',
+          'subtitle' => 'Ext '.($room['extension_num'] ?? '—'),
+          'time' => null,
+          'badge' => ($room['enabled'] ?? true) ? 'active' : 'disabled',
+          'avatar' => 'C',
+          'active' => $request->get('conference') === $id,
+          'url' => route($routePrefix.'communications.index', array_merge($baseQuery, ['conference' => $id])),
+        ];
+      })->values()->all(),
+
+      'leads' => collect($leads)->map(function (array $lead) use ($baseQuery, $routePrefix) {
+        $id = $lead['id'] ?? null;
+        $name = trim(($lead['first_name'] ?? '').' '.($lead['last_name'] ?? '')) ?: ($lead['phone_number'] ?? 'Lead');
+
+        return [
+          'key' => 'lead:'.$id,
+          'kind' => 'lead',
+          'label' => $name,
+          'subtitle' => ($lead['phone_number'] ?? '—').' · '.($lead['status'] ?? '—'),
+          'time' => $lead['updated_at'] ?? null,
+          'badge' => $lead['disposition'] ?? null,
+          'avatar' => 'L',
+          'active' => false,
+          'url' => route($routePrefix.'communications.index', array_merge($baseQuery, ['channel' => 'leads'])),
+        ];
+      })->values()->all(),
+
+      'campaigns' => collect($campaigns)->map(function (array $campaign) use ($baseQuery, $routePrefix) {
+        $id = $campaign['id'] ?? null;
+
+        return [
+          'key' => 'campaign:'.$id,
+          'kind' => 'campaign',
+          'label' => $campaign['name'] ?? 'Campaign',
+          'subtitle' => ($campaign['dial_mode'] ?? '—').' · '.($campaign['status'] ?? '—'),
+          'time' => null,
+          'badge' => $campaign['status'] ?? null,
+          'avatar' => 'P',
+          'active' => false,
+          'url' => route($routePrefix.'communications.index', array_merge($baseQuery, ['channel' => 'campaigns'])),
+        ];
+      })->values()->all(),
+
+      'lists' => collect($lists)->map(function (array $list) use ($baseQuery, $routePrefix) {
+        $id = $list['id'] ?? null;
+
+        return [
+          'key' => 'list:'.$id,
+          'kind' => 'list',
+          'label' => $list['name'] ?? 'List',
+          'subtitle' => $list['status'] ?? '—',
+          'time' => null,
+          'badge' => $list['status'] ?? null,
+          'avatar' => '#',
+          'active' => false,
+          'url' => route($routePrefix.'communications.index', array_merge($baseQuery, ['channel' => 'lists'])),
+        ];
+      })->values()->all(),
+
+      'extensions' => collect($extensions)->map(function (array $ext) use ($baseQuery, $routePrefix) {
+        $id = $ext['id'] ?? $ext['extension_num'] ?? null;
+
+        return [
+          'key' => 'ext:'.$id,
+          'kind' => 'extension',
+          'label' => $ext['caller_id_name'] ?? ('Ext '.$ext['extension_num']),
+          'subtitle' => $ext['extension_num'] ?? '—',
+          'time' => null,
+          'badge' => $ext['status'] ?? null,
+          'avatar' => 'E',
+          'active' => false,
+          'url' => route($routePrefix.'communications.index', array_merge($baseQuery, ['channel' => 'extensions'])),
         ];
       })->values()->all(),
 

@@ -9,7 +9,7 @@
             'routePrefix' => $routePrefix,
             'phone' => $phone,
         ])
-        <a href="{{ route($routePrefix.'communications.index', ['mode' => 'dialer', 'number' => $phone]) }}"
+        <a href="{{ route($routePrefix.'communications.index', ['panel' => 'dialer', 'number' => $phone]) }}"
            class="comm-hub-btn comm-hub-btn-secondary ghl-quick-btn">Dialer</a>
         @if($smsSession && !empty($smsSession['session_id']))
             <a href="{{ route($routePrefix.'communications.index', ['mode' => 'sms', 'session' => $smsSession['session_id']]) }}"

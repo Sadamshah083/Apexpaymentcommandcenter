@@ -7,23 +7,45 @@ use Tests\TestCase;
 
 class ZoomClickToCallServiceTest extends TestCase
 {
-    public function test_builds_zoom_phone_call_url(): void
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config([
+            'integrations.morpheus.host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.sip_host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.sip_params' => 'user=phone',
+            'integrations.morpheus.dial_method' => 'sip',
+        ]);
+    }
+
+    public function test_builds_sip_dial_url_for_e164_number(): void
     {
         $service = new ZoomClickToCallService;
 
         $this->assertSame(
-            'zoomphonecall://+15551234567',
-            $service->dialUrl('(555) 123-4567')
+            'sip:15551234567@apexone.morpheus.cx;user=phone',
+            $service->sipUrl('(555) 123-4567')
         );
     }
 
-    public function test_builds_zoom_phone_call_url_with_caller_id(): void
+    public function test_builds_sip_dial_url_for_extension_destination(): void
     {
         $service = new ZoomClickToCallService;
 
         $this->assertSame(
-            'zoomphonecall://+15551234567?callerid=%2B15557654321',
-            $service->dialUrl('+1 555 123 4567', '+1 (555) 765-4321')
+            'sip:8003@apexone.morpheus.cx',
+            $service->sipUrl('8003')
+        );
+    }
+
+    public function test_preferred_dial_url_uses_sip_when_configured(): void
+    {
+        $service = new ZoomClickToCallService;
+
+        $this->assertSame(
+            'sip:15551234567@apexone.morpheus.cx;user=phone',
+            $service->dialUrl('+1 555 123 4567')
         );
     }
 
@@ -39,5 +61,12 @@ class ZoomClickToCallServiceTest extends TestCase
         $service = new ZoomClickToCallService;
 
         $this->assertSame('tel:+15551234567', $service->telUrl('5551234567'));
+    }
+
+    public function test_portal_url_defaults_to_https_host(): void
+    {
+        $service = new ZoomClickToCallService;
+
+        $this->assertSame('https://apexone.morpheus.cx/', $service->portalUrl());
     }
 }

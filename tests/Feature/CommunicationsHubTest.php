@@ -25,6 +25,9 @@ class CommunicationsHubTest extends TestCase
         config([
             'integrations.morpheus.api_key' => 'ck_test_super_secret_value_1234',
             'integrations.morpheus.host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.sip_host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.sip_params' => 'user=phone',
+            'integrations.morpheus.dial_method' => 'api',
         ]);
     }
 
@@ -173,13 +176,54 @@ class CommunicationsHubTest extends TestCase
             ->assertNotFound();
     }
 
-    public function test_admin_can_open_recordings_voicemails_sms_and_team_tabs(): void
+    public function test_admin_can_originate_outbound_call_with_sip_launch(): void
+    {
+        config(['integrations.morpheus.dial_method' => 'sip']);
+
+        $admin = $this->makeAdmin();
+
+        $this->actingAs($admin)
+            ->post(route('admin.communications.morpheus.calls.originate'), [
+                'from_extension' => '1001',
+                'destination' => '+15551234567',
+                'fallback' => 'sip',
+            ])
+            ->assertOk()
+            ->assertSee('Opening your softphone')
+            ->assertSee('sip:15551234567@apexone.morpheus.cx;user=phone', false);
+    }
+
+    public function test_admin_can_originate_outbound_call_with_api_then_sip_fallback(): void
+    {
+        config(['integrations.morpheus.dial_method' => 'api']);
+
+        Http::fake([
+            'https://apexone.morpheus.cx/api/v1/call-control/calls/originate' => Http::response(['error' => 'not found'], 404),
+            'https://apexone.morpheus.cx/api/v1/call-control/calls' => Http::response(['error' => 'method not allowed'], 405),
+            'https://apexone.morpheus.cx/api/v1/call-control/dial' => Http::response(['error' => 'not found'], 404),
+            'https://apexone.morpheus.cx/api/v1/call-control/originate' => Http::response(['error' => 'not found'], 404),
+        ]);
+
+        $admin = $this->makeAdmin();
+
+        $this->actingAs($admin)
+            ->post(route('admin.communications.morpheus.calls.originate'), [
+                'from_extension' => '1001',
+                'destination' => '+15551234567',
+                'fallback' => 'sip',
+            ])
+            ->assertOk()
+            ->assertSee('Opening your softphone')
+            ->assertSee('sip:15551234567@apexone.morpheus.cx;user=phone', false);
+    }
+
+    public function test_admin_can_open_morpheus_hub_channels(): void
     {
         $this->mockZoomServices();
 
         $admin = $this->makeAdmin();
 
-        foreach (['recordings', 'voicemail', 'sms', 'chat', 'team'] as $channel) {
+        foreach (['queues', 'conferences', 'leads', 'campaigns', 'lists', 'extensions', 'team'] as $channel) {
             $this->actingAs($admin)
                 ->get(route('admin.communications.index', ['channel' => $channel]))
                 ->assertOk()
@@ -189,7 +233,8 @@ class CommunicationsHubTest extends TestCase
         $this->actingAs($admin)
             ->get(route('admin.communications.index', ['panel' => 'dialer']))
             ->assertOk()
-            ->assertSee('Phone dialer');
+            ->assertSee('Phone dialer')
+            ->assertSee('Call with Morpheus CX');
     }
 
     public function test_admin_can_open_dialer_with_prefill_number(): void
@@ -204,6 +249,30 @@ class CommunicationsHubTest extends TestCase
             ->assertSee('Phone dialer')
             ->assertSee('Call with Morpheus CX')
             ->assertSee('+15559876543', false);
+    }
+
+    public function test_admin_can_transfer_active_call_via_morpheus_api(): void
+    {
+        Http::fake([
+            'https://apexone.morpheus.cx/api/v1/call-control/calls/*' => Http::response(['ok' => true, 'action' => 'transfer'], 200),
+        ]);
+
+        $admin = $this->makeAdmin();
+        $uuid = '550e8400-e29b-41d4-a716-446655440000';
+
+        $this->actingAs($admin)
+            ->post(route('admin.communications.morpheus.calls.transfer', ['uuid' => $uuid]), [
+                'destination' => '8003',
+            ])
+            ->assertRedirect(route('admin.communications.index', ['mode' => 'calls']))
+            ->assertSessionHas('success');
+
+        Http::assertSent(function ($request) use ($uuid) {
+            return $request->method() === 'POST'
+                && str_contains($request->url(), "/calls/{$uuid}/transfer")
+                && $request['destination'] === '8003'
+                && $request->hasHeader('X-API-Key', 'ck_test_super_secret_value_1234');
+        });
     }
 
     public function test_inbox_contact_detail_renders_without_error(): void

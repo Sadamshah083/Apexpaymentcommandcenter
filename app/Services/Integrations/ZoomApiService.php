@@ -114,6 +114,68 @@ class ZoomApiService
         return null;
     }
 
+    /**
+     * Attempt to originate an outbound call from an agent extension.
+     * Morpheus documents live call control only; we probe known originate paths
+     * and return a structured result for the hub dialer.
+     *
+     * @return array{ok: bool, action?: string, call_uuid?: string, error?: string, attempted?: array<int, string>}
+     */
+    public function originateCall(string $fromExtension, string $destination): array
+    {
+        $fromExtension = trim($fromExtension);
+        $destination = trim($destination);
+
+        if ($fromExtension === '' || $destination === '') {
+            return ['ok' => false, 'error' => 'Extension and destination are required.'];
+        }
+
+        $payloads = [
+            ['/calls/originate', ['extension' => $fromExtension, 'destination' => $destination]],
+            ['/calls/originate', ['extension_num' => $fromExtension, 'destination' => $destination]],
+            ['/calls/originate', ['from_extension' => $fromExtension, 'destination' => $destination]],
+            ['/calls', ['from_extension' => $fromExtension, 'destination' => $destination]],
+            ['/calls', ['extension_num' => $fromExtension, 'to' => $destination]],
+            ['/dial', ['extension_num' => $fromExtension, 'destination' => $destination]],
+            ['/originate', ['extension' => $fromExtension, 'destination' => $destination]],
+        ];
+
+        $attempted = [];
+        $lastError = 'Outbound originate is not exposed by the Morpheus Call-Control API. Register your extension in a SIP softphone and dial from the hub.';
+
+        foreach ($payloads as [$path, $body]) {
+            $attempted[] = 'POST '.$path;
+
+            try {
+                $response = $this->client()->post($this->url($path), $body);
+
+                if ($response->status() === 404) {
+                    continue;
+                }
+
+                if ($response->successful()) {
+                    $json = $response->json() ?? [];
+
+                    return array_merge([
+                        'ok' => true,
+                        'action' => 'originate',
+                        'attempted' => $attempted,
+                    ], $json);
+                }
+
+                $lastError = (string) ($response->json('error') ?? $response->body() ?: 'HTTP '.$response->status());
+            } catch (\Throwable $e) {
+                $lastError = $e->getMessage();
+            }
+        }
+
+        return [
+            'ok' => false,
+            'error' => $lastError,
+            'attempted' => $attempted,
+        ];
+    }
+
     // =========================================================================
     // CALL ACTIONS  (requires calls:control)
     // =========================================================================
@@ -767,6 +829,31 @@ class ZoomApiService
     // =========================================================================
 
     /**
+     * GET /extensions — List SIP extensions (raw API rows).
+     *
+     * @param array{limit?: int, offset?: int, user_id?: string} $filters
+     * @return array{extensions: array<int, array<string, mixed>>}
+     */
+    public function listExtensions(array $filters = []): array
+    {
+        try {
+            $params = array_filter([
+                'limit' => $filters['limit'] ?? 100,
+                'offset' => $filters['offset'] ?? 0,
+                'user_id' => $filters['user_id'] ?? null,
+            ], fn ($v) => ! is_null($v));
+
+            $response = $this->client()->get($this->url('/extensions'), $params);
+            if ($response->successful()) {
+                return ['extensions' => $response->json('extensions') ?? []];
+            }
+        } catch (\Throwable) {
+        }
+
+        return ['extensions' => []];
+    }
+
+    /**
      * GET /extensions — List SIP extensions.
      *
      * @param array{limit?: int, offset?: int, user_id?: string} $filters
@@ -886,10 +973,74 @@ class ZoomApiService
                         'campaign_id'=> $row['campaign_id'] ?? null,
                     ];
                 }
-                return ['logs' => $logs, 'next_page_token' => null];
+                return ['logs' => $logs, 'call_logs' => $logs, 'next_page_token' => null];
             }
         } catch (\Throwable) {}
-        return ['logs' => [], 'next_page_token' => null];
+        return ['logs' => [], 'call_logs' => [], 'next_page_token' => null];
+    }
+
+    /**
+     * Normalize a call row for the communications hub (idempotent for listCallLogs output).
+     *
+     * @return array<string, mixed>
+     */
+    public function normalizeCallLog(array $row): array
+    {
+        if (isset($row['from']) && isset($row['direction'])) {
+            return array_merge($row, ['raw' => $row['raw'] ?? $row]);
+        }
+
+        return [
+            'id' => (string) ($row['uuid'] ?? $row['id'] ?? ''),
+            'direction' => $row['direction'] ?? 'inbound',
+            'from' => $row['caller_name'] ?? $row['phone_number'] ?? '—',
+            'to' => $row['callee_name'] ?? '—',
+            'from_phone' => $row['phone_number'] ?? '',
+            'to_phone' => $row['phone_number'] ?? '',
+            'start_time' => $row['started_at'] ?? null,
+            'result' => ($row['status'] ?? '') === 'active' ? 'Active Call' : ($row['status'] ?? '—'),
+            'duration' => (int) ($row['duration'] ?? 0),
+            'recording' => '—',
+            'campaign_id' => $row['campaign_id'] ?? null,
+            'raw' => $row,
+        ];
+    }
+
+    public function compactZoomReferenceId(string $id): string
+    {
+        return preg_replace('/[^a-zA-Z0-9]/', '', $id) ?? $id;
+    }
+
+    /**
+     * @return array{recordings: array<int, array<string, mixed>>, next_page_token: null}
+     */
+    public function listPhoneRecordings(array $filters = []): array
+    {
+        return ['recordings' => [], 'next_page_token' => null];
+    }
+
+    /**
+     * @return array{messages: array<int, array<string, mixed>>, next_page_token: null}
+     */
+    public function getSmsSessionMessages(string $sessionId, array $filters = []): array
+    {
+        return ['messages' => [], 'next_page_token' => null];
+    }
+
+    /**
+     * @return array{success: bool, error?: string}
+     */
+    public function sendSmsMessage(array $payload): array
+    {
+        return ['success' => false, 'error' => 'Morpheus CX does not support SMS via the Call-Control API.'];
+    }
+
+    /**
+     * @return array{messages: array<int, array<string, mixed>>, next_page_token: null}
+     */
+    public function getTeamChatMessages(string $ownerUserId, array $filters = []): array
+    {
+        return ['messages' => [], 'next_page_token' => null];
     }
 
     // =========================================================================

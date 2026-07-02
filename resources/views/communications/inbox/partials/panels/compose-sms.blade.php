@@ -5,9 +5,9 @@
             'thread' => null,
             'prefillTo' => request('number', ''),
         ])
-        <p class="text-xs text-zinc-500 mt-3">Requires <code>phone:read:sms_message:admin</code> scope in Zoom.</p>
+        <p class="text-xs text-zinc-500 mt-3">SMS is not available through the Morpheus CX Call-Control API.</p>
     @else
-        <p class="text-sm text-zinc-500">No Zoom Phone lines available. Add <code>phone:read:list_users:admin</code> and refresh.</p>
+        <p class="text-sm text-zinc-500">No Morpheus extensions available. Check your API key permissions and refresh.</p>
     @endif
 </section>
 
