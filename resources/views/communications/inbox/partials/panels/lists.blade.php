@@ -40,4 +40,5 @@
             <p class="ghl-empty py-6">No lists.</p>
         @endforelse
     </div>
+    <x-communications.list-pagination :pagination="$panelPagination ?? null" class="mt-4" />
 </div>

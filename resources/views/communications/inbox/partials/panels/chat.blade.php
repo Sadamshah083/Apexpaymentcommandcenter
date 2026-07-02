@@ -25,12 +25,7 @@
                 <p class="ghl-empty py-8">No messages in this channel yet.</p>
             @endforelse
         </div>
-        @if ($chatMessagesNextPageToken ?? null)
-            <div class="mt-4 text-center">
-                <a href="{{ route($routePrefix . 'communications.index', array_merge(request()->query(), ['msg_page_token' => $chatMessagesNextPageToken])) }}"
-                    class="comm-hub-btn comm-hub-btn-secondary">Load older messages</a>
-            </div>
-        @endif
+        <x-communications.list-pagination :pagination="$panelPagination ?? null" class="mt-4" />
     </section>
 
     <div class="ghl-sms-compose mt-4">

@@ -28,12 +28,7 @@
         @empty
             <p class="ghl-empty py-8 text-center">No messages yet. Send one below.</p>
         @endforelse
-        @if ($smsMessagesNextPageToken ?? null)
-            <div class="text-center py-2">
-                <a href="{{ route($routePrefix . 'communications.index', array_merge(request()->query(), ['msg_page_token' => $smsMessagesNextPageToken])) }}"
-                    class="comm-hub-link text-sm">Load older messages</a>
-            </div>
-        @endif
+        <x-communications.list-pagination :pagination="$panelPagination ?? null" class="mt-3" />
     </div>
 
     @if (!empty($phoneUsers))

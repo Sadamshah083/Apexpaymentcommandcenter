@@ -4,8 +4,10 @@ namespace App\Services\Communications;
 
 use App\Services\Integrations\ZoomApiService;
 use App\Services\Workspace\WorkspaceContextService;
+use App\Support\SimplePaginator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 
 class CommunicationsInboxService
 {
@@ -55,7 +57,13 @@ class CommunicationsInboxService
     $warnings = [];
 
     $connection = $this->zoom->isConfigured()
-      ? $this->zoom->connectionStatus()
+      ? ($panel === 'settings'
+        ? $this->zoom->connectionStatus()
+        : Cache::remember(
+          'integrations.morpheus.connection_status',
+          180,
+          fn () => $this->zoom->connectionStatus(),
+        ))
       : ['connected' => false, 'message' => 'Morpheus CX is not configured.', 'expires_at' => null];
 
     if (! $this->zoom->isConfigured()) {
@@ -125,6 +133,8 @@ class CommunicationsInboxService
 
     $channelCounts = [];
     $sidebarItems = [];
+    $listPagination = null;
+    $panelPagination = null;
     $contacts = [];
     $callLogs = [];
     $callStats = [];
@@ -165,24 +175,26 @@ class CommunicationsInboxService
 
     if ($this->zoom->isConfigured()) {
       try {
-        $phonePayload = $this->data->phoneUsers($filters);
-        $phoneUsers = $phonePayload['users'];
-        if ($phonePayload['warning'] ?? null) {
-          $warnings[] = $phonePayload['warning'];
-        }
+        $loadDialerExtras = in_array($channel, ['inbox', 'calls'], true) || $panel === 'dialer';
+        $needsPhoneUsers = in_array($channel, ['inbox', 'calls', 'sms', 'team'], true)
+          || in_array($panel, ['dialer', 'sms'], true);
 
-        $loadSummary = in_array($channel, ['inbox', 'calls'], true);
-        $loadDialerExtras = $loadSummary || $panel === 'dialer';
-
-        if ($loadDialerExtras) {
-          try {
-            $recentNumbers = $this->data->recentDialNumbers($filters);
-          } catch (\Throwable $e) {
-            $warnings[] = $this->zoom->humanizeError($e->getMessage());
+        if ($needsPhoneUsers) {
+          $phonePayload = $this->data->phoneUsers($filters);
+          $phoneUsers = $phonePayload['users'];
+          if ($phonePayload['warning'] ?? null) {
+            $warnings[] = $phonePayload['warning'];
           }
         }
 
-        if ($loadSummary) {
+        $loadCallSummary = ! in_array($channel, ['inbox', 'calls'], true);
+        $loadVmSummary = ! in_array($channel, ['inbox', 'voicemail'], true);
+        $loadSmsSummary = ! in_array($channel, ['inbox', 'sms'], true);
+        $summaryStats = [];
+        $summaryVms = [];
+        $summarySms = [];
+
+        if ($loadCallSummary) {
           $summaryCalls = $this->safeDataLoad(
             fn () => $this->data->callLogs($filters, 1),
             ['logs' => [], 'next_page_token' => null, 'warning' => null],
@@ -192,6 +204,9 @@ class CommunicationsInboxService
             $warnings[] = $summaryCalls['warning'];
           }
           $summaryStats = $this->data->callStatsFromLogs($summaryCalls['logs']);
+        }
+
+        if ($loadVmSummary) {
           $summaryVmPayload = $this->safeDataLoad(
             fn () => $this->data->voiceMails($filters),
             ['voice_mails' => [], 'warning' => null],
@@ -201,6 +216,9 @@ class CommunicationsInboxService
           if ($summaryVmPayload['warning'] ?? null) {
             $warnings[] = $summaryVmPayload['warning'];
           }
+        }
+
+        if ($loadSmsSummary) {
           $summarySmsPayload = $this->safeDataLoad(
             fn () => $this->data->smsSessions($filters),
             ['sessions' => [], 'warning' => null],
@@ -210,17 +228,17 @@ class CommunicationsInboxService
           if ($summarySmsPayload['warning'] ?? null) {
             $warnings[] = $summarySmsPayload['warning'];
           }
-        } else {
-          $summaryStats = [];
-          $summaryVms = [];
-          $summarySms = [];
         }
+
+        $enrichCallRecordings = $channel === 'recordings' || ($filters['filter'] ?? '') === 'recorded';
 
         if (in_array($channel, ['inbox', 'calls'], true)) {
           $callPayload = $this->safeDataLoad(
-            fn () => $this->data->callLogs($filters, $channel === 'inbox'
-              ? (int) config('integrations.communications.detail_max_pages', 3)
-              : 1),
+            fn () => $this->data->callLogs(
+              $filters,
+              (int) config('integrations.communications.detail_max_pages', 1),
+              $enrichCallRecordings,
+            ),
             ['logs' => [], 'next_page_token' => null, 'warning' => null],
             $warnings,
           );
@@ -233,13 +251,21 @@ class CommunicationsInboxService
           );
           $nextPageToken = $callPayload['next_page_token'];
           $callStats = $this->data->callStatsFromLogs($callLogs);
+
+          if ($loadDialerExtras) {
+            try {
+              $recentNumbers = $this->data->recentDialNumbers($filters, 12, $callLogs);
+            } catch (\Throwable $e) {
+              $warnings[] = $this->zoom->humanizeError($e->getMessage());
+            }
+          }
         } elseif ($callStats === []) {
           $callStats = $summaryStats;
         }
 
         if ($channel === 'inbox') {
           $contactPayload = $this->safeDataLoad(
-            fn () => $this->contacts->buildIndexPayload($filters),
+            fn () => $this->contacts->buildIndexPayload($filters, $callLogs, $nextPageToken),
             ['contacts' => [], 'error' => null],
             $warnings,
           );
@@ -375,17 +401,6 @@ class CommunicationsInboxService
           $morpheusUsers = $teamUsers;
         }
 
-        if (in_array($channel, ['calls', 'inbox', 'queues', 'conferences'], true)) {
-          $morpheusQueues = $morpheusQueues ?: $this->safeDataLoad(fn () => $this->morpheusHub->queues(), [], $warnings);
-          $morpheusConferences = $morpheusConferences ?: $this->safeDataLoad(fn () => $this->morpheusHub->conferences(), [], $warnings);
-          $morpheusUsers = $morpheusUsers ?: collect($this->safeDataLoad(fn () => $this->morpheusHub->users(), [], $warnings))
-            ->map(fn (array $user) => [
-              'id' => $user['id'] ?? null,
-              'name' => trim(($user['first_name'] ?? '').' '.($user['last_name'] ?? '')) ?: ($user['email'] ?? 'Agent'),
-              'email' => $user['email'] ?? null,
-            ])->values()->all();
-        }
-
         if ($request->filled('queue') && $channel === 'queues') {
           $selectedQueueWaiting = $this->safeDataLoad(
             fn () => $this->morpheusHub->queueWaiting((string) $request->get('queue')),
@@ -421,8 +436,26 @@ class CommunicationsInboxService
           $routePrefix,
         );
 
+        $listBaseQuery = $this->listBaseQuery($request, $channel);
+        $listPaginated = SimplePaginator::paginate(
+          $sidebarItems,
+          $request,
+          $routePrefix.'communications.index',
+          $listBaseQuery,
+          'list_page',
+          $nextPageToken,
+        );
+        $sidebarItems = $listPaginated['items'];
+        $listPagination = $listPaginated['pagination'];
+
         if ($panel === 'contact' && $request->filled('contact')) {
-          $show = $this->contacts->buildShowPayload((string) $request->get('contact'), $filters);
+          $show = $this->contacts->buildShowPayload(
+            (string) $request->get('contact'),
+            $filters,
+            $callLogs,
+            $voiceMails,
+            $smsSessions,
+          );
           $selectedContact = $show['contact'];
           $timeline = $show['timeline'];
           $contactStats = $show['stats'];
@@ -430,6 +463,16 @@ class CommunicationsInboxService
           if ($show['error']) {
             $errors[] = $show['error'];
           }
+
+          $timelinePaginated = SimplePaginator::paginate(
+            $timeline,
+            $request,
+            $routePrefix.'communications.index',
+            $listBaseQuery,
+            'panel_page',
+          );
+          $timeline = $timelinePaginated['items'];
+          $panelPagination = $timelinePaginated['pagination'];
         }
 
         if ($panel === 'sms' && $request->filled('session')) {
@@ -491,9 +534,9 @@ class CommunicationsInboxService
         $channelCounts = $this->buildChannelCounts(
           $contacts,
           $callLogs,
-          $summaryStats,
-          $summaryVms,
-          $summarySms,
+          in_array($channel, ['inbox', 'calls'], true) && $callStats !== [] ? $callStats : $summaryStats,
+          in_array($channel, ['inbox', 'voicemail'], true) ? $voiceMails : $summaryVms,
+          in_array($channel, ['inbox', 'sms'], true) ? $smsSessions : $summarySms,
           $chatChannels,
           $recordings,
           $morpheusQueues,
@@ -503,6 +546,66 @@ class CommunicationsInboxService
           $morpheusLists,
           $morpheusExtensions,
         );
+
+        if ($panel === 'sms' && $smsMessages !== []) {
+          $smsPaginated = $this->applyPanelPagination(
+            $smsMessages,
+            $request,
+            $routePrefix,
+            $channel,
+            $smsMessagesNextPageToken,
+            'msg_page_token',
+          );
+          $smsMessages = $smsPaginated['items'];
+          $panelPagination ??= $smsPaginated['pagination'];
+        }
+
+        if ($panel === 'chat' && $chatMessages !== []) {
+          $chatPaginated = $this->applyPanelPagination(
+            $chatMessages,
+            $request,
+            $routePrefix,
+            $channel,
+            $chatMessagesNextPageToken,
+            'msg_page_token',
+          );
+          $chatMessages = $chatPaginated['items'];
+          $panelPagination ??= $chatPaginated['pagination'];
+        }
+
+        if ($channel === 'leads') {
+          $paginated = $this->applyPanelPagination($morpheusLeads, $request, $routePrefix, $channel);
+          $morpheusLeads = $paginated['items'];
+          $panelPagination ??= $paginated['pagination'];
+        } elseif ($channel === 'campaigns') {
+          $paginated = $this->applyPanelPagination($morpheusCampaigns, $request, $routePrefix, $channel);
+          $morpheusCampaigns = $paginated['items'];
+          $panelPagination ??= $paginated['pagination'];
+        } elseif ($channel === 'lists') {
+          $paginated = $this->applyPanelPagination($morpheusLists, $request, $routePrefix, $channel);
+          $morpheusLists = $paginated['items'];
+          $panelPagination ??= $paginated['pagination'];
+        } elseif ($channel === 'extensions') {
+          $paginated = $this->applyPanelPagination($morpheusExtensions, $request, $routePrefix, $channel);
+          $morpheusExtensions = $paginated['items'];
+          $panelPagination ??= $paginated['pagination'];
+        } elseif ($channel === 'agents') {
+          $paginated = $this->applyPanelPagination($communicationAgents, $request, $routePrefix, $channel);
+          $communicationAgents = $paginated['items'];
+          $panelPagination ??= $paginated['pagination'];
+        } elseif ($channel === 'team') {
+          $paginated = $this->applyPanelPagination($teamUsers, $request, $routePrefix, $channel);
+          $teamUsers = $paginated['items'];
+          $panelPagination ??= $paginated['pagination'];
+        } elseif ($channel === 'queues') {
+          $paginated = $this->applyPanelPagination($morpheusQueues, $request, $routePrefix, $channel);
+          $morpheusQueues = $paginated['items'];
+          $panelPagination ??= $paginated['pagination'];
+        } elseif ($channel === 'conferences') {
+          $paginated = $this->applyPanelPagination($morpheusConferences, $request, $routePrefix, $channel);
+          $morpheusConferences = $paginated['items'];
+          $panelPagination ??= $paginated['pagination'];
+        }
       } catch (\Throwable $e) {
         $errors[] = $this->zoom->humanizeError($e->getMessage());
       }
@@ -539,6 +642,8 @@ class CommunicationsInboxService
       'phoneUsers' => $phoneUsers,
       'recentNumbers' => $recentNumbers,
       'nextPageToken' => $nextPageToken,
+      'listPagination' => $listPagination,
+      'panelPagination' => $panelPagination,
       'selectedContact' => $selectedContact,
       'timeline' => $timeline,
       'contactStats' => $contactStats,
@@ -552,7 +657,7 @@ class CommunicationsInboxService
       'selectedVoicemail' => $selectedVoicemail,
       'selectedRecording' => $selectedRecording,
       'connection' => $connection,
-      'connectionDiagnostics' => in_array($channel, ['calls', 'recordings', 'sms', 'voicemail'], true)
+      'connectionDiagnostics' => $panel === 'settings'
         ? $this->zoom->connectionDiagnostics()
         : null,
       'settings' => [
@@ -693,6 +798,70 @@ class CommunicationsInboxService
       'from' => $request->get('from', now()->subDays($days)->toDateString()),
       'to' => $request->get('to', now()->toDateString()),
       'page_token' => $request->get('page_token'),
+      'per_page' => (int) config('integrations.communications.list_page_size', 20),
+    ];
+  }
+
+  /**
+   * @return array<string, mixed>
+   */
+  protected function listBaseQuery(Request $request, string $channel): array
+  {
+    return array_filter([
+      'channel' => $channel,
+      'search' => $request->get('search'),
+      'filter' => $request->get('filter'),
+      'direction' => $request->get('direction'),
+      'status' => $request->get('status'),
+      'from' => $request->get('from'),
+      'to' => $request->get('to'),
+      'panel' => $request->get('panel'),
+      'contact' => $request->get('contact'),
+      'session' => $request->get('session'),
+      'call' => $request->get('call'),
+      'voicemail' => $request->get('voicemail'),
+      'recording' => $request->get('recording'),
+      'chat_owner' => $request->get('chat_owner'),
+      'chat_channel' => $request->get('chat_channel'),
+      'chat_contact' => $request->get('chat_contact'),
+      'queue' => $request->get('queue'),
+      'conference' => $request->get('conference'),
+    ], fn ($value) => $value !== null && $value !== '');
+  }
+
+  /**
+   * @return array{items: array<int, mixed>, pagination: array<string, mixed>|null}
+   */
+  protected function applyPanelPagination(
+    array $items,
+    Request $request,
+    string $routePrefix,
+    string $channel,
+    ?string $apiNextPageToken = null,
+    string $apiPageTokenKey = 'page_token',
+  ): array {
+    if ($items === []) {
+      return ['items' => [], 'pagination' => null];
+    }
+
+    $baseQuery = $this->listBaseQuery($request, $channel);
+    if ($apiPageTokenKey === 'msg_page_token' && $request->filled('msg_page_token')) {
+      $baseQuery['msg_page_token'] = $request->get('msg_page_token');
+    }
+
+    $result = SimplePaginator::paginate(
+      $items,
+      $request,
+      $routePrefix.'communications.index',
+      $baseQuery,
+      'panel_page',
+      $apiNextPageToken,
+      $apiPageTokenKey,
+    );
+
+    return [
+      'items' => $result['items'],
+      'pagination' => $result['pagination'],
     ];
   }
 

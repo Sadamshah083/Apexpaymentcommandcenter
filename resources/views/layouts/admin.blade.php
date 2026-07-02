@@ -13,6 +13,7 @@
 <body class="bg-cream-100 text-warmgrey-900 min-h-screen font-sans antialiased" data-turbo-prefetch="false"
     @auth
 data-workspace-id="{{ auth()->user()->current_workspace_id }}"
+        data-workspace-sync-scope="{{ request()->routeIs('admin.lists.*', 'admin.deliverability.*', 'admin.content.*', 'admin.reputation.*', 'admin.communications.*') ? 'lite' : 'full' }}"
         data-workspace-sync-url="{{ route('admin.sync.poll') }}"
         data-workspace-sync-stream-url="{{ route('admin.sync.stream') }}"
         data-lead-show-base="{{ url('/portal/leads') }}"

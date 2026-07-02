@@ -17,12 +17,13 @@ return [
     'communications' => [
         'cache_ttl_minutes' => (int) env('COMMUNICATIONS_CACHE_TTL', 10),
         'default_days' => (int) env('COMMUNICATIONS_DEFAULT_DAYS', 14),
+        'list_page_size' => (int) env('COMMUNICATIONS_LIST_PAGE_SIZE', 20),
         'list_max_pages' => 1,
-        'detail_max_pages' => 3,
+        'detail_max_pages' => 1,
         'user_fallback' => (bool) env('COMMUNICATIONS_USER_FALLBACK', true),
         'user_fallback_on_empty' => (bool) env('COMMUNICATIONS_USER_FALLBACK_ON_EMPTY', true),
         'user_fallback_max_users' => (int) env('COMMUNICATIONS_USER_FALLBACK_MAX_USERS', 25),
-        'http_timeout_seconds' => (int) env('COMMUNICATIONS_HTTP_TIMEOUT', 12),
+        'http_timeout_seconds' => (int) env('COMMUNICATIONS_HTTP_TIMEOUT', 8),
         'default_caller_id' => env('COMMUNICATIONS_DEFAULT_CALLER_ID'),
     ],
 

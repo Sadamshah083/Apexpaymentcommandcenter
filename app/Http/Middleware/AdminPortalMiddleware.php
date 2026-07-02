@@ -18,6 +18,12 @@ class AdminPortalMiddleware
         $user->loadMissing(['workspaces']);
 
         if (! $user->canAccessAdminPortal()) {
+            if ($user->canAccessPortal()) {
+                return redirect()->route('portal.dashboard');
+            }
+
+            Auth::logout();
+
             return redirect()->route('admin.login')->withErrors([
                 'username' => 'Access denied. Admin portal requires Super Admin or Admin role.',
             ]);

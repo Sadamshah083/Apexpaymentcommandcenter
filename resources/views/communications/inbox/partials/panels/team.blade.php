@@ -89,3 +89,5 @@
         </div>
     </section>
 </div>
+
+<x-communications.list-pagination :pagination="$panelPagination ?? null" class="mt-4" />

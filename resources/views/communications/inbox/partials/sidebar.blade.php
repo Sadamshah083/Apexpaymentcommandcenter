@@ -32,7 +32,7 @@
         @endif
     </div>
 
-    <div class="ghl-list-count">{{ count($sidebarItems) }} {{ $channels[$channel]['label'] ?? 'items' }}</div>
+    <div class="ghl-list-count">{{ $listPagination['total'] ?? count($sidebarItems) }} {{ $channels[$channel]['label'] ?? 'items' }}</div>
 
     <div class="ghl-contact-list">
         @forelse($sidebarItems as $item)
@@ -59,10 +59,5 @@
         @endforelse
     </div>
 
-    @if ($nextPageToken ?? null)
-        <div class="ghl-inbox-sidebar-footer">
-            <a href="{{ route($routePrefix . 'communications.index', array_merge(request()->query(), ['page_token' => $nextPageToken])) }}"
-                class="comm-hub-btn comm-hub-btn-secondary w-full text-center">Load more</a>
-        </div>
-    @endif
+    <x-communications.list-pagination :pagination="$listPagination ?? null" />
 </aside>

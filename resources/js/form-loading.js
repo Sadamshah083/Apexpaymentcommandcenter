@@ -1,7 +1,5 @@
 import { showToast } from './toast.js';
 
-const LOTTIE_SRC = 'https://assets2.lottiefiles.com/packages/lf20_usmfx6bp.json';
-
 let overlayEl = null;
 
 function getOverlay() {
@@ -32,33 +30,22 @@ function getOverlay() {
     return overlayEl;
 }
 
-async function mountLottie(container) {
-    if (container.querySelector('dotlottie-player')) {
-        return;
-    }
+export function hideLoadingOverlay() {
+    const overlay = getOverlay();
+    overlay.hidden = true;
+    document.body.classList.remove('app-loading-open');
 
-    const spinner = container.querySelector('.app-loading-spinner');
-    if (!spinner) {
-        return;
-    }
-
-    try {
-        if (!customElements.get('dotlottie-player')) {
-            await import('https://unpkg.com/@dotlottie/player-component@2.7.12/dist/dotlottie-player.mjs');
+    document.querySelectorAll('form[data-form-loading][data-submitting="1"]').forEach((form) => {
+        form.dataset.submitting = '0';
+        const button = form.querySelector('button[type="submit"]');
+        if (button?.dataset.loadingOriginalHtml) {
+            button.innerHTML = button.dataset.loadingOriginalHtml;
+            delete button.dataset.loadingOriginalHtml;
+            button.disabled = false;
+            button.removeAttribute('aria-busy');
+            button.classList.remove('is-loading');
         }
-
-        const player = document.createElement('dotlottie-player');
-        player.setAttribute('src', LOTTIE_SRC);
-        player.setAttribute('background', 'transparent');
-        player.setAttribute('speed', '1');
-        player.setAttribute('loop', '');
-        player.setAttribute('autoplay', '');
-        player.className = 'app-loading-lottie-player';
-
-        spinner.replaceWith(player);
-    } catch {
-        // CSS spinner fallback remains visible.
-    }
+    });
 }
 
 export function showLoadingOverlay(message, title = 'Please wait') {
@@ -76,11 +63,6 @@ export function showLoadingOverlay(message, title = 'Please wait') {
 
     overlay.hidden = false;
     document.body.classList.add('app-loading-open');
-
-    const lottieHost = overlay.querySelector('#app-loading-lottie');
-    if (lottieHost) {
-        mountLottie(lottieHost);
-    }
 }
 
 function setSubmitButtonState(button, loadingText) {
@@ -124,10 +106,17 @@ export function attachFormLoading(form) {
 
         setSubmitButtonState(submitButton, buttonText);
         showLoadingOverlay(message, title);
-        showToast(message, 'info', { title, duration: 120000 });
     });
 }
 
 export function initFormLoading() {
     document.querySelectorAll('form[data-form-loading]').forEach(attachFormLoading);
+
+    document.addEventListener('turbo:submit-end', (event) => {
+        hideLoadingOverlay();
+    });
+
+    document.addEventListener('turbo:load', () => {
+        document.querySelectorAll('form[data-form-loading]').forEach(attachFormLoading);
+    });
 }

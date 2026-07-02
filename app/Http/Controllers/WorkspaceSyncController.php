@@ -28,6 +28,7 @@ class WorkspaceSyncController extends Controller
                 $request->has('cursor') ? $request->integer('cursor') : null,
                 $request->integer('workflow_id') ?: null,
                 $request->integer('lead_id') ?: null,
+                $request->query('scope') === 'lite' ? 'lite' : 'full',
             )
         );
     }
@@ -46,8 +47,9 @@ class WorkspaceSyncController extends Controller
 
         $workflowId = $request->integer('workflow_id') ?: null;
         $leadId = $request->integer('lead_id') ?: null;
+        $scope = $request->query('scope') === 'lite' ? 'lite' : 'full';
 
-        return response()->stream(function () use ($request, $workspace, $user, $workflowId, $leadId) {
+        return response()->stream(function () use ($request, $workspace, $user, $workflowId, $leadId, $scope) {
             if (function_exists('set_time_limit')) {
                 @set_time_limit(0);
             }
@@ -65,6 +67,7 @@ class WorkspaceSyncController extends Controller
                     $cursor,
                     $workflowId,
                     $leadId,
+                    $scope,
                 );
 
                 if ($payload['changed'] ?? true) {

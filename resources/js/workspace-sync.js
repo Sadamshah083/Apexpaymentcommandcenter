@@ -380,6 +380,7 @@ function formatWorkflowProgressLabel(wf) {
 }
 
 const SYNC_ACTIVE_MS = 2000;
+const SYNC_LITE_MS = 15000;
 const SYNC_HIDDEN_MS = 10000;
 const SYNC_ERROR_MS = 4000;
 
@@ -627,6 +628,8 @@ export function initWorkspaceSync() {
     const root = document.body;
     const syncUrl = root.dataset.workspaceSyncUrl;
     const streamUrl = root.dataset.workspaceSyncStreamUrl;
+    const syncScope = root.dataset.workspaceSyncScope || 'full';
+    const syncLite = syncScope === 'lite';
     if (!syncUrl) return;
 
     const workspaceId = root.dataset.workspaceId || 'default';
@@ -766,6 +769,7 @@ export function initWorkspaceSync() {
             params.set('cursor', String(cursor));
             if (workflowId) params.set('workflow_id', workflowId);
             if (leadId) params.set('lead_id', leadId);
+            if (syncLite) params.set('scope', 'lite');
 
             const response = await fetch(`${syncUrl}?${params.toString()}`, {
                 headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
@@ -781,7 +785,10 @@ export function initWorkspaceSync() {
 
             const data = await response.json();
             applySyncPayload(data);
-            schedulePoll(document.hidden ? SYNC_HIDDEN_MS : SYNC_ACTIVE_MS);
+            const pollMs = document.hidden
+                ? SYNC_HIDDEN_MS
+                : (syncLite ? SYNC_LITE_MS : SYNC_ACTIVE_MS);
+            schedulePoll(pollMs);
         } catch (error) {
             if (error?.name === 'AbortError') {
                 return;
@@ -798,6 +805,7 @@ export function initWorkspaceSync() {
         params.set('cursor', String(cursor));
         if (workflowId) params.set('workflow_id', workflowId);
         if (leadId) params.set('lead_id', leadId);
+        if (syncLite) params.set('scope', 'lite');
 
         return `${streamUrl}?${params.toString()}`;
     }
@@ -860,9 +868,22 @@ export function initWorkspaceSync() {
     };
     document.addEventListener('visibilitychange', syncVisibilityHandler);
 
-    if (streamUrl && typeof EventSource !== 'undefined') {
-        connectStream();
+    function startSync() {
+        if (syncLite) {
+            schedulePoll(2000);
+            return;
+        }
+
+        if (streamUrl && typeof EventSource !== 'undefined') {
+            connectStream();
+        } else {
+            schedulePoll(0);
+        }
+    }
+
+    if (syncLite && 'requestIdleCallback' in window) {
+        requestIdleCallback(startSync, { timeout: 2500 });
     } else {
-        schedulePoll(0);
+        startSync();
     }
 }

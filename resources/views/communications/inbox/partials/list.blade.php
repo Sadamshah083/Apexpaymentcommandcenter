@@ -1,6 +1,6 @@
 <aside class="ghl-inbox-list">
     <div class="ghl-inbox-list-header">
-        <div class="ghl-inbox-list-title">{{ $channelLabel }} · {{ count($sidebarItems) }}</div>
+        <div class="ghl-inbox-list-title">{{ $channelLabel }} · {{ $listPagination['total'] ?? count($sidebarItems) }}</div>
         @if ($channel === 'inbox')
             <div class="ghl-filter-pills">
                 @foreach (['' => 'All', 'recent' => 'Recent', 'with_phone' => 'Phone'] as $value => $label)
@@ -40,10 +40,18 @@
 
     <div class="ghl-inbox-list-scroll">
         @forelse($sidebarItems as $item)
+            @php
+                $avatarClass = match ($item['kind'] ?? 'contact') {
+                    'call' => 'call',
+                    'sms' => 'sms',
+                    'voicemail' => 'vm',
+                    default => 'contact',
+                };
+            @endphp
             <a href="{{ $item['url'] }}"
                 class="ghl-inbox-row {{ !empty($item['active']) ? 'ghl-inbox-row-active' : '' }}">
                 <span
-                    class="ghl-inbox-row-avatar ghl-inbox-row-avatar-{{ $item['kind'] ?? 'contact' }}">{{ $item['avatar'] }}</span>
+                    class="ghl-inbox-row-avatar ghl-inbox-row-avatar-{{ $avatarClass }}">{{ $item['avatar'] }}</span>
                 <span class="ghl-inbox-row-body">
                     <span class="ghl-inbox-row-name">{{ $item['label'] }}</span>
                     <span class="ghl-inbox-row-preview">{{ $item['subtitle'] }}</span>
@@ -76,10 +84,5 @@
         @endforelse
     </div>
 
-    @if ($nextPageToken ?? null)
-        <div class="ghl-inbox-sidebar-footer">
-            <a href="{{ route($routePrefix . 'communications.index', array_merge(request()->query(), ['page_token' => $nextPageToken])) }}"
-                class="comm-hub-btn comm-hub-btn-secondary w-full text-center comm-hub-btn-sm">Load more</a>
-        </div>
-    @endif
+    <x-communications.list-pagination :pagination="$listPagination ?? null" />
 </aside>

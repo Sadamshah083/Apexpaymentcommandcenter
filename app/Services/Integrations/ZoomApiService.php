@@ -2,8 +2,9 @@
 
 namespace App\Services\Integrations;
 
-use Illuminate\Support\Facades\Http;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 
 /**
  * MorpheusCX Call-Control API client.
@@ -30,6 +31,9 @@ use Illuminate\Http\Client\PendingRequest;
  */
 class ZoomApiService
 {
+    /** @var array<int, array<string, mixed>>|null */
+    protected ?array $memoizedActiveCallLogs = null;
+
     // -------------------------------------------------------------------------
     // Identity / health
     // -------------------------------------------------------------------------
@@ -63,24 +67,26 @@ class ZoomApiService
     /** @return array{phone_available: bool, messages: array<int, string>} */
     public function connectionDiagnostics(): array
     {
-        $messages = [];
+        return Cache::remember('integrations.morpheus.connection_diagnostics', 300, function () {
+            $messages = [];
 
-        foreach ([
-            '/cdr' => 'cdr:read (call history)',
-            '/recordings' => 'recordings:read',
-            '/voicemails' => 'voicemails:read',
-        ] as $path => $label) {
-            try {
-                $response = $this->client()->get($this->url($path), ['limit' => 1]);
-                if ($response->status() === 403) {
-                    $messages[] = "Missing permission: {$label}";
+            foreach ([
+                '/cdr' => 'cdr:read (call history)',
+                '/recordings' => 'recordings:read',
+                '/voicemails' => 'voicemails:read',
+            ] as $path => $label) {
+                try {
+                    $response = $this->client()->get($this->url($path), ['limit' => 1]);
+                    if ($response->status() === 403) {
+                        $messages[] = "Missing permission: {$label}";
+                    }
+                } catch (\Throwable $e) {
+                    $messages[] = "{$label}: ".$e->getMessage();
                 }
-            } catch (\Throwable $e) {
-                $messages[] = "{$label}: ".$e->getMessage();
             }
-        }
 
-        return ['phone_available' => true, 'messages' => $messages];
+            return ['phone_available' => true, 'messages' => $messages];
+        });
     }
 
     // -------------------------------------------------------------------------
@@ -1094,10 +1100,14 @@ class ZoomApiService
      */
     protected function listActiveCallLogs(): array
     {
+        if ($this->memoizedActiveCallLogs !== null) {
+            return $this->memoizedActiveCallLogs;
+        }
+
         try {
             $response = $this->client()->get($this->url('/calls'));
             if (! $response->successful()) {
-                return [];
+                return $this->memoizedActiveCallLogs = [];
             }
 
             $logs = [];
@@ -1119,9 +1129,9 @@ class ZoomApiService
                 ];
             }
 
-            return $logs;
+            return $this->memoizedActiveCallLogs = $logs;
         } catch (\Throwable) {
-            return [];
+            return $this->memoizedActiveCallLogs = [];
         }
     }
 

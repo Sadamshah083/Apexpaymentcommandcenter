@@ -139,6 +139,17 @@ class User extends Authenticatable
             return false;
         }
 
+        if ($this->relationLoaded('currentWorkspace') && $this->currentWorkspace?->id === $workspaceId) {
+            return $this->currentWorkspace->admin_id === $this->id;
+        }
+
+        if ($this->relationLoaded('workspaces')) {
+            $workspace = $this->workspaces->firstWhere('id', $workspaceId);
+            if ($workspace) {
+                return $workspace->admin_id === $this->id;
+            }
+        }
+
         $workspace = Workspace::find($workspaceId);
 
         return $workspace && $workspace->admin_id === $this->id;

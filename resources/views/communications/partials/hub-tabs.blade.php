@@ -54,7 +54,7 @@
                 },
             ) }}"
                 class="ghl-hub-nav-link {{ $mode === $tabMode ? 'ghl-hub-nav-link-active' : '' }}"
-                data-turbo-prefetch="false">{{ $label }}</a>
+                data-turbo-preload>{{ $label }}</a>
         @endforeach
     </nav>
 </div>

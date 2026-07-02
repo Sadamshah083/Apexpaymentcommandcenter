@@ -15,7 +15,9 @@
     @break
 
     @case('sms')
-        @include('communications.inbox.partials.panels.sms')
+        <div class="ghl-inbox-panel ghl-inbox-panel--thread">
+            @include('communications.inbox.partials.panels.sms')
+        </div>
     @break
 
     @case('compose_sms')
@@ -127,20 +129,22 @@
     @break
 
     @default
-        <div class="ghl-inbox-empty">
-            <div class="ghl-inbox-empty-icon">💬</div>
-            <h2>Select a conversation</h2>
-            <p>Choose someone from the {{ strtolower($channels[$channel]['label'] ?? 'inbox') }} list, or use the tools on the
-                right to place a call.</p>
-            <div class="ghl-inbox-empty-actions">
-                <a href="{{ route($routePrefix . 'communications.index', ['channel' => 'inbox']) }}"
-                    class="comm-hub-btn comm-hub-btn-secondary comm-hub-btn-sm">Open inbox</a>
-                <a href="{{ route($routePrefix . 'communications.index', array_merge($baseQuery, ['panel' => 'dialer'])) }}"
-                    class="comm-hub-btn comm-hub-btn-sm">Open dialer</a>
-                @if ($channel === 'sms')
-                    <a href="{{ route($routePrefix . 'communications.index', array_merge($baseQuery, ['panel' => 'compose_sms'])) }}"
-                        class="comm-hub-btn comm-hub-btn-sm">New SMS</a>
-                @endif
+        <div class="ghl-inbox-conversation-scroll ghl-inbox-conversation-scroll--center">
+            <div class="ghl-inbox-empty">
+                <div class="ghl-inbox-empty-icon">💬</div>
+                <h2>Select a conversation</h2>
+                <p>Choose someone from the {{ strtolower($channels[$channel]['label'] ?? 'inbox') }} list, or use Quick
+                    dial on the right to place a call.</p>
+                <div class="ghl-inbox-empty-actions">
+                    <a href="{{ route($routePrefix . 'communications.index', ['channel' => 'inbox']) }}"
+                        class="comm-hub-btn comm-hub-btn-secondary comm-hub-btn-sm">Open inbox</a>
+                    <a href="{{ route($routePrefix . 'communications.index', array_merge($baseQuery, ['panel' => 'dialer'])) }}"
+                        class="comm-hub-btn comm-hub-btn-sm">Open dialer</a>
+                    @if ($channel === 'sms')
+                        <a href="{{ route($routePrefix . 'communications.index', array_merge($baseQuery, ['panel' => 'compose_sms'])) }}"
+                            class="comm-hub-btn comm-hub-btn-sm">New SMS</a>
+                    @endif
+                </div>
             </div>
         </div>
 @endswitch

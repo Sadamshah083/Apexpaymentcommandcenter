@@ -45,24 +45,11 @@
             <h3 class="font-semibold mb-4">Google Compliance Checklist</h3>
             <form id="compliance-form" class="flex gap-2 mb-4">
                 <input type="text" name="domain" id="compliance-domain" placeholder="yourdomain.com"
-                    value="{{ $complianceDomain }}" required class="flex-1 border rounded px-3 py-2 text-sm">
+                    value="" required class="flex-1 border rounded px-3 py-2 text-sm">
                 <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm">Check DNS</button>
             </form>
             <ul id="compliance-list" class="space-y-2 text-sm">
-                @forelse($complianceChecklist as $item)
-                    @php $iconData = $statusIcon($item['status']); @endphp
-                    <li class="flex items-start gap-2">
-                        <span class="{{ $iconData[1] }}">{!! $iconData[0] !!}</span>
-                        <span>
-                            <span class="font-medium">{{ $item['label'] }}</span>
-                            @if (!empty($item['detail']))
-                                <span class="block text-xs text-slate-500">{{ $item['detail'] }}</span>
-                            @endif
-                        </span>
-                    </li>
-                @empty
-                    <li class="text-slate-500">Enter a sending domain above to run live SPF, DKIM, and DMARC checks.</li>
-                @endforelse
+                <li class="text-slate-500">Enter a sending domain above to run live SPF, DKIM, and DMARC checks.</li>
             </ul>
             <p class="text-xs text-slate-500 mt-4"><a href="https://postmaster.google.com/" target="_blank"
                     class="text-indigo-600">Google Postmaster Tools</a> · <a

@@ -14,18 +14,19 @@ class ZoomContactService
     ) {}
 
     /**
+     * @param  array<int, array<string, mixed>>|null  $preloadedCallLogs
      * @return array{contacts: array<int, array<string, mixed>>, call_logs: array<int, array<string, mixed>>, error: string|null, next_page_token: string|null}
      */
-    public function buildIndexPayload(array $filters = []): array
+    public function buildIndexPayload(array $filters = [], ?array $preloadedCallLogs = null, ?string $preloadedNextPageToken = null): array
     {
         if (! $this->zoom->isConfigured()) {
             return ['contacts' => [], 'call_logs' => [], 'error' => 'Morpheus CX is not configured.', 'next_page_token' => null];
         }
 
         $users = [];
-        $callLogs = [];
+        $callLogs = $preloadedCallLogs ?? [];
         $errors = [];
-        $nextPageToken = null;
+        $nextPageToken = $preloadedNextPageToken;
 
         try {
             $users = $this->data->users();
@@ -33,12 +34,14 @@ class ZoomContactService
             $errors[] = $this->zoom->humanizeError($e->getMessage());
         }
 
-        try {
-            $payload = $this->data->callLogs($filters, (int) config('integrations.communications.list_max_pages', 1));
-            $callLogs = $payload['logs'];
-            $nextPageToken = $payload['next_page_token'];
-        } catch (\Throwable $e) {
-            $errors[] = $this->zoom->humanizeError($e->getMessage());
+        if ($preloadedCallLogs === null) {
+            try {
+                $payload = $this->data->callLogs($filters, (int) config('integrations.communications.list_max_pages', 1));
+                $callLogs = $payload['logs'];
+                $nextPageToken = $payload['next_page_token'];
+            } catch (\Throwable $e) {
+                $errors[] = $this->zoom->humanizeError($e->getMessage());
+            }
         }
 
         if ($users === [] && $callLogs === [] && $errors !== []) {
@@ -59,17 +62,27 @@ class ZoomContactService
     }
 
     /**
+     * @param  array<int, array<string, mixed>>|null  $preloadedCallLogs
+     * @param  array<int, array<string, mixed>>|null  $preloadedVoiceMails
+     * @param  array<int, array<string, mixed>>|null  $preloadedSmsSessions
      * @return array{contact: array<string, mixed>|null, timeline: array<int, array<string, mixed>>, stats: array<string, mixed>, error: string|null}
      */
-    public function buildShowPayload(string $contactKey, array $filters = []): array
-    {
+    public function buildShowPayload(
+        string $contactKey,
+        array $filters = [],
+        ?array $preloadedCallLogs = null,
+        ?array $preloadedVoiceMails = null,
+        ?array $preloadedSmsSessions = null,
+    ): array {
         if (! $this->zoom->isConfigured()) {
             return ['contact' => null, 'timeline' => [], 'stats' => [], 'error' => 'Morpheus CX is not configured.'];
         }
 
         try {
             $users = $this->data->users();
-            $callPayload = $this->data->callLogs($filters, (int) config('integrations.communications.detail_max_pages', 3));
+            $callPayload = $preloadedCallLogs !== null
+                ? ['logs' => $preloadedCallLogs, 'next_page_token' => null]
+                : $this->data->callLogs($filters, (int) config('integrations.communications.detail_max_pages', 1));
             $contacts = $this->mergeContacts($users, $callPayload['logs'], $filters);
             $contact = collect($contacts)->firstWhere('contact_key', $contactKey);
 
@@ -77,8 +90,8 @@ class ZoomContactService
                 return ['contact' => null, 'timeline' => [], 'stats' => [], 'error' => 'Contact not found.'];
             }
 
-            $voiceMails = $this->data->voiceMails($filters)['voice_mails'];
-            $smsSessions = $this->data->smsSessions($filters)['sessions'];
+            $voiceMails = $preloadedVoiceMails ?? $this->data->voiceMails($filters)['voice_mails'];
+            $smsSessions = $preloadedSmsSessions ?? $this->data->smsSessions($filters)['sessions'];
 
             $timeline = $this->activityTimelineFor(
                 $contact,

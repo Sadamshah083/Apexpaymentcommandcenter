@@ -21,6 +21,7 @@ class ContentAnalyzerController extends Controller
 
         $analyses = ContentAnalysis::query()
             ->where('workspace_id', $workspace->id)
+            ->select(['id', 'title', 'subject', 'overall_score', 'created_at'])
             ->latest()
             ->paginate(10);
 

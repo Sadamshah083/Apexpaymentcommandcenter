@@ -2,7 +2,14 @@
     $user = auth()->user();
     $workspaceId = $user?->current_workspace_id;
 
-    $can = fn(string $module) => $user?->canAccessAdminModule($module, $workspaceId);
+    $allowedModules = [];
+    $can = function (string $module) use (&$allowedModules, $user, $workspaceId): bool {
+        if (! $user) {
+            return false;
+        }
+
+        return $allowedModules[$module] ??= $user->canAccessAdminModule($module, $workspaceId);
+    };
 
     $leadPipelineModules = ['lead_pipeline', 'lead_tags'];
     $emailToolkitModules = ['email_lists', 'deliverability', 'content_analyzer', 'reputation'];

@@ -21,25 +21,15 @@ class ReputationController extends Controller
 
         $logs = ReputationLog::query()
             ->where('workspace_id', $workspace->id)
+            ->select(['id', 'domain', 'metric', 'value', 'notes', 'recorded_at'])
             ->latest('recorded_at')
             ->paginate(20);
 
-        $lists = EmailList::query()->where('workspace_id', $workspace->id)->where('total_count', '>', 0);
-
-        $hygiene = [
-            'total_lists' => (clone $lists)->count(),
-            'avg_invalid_rate' => $this->averageInvalidRate($workspace->id),
-            'lists_needing_cleanup' => (clone $lists)->whereRaw('invalid_count > total_count * 0.05')->count(),
-        ];
+        $hygiene = $this->buildHygieneStats($workspace->id);
 
         $warmupTarget = (int) $request->integer('warmup_target', 50000);
         $warmupWeeks = (int) $request->integer('warmup_weeks', 6);
         $warmupSchedule = $this->generateWarmupSchedule($warmupTarget, $warmupWeeks);
-
-        $complianceDomain = $request->string('compliance_domain')->toString();
-        $complianceChecklist = $complianceDomain !== ''
-            ? $this->buildComplianceChecklist($workspace->id, $complianceDomain, app(DeliverabilityAnalyzer::class))
-            : [];
 
         return view('reputation.index', compact(
             'logs',
@@ -47,8 +37,6 @@ class ReputationController extends Controller
             'warmupSchedule',
             'warmupTarget',
             'warmupWeeks',
-            'complianceDomain',
-            'complianceChecklist',
         ));
     }
 
@@ -107,20 +95,26 @@ class ReputationController extends Controller
         ]);
     }
 
-    protected function averageInvalidRate(int $workspaceId): float
+    /**
+     * @return array{total_lists: int, avg_invalid_rate: float, lists_needing_cleanup: int}
+     */
+    protected function buildHygieneStats(int $workspaceId): array
     {
-        $lists = EmailList::query()
+        $base = EmailList::query()
             ->where('workspace_id', $workspaceId)
-            ->where('total_count', '>', 0)
-            ->get();
+            ->where('total_count', '>', 0);
 
-        if ($lists->isEmpty()) {
-            return 0;
-        }
+        $stats = (clone $base)
+            ->selectRaw('COUNT(*) as total_lists')
+            ->selectRaw('AVG((invalid_count * 100.0) / total_count) as avg_invalid_rate')
+            ->selectRaw('SUM(CASE WHEN invalid_count > total_count * 0.05 THEN 1 ELSE 0 END) as lists_needing_cleanup')
+            ->first();
 
-        $rates = $lists->map(fn ($l) => ($l->invalid_count / $l->total_count) * 100);
-
-        return round($rates->avg(), 2);
+        return [
+            'total_lists' => (int) ($stats->total_lists ?? 0),
+            'avg_invalid_rate' => round((float) ($stats->avg_invalid_rate ?? 0), 2),
+            'lists_needing_cleanup' => (int) ($stats->lists_needing_cleanup ?? 0),
+        ];
     }
 
     /**

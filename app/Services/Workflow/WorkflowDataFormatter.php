@@ -32,6 +32,15 @@ class WorkflowDataFormatter
             return [];
         }
 
+        if (config('workflow.use_manual_import_mapping', true)) {
+            $results = [];
+            foreach ($rawRows as $index => $rawRow) {
+                $results[$index] = $this->manualFallbackRow($rawRow, $mapping);
+            }
+
+            return $results;
+        }
+
         $systemPrompt = "You are an AI data formatting expert. Your task is to understand a list of raw spreadsheet rows and format them into our universal system structure.\n\n" .
             "Target fields for each row object:\n" .
             "- business_name (Clean company or business name)\n" .
@@ -42,7 +51,8 @@ class WorkflowDataFormatter
             "- country (Country name, e.g. United States)\n" .
             "- website (Cleaned website URL or root domain)\n" .
             "- input_phone (Cleaned phone number)\n" .
-            "- input_email (Normalized email address)\n\n" .
+            "- input_email (Normalized email address)\n" .
+            "- owner_name (Owner or primary contact name)\n\n" .
             "Instructions:\n" .
             "1. Extract values from the raw rows based on the suggested column mappings provided.\n" .
             "2. Clean and format the extracted values. If a full address is combined in a single field, split it into address, city, state, and zip_code correctly.\n" .
@@ -80,7 +90,7 @@ class WorkflowDataFormatter
                     if (!is_array($formatted)) {
                         $formatted = $this->manualFallbackRow($rawRow, $mapping);
                     } else {
-                        foreach (['business_name', 'address', 'city', 'state', 'zip_code', 'country', 'website', 'input_phone', 'input_email'] as $key) {
+                        foreach (['business_name', 'address', 'city', 'state', 'zip_code', 'country', 'website', 'input_phone', 'input_email', 'owner_name'] as $key) {
                             if (!isset($formatted[$key])) {
                                 $formatted[$key] = null;
                             }

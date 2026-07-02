@@ -1,6 +1,6 @@
 <aside class="ghl-inbox-tools">
     <div class="ghl-inbox-tools-inner ghl-tools-dialer">
-        <div>
+        <section class="ghl-tools-section">
             <h3 class="ghl-inbox-rail-title">Quick dial</h3>
             @include('communications.inbox.partials.rail-dialer-compact', [
                 'routePrefix' => $routePrefix,
@@ -9,10 +9,10 @@
                 'defaultCallerId' => $defaultCallerId ?? null,
                 'prefillNumber' => $prefillNumber ?? null,
             ])
-        </div>
+        </section>
 
         @if (!empty($callStats))
-            <div>
+            <section class="ghl-tools-section">
                 <h3 class="ghl-inbox-rail-title">Call summary</h3>
                 <div class="ghl-inbox-rail-stats">
                     <div><span class="ghl-inbox-rail-stat-value">{{ $callStats['total'] ?? 0 }}</span><span
@@ -24,16 +24,16 @@
                     <div><span class="ghl-inbox-rail-stat-value">{{ $callStats['missed'] ?? 0 }}</span><span
                             class="ghl-inbox-rail-stat-label">Missed</span></div>
                 </div>
-            </div>
+            </section>
         @endif
 
         @if (!empty($phoneUsers))
-            <div>
+            <section class="ghl-tools-section">
                 <h3 class="ghl-inbox-rail-title">Phone lines</h3>
-                <div class="ghl-team-list" style="max-height: 10rem;">
+                <div class="ghl-team-list ghl-team-list-compact">
                     @foreach ($phoneUsers as $user)
                         @foreach ($user['phone_numbers'] as $number)
-                            <div class="ghl-team-row" style="padding: 0.35rem 0;">
+                            <div class="ghl-team-row ghl-team-row-compact">
                                 <span class="text-xs font-semibold text-zinc-800 truncate">{{ $user['name'] }}</span>
                                 <a href="{{ route($routePrefix . 'communications.index', array_merge($baseQuery, ['panel' => 'dialer', 'number' => $number])) }}"
                                     class="comm-hub-link text-xs">{{ $number }}</a>
@@ -41,7 +41,7 @@
                         @endforeach
                     @endforeach
                 </div>
-            </div>
+            </section>
         @endif
 
         <a href="{{ route($routePrefix . 'communications.index', array_merge($baseQuery, ['panel' => 'dialer'])) }}"

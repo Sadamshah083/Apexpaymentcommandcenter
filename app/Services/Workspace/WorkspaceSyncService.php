@@ -2,8 +2,10 @@
 
 namespace App\Services\Workspace;
 
+use App\Models\ContentAnalysis;
 use App\Models\EmailList;
 use App\Models\LeadActivity;
+use App\Models\ReputationLog;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceSyncEvent;
@@ -48,8 +50,12 @@ class WorkspaceSyncService
         ?int $cursor = null,
         ?int $workflowId = null,
         ?int $leadId = null,
+        string $scope = 'full',
     ): array {
-        $fingerprint = $this->fingerprint($workspace, $user, $workflowId, $leadId);
+        $lite = $scope === 'lite';
+        $fingerprint = $lite
+            ? $this->fingerprintLite($workspace, $user)
+            : $this->fingerprint($workspace, $user, $workflowId, $leadId);
         $latestCursor = (int) (WorkspaceSyncEvent::where('workspace_id', $workspace->id)->max('id') ?? 0);
 
         $events = [];
@@ -57,7 +63,7 @@ class WorkspaceSyncService
             $events = WorkspaceSyncEvent::where('workspace_id', $workspace->id)
                 ->where('id', '>', $cursor)
                 ->orderBy('id')
-                ->limit(50)
+                ->limit($lite ? 10 : 50)
                 ->get()
                 ->map(fn (WorkspaceSyncEvent $event) => [
                     'id' => $event->id,
@@ -80,12 +86,58 @@ class WorkspaceSyncService
             ];
         }
 
-        $state = $this->buildState($workspace, $user, $cursor, $workflowId, $leadId, $fingerprint, $latestCursor, $events);
+        $state = $lite
+            ? $this->buildLiteState($workspace, $user, $fingerprint, $latestCursor, $events)
+            : $this->buildState($workspace, $user, $cursor, $workflowId, $leadId, $fingerprint, $latestCursor, $events);
 
         return [
             'changed' => $version === null || $state['version'] !== $version || ! empty($events),
             ...$state,
         ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>|null  $events
+     * @return array<string, mixed>
+     */
+    protected function buildLiteState(
+        Workspace $workspace,
+        User $user,
+        string $fingerprint,
+        int $latestCursor,
+        ?array $events = null,
+    ): array {
+        return [
+            'version' => $fingerprint,
+            'cursor' => $latestCursor,
+            'events' => $events ?? [],
+            'workflows' => [],
+            'leads' => [],
+            'team' => [],
+            'sales_ops' => [],
+            'toolkit' => $this->buildToolkitPayload($workspace, $user),
+        ];
+    }
+
+    protected function fingerprintLite(Workspace $workspace, User $user): string
+    {
+        $listStamp = EmailList::where('workspace_id', $workspace->id)->max('updated_at') ?? '';
+        $deliverabilityStamp = DeliverabilityTest::where('workspace_id', $workspace->id)->max('updated_at') ?? '';
+        $contentStamp = ContentAnalysis::where('workspace_id', $workspace->id)->max('updated_at') ?? '';
+        $reputationStamp = ReputationLog::where('workspace_id', $workspace->id)->max('recorded_at') ?? '';
+        $eventStamp = WorkspaceSyncEvent::where('workspace_id', $workspace->id)->max('id') ?? 0;
+
+        return md5(implode('|', [
+            'lite',
+            $workspace->id,
+            $user->id,
+            $listStamp,
+            $deliverabilityStamp,
+            $contentStamp,
+            $reputationStamp,
+            $eventStamp,
+            $workspace->updated_at,
+        ]));
     }
 
     /**

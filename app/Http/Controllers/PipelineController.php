@@ -6,6 +6,7 @@ use App\Models\WorkflowLead;
 use App\Services\Pipeline\CloserAssignmentService;
 use App\Services\Pipeline\LeadPipelineService;
 use App\Services\Pipeline\RoleDashboardService;
+use App\Services\Pipeline\SetterDistributionService;
 use App\Services\Portal\PortalDashboardService;
 use App\Services\Workspace\WorkspaceContextService;
 use Illuminate\Http\Request;
@@ -19,6 +20,7 @@ class PipelineController extends Controller
         protected PortalDashboardService $portalDashboard,
         protected LeadPipelineService $pipelineService,
         protected CloserAssignmentService $closerAssignment,
+        protected SetterDistributionService $setterDistribution,
     ) {}
 
     public function portalDashboard()
@@ -64,11 +66,14 @@ class PipelineController extends Controller
         $leads = $this->dashboardService->setterTeamLeads($workspace, $user, [
             'search' => $request->input('search'),
             'phase' => $request->input('phase'),
+            'setter' => $request->input('setter'),
         ]);
         $teamMetrics = $this->dashboardService->setterTeamMetrics($workspace);
+        $setters = $this->dashboardService->availableSetters($workspace);
+        $unassignedLeads = $this->setterDistribution->unassignedLeadCount($workspace);
         $dashboard = $this->portalDashboard->forUser($user, $workspace);
 
-        return view('pipeline.setter-team.index', compact('workspace', 'leads', 'user', 'teamMetrics', 'dashboard'));
+        return view('pipeline.setter-team.index', compact('workspace', 'leads', 'user', 'teamMetrics', 'dashboard', 'setters', 'unassignedLeads'));
     }
 
     public function closerTeamDashboard(Request $request)
@@ -83,11 +88,13 @@ class PipelineController extends Controller
         $leads = $this->dashboardService->closerTeamLeads($workspace, $user, [
             'search' => $request->input('search'),
             'phase' => $request->input('phase'),
+            'closer' => $request->input('closer'),
         ]);
         $teamMetrics = $this->dashboardService->closerTeamMetrics($workspace);
+        $closers = $this->dashboardService->availableClosers($workspace);
         $dashboard = $this->portalDashboard->forUser($user, $workspace);
 
-        return view('pipeline.closer-team.index', compact('workspace', 'leads', 'user', 'teamMetrics', 'dashboard'));
+        return view('pipeline.closer-team.index', compact('workspace', 'leads', 'user', 'teamMetrics', 'dashboard', 'closers'));
     }
 
     public function closerTeamQueue(Request $request)
@@ -183,5 +190,48 @@ class PipelineController extends Controller
         );
 
         return redirect()->back()->with('success', 'Lead status updated.');
+    }
+
+    public function assignSetterLeads(Request $request)
+    {
+        $user = Auth::user();
+        $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
+
+        if (! $user->isAppointmentSetterTeamLead($workspace->id) && ! $user->canAccessAdminPortal($workspace->id)) {
+            abort(403);
+        }
+
+        $data = $request->validate([
+            'setter_id' => 'required|integer|exists:users,id',
+            'lead_count' => 'required|integer|min:1|max:500',
+        ]);
+
+        $setter = $workspace->users()
+            ->where('users.id', $data['setter_id'])
+            ->wherePivot('role', 'appointment_setter')
+            ->wherePivot('status', 'active')
+            ->first();
+
+        if (! $setter) {
+            return redirect()->back()->withErrors(['setter_id' => 'Selected user is not an active appointment setter.']);
+        }
+
+        $available = $this->setterDistribution->unassignedLeadCount($workspace);
+        if ($available === 0) {
+            return redirect()->back()->withErrors(['lead_count' => 'No unassigned leads are available to assign.']);
+        }
+
+        $assigned = $this->setterDistribution->assignLeadsToSetter(
+            $workspace,
+            $setter,
+            (int) $data['lead_count'],
+            $user
+        );
+
+        if ($assigned === 0) {
+            return redirect()->back()->withErrors(['lead_count' => 'No leads could be assigned. The setter may be at capacity or no leads are available.']);
+        }
+
+        return redirect()->back()->with('success', "Assigned {$assigned} lead(s) to {$setter->name}.");
     }
 }

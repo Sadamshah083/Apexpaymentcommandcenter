@@ -31,7 +31,8 @@ class EmailListController extends Controller
 
         $lists = EmailList::query()
             ->where('workspace_id', $workspace->id)
-            ->with('latestBatch', 'user')
+            ->select(['id', 'name', 'source_file', 'total_count', 'valid_count', 'invalid_count', 'status', 'created_at', 'user_id', 'workspace_id'])
+            ->with('latestBatch:id,email_list_id,status,processed_count,total_count', 'user:id,name')
             ->latest()
             ->paginate(15);
 

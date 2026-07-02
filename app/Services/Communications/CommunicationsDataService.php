@@ -42,16 +42,17 @@ class CommunicationsDataService
     /**
      * @return array{logs: array<int, array<string, mixed>>, next_page_token: string|null, warning: string|null}
      */
-    public function callLogs(array $filters, int $maxPages = 1): array
+    public function callLogs(array $filters, int $maxPages = 1, bool $enrichRecordings = false): array
     {
         $cacheKey = $this->versionedKey('call_logs.'.md5(json_encode([
             $filters['from'] ?? null,
             $filters['to'] ?? null,
             $filters['page_token'] ?? null,
             $maxPages,
+            $enrichRecordings,
         ])));
 
-        return $this->rememberUnlessEmptyFailure($cacheKey, function () use ($filters, $maxPages) {
+        return $this->rememberUnlessEmptyFailure($cacheKey, function () use ($filters, $maxPages, $enrichRecordings) {
             $logs = [];
             $pageToken = $filters['page_token'] ?? null;
             $pages = 0;
@@ -62,7 +63,7 @@ class CommunicationsDataService
                     'from' => $filters['from'] ?? now()->subDays(14)->toDateString(),
                     'to' => $filters['to'] ?? now()->toDateString(),
                     'page_token' => $pageToken,
-                    'per_page' => 50,
+                    'per_page' => (int) ($filters['per_page'] ?? config('integrations.communications.list_page_size', 20)),
                 ]);
 
                 if (filled($payload['warning'] ?? null)) {
@@ -78,7 +79,7 @@ class CommunicationsDataService
             } while ($pageToken && $pages < $maxPages);
 
             return [
-                'logs' => $this->enrichLogsWithRecordingFlags($logs, $filters),
+                'logs' => $this->enrichLogsWithRecordingFlags($logs, $filters, $enrichRecordings),
                 'next_page_token' => $pageToken,
                 'warning' => $warning,
             ];
@@ -89,10 +90,22 @@ class CommunicationsDataService
      * @param  array<int, array<string, mixed>>  $logs
      * @return array<int, array<string, mixed>>
      */
-    protected function enrichLogsWithRecordingFlags(array $logs, array $filters = []): array
+    protected function enrichLogsWithRecordingFlags(array $logs, array $filters = [], bool $fetchIndex = false): array
     {
-        if ($logs === []) {
-            return [];
+        if ($logs === [] || ! $fetchIndex) {
+            return $logs;
+        }
+
+        $needsIndex = collect($logs)->contains(function (array $log) {
+            $hasRecording = (bool) ($log['raw']['has_recording'] ?? false)
+                || (bool) ($log['has_recording_media'] ?? false);
+            $status = strtolower((string) ($log['raw']['recording_status'] ?? ''));
+
+            return $hasRecording || ($status !== '' && $status !== 'non_recorded');
+        });
+
+        if (! $needsIndex) {
+            return $logs;
         }
 
         $index = $this->phoneRecordingFileIndex($filters);
@@ -280,9 +293,11 @@ class CommunicationsDataService
     /**
      * @return array<int, string>
      */
-    public function recentDialNumbers(array $filters, int $limit = 12): array
+    public function recentDialNumbers(array $filters, int $limit = 12, ?array $logs = null): array
     {
-        $logs = $this->callLogs($filters, 1)['logs'];
+        if ($logs === null) {
+            $logs = $this->callLogs($filters, 1)['logs'];
+        }
 
         return collect($logs)
             ->flatMap(function (array $log) {

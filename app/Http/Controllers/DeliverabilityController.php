@@ -23,10 +23,15 @@ class DeliverabilityController extends Controller
 
         $tests = DeliverabilityTest::query()
             ->where('workspace_id', $workspace->id)
+            ->select(['id', 'domain', 'overall_score', 'status', 'created_at'])
             ->latest()
             ->paginate(10);
 
-        $inboxes = InboundTestInbox::latest()->take(5)->get();
+        $inboxes = InboundTestInbox::query()
+            ->select(['id', 'email_address', 'status', 'overall_score'])
+            ->latest()
+            ->take(5)
+            ->get();
         $inboundDomainConfigured = filled(config('email_checker.inbound.domain'));
         $inboundImapConfigured = filled(config('email_checker.inbound.imap_host'));
 

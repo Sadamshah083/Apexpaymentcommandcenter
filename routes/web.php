@@ -122,6 +122,7 @@ Route::prefix('admin')->name('admin.')->middleware([
         Route::post('/{workflow}/retry-failed', [WorkflowController::class, 'retryFailed'])->name('retry-failed');
         Route::post('/{workflow}/enrich', [WorkflowController::class, 'enrich'])->name('enrich');
         Route::post('/{workflow}/distribute', [WorkflowController::class, 'distribute'])->name('distribute');
+        Route::post('/{workflow}/assign-leads', [WorkflowController::class, 'assignLeads'])->name('assign-leads');
         Route::delete('/{workflow}', [WorkflowController::class, 'destroy'])->name('destroy');
     });
 
@@ -187,6 +188,7 @@ Route::prefix('portal')->name('portal.')->middleware([\App\Http\Middleware\Marke
 
     Route::get('/setter', [PipelineController::class, 'setterDashboard'])->name('setter.dashboard');
     Route::get('/setter-team', [PipelineController::class, 'setterTeamDashboard'])->name('setter-team.dashboard');
+    Route::post('/setter-team/assign-leads', [PipelineController::class, 'assignSetterLeads'])->name('setter-team.assign-leads');
     Route::get('/closer-team', [PipelineController::class, 'closerTeamDashboard'])->name('closer-team.dashboard');
     Route::get('/closer-team/queue', [PipelineController::class, 'closerTeamQueue'])->name('closer-team.queue');
     Route::get('/closer', [PipelineController::class, 'closerDashboard'])->name('closer.dashboard');

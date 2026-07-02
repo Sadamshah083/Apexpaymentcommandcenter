@@ -59,4 +59,5 @@
             </tbody>
         </table>
     </x-data-table>
+    <x-communications.list-pagination :pagination="$panelPagination ?? null" class="mt-4" />
 </div>
