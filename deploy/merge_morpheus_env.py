@@ -37,7 +37,7 @@ def main() -> int:
     api_key = os.environ.get("MORPHEUS_API_KEY", "").strip()
     ssh = connect()
 
-    existing = run(ssh, f"grep -E '^[A-Z_]+=' {ENV_PATH} 2>/dev/null | cut -d= -f1 | sort -u || true")
+    existing = run(ssh, f"sudo grep -E '^[A-Z_]+=' {ENV_PATH} 2>/dev/null | cut -d= -f1 | sort -u || true")
     present = {line.strip() for line in existing.splitlines() if line.strip()}
 
     to_add: list[str] = []
