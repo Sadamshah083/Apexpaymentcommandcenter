@@ -1,4 +1,4 @@
-@php
+﻿@php
     $steps = \App\Support\PipelineProgress::steps($workflow);
 @endphp
 
