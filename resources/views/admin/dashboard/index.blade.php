@@ -377,44 +377,51 @@
             }
         });
 
-        // Real-Time Polling Loop (every 5 seconds)
+        // Real-time dashboard updates (stops on Turbo navigation)
         const pollEndpoint = "{{ route('admin.dashboard.realtime-data') }}";
+        let stopDashboardPoll = null;
 
-        setInterval(() => {
-            fetch(pollEndpoint)
-                .then(response => response.json())
-                .then(data => {
-                    // Update Text Metrics
-                    document.getElementById('stat-total_leads').innerText = data.pipeline.total_leads;
-                    document.getElementById('stat-new').innerText = data.pipeline.new;
-                    document.getElementById('stat-qualified').innerText = data.pipeline.qualified;
-                    document.getElementById('stat-booked').innerText = data.pipeline.booked;
-                    document.getElementById('stat-showed').innerText = data.pipeline.showed;
-                    document.getElementById('stat-closed_won').innerText = data.pipeline.closed_won;
-                    document.getElementById('stat-not_now').innerText = data.pipeline.not_now;
-                    document.getElementById('stat-dead').innerText = data.pipeline.dead;
+        function updateDashboardMetrics(data) {
+            const setText = (id, value) => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.innerText = value;
+                }
+            };
 
-                    document.getElementById('stat-book_to_show').innerText = data.conversion_rates.book_to_show_rate !== null ? data.conversion_rates.book_to_show_rate + '%' : '-';
-                    document.getElementById('stat-show_to_close').innerText = data.conversion_rates.show_to_close_rate !== null ? data.conversion_rates.show_to_close_rate + '%' : '-';
-                    document.getElementById('stat-overall_close').innerText = data.conversion_rates.overall_close_rate !== null ? data.conversion_rates.overall_close_rate + '%' : '-';
-                    document.getElementById('stat-avg_deal_volume').innerText = '$' + data.conversion_rates.avg_closed_volume.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                    document.getElementById('stat-total_dials').innerText = data.conversion_rates.total_dials;
-                    document.getElementById('stat-total_closes').innerText = data.conversion_rates.total_closes;
+            setText('stat-total_leads', data.pipeline.total_leads);
+            setText('stat-new', data.pipeline.new);
+            setText('stat-qualified', data.pipeline.qualified);
+            setText('stat-booked', data.pipeline.booked);
+            setText('stat-showed', data.pipeline.showed);
+            setText('stat-closed_won', data.pipeline.closed_won);
+            setText('stat-not_now', data.pipeline.not_now);
+            setText('stat-dead', data.pipeline.dead);
 
-                    // Update Funnel Chart Data
-                    funnelChart.data.datasets[0].data = [
+            setText('stat-book_to_show', data.conversion_rates.book_to_show_rate !== null ? data.conversion_rates.book_to_show_rate + '%' : '-');
+            setText('stat-show_to_close', data.conversion_rates.show_to_close_rate !== null ? data.conversion_rates.show_to_close_rate + '%' : '-');
+            setText('stat-overall_close', data.conversion_rates.overall_close_rate !== null ? data.conversion_rates.overall_close_rate + '%' : '-');
+            setText('stat-avg_deal_volume', '$' + data.conversion_rates.avg_closed_volume.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}));
+            setText('stat-total_dials', data.conversion_rates.total_dials);
+            setText('stat-total_closes', data.conversion_rates.total_closes);
+
+            if (!funnelChart) {
+                return;
+            }
+
+            funnelChart.data.datasets[0].data = [
                         data.pipeline.total_leads,
                         data.pipeline.new,
                         data.pipeline.qualified,
                         data.pipeline.booked,
                         data.pipeline.showed,
                         data.pipeline.closed_won
-                    ];
-                    funnelChart.update();
+            ];
+            funnelChart.update();
 
-                    // Update Setters Table
-                    const settersBody = document.getElementById('setters-table-body');
-                    let settersHTML = '';
+            const settersBody = document.getElementById('setters-table-body');
+            if (settersBody) {
+                let settersHTML = '';
                     if (data.setters.length > 0) {
                         data.setters.forEach(setter => {
                             settersHTML += `
@@ -429,11 +436,12 @@
                     } else {
                         settersHTML = `<tr><td colspan="2" class="py-4 text-center text-slate-400">No active setters found.</td></tr>`;
                     }
-                    settersBody.innerHTML = settersHTML;
+                settersBody.innerHTML = settersHTML;
+            }
 
-                    // Update Closers Table
-                    const closersBody = document.getElementById('closers-table-body');
-                    let closersHTML = '';
+            const closersBody = document.getElementById('closers-table-body');
+            if (closersBody) {
+                let closersHTML = '';
                     if (data.closers.length > 0) {
                         data.closers.forEach(closer => {
                             closersHTML += `
@@ -448,11 +456,12 @@
                     } else {
                         closersHTML = `<tr><td colspan="2" class="py-4 text-center text-slate-400">No active closers found.</td></tr>`;
                     }
-                    closersBody.innerHTML = closersHTML;
+                closersBody.innerHTML = closersHTML;
+            }
 
-                    // Update Workflows Table & Chart
-                    const workflowsBody = document.getElementById('workflows-table-body');
-                    let workflowsHTML = '';
+            const workflowsBody = document.getElementById('workflows-table-body');
+            if (workflowsBody) {
+                let workflowsHTML = '';
                     const newLabels = [];
                     const newTotals = [];
                     const newEnriched = [];
@@ -498,17 +507,29 @@
                     } else {
                         workflowsHTML = `<tr><td colspan="9" class="py-4 text-center text-slate-400">No workflow files uploaded yet.</td></tr>`;
                     }
-                    workflowsBody.innerHTML = workflowsHTML;
+                workflowsBody.innerHTML = workflowsHTML;
 
-                    // Update Workflows Chart Data
+                if (workflowsChart) {
                     workflowsChart.data.labels = newLabels;
                     workflowsChart.data.datasets[0].data = newTotals;
                     workflowsChart.data.datasets[1].data = newEnriched;
                     workflowsChart.data.datasets[2].data = newClosed;
                     workflowsChart.update();
-                })
-                .catch(error => console.error('Real-time sync failed:', error));
-        }, 5000);
+                }
+            }
+        }
+
+        if (window.startProgressPoll) {
+            stopDashboardPoll = window.startProgressPoll(pollEndpoint, (data) => {
+                updateDashboardMetrics(data);
+                return true;
+            }, { activeMs: 5000, hiddenMs: 15000 });
+        }
+
+        document.addEventListener('turbo:before-cache', () => {
+            stopDashboardPoll?.();
+            stopDashboardPoll = null;
+        }, { once: true });
     });
 </script>
 @endpush

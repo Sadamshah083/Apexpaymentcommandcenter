@@ -81,14 +81,26 @@ function renderLeadTagChips(lead) {
     return `${listHtml}${tagHtml}`;
 }
 
-function renderLeadRow(lead, leadShowBase) {
-    const contact = lead.direct_email && lead.direct_email !== 'Not Publicly Available'
-        ? `<div class="text-zinc-700">${escapeHtml(lead.direct_email)}</div>`
-        : '';
+function resolveLeadContact(lead) {
+    const email = lead.direct_email && lead.direct_email !== 'Not Publicly Available'
+        ? lead.direct_email
+        : (lead.input_email || '');
     const phone = lead.direct_phone && lead.direct_phone !== 'Not Publicly Available'
-        ? `<div class="text-xs text-zinc-400 mt-0.5">${escapeHtml(lead.direct_phone)}</div>`
+        ? lead.direct_phone
+        : (lead.input_phone || '');
+
+    return { email: String(email || '').trim(), phone: String(phone || '').trim() };
+}
+
+function renderLeadRow(lead, leadShowBase) {
+    const contactInfo = resolveLeadContact(lead);
+    const contact = contactInfo.email
+        ? `<div class="text-zinc-700">${escapeHtml(contactInfo.email)}</div>`
         : '';
-    const contactFallback = (!lead.direct_email && !lead.direct_phone)
+    const phone = contactInfo.phone
+        ? `<div class="text-xs text-zinc-400 mt-0.5">${escapeHtml(contactInfo.phone)}</div>`
+        : '';
+    const contactFallback = (!contactInfo.email && !contactInfo.phone)
         ? '<span class="text-xs text-zinc-400 italic">None available</span>'
         : '';
     const tierLabel = lead.tier_label || TIER_LABELS[lead.tier] || '';
@@ -173,8 +185,9 @@ function renderPipelineLeadRow(lead, leadShowBase, csrf) {
            </div>`
         : (lead.status === 'completed' ? '<span class="text-xs font-semibold text-emerald-700">Released</span>' : '');
 
-    const email = lead.direct_email && lead.direct_email !== 'Not Publicly Available' ? escapeHtml(lead.direct_email) : '';
-    const phone = lead.direct_phone && lead.direct_phone !== 'Not Publicly Available' ? escapeHtml(lead.direct_phone) : '';
+    const contactInfo = resolveLeadContact(lead);
+    const email = contactInfo.email ? escapeHtml(contactInfo.email) : '';
+    const phone = contactInfo.phone ? escapeHtml(contactInfo.phone) : '';
     const contact = email || phone
         ? `${email ? `<div>${email}</div>` : ''}${phone ? `<div class="text-xs text-zinc-400 mt-0.5">${phone}</div>` : ''}`
         : '<span class="text-zinc-400">—</span>';
@@ -583,6 +596,7 @@ function notifySyncEvents(events, workspaceId, seenIds, leadShowBase, workflowSh
 
 let syncTimer = null;
 let syncInflight = null;
+let syncEventSource = null;
 let syncVisibilityHandler = null;
 let syncRequestHandler = null;
 
@@ -593,6 +607,10 @@ export function teardownWorkspaceSync() {
     }
     syncInflight?.abort();
     syncInflight = null;
+    if (syncEventSource) {
+        syncEventSource.close();
+        syncEventSource = null;
+    }
     if (syncVisibilityHandler) {
         document.removeEventListener('visibilitychange', syncVisibilityHandler);
         syncVisibilityHandler = null;
@@ -608,6 +626,7 @@ export function initWorkspaceSync() {
 
     const root = document.body;
     const syncUrl = root.dataset.workspaceSyncUrl;
+    const streamUrl = root.dataset.workspaceSyncStreamUrl;
     if (!syncUrl) return;
 
     const workspaceId = root.dataset.workspaceId || 'default';
@@ -637,7 +656,11 @@ export function initWorkspaceSync() {
     initAjaxActivityForms();
 
     function onSyncRequest() {
-        schedulePoll(0);
+        if (syncEventSource) {
+            connectStream();
+        } else {
+            schedulePoll(0);
+        }
     }
 
     syncRequestHandler = onSyncRequest;
@@ -648,6 +671,86 @@ export function initWorkspaceSync() {
             window.clearTimeout(syncTimer);
         }
         syncTimer = window.setTimeout(poll, ms);
+    }
+
+    function applySyncPayload(data) {
+        updateSyncIndicator('live');
+
+        if (typeof data.cursor === 'number' && data.cursor >= cursor) {
+            cursor = data.cursor;
+            saveStoredCursor(workspaceId, cursor);
+        }
+
+        if (Array.isArray(data.events) && data.events.length > 0) {
+            if (hasSyncedOnce) {
+                notifySyncEvents(data.events, workspaceId, seenEventIds, leadShowBase, workflowShowBase);
+            } else {
+                markEventsSeen(workspaceId, data.events, seenEventIds);
+            }
+        }
+
+        if (!data.changed) {
+            hasSyncedOnce = true;
+            sessionStorage.setItem(readyStorageKey(workspaceId), '1');
+            return;
+        }
+
+        version = data.version;
+        hasSyncedOnce = true;
+        sessionStorage.setItem(readyStorageKey(workspaceId), '1');
+
+        if (leadsBody && Array.isArray(data.leads)) {
+            syncTableBody(leadsBody, data.leads, renderLeadRow, [leadShowBase]);
+        }
+
+        if (pipelineLeadsBody && Array.isArray(data.leads)) {
+            syncTableBody(pipelineLeadsBody, data.leads, renderPipelineLeadRow, [leadShowBase, csrfToken()]);
+            reapplyPipelineLeadFilter();
+        }
+
+        if (aePipelineBody && Array.isArray(data.leads)) {
+            const aeLeads = data.leads.filter((lead) => AE_PIPELINE_STAGES.has(lead.stage));
+            syncTableBody(aePipelineBody, aeLeads, renderAePipelineRow, [leadShowBase]);
+        }
+
+        if (workflowsList && Array.isArray(data.workflows)) {
+            if (syncModeIsPatch(workflowsList)) {
+                patchWorkflowCards(workflowsList, data.workflows, workflowShowBase);
+            } else {
+                smoothHtmlUpdate(
+                    workflowsList,
+                    data.workflows.map((wf) => renderWorkflowCard(wf, workflowShowBase)).join(''),
+                );
+            }
+        }
+
+        if (teamList && Array.isArray(data.team)) {
+            if (teamList.dataset.adminTeam === '1' || teamList.dataset.staticTeam === '1') {
+                updateMemberRows(teamList, data.team);
+            } else {
+                smoothHtmlUpdate(teamList, renderTeam(data.team));
+            }
+        }
+
+        applyWorkspaceAdminState(data);
+        applySalesOpsSync(data);
+        applyToolkitSync(data?.toolkit);
+
+        if (workflowId && Array.isArray(data.workflows) && data.workflows.length > 0) {
+            const wf = data.workflows[0];
+            smoothHtmlUpdate(workflowStatus, renderWorkflowStatusPill(wf.status));
+            smoothTextUpdate(workflowProgress, String(wf.attempted_leads ?? wf.enriched_leads ?? wf.processed_leads ?? 0));
+            smoothTextUpdate(workflowAssigned, String(wf.assigned_leads ?? 0));
+            smoothTextUpdate(workflowPendingReview, String(wf.pending_verification ?? 0));
+            smoothTextUpdate(workflowPendingReview2, String(wf.pending_verification ?? 0));
+            smoothWidthUpdate(workflowProgressBar, wf.completion_pct ?? 0);
+            if (workflowProgressLabel) {
+                smoothTextUpdate(workflowProgressLabel, formatWorkflowProgressLabel(wf));
+            }
+            updatePipelineProgress(wf);
+        }
+
+        document.dispatchEvent(new CustomEvent('workspace:sync', { detail: data }));
     }
 
     async function poll() {
@@ -677,84 +780,7 @@ export function initWorkspaceSync() {
             }
 
             const data = await response.json();
-            updateSyncIndicator('live');
-
-            if (typeof data.cursor === 'number' && data.cursor >= cursor) {
-                cursor = data.cursor;
-                saveStoredCursor(workspaceId, cursor);
-            }
-
-            if (Array.isArray(data.events) && data.events.length > 0) {
-                if (hasSyncedOnce) {
-                    notifySyncEvents(data.events, workspaceId, seenEventIds, leadShowBase, workflowShowBase);
-                } else {
-                    markEventsSeen(workspaceId, data.events, seenEventIds);
-                }
-            }
-
-            if (!data.changed) {
-                hasSyncedOnce = true;
-                sessionStorage.setItem(readyStorageKey(workspaceId), '1');
-                schedulePoll(document.hidden ? SYNC_HIDDEN_MS : SYNC_ACTIVE_MS);
-                return;
-            }
-
-            version = data.version;
-            hasSyncedOnce = true;
-            sessionStorage.setItem(readyStorageKey(workspaceId), '1');
-
-            if (leadsBody && Array.isArray(data.leads)) {
-                syncTableBody(leadsBody, data.leads, renderLeadRow, [leadShowBase]);
-            }
-
-            if (pipelineLeadsBody && Array.isArray(data.leads)) {
-                syncTableBody(pipelineLeadsBody, data.leads, renderPipelineLeadRow, [leadShowBase, csrfToken()]);
-                reapplyPipelineLeadFilter();
-            }
-
-            if (aePipelineBody && Array.isArray(data.leads)) {
-                const aeLeads = data.leads.filter((lead) => AE_PIPELINE_STAGES.has(lead.stage));
-                syncTableBody(aePipelineBody, aeLeads, renderAePipelineRow, [leadShowBase]);
-            }
-
-            if (workflowsList && Array.isArray(data.workflows)) {
-                if (syncModeIsPatch(workflowsList)) {
-                    patchWorkflowCards(workflowsList, data.workflows, workflowShowBase);
-                } else {
-                    smoothHtmlUpdate(
-                        workflowsList,
-                        data.workflows.map((wf) => renderWorkflowCard(wf, workflowShowBase)).join(''),
-                    );
-                }
-            }
-
-            if (teamList && Array.isArray(data.team)) {
-                if (teamList.dataset.adminTeam === '1' || teamList.dataset.staticTeam === '1') {
-                    updateMemberRows(teamList, data.team);
-                } else {
-                    smoothHtmlUpdate(teamList, renderTeam(data.team));
-                }
-            }
-
-            applyWorkspaceAdminState(data);
-            applySalesOpsSync(data);
-            applyToolkitSync(data?.toolkit);
-
-            if (workflowId && Array.isArray(data.workflows) && data.workflows.length > 0) {
-                const wf = data.workflows[0];
-                smoothHtmlUpdate(workflowStatus, renderWorkflowStatusPill(wf.status));
-                smoothTextUpdate(workflowProgress, String(wf.attempted_leads ?? wf.enriched_leads ?? wf.processed_leads ?? 0));
-                smoothTextUpdate(workflowAssigned, String(wf.assigned_leads ?? 0));
-                smoothTextUpdate(workflowPendingReview, String(wf.pending_verification ?? 0));
-                smoothTextUpdate(workflowPendingReview2, String(wf.pending_verification ?? 0));
-                smoothWidthUpdate(workflowProgressBar, wf.completion_pct ?? 0);
-                if (workflowProgressLabel) {
-                    smoothTextUpdate(workflowProgressLabel, formatWorkflowProgressLabel(wf));
-                }
-                updatePipelineProgress(wf);
-            }
-
-            document.dispatchEvent(new CustomEvent('workspace:sync', { detail: data }));
+            applySyncPayload(data);
             schedulePoll(document.hidden ? SYNC_HIDDEN_MS : SYNC_ACTIVE_MS);
         } catch (error) {
             if (error?.name === 'AbortError') {
@@ -766,12 +792,77 @@ export function initWorkspaceSync() {
         }
     }
 
+    function buildStreamUrl() {
+        const params = new URLSearchParams();
+        if (version) params.set('v', version);
+        params.set('cursor', String(cursor));
+        if (workflowId) params.set('workflow_id', workflowId);
+        if (leadId) params.set('lead_id', leadId);
+
+        return `${streamUrl}?${params.toString()}`;
+    }
+
+    function connectStream() {
+        if (!streamUrl || typeof EventSource === 'undefined') {
+            schedulePoll(0);
+            return;
+        }
+
+        if (syncEventSource) {
+            syncEventSource.close();
+            syncEventSource = null;
+        }
+
+        updateSyncIndicator('syncing');
+
+        const source = new EventSource(buildStreamUrl());
+        syncEventSource = source;
+
+        source.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                applySyncPayload(data);
+            } catch (error) {
+                console.debug('Workspace sync stream parse failed', error);
+            }
+        };
+
+        source.addEventListener('reconnect', () => {
+            source.close();
+            if (syncEventSource === source) {
+                syncEventSource = null;
+            }
+            window.setTimeout(connectStream, 500);
+        });
+
+        source.onerror = () => {
+            source.close();
+            if (syncEventSource === source) {
+                syncEventSource = null;
+            }
+            updateSyncIndicator('paused');
+            schedulePoll(SYNC_ERROR_MS);
+        };
+
+        source.onopen = () => {
+            updateSyncIndicator('live');
+        };
+    }
+
     syncVisibilityHandler = () => {
         if (!document.hidden) {
-            schedulePoll(0);
+            if (syncEventSource) {
+                connectStream();
+            } else {
+                schedulePoll(0);
+            }
         }
     };
     document.addEventListener('visibilitychange', syncVisibilityHandler);
 
-    schedulePoll(0);
+    if (streamUrl && typeof EventSource !== 'undefined') {
+        connectStream();
+    } else {
+        schedulePoll(0);
+    }
 }
