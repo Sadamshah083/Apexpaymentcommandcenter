@@ -9,6 +9,8 @@
             <p class="app-page-subtitle">Read-only view of your team's leads and metrics.</p>
         </div>
 
+        @include('pipeline.partials.dashboard-widgets', ['dashboard' => $dashboard ?? []])
+
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             @foreach ($teamMetrics as $metric)
                 <div class="app-card app-card-padded">

@@ -5,6 +5,7 @@
     $waiting = $selectedQueueWaiting ?? [];
 @endphp
 
+@if ($hubAccess['canConfigure'] ?? false)
 <div class="ghl-card mb-6">
     <h3 class="ghl-card-title">Create queue</h3>
     <form method="POST" action="{{ route($routePrefix . 'communications.morpheus.queues.store') }}"
@@ -16,6 +17,7 @@
         <button type="submit" class="comm-hub-btn">Create queue</button>
     </form>
 </div>
+@endif
 
 @if ($selected)
     <div class="ghl-card mb-6">
@@ -25,13 +27,16 @@
                 <p class="text-sm text-slate-500">{{ $selected['waiting'] ?? 0 }} waiting · longest
                     {{ $selected['longest_wait_sec'] ?? 0 }}s</p>
             </div>
+            @if ($hubAccess['canConfigure'] ?? false)
             <form method="POST"
                 action="{{ route($routePrefix . 'communications.morpheus.queues.destroy', ['id' => $selected['id']]) }}"
                 onsubmit="return confirm('Delete this queue?')">
                 @csrf @method('DELETE')
                 <button type="submit" class="comm-hub-btn comm-hub-btn-secondary text-xs">Delete</button>
             </form>
+            @endif
         </div>
+        @if ($hubAccess['canConfigure'] ?? false)
         <form method="POST"
             action="{{ route($routePrefix . 'communications.morpheus.queues.update', ['id' => $selected['id']]) }}"
             class="grid grid-cols-1 md:grid-cols-4 gap-2 mt-4">
@@ -43,6 +48,7 @@
                 class="comm-hub-input text-sm">
             <button type="submit" class="comm-hub-btn text-sm">Update queue</button>
         </form>
+        @endif
         @if (!empty($waiting))
             <ul class="mt-3 space-y-2 text-sm">
                 @foreach ($waiting as $caller)

@@ -7,7 +7,7 @@ use Illuminate\Http\Request;
 
 class CommunicationsAccessService
 {
-    /** Channels available to portal agents (setters, closers, team leads). */
+    /** Core agent operations: dial, inbox, call history, media. */
     public const AGENT_CHANNELS = [
         'inbox',
         'calls',
@@ -17,43 +17,98 @@ class CommunicationsAccessService
         'chat',
     ];
 
-    /** Admin-only channels (configuration & telephony management). */
-    public const ADMIN_ONLY_CHANNELS = [
+    /** Team leads see their team's presence and quick-dial links. */
+    public const TEAM_LEAD_CHANNELS = [
+        'team',
+    ];
+
+    /** Managers / supervisors: operational telephony & dialer CRM (read + dial, no provisioning). */
+    public const SUPERVISOR_CHANNELS = [
         'queues',
         'conferences',
         'leads',
         'campaigns',
         'lists',
+    ];
+
+    /** Full telephony administration (provision extensions, agents, settings). */
+    public const ADMIN_ONLY_CHANNELS = [
         'extensions',
-        'team',
         'agents',
     ];
 
-    /** Panels that configure Morpheus / workspace telephony. */
     public const ADMIN_ONLY_PANELS = [
         'settings',
-        'team',
-        'queues',
-        'conferences',
-        'leads',
-        'campaigns',
-        'lists',
-        'extensions',
         'agents',
+        'extensions',
     ];
+
+  /**
+   * Access tier for Communications Hub UI and mutations.
+   *
+   * admin      — super_admin / admin (admin portal): full hub + telephony config
+   * supervisor — manager (admin portal): dial + ops channels, no provisioning
+   * team_lead  — setter/closer team leads (portal): agents + team visibility
+   * agent      — setters / closers (portal): dial + comms channels only
+   */
+    public function tierFor(?User $user, string $routePrefix): string
+    {
+        if ($user === null) {
+            return 'guest';
+        }
+
+        if ($routePrefix === 'admin.') {
+            if ($user->isSuperAdmin() || $user->isAdmin()) {
+                return 'admin';
+            }
+
+            if ($user->isManager()) {
+                return 'supervisor';
+            }
+
+            return $user->canAccessAdminPortal() ? 'supervisor' : 'guest';
+        }
+
+        if (! $user->canAccessPortal()) {
+            return 'guest';
+        }
+
+        $role = $user->getWorkspaceRole();
+
+        if (in_array($role, ['appointment_setter_team_lead', 'closers_team_lead'], true)) {
+            return 'team_lead';
+        }
+
+        return 'agent';
+    }
 
     public function isAgentTier(?User $user, string $routePrefix): bool
     {
-        if ($routePrefix !== 'portal.') {
-            return false;
-        }
-
-        return $user !== null && $user->canAccessPortal();
+        return in_array($this->tierFor($user, $routePrefix), ['agent', 'team_lead'], true);
     }
 
     public function canConfigure(?User $user, string $routePrefix): bool
     {
-        return ! $this->isAgentTier($user, $routePrefix);
+        return $this->tierFor($user, $routePrefix) === 'admin';
+    }
+
+    public function canManageTelephony(?User $user, string $routePrefix): bool
+    {
+        return $this->canConfigure($user, $routePrefix);
+    }
+
+    public function canDial(?User $user, string $routePrefix): bool
+    {
+        return $this->tierFor($user, $routePrefix) !== 'guest';
+    }
+
+    public function canAccessHub(?User $user, string $routePrefix): bool
+    {
+        if ($routePrefix === 'portal.') {
+            return $user !== null && $user->canAccessPortal();
+        }
+
+        return $user !== null && $user->canAccessAdminPortal();
     }
 
     /**
@@ -61,12 +116,18 @@ class CommunicationsAccessService
      */
     public function channelsFor(?User $user, string $routePrefix): array
     {
-        if ($this->canConfigure($user, $routePrefix)) {
-            return CommunicationsInboxService::CHANNELS;
-        }
+        $tier = $this->tierFor($user, $routePrefix);
+
+        $allowed = match ($tier) {
+            'admin' => array_keys(CommunicationsInboxService::CHANNELS),
+            'supervisor' => array_merge(self::AGENT_CHANNELS, self::TEAM_LEAD_CHANNELS, self::SUPERVISOR_CHANNELS),
+            'team_lead' => array_merge(self::AGENT_CHANNELS, self::TEAM_LEAD_CHANNELS),
+            'agent' => self::AGENT_CHANNELS,
+            default => [],
+        };
 
         return collect(CommunicationsInboxService::CHANNELS)
-            ->only(self::AGENT_CHANNELS)
+            ->only($allowed)
             ->all();
     }
 
@@ -81,12 +142,15 @@ class CommunicationsAccessService
             return $this->canConfigure($user, $routePrefix);
         }
 
-        return true;
+        if (in_array($panel, ['team', 'queues', 'conferences', 'leads', 'campaigns', 'lists'], true)) {
+            return $this->tierFor($user, $routePrefix) !== 'guest'
+                && $this->tierFor($user, $routePrefix) !== 'agent';
+        }
+
+        return $this->canAccessHub($user, $routePrefix);
     }
 
     /**
-     * Clamp channel/panel to what the current user may view.
-     *
      * @return array{channel: string, panel: string, tier: string, can_configure: bool}
      */
     public function clampScope(
@@ -96,6 +160,8 @@ class CommunicationsAccessService
         string $channel,
         string $panel,
     ): array {
+        $tier = $this->tierFor($user, $routePrefix);
+
         if (! $this->canAccessChannel($user, $routePrefix, $channel)) {
             $channel = 'inbox';
             $panel = 'empty';
@@ -110,7 +176,7 @@ class CommunicationsAccessService
         }
 
         if (
-            $this->isAgentTier($user, $routePrefix)
+            in_array($tier, ['agent', 'team_lead', 'supervisor'], true)
             && $panel === 'empty'
             && ! $request->has('panel')
             && ! $request->filled('contact')
@@ -125,7 +191,7 @@ class CommunicationsAccessService
         return [
             'channel' => $channel,
             'panel' => $panel,
-            'tier' => $this->isAgentTier($user, $routePrefix) ? 'agent' : 'admin',
+            'tier' => $tier,
             'can_configure' => $this->canConfigure($user, $routePrefix),
         ];
     }
@@ -135,11 +201,25 @@ class CommunicationsAccessService
      */
     public function viewMeta(?User $user, string $routePrefix): array
     {
+        $tier = $this->tierFor($user, $routePrefix);
+
         return [
-            'tier' => $this->isAgentTier($user, $routePrefix) ? 'agent' : 'admin',
+            'tier' => $tier,
             'canConfigure' => $this->canConfigure($user, $routePrefix),
-            'canManageTelephony' => $this->canConfigure($user, $routePrefix),
-            'canDial' => true,
+            'canManageTelephony' => $this->canManageTelephony($user, $routePrefix),
+            'canDial' => $this->canDial($user, $routePrefix),
+            'roleLabel' => $this->roleLabel($tier),
         ];
+    }
+
+    protected function roleLabel(string $tier): string
+    {
+        return match ($tier) {
+            'admin' => 'Administrator',
+            'supervisor' => 'Manager',
+            'team_lead' => 'Team lead',
+            'agent' => 'Agent',
+            default => 'User',
+        };
     }
 }

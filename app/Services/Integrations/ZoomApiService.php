@@ -161,11 +161,7 @@ class ZoomApiService
         return $this->postOriginate('/click-to-call', array_merge([
             'extension' => trim($extension),
             'destination' => trim($destination),
-        ], array_filter([
-            'caller_id_number' => $options['caller_id_number'] ?? null,
-            'caller_id_name' => $options['caller_id_name'] ?? null,
-            'timeout_sec' => $options['timeout_sec'] ?? null,
-        ])));
+        ], $this->originatePayloadExtras($options)));
     }
 
     /**
@@ -183,11 +179,7 @@ class ZoomApiService
         }
 
         $attempted = [];
-        $extra = array_filter([
-            'caller_id_number' => $options['caller_id_number'] ?? null,
-            'caller_id_name' => $options['caller_id_name'] ?? null,
-            'timeout_sec' => $options['timeout_sec'] ?? null,
-        ]);
+        $extra = $this->originatePayloadExtras($options);
 
         $click = $this->postOriginate('/click-to-call', array_merge([
             'extension' => $fromExtension,
@@ -213,6 +205,38 @@ class ZoomApiService
             'error' => $originate['error'] ?? $click['error'] ?? 'Could not originate call.',
             'attempted' => $attempted,
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function originatePayloadExtras(array $options = []): array
+    {
+        $campaignId = $options['campaign_id'] ?? $this->defaultCampaignId();
+
+        return array_filter([
+            'caller_id_number' => $options['caller_id_number'] ?? null,
+            'caller_id_name' => $options['caller_id_name'] ?? null,
+            'timeout_sec' => $options['timeout_sec'] ?? null,
+            'campaign_id' => $campaignId,
+        ], fn ($value) => $value !== null && $value !== '');
+    }
+
+    protected function defaultCampaignId(): ?string
+    {
+        $configured = config('integrations.morpheus.default_campaign_id');
+        if (filled($configured)) {
+            return (string) $configured;
+        }
+
+        try {
+            $campaigns = $this->listCampaigns(['per_page' => 1]);
+            $first = $campaigns['campaigns'][0]['id'] ?? null;
+
+            return $first !== null ? (string) $first : null;
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**

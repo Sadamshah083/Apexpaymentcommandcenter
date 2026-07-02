@@ -14,12 +14,20 @@
                 'voicemail' => $channelCounts['voicemail_unread'] ?? 0 ?: null,
                 default => null,
             };
+            $navLabel = match ($channelKey) {
+                'chat' => 'Chat',
+                'agents' => 'Agents',
+                'recordings' => 'Record',
+                'conferences' => 'Conf',
+                'voicemail' => 'VM',
+                default => $meta['label'],
+            };
         @endphp
         <a href="{{ route($routePrefix . 'communications.index', $navQuery) }}"
             class="ghl-inbox-nav-item {{ $channel === $channelKey && !in_array($panel ?? '', ['settings', 'dialer']) ? 'ghl-inbox-nav-item-active' : '' }}"
             title="{{ $meta['label'] }}">
             @include('communications.inbox.partials.nav-icon', ['icon' => $meta['icon']])
-            <span>{{ $meta['label'] }}</span>
+            <span class="ghl-inbox-nav-label">{{ $navLabel }}</span>
             @if ($badge)
                 <span class="ghl-inbox-nav-badge">{{ $badge > 99 ? '99+' : $badge }}</span>
             @endif
@@ -32,6 +40,6 @@
         class="ghl-inbox-nav-item ghl-inbox-nav-item-dial {{ ($panel ?? '') === 'dialer' ? 'ghl-inbox-nav-item-active' : '' }}"
         title="Phone dialer">
         @include('communications.inbox.partials.nav-icon', ['icon' => 'dial'])
-        <span>Dial</span>
+        <span class="ghl-inbox-nav-label">Dial</span>
     </a>
 </nav>

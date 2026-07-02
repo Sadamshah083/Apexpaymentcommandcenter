@@ -85,9 +85,10 @@
     </x-sidebar.section>
 @endif
 
-@if ($can('communications'))
+@if ($can('communications') || auth()->user()?->canAccessAdminPortal())
     <x-sidebar.section title="Communications">
-        <x-sidebar.link :href="route('admin.communications.index')" label="Communications Hub" :active="request()->routeIs('admin.communications.*')">
+        <x-sidebar.link :href="route('admin.communications.index')" label="Communications Hub"
+            :active="request()->routeIs('admin.communications.*')">
             <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'communications'])</x-slot:icon>
         </x-sidebar.link>
     </x-sidebar.section>

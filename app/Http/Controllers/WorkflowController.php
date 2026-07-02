@@ -394,6 +394,18 @@ class WorkflowController extends Controller
 
         $this->workspaceManager->switchWorkspace($user, $workspace);
 
+        if (request()->is('portal*') || request()->routeIs('portal.*')) {
+            if (! $user->canAccessPortal($workspace->id)) {
+                if (request()->expectsJson()) {
+                    return response()->json([
+                        'message' => 'You can only switch to workspaces where you have agent portal access.',
+                    ], 403);
+                }
+
+                abort(403, 'You can only switch to workspaces where you have agent portal access.');
+            }
+        }
+
         if (request()->expectsJson()) {
             return response()->json([
                 'success' => true,

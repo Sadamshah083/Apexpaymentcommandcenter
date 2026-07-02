@@ -3,7 +3,7 @@
     $isOwner = $activeWorkspace->admin_id === $member->id;
     $canManage = Auth::user()->isWorkspaceAdmin($activeWorkspace->id) && !$isOwner;
     $roleLabel = \App\Support\SalesOps::roleLabel($member->pivot->role ?? null);
-    $nextRole = $member->pivot->role === 'admin' ? 'marketer' : 'admin';
+    $nextRole = $member->pivot->role === 'admin' ? 'appointment_setter' : 'admin';
 @endphp
 
 <div class="member-row py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 {{ $status === 'suspended' ? 'member-row-suspended' : '' }}"

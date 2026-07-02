@@ -80,6 +80,20 @@ class User extends Authenticatable
             ->values();
     }
 
+    public function portalSwitchableWorkspaces()
+    {
+        return $this->switchableWorkspaces()
+            ->filter(fn (Workspace $workspace) => $this->canAccessPortal($workspace->id))
+            ->values();
+    }
+
+    public function effectivePortalRole(?int $workspaceId = null): ?string
+    {
+        $role = $this->getWorkspaceRole($workspaceId);
+
+        return $role ? SalesOps::normalizeLegacyRole($role) : null;
+    }
+
     public function assignedLeads(): HasMany
     {
         return $this->hasMany(WorkflowLead::class, 'assigned_user_id');
@@ -142,7 +156,7 @@ class User extends Authenticatable
 
     public function isAppointmentSetter(?int $workspaceId = null): bool
     {
-        return $this->getWorkspaceRole($workspaceId) === 'appointment_setter';
+        return $this->effectivePortalRole($workspaceId) === 'appointment_setter';
     }
 
     public function isAppointmentSetterTeamLead(?int $workspaceId = null): bool
@@ -157,7 +171,7 @@ class User extends Authenticatable
 
     public function isCloser(?int $workspaceId = null): bool
     {
-        return $this->getWorkspaceRole($workspaceId) === 'closer';
+        return $this->effectivePortalRole($workspaceId) === 'closer';
     }
 
     public function isAdminOfAnyWorkspace(): bool
@@ -240,6 +254,11 @@ class User extends Authenticatable
     public function firstActiveWorkspace(): ?Workspace
     {
         return $this->switchableWorkspaces()->first();
+    }
+
+    public function firstPortalWorkspace(): ?Workspace
+    {
+        return $this->portalSwitchableWorkspaces()->first();
     }
 
     public function canAccessAdminPortal(?int $workspaceId = null): bool
@@ -361,7 +380,7 @@ class User extends Authenticatable
 
     public function portalDashboardRoute(): string
     {
-        return match ($this->getWorkspaceRole()) {
+        return match ($this->effectivePortalRole()) {
             'appointment_setter' => 'portal.setter.dashboard',
             'appointment_setter_team_lead' => 'portal.setter-team.dashboard',
             'closers_team_lead' => 'portal.closer-team.dashboard',

@@ -17,6 +17,62 @@
     </div>
 </div>
 
+@if (!empty($ops))
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+    <a href="{{ route('admin.sales-ops.index') }}" class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 hover:border-indigo-200 transition">
+        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Active CRM Leads</p>
+        <p id="ops-active-leads" class="text-3xl font-extrabold text-slate-800 mt-1">{{ $ops['overview']['total_active_leads'] ?? 0 }}</p>
+    </a>
+    <a href="{{ route('admin.sales-ops.index') }}" class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 hover:border-amber-200 transition">
+        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Awaiting Verification</p>
+        <p id="ops-pending-verification" class="text-3xl font-extrabold text-amber-600 mt-1">{{ $ops['overview']['pending_verification'] ?? 0 }}</p>
+    </a>
+    <a href="{{ route('admin.sales-ops.reactivation') }}" class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 hover:border-indigo-200 transition">
+        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Reactivation Queue</p>
+        <p id="ops-reactivation" class="text-3xl font-extrabold text-slate-800 mt-1">{{ $ops['overview']['reactivation_queue'] ?? 0 }}</p>
+    </a>
+    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Handoff Queue</p>
+        <p id="ops-handoff-queue" class="text-3xl font-extrabold text-indigo-600 mt-1">{{ $ops['handoff_queue'] ?? 0 }}</p>
+        <p class="text-xs text-slate-500 mt-1">Settled, awaiting closer</p>
+    </div>
+</div>
+
+<div class="grid lg:grid-cols-2 gap-6 mb-8">
+    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
+        <h3 class="text-lg font-bold text-slate-800 mb-4">Today's team activity</h3>
+        <div class="grid grid-cols-2 gap-4">
+            @foreach (['dials' => 'Dials', 'conversations' => 'Conversations', 'discoveries' => 'Discoveries', 'meetings' => 'Meetings booked'] as $key => $label)
+                <div>
+                    <p class="text-xs font-semibold text-slate-400 uppercase">{{ $label }}</p>
+                    <p id="ops-today-{{ $key }}" class="text-2xl font-extrabold text-slate-800 mt-1">{{ $ops['today_activity'][$key] ?? 0 }}</p>
+                </div>
+            @endforeach
+        </div>
+        @if (($ops['at_capacity_setters'] ?? 0) > 0)
+            <p class="text-sm text-amber-700 mt-4 font-medium">{{ $ops['at_capacity_setters'] }} setter(s) at book capacity — <a href="{{ route('admin.sales-ops.distribution') }}" class="text-indigo-600 hover:underline">view load</a></p>
+        @endif
+    </div>
+
+    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-bold text-slate-800">Weekly leaderboard</h3>
+            <a href="{{ route('admin.sales-ops.performance') }}" class="text-sm font-semibold text-indigo-600 hover:text-indigo-800">Full report</a>
+        </div>
+        <div id="ops-leaderboard" class="space-y-2">
+            @forelse ($ops['leaderboard'] ?? [] as $i => $row)
+                <div class="flex justify-between items-center text-sm py-1">
+                    <span class="text-slate-700"><span class="font-bold text-slate-400 mr-2">#{{ $i + 1 }}</span>{{ $row['name'] }} <span class="text-slate-400">· {{ $row['role'] }}</span></span>
+                    <span class="font-semibold text-slate-600">{{ $row['dials'] }} d · {{ $row['meetings'] }} m · {{ $row['deals_funded'] }} funded</span>
+                </div>
+            @empty
+                <p class="text-sm text-slate-500">No activity logged this week yet.</p>
+            @endforelse
+        </div>
+    </div>
+</div>
+@endif
+
 <!-- Main Stats Section -->
 <div class="grid lg:grid-cols-2 gap-6 mb-8">
     <!-- Pipeline Block -->
@@ -404,6 +460,17 @@
             setText('stat-avg_deal_volume', '$' + data.conversion_rates.avg_closed_volume.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}));
             setText('stat-total_dials', data.conversion_rates.total_dials);
             setText('stat-total_closes', data.conversion_rates.total_closes);
+
+            if (data.ops) {
+                setText('ops-active-leads', data.ops.overview?.total_active_leads ?? 0);
+                setText('ops-pending-verification', data.ops.overview?.pending_verification ?? 0);
+                setText('ops-reactivation', data.ops.overview?.reactivation_queue ?? 0);
+                setText('ops-handoff-queue', data.ops.handoff_queue ?? 0);
+                setText('ops-today-dials', data.ops.today_activity?.dials ?? 0);
+                setText('ops-today-conversations', data.ops.today_activity?.conversations ?? 0);
+                setText('ops-today-discoveries', data.ops.today_activity?.discoveries ?? 0);
+                setText('ops-today-meetings', data.ops.today_activity?.meetings ?? 0);
+            }
 
             if (!funnelChart) {
                 return;

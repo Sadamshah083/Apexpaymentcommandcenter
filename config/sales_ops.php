@@ -60,4 +60,25 @@ return [
         'setter_status_change' => 'Setter status change',
         'closer_status_change' => 'Closer status change',
     ],
+
+    'daily_quotas' => [
+        'dials' => 80,
+        'conversations' => 20,
+        'decision_maker_contacts' => 8,
+        'discoveries' => 3,
+    ],
+
+    'weekly_quotas' => [
+        'dials' => 400,
+        'conversations' => 100,
+        'appointments' => 10,
+        'closes' => 2,
+    ],
+
+    'reactivation_sources' => [
+        'no_answer' => 'No answer follow-up',
+        'not_interested' => 'Not interested nurture',
+        'callback' => 'Scheduled callback',
+        'stale_lead' => 'Stale lead recycle',
+    ],
 ];

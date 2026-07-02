@@ -6,6 +6,7 @@ use App\Models\WorkflowLead;
 use App\Services\Pipeline\CloserAssignmentService;
 use App\Services\Pipeline\LeadPipelineService;
 use App\Services\Pipeline\RoleDashboardService;
+use App\Services\Portal\PortalDashboardService;
 use App\Services\Workspace\WorkspaceContextService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -15,6 +16,7 @@ class PipelineController extends Controller
     public function __construct(
         protected WorkspaceContextService $workspaceContext,
         protected RoleDashboardService $dashboardService,
+        protected PortalDashboardService $portalDashboard,
         protected LeadPipelineService $pipelineService,
         protected CloserAssignmentService $closerAssignment,
     ) {}
@@ -45,8 +47,9 @@ class PipelineController extends Controller
         ]);
 
         $setterStatuses = config('sales_ops.setter_statuses', []);
+        $dashboard = $this->portalDashboard->forUser($user, $workspace);
 
-        return view('pipeline.setter.index', compact('workspace', 'leads', 'user', 'setterStatuses'));
+        return view('pipeline.setter.index', compact('workspace', 'leads', 'user', 'setterStatuses', 'dashboard'));
     }
 
     public function setterTeamDashboard(Request $request)
@@ -63,8 +66,9 @@ class PipelineController extends Controller
             'phase' => $request->input('phase'),
         ]);
         $teamMetrics = $this->dashboardService->setterTeamMetrics($workspace);
+        $dashboard = $this->portalDashboard->forUser($user, $workspace);
 
-        return view('pipeline.setter-team.index', compact('workspace', 'leads', 'user', 'teamMetrics'));
+        return view('pipeline.setter-team.index', compact('workspace', 'leads', 'user', 'teamMetrics', 'dashboard'));
     }
 
     public function closerTeamDashboard(Request $request)
@@ -81,8 +85,9 @@ class PipelineController extends Controller
             'phase' => $request->input('phase'),
         ]);
         $teamMetrics = $this->dashboardService->closerTeamMetrics($workspace);
+        $dashboard = $this->portalDashboard->forUser($user, $workspace);
 
-        return view('pipeline.closer-team.index', compact('workspace', 'leads', 'user', 'teamMetrics'));
+        return view('pipeline.closer-team.index', compact('workspace', 'leads', 'user', 'teamMetrics', 'dashboard'));
     }
 
     public function closerTeamQueue(Request $request)
@@ -115,7 +120,9 @@ class PipelineController extends Controller
             'search' => $request->input('search'),
         ]);
 
-        return view('pipeline.closer.index', compact('workspace', 'leads', 'user'));
+        $dashboard = $this->portalDashboard->forUser($user, $workspace);
+
+        return view('pipeline.closer.index', compact('workspace', 'leads', 'user', 'dashboard'));
     }
 
     public function assignCloser(Request $request, WorkflowLead $lead)

@@ -26,7 +26,21 @@ class SalesOps
 
     public static function isPortalRole(?string $role): bool
     {
-        return in_array($role, config('sales_ops.portal_roles', []), true);
+        if (! $role) {
+            return false;
+        }
+
+        return in_array(self::normalizeLegacyRole($role), config('sales_ops.portal_roles', []), true);
+    }
+
+    /** Map pre-ApexPayments roles to current portal roles. */
+    public static function normalizeLegacyRole(string $role): string
+    {
+        return match ($role) {
+            'marketer', 'sdr' => 'appointment_setter',
+            'account_executive' => 'closer',
+            default => $role,
+        };
     }
 
     public static function isAdminPortalRole(?string $role): bool
@@ -36,12 +50,12 @@ class SalesOps
 
     public static function isAppointmentSetterRole(?string $role): bool
     {
-        return $role === 'appointment_setter';
+        return self::normalizeLegacyRole((string) $role) === 'appointment_setter';
     }
 
     public static function isCloserRole(?string $role): bool
     {
-        return $role === 'closer';
+        return self::normalizeLegacyRole((string) $role) === 'closer';
     }
 
     /**

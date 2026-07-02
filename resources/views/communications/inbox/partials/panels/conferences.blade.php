@@ -4,6 +4,7 @@
     $members = $selectedConferenceMembers ?? [];
 @endphp
 
+@if ($hubAccess['canConfigure'] ?? false)
 <div class="ghl-card mb-6">
     <h3 class="ghl-card-title">Create conference room</h3>
     <form method="POST" action="{{ route($routePrefix . 'communications.morpheus.conferences.store') }}"
@@ -15,6 +16,7 @@
         <button type="submit" class="comm-hub-btn">Create room</button>
     </form>
 </div>
+@endif
 
 @if ($selectedId)
     <div class="ghl-card mb-6">

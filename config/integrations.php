@@ -11,6 +11,7 @@ return [
         'sip_params' => env('MORPHEUS_SIP_PARAMS', 'user=phone'),
         'dial_method' => env('MORPHEUS_DIAL_METHOD', 'auto'),
         'platform_api_key' => env('MORPHEUS_PLATFORM_API_KEY'),
+        'default_campaign_id' => env('MORPHEUS_DEFAULT_CAMPAIGN_ID'),
     ],
 
     'communications' => [

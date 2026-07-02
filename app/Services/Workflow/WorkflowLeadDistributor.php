@@ -111,11 +111,20 @@ class WorkflowLeadDistributor
                 ->get();
         }
 
-        $marketers = (clone $query)->wherePivotIn('role', ['marketer', 'sdr'])->get();
-        if ($marketers->isNotEmpty()) {
-            return $marketers;
+        $setters = (clone $query)->wherePivotIn('role', [
+            'appointment_setter',
+            'marketer',
+            'sdr',
+        ])->get();
+        if ($setters->isNotEmpty()) {
+            return $setters;
         }
 
-        return $query->wherePivotIn('role', ['marketer', 'sdr', 'admin'])->get();
+        return $query->wherePivotIn('role', [
+            'appointment_setter',
+            'marketer',
+            'sdr',
+            'admin',
+        ])->get();
     }
 }

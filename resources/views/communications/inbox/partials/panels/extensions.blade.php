@@ -1,5 +1,6 @@
 @php $items = $morpheusExtensions ?? []; @endphp
 
+@if ($hubAccess['canConfigure'] ?? false)
 <div class="ghl-card mb-6">
     <h3 class="ghl-card-title">Create SIP extension</h3>
     <form method="POST" action="{{ route($routePrefix . 'communications.morpheus.extensions.store') }}"
@@ -12,6 +13,7 @@
         <button type="submit" class="comm-hub-btn md:col-span-3">Create extension</button>
     </form>
 </div>
+@endif
 
 <div class="ghl-card">
     <h3 class="ghl-card-title">Extensions ({{ count($items) }})</h3>

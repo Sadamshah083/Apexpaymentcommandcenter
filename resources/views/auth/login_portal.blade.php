@@ -66,6 +66,17 @@
             box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.15);
             outline: none;
         }
+
+        .portal-login-submit {
+            background: #000000 !important;
+            color: #ffffff !important;
+            border: 2px solid #000000;
+        }
+
+        .portal-login-submit:hover:not(:disabled) {
+            background: #27272a !important;
+            border-color: #27272a;
+        }
     </style>
 </head>
 
@@ -124,8 +135,8 @@
                     </div>
 
                     <button type="submit"
-                        class="w-full mt-6 py-3 bg-warmgrey-900 hover:bg-warmgrey-500 text-cream-50 font-bold rounded-xl shadow-md transition-all duration-300 transform hover:-translate-y-0.5">
-                        login
+                        class="portal-login-submit w-full mt-6 py-3 font-bold rounded-xl shadow-md transition-all duration-300 transform hover:-translate-y-0.5">
+                        Sign in
                     </button>
                 </form>
             </div>

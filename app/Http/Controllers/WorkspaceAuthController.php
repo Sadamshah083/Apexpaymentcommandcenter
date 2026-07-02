@@ -130,7 +130,7 @@ class WorkspaceAuthController extends Controller
         $user = User::where('name', $credentials['username'])->first();
 
         if ($user && Hash::check($credentials['password'], $user->password)) {
-            $activeWorkspace = $user->firstActiveWorkspace();
+            $activeWorkspace = $user->firstPortalWorkspace() ?? $user->firstActiveWorkspace();
 
             if (! $activeWorkspace) {
                 $suspended = $user->hasAnySuspendedMembership();

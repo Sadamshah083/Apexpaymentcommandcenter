@@ -3,6 +3,7 @@
     $campaigns = $morpheusCampaigns ?? [];
 @endphp
 
+@if ($hubAccess['canConfigure'] ?? false)
 <div class="ghl-card mb-6">
     <h3 class="ghl-card-title">Create lead list</h3>
     <form method="POST" action="{{ route($routePrefix . 'communications.morpheus.lists.store') }}"
@@ -19,6 +20,7 @@
         <button type="submit" class="comm-hub-btn">Create list</button>
     </form>
 </div>
+@endif
 
 <div class="ghl-card">
     <h3 class="ghl-card-title">Lead lists ({{ count($items) }})</h3>

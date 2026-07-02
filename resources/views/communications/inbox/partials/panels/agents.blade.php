@@ -17,6 +17,7 @@
     </div>
 @endif
 
+@if ($hubAccess['canConfigure'] ?? false)
 <div class="ghl-card mb-6">
     <h3 class="ghl-card-title">Provision phone agent</h3>
     <p class="text-sm text-slate-500 mb-3">Creates a Morpheus SIP extension linked to a workspace user. The agent uses
@@ -63,6 +64,7 @@
         </div>
     </form>
 </div>
+@endif
 
 <div class="ghl-card">
     <h3 class="ghl-card-title">Phone agents ({{ count($agents) }})</h3>

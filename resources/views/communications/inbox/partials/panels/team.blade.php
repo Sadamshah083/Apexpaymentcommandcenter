@@ -1,3 +1,4 @@
+@if ($hubAccess['canConfigure'] ?? false)
 <div class="ghl-card mb-6">
     <h3 class="ghl-card-title">Create Morpheus user</h3>
     <form method="POST" action="{{ route($routePrefix . 'communications.morpheus.users.store') }}"
@@ -16,6 +17,7 @@
         <button type="submit" class="comm-hub-btn md:col-span-3">Create user</button>
     </form>
 </div>
+@endif
 
 <div class="ghl-team-grid">
     <section class="ghl-card">

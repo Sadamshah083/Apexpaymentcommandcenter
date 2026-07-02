@@ -107,9 +107,10 @@ return [
         ],
         'communications' => [
             'label' => 'Communications Hub',
-            'description' => 'Calls, SMS, Zoom logs, and contact timelines',
+            'description' => 'Calls, dialer, recordings, voicemails, and Morpheus telephony',
             'section' => 'Communications',
             'default_route' => 'admin.communications.index',
+            'always_available' => true,
             'routes' => [
                 'admin.communications.*',
             ],

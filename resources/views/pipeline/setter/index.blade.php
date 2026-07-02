@@ -16,6 +16,8 @@
             </form>
         </div>
 
+        @include('pipeline.partials.dashboard-widgets', ['dashboard' => $dashboard ?? []])
+
         @include('pipeline.partials.leads-table', [
             'leads' => $leads,
             'statusColumn' => 'setter',

@@ -8,7 +8,7 @@
     $workspace = $user?->currentWorkspace;
     $switchableWorkspaces = $workspaceManageRoute
         ? $user?->adminSwitchableWorkspaces() ?? collect()
-        : $user?->switchableWorkspaces() ?? collect();
+        : $user?->portalSwitchableWorkspaces() ?? collect();
     $workspaceSwitchRoute = $workspaceManageRoute ? 'admin.workspaces.switch' : 'portal.workspaces.switch';
     $nameParts = preg_split('/\s+/', trim($user?->name ?? ''));
     $initials = strtoupper(

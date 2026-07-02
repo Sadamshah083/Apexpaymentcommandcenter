@@ -194,6 +194,9 @@ Route::prefix('portal')->name('portal.')->middleware([\App\Http\Middleware\Marke
     Route::post('/leads/{lead}/setter-status', [PipelineController::class, 'updateSetterStatus'])->name('leads.setter-status');
     Route::post('/leads/{lead}/closer-status', [PipelineController::class, 'updateCloserStatus'])->name('leads.closer-status');
 
+    Route::get('/performance', [SalesOpsController::class, 'sdrPerformance'])->name('performance');
+    Route::get('/pipeline', [SalesOpsController::class, 'aePipeline'])->name('pipeline');
+
     Route::post('/workspaces/switch/{workspace}', [WorkflowController::class, 'workspaceSwitch'])->name('workspaces.switch');
 
     Route::get('sync', [WorkspaceSyncController::class, 'poll'])->name('sync.poll');

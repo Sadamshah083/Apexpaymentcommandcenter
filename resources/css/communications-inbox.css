@@ -7,7 +7,7 @@
     --ghl-surface: #ffffff;
     --ghl-muted: #71717a;
     --ghl-text: #18181b;
-    --ghl-nav-width: 4.75rem;
+    --ghl-nav-width: 5.25rem;
     --ghl-list-width: 22rem;
     --ghl-tools-width: 17rem;
     --ghl-inbox-height: calc(100vh - 8.5rem);
@@ -179,20 +179,35 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    gap: 0.15rem;
-    padding: 0.55rem 0.25rem;
+    justify-content: flex-start;
+    gap: 0.35rem;
+    min-height: 4.25rem;
+    width: 100%;
+    padding: 0.5rem 0.2rem;
     border-radius: 0.625rem;
     text-decoration: none;
     color: var(--ghl-muted);
     font-size: 0.5625rem;
     font-weight: 800;
     text-transform: uppercase;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.02em;
     position: relative;
     transition:
         background 0.15s,
         color 0.15s;
+    box-sizing: border-box;
+}
+
+.ghl-inbox-nav-label {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    text-align: center;
+    line-height: 1.2;
+    white-space: normal;
+    word-break: keep-all;
+    overflow-wrap: normal;
+    hyphens: none;
 }
 
 .ghl-inbox-nav-item:hover {
@@ -210,8 +225,10 @@
 }
 
 .ghl-inbox-nav-svg {
-    width: 1.125rem;
-    height: 1.125rem;
+    width: 1.25rem;
+    height: 1.25rem;
+    flex-shrink: 0;
+    display: block;
     stroke: #71717a;
     fill: none;
     stroke-width: 2;

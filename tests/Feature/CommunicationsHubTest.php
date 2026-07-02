@@ -719,6 +719,63 @@ class CommunicationsHubTest extends TestCase
             ->assertRedirect();
     }
 
+    public function test_manager_sees_operational_channels_not_phone_agents(): void
+    {
+        $this->mockZoomServices();
+
+        $manager = $this->makeManager();
+
+        $this->actingAs($manager)
+            ->get(route('admin.communications.index', ['channel' => 'queues']))
+            ->assertOk()
+            ->assertSee('All queues')
+            ->assertDontSee('Create queue')
+            ->assertDontSee('Phone agents');
+    }
+
+    public function test_team_lead_sees_team_channel_in_portal(): void
+    {
+        $this->mockZoomServices();
+
+        $lead = $this->makePortalAgent('appointment_setter_team_lead');
+
+        $this->actingAs($lead)
+            ->get(route('portal.communications.index', ['channel' => 'team']))
+            ->assertOk()
+            ->assertSee('Morpheus users')
+            ->assertDontSee('Create Morpheus user');
+    }
+
+    public function test_manager_cannot_create_morpheus_queue(): void
+    {
+        $this->mockZoomServices();
+
+        $manager = $this->makeManager();
+
+        $this->actingAs($manager)
+            ->post(route('admin.communications.morpheus.queues.store'), ['name' => 'Sales'])
+            ->assertForbidden();
+    }
+
+    protected function makeManager(): User
+    {
+        $owner = User::factory()->create();
+        $workspace = Workspace::create(['name' => 'Acme', 'admin_id' => $owner->id]);
+        $workspace->users()->attach($owner->id, ['role' => 'admin', 'status' => 'active', 'joined_at' => now()]);
+
+        $manager = User::factory()->create([
+            'current_workspace_id' => $workspace->id,
+        ]);
+        $workspace->users()->attach($manager->id, [
+            'role' => 'manager',
+            'status' => 'active',
+            'joined_at' => now(),
+            'module_permissions' => json_encode(['dashboard', 'communications']),
+        ]);
+
+        return $manager;
+    }
+
     protected function makePortalAgent(string $role): User
     {
         $owner = User::factory()->create();

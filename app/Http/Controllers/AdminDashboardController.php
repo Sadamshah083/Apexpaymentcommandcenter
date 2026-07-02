@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use App\Models\WorkflowLead;
 use App\Models\LeadActivity;
+use App\Services\Portal\PortalDashboardService;
 use App\Services\Workspace\WorkspaceContextService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -13,7 +14,8 @@ use Illuminate\Support\Facades\DB;
 class AdminDashboardController extends Controller
 {
     public function __construct(
-        protected WorkspaceContextService $workspaceContext
+        protected WorkspaceContextService $workspaceContext,
+        protected PortalDashboardService $portalDashboard,
     ) {}
 
     public function index(Request $request)
@@ -25,6 +27,7 @@ class AdminDashboardController extends Controller
 
         return view('admin.dashboard.index', array_merge($data, [
             'workspace' => $workspace,
+            'ops' => $this->portalDashboard->adminOperationalSummary($workspace),
         ]));
     }
 
@@ -35,7 +38,9 @@ class AdminDashboardController extends Controller
 
         $data = $this->getDashboardData($workspace);
 
-        return response()->json($data);
+        return response()->json(array_merge($data, [
+            'ops' => $this->portalDashboard->adminOperationalSummary($workspace),
+        ]));
     }
 
     protected function getDashboardData($workspace): array
