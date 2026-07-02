@@ -1,4 +1,5 @@
 import '@hotwired/turbo';
+import { initTurboAuthGuard } from './turbo-auth.js';
 import { initToasts } from './toast.js';
 import './system-notifications.js';
 import { initTopnav } from './topnav.js';
@@ -27,6 +28,7 @@ function initPageTransitions() {
 }
 
 function boot() {
+    initTurboAuthGuard();
     initPageTransitions();
     initToasts();
     initTopnav();

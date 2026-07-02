@@ -329,8 +329,20 @@ class CommunicationsInboxService
 
         if ($canConfigure && ($channel === 'extensions' || $channel === 'agents')) {
           $morpheusExtensions = $this->safeDataLoad(fn () => $this->morpheusHub->extensions(), [], $warnings);
-        } elseif ($loadDialerExtras && $canConfigure) {
-          $morpheusExtensions = $this->safeDataLoad(fn () => $this->morpheusHub->extensions(), [], $warnings);
+        } elseif ($loadDialerExtras) {
+          $morpheusExtensions = $this->safeDataLoad(function () use ($routePrefix) {
+            if (! auth()->check()) {
+              return [];
+            }
+            $workspace = app(\App\Services\Workspace\WorkspaceContextService::class)
+              ->resolveActiveWorkspace(auth()->user());
+
+            return app(CommunicationsAgentService::class)->dialerExtensionsFor(
+              auth()->user(),
+              $workspace,
+              $routePrefix,
+            );
+          }, [], $warnings);
         }
 
         if ($canConfigure && $channel === 'agents' && auth()->check()) {

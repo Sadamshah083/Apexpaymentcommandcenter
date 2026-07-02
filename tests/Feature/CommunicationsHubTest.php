@@ -705,7 +705,10 @@ class CommunicationsHubTest extends TestCase
 
         $zoom = Mockery::mock(ZoomApiService::class);
         $zoom->shouldReceive('isConfigured')->andReturn(true);
-        $zoom->shouldReceive('originateCall')->andReturn(['ok' => true, 'call_uuid' => 'uuid-1']);
+        $zoom->shouldReceive('originateCall')
+            ->once()
+            ->with('1001', Mockery::type('string'), Mockery::type('array'))
+            ->andReturn(['ok' => true, 'call_uuid' => 'uuid-1']);
         $zoom->shouldReceive('humanizeError')->andReturnUsing(fn ($m) => $m);
         $this->app->instance(ZoomApiService::class, $zoom);
 
@@ -717,6 +720,26 @@ class CommunicationsHubTest extends TestCase
                 'from_extension' => '1001',
             ])
             ->assertRedirect();
+    }
+
+    public function test_portal_agent_cannot_originate_from_another_extension(): void
+    {
+        config(['integrations.morpheus.dial_method' => 'api']);
+
+        $zoom = Mockery::mock(ZoomApiService::class);
+        $zoom->shouldReceive('isConfigured')->andReturn(true);
+        $zoom->shouldReceive('originateCall')->never();
+        $this->app->instance(ZoomApiService::class, $zoom);
+
+        $agent = $this->makePortalAgent('appointment_setter');
+
+        $this->actingAs($agent)
+            ->post(route('portal.communications.morpheus.calls.originate'), [
+                'destination' => '5551234567',
+                'from_extension' => '1002',
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('error');
     }
 
     public function test_manager_sees_operational_channels_not_phone_agents(): void

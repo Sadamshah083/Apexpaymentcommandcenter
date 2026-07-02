@@ -5,11 +5,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    <meta name="auth-login-paths" content='@json([route("admin.login", [], false), route("portal.login", [], false), "/login"])'>
     <title>@yield('title', 'Dashboard') - {{ config('app.name') }}</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 
-<body class="bg-cream-100 text-warmgrey-900 min-h-screen font-sans antialiased" data-turbo-prefetch="true"
+<body class="bg-cream-100 text-warmgrey-900 min-h-screen font-sans antialiased" data-turbo-prefetch="false"
     @auth
 data-workspace-id="{{ auth()->user()->current_workspace_id }}"
         data-workspace-sync-url="{{ route('admin.sync.poll') }}"

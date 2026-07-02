@@ -20,13 +20,12 @@ class MarketerPortalMiddleware
         }
 
         $user = Auth::user();
+        $user->loadMissing(['workspaces']);
 
         if (! $user->canAccessPortal()) {
             if ($user->canAccessAdminPortal()) {
                 return redirect()->route('admin.dashboard');
             }
-
-            Auth::logout();
 
             return redirect()->route('portal.login')->withErrors([
                 'username' => 'Access denied. This account is not assigned to a portal role.',
@@ -34,18 +33,27 @@ class MarketerPortalMiddleware
         }
 
         if (! $user->hasActiveMembership()) {
-            $fallbackWorkspace = $user->firstActiveWorkspace();
+            $fallbackWorkspace = $user->firstPortalWorkspace() ?? $user->firstActiveWorkspace();
 
             if ($fallbackWorkspace) {
                 $this->workspaceContext->ensureUserIsMember($user, $fallbackWorkspace);
                 $user->update(['current_workspace_id' => $fallbackWorkspace->id]);
                 $user->refresh();
+                $user->loadMissing(['workspaces']);
             }
         }
 
         if (! $user->canAccessPortal($user->current_workspace_id)) {
-            Auth::logout();
+            $fallbackWorkspace = $user->firstPortalWorkspace();
 
+            if ($fallbackWorkspace && $fallbackWorkspace->id !== $user->current_workspace_id) {
+                $user->update(['current_workspace_id' => $fallbackWorkspace->id]);
+                $user->refresh();
+                $user->loadMissing(['workspaces']);
+            }
+        }
+
+        if (! $user->canAccessPortal($user->current_workspace_id)) {
             return redirect()->route('portal.login')->withErrors([
                 'username' => $user->hasAnySuspendedMembership()
                     ? 'Your account has been suspended. Contact your workspace administrator.'

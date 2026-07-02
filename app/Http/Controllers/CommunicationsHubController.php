@@ -444,6 +444,8 @@ class CommunicationsHubController extends Controller
 
         $prefillNumber = $request->get('number');
 
+        $routePrefix = $this->routePrefix();
+
 
 
         if ($this->zoom->isConfigured()) {
@@ -457,7 +459,13 @@ class CommunicationsHubController extends Controller
                 $warning = $payload['warning'];
 
                 $recentNumbers = $this->data->recentDialNumbers($filters);
-                $morpheusExtensions = app(\App\Services\Communications\MorpheusHubService::class)->extensions();
+
+                if (auth()->check()) {
+                    $workspace = app(\App\Services\Workspace\WorkspaceContextService::class)
+                        ->resolveActiveWorkspace(auth()->user());
+                    $morpheusExtensions = app(\App\Services\Communications\CommunicationsAgentService::class)
+                        ->dialerExtensionsFor(auth()->user(), $workspace, $routePrefix);
+                }
 
             } catch (\Throwable $e) {
 
@@ -477,7 +485,7 @@ class CommunicationsHubController extends Controller
 
             'mode' => 'dialer',
 
-            'routePrefix' => $this->routePrefix(),
+            'routePrefix' => $routePrefix,
 
             'filters' => $filters,
 
@@ -489,7 +497,10 @@ class CommunicationsHubController extends Controller
 
             'prefillNumber' => is_string($prefillNumber) ? $prefillNumber : null,
 
-            'defaultCallerId' => config('integrations.communications.default_caller_id'),
+            'defaultCallerId' => auth()->check()
+                ? (app(\App\Services\Communications\CommunicationsAgentService::class)
+                    ->extensionForUser(auth()->user()) ?? config('integrations.communications.default_caller_id'))
+                : config('integrations.communications.default_caller_id'),
 
             'error' => $error,
 

@@ -41,6 +41,9 @@ class WorkspaceSyncController extends Controller
         $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
         $this->workspaceContext->ensureActiveMember($user, $workspace);
 
+        // Release the session lock so Turbo navigation + sync polls are not blocked for ~60s.
+        $request->session()->save();
+
         $workflowId = $request->integer('workflow_id') ?: null;
         $leadId = $request->integer('lead_id') ?: null;
 

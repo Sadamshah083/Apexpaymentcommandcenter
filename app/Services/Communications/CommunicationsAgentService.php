@@ -218,6 +218,104 @@ class CommunicationsAgentService
             : null;
     }
 
+    /**
+     * Extensions shown in the dialer dropdown for the current user.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function dialerExtensionsFor(User $user, Workspace $workspace, string $routePrefix): array
+    {
+        $tier = app(CommunicationsAccessService::class)->tierFor($user, $routePrefix);
+        $all = collect($this->hub->extensions());
+
+        if (in_array($tier, ['admin', 'supervisor'], true)) {
+            return $all
+                ->map(fn (array $ext) => $this->formatDialerExtension($ext))
+                ->filter(fn (array $ext) => filled($ext['extension_num']))
+                ->values()
+                ->all();
+        }
+
+        $userExt = $this->extensionForUser($user, $workspace->id);
+        if (! $userExt) {
+            return [];
+        }
+
+        $match = $all->first(fn (array $ext) => (string) ($ext['extension_num'] ?? '') === $userExt);
+
+        if ($match) {
+            return [$this->formatDialerExtension($match)];
+        }
+
+        return [[
+            'id' => null,
+            'extension_num' => $userExt,
+            'caller_id_name' => $user->name,
+            'caller_id_num' => null,
+            'outbound_cid_num' => null,
+        ]];
+    }
+
+    public function userCanDialFrom(User $user, Workspace $workspace, string $extensionNum, string $routePrefix): bool
+    {
+        $tier = app(CommunicationsAccessService::class)->tierFor($user, $routePrefix);
+
+        if (in_array($tier, ['admin', 'supervisor'], true)) {
+            return true;
+        }
+
+        return (string) $this->extensionForUser($user, $workspace->id) === (string) (preg_replace('/\D/', '', $extensionNum) ?: $extensionNum);
+    }
+
+    /**
+     * Caller ID and campaign options for Morpheus originate API.
+     *
+     * @return array<string, mixed>
+     */
+    public function extensionDialOptions(string $extensionNum): array
+    {
+        $normalized = preg_replace('/\D/', '', $extensionNum) ?: $extensionNum;
+
+        $ext = collect($this->hub->extensions())->first(
+            fn (array $row) => (string) ($row['extension_num'] ?? '') === (string) $normalized
+        );
+
+        if (! $ext) {
+            return [];
+        }
+
+        $callerIdNum = $ext['outbound_cid_num'] ?? $ext['caller_id_num'] ?? null;
+        $callerIdName = $ext['outbound_cid_name'] ?? $ext['caller_id_name'] ?? null;
+
+        return array_filter([
+            'caller_id_number' => $callerIdNum,
+            'caller_id_name' => $callerIdName,
+        ], fn ($v) => filled($v));
+    }
+
+    public function extensionHasOutboundDid(string $extensionNum): bool
+    {
+        return filled($this->extensionDialOptions($extensionNum)['caller_id_number'] ?? null);
+    }
+
+    /**
+     * @param  array<string, mixed>  $ext
+     * @return array<string, mixed>
+     */
+    protected function formatDialerExtension(array $ext): array
+    {
+        $callerIdNum = $ext['outbound_cid_num'] ?? $ext['caller_id_num'] ?? null;
+
+        return [
+            'id' => $ext['id'] ?? null,
+            'extension_num' => $ext['extension_num'] ?? null,
+            'caller_id_name' => $ext['caller_id_name'] ?? $ext['outbound_cid_name'] ?? null,
+            'caller_id_num' => $callerIdNum,
+            'outbound_cid_num' => $callerIdNum,
+            'status' => $ext['status'] ?? 'active',
+        ];
+    }
+
     protected function morpheusUsername(User $user): string
     {
         $base = Str::slug(Str::before($user->email, '@'), '_');

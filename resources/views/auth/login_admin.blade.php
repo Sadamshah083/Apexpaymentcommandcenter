@@ -105,7 +105,7 @@
                         portal with the same credentials.</p>
                 </div>
 
-                <form method="POST" action="{{ route('admin.login') }}" class="space-y-4" data-form-loading
+                <form method="POST" action="{{ route('admin.login') }}" class="space-y-4" data-admin-login data-form-loading
                     data-loading-title="Signing in" data-loading-message="Verifying your admin credentials…"
                     data-loading-button-text="Signing in…">
                     @csrf

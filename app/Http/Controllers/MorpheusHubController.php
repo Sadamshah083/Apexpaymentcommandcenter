@@ -42,12 +42,25 @@ class MorpheusHubController extends Controller
         $clickToCall = app(\App\Services\Communications\ZoomClickToCallService::class);
         $destination = $clickToCall->normalizePhone($validated['destination']);
         $fromExtension = preg_replace('/\D/', '', $validated['from_extension']) ?: $validated['from_extension'];
+        $user = Auth::user();
+        $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
+        $routePrefix = $this->redirectRoutePrefix($request);
+
+        if (! $this->agents->userCanDialFrom($user, $workspace, $fromExtension, $routePrefix)) {
+            return back()->withInput()->with('error', 'You can only place calls from your assigned extension.');
+        }
+
+        $dialOptions = $this->agents->extensionDialOptions($fromExtension);
+        $missingDid = ! $this->agents->extensionHasOutboundDid($fromExtension);
         $fallback = $validated['fallback'] ?? 'sip';
         $dialMethod = (string) config('integrations.morpheus.dial_method', 'auto');
         $result = ['ok' => false, 'error' => 'Could not place outbound call.'];
+        $didWarning = $missingDid
+            ? 'Outbound DID is not set on this extension yet — assign a caller ID in Phone Agents before calling customers.'
+            : null;
 
         if (in_array($dialMethod, ['api', 'auto'], true)) {
-            $result = $this->morpheus->originateCall($fromExtension, $destination);
+            $result = $this->morpheus->originateCall($fromExtension, $destination, $dialOptions);
 
             if ($result['ok'] ?? false) {
                 $this->logOutboundDial($request, $fromExtension, $destination, $result['call_uuid'] ?? null);
@@ -58,9 +71,15 @@ class MorpheusHubController extends Controller
                     return response()->json(array_merge(['ok' => true], $result));
                 }
 
-                return redirect()
+                $redirect = redirect()
                     ->route($this->redirectRoutePrefix($request).'communications.index', ['channel' => 'calls'])
                     ->with('success', 'Outbound call initiated. Answer your extension/softphone when it rings.');
+
+                if ($didWarning) {
+                    $redirect->with('warning', $didWarning);
+                }
+
+                return $redirect;
             }
 
             if ($dialMethod === 'api') {
@@ -459,7 +478,14 @@ class MorpheusHubController extends Controller
             'status' => ['nullable', 'string', 'in:active,disabled'],
         ]);
 
-        return $this->mutateAction(fn () => $this->morpheus->createExtension($validated), 'Extension created.');
+        $payload = array_filter([
+            ...$validated,
+            'outbound_cid_name' => $validated['caller_id_name'] ?? null,
+            'outbound_cid_num' => $validated['caller_id_num'] ?? null,
+            'is_dialer_agent' => true,
+        ], fn ($v) => ! is_null($v));
+
+        return $this->mutateAction(fn () => $this->morpheus->createExtension($payload), 'Extension created.');
     }
 
     public function updateExtension(Request $request, string $id)
@@ -471,7 +497,13 @@ class MorpheusHubController extends Controller
             'password' => ['nullable', 'string', 'min:8', 'max:128'],
         ]);
 
-        return $this->mutateAction(fn () => $this->morpheus->updateExtension($id, array_filter($validated, fn ($v) => ! is_null($v))), 'Extension updated.');
+        $payload = array_filter([
+            ...$validated,
+            'outbound_cid_name' => $validated['caller_id_name'] ?? null,
+            'outbound_cid_num' => $validated['caller_id_num'] ?? null,
+        ], fn ($v) => ! is_null($v));
+
+        return $this->mutateAction(fn () => $this->morpheus->updateExtension($id, $payload), 'Extension updated.');
     }
 
     public function destroyExtension(string $id)

@@ -116,7 +116,7 @@
                         for you.</p>
                 </div>
 
-                <form method="POST" action="{{ route('portal.login') }}" class="space-y-4" data-form-loading
+                <form method="POST" action="{{ route('portal.login') }}" class="space-y-4" data-portal-login data-form-loading
                     data-loading-title="Signing in" data-loading-message="Verifying your credentials…"
                     data-loading-button-text="Signing in…">
                     @csrf

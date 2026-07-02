@@ -20,8 +20,9 @@
 @if ($hubAccess['canConfigure'] ?? false)
 <div class="ghl-card mb-6">
     <h3 class="ghl-card-title">Provision phone agent</h3>
-    <p class="text-sm text-slate-500 mb-3">Creates a Morpheus SIP extension linked to a workspace user. The agent uses
-        the SIP password in Zoiper/Linphone.</p>
+    <p class="text-sm text-slate-500 mb-3">Creates a Morpheus SIP extension linked to a workspace user. Set the
+        <strong>Caller ID number</strong> to the DID Morpheus assigns — outbound calls will not show your business
+        number until this is filled in.</p>
     <form method="POST"
         action="{{ route($routePrefix . 'communications.morpheus.agents.provision', ['user' => '__USER__']) }}"
         id="provision-agent-form" class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
@@ -56,7 +57,8 @@
         </div>
         <div>
             <label class="comm-hub-label">Caller ID number (outbound DID)</label>
-            <input type="text" name="caller_id_num" class="comm-hub-input w-full" placeholder="+1 555 123 4567">
+            <input type="text" name="caller_id_num" class="comm-hub-input w-full" placeholder="+1 555 123 4567"
+                title="Required for correct outbound caller ID once Morpheus delivers your DIDs">
         </div>
         <div class="md:col-span-2 flex items-center gap-2">
             <input type="hidden" name="create_morpheus_user" value="1">

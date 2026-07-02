@@ -20,10 +20,12 @@ ENV_PATH = f"{REMOTE_APP}/.env"
 DEFAULTS = {
     "MORPHEUS_HOST": "apexone.morpheus.cx",
     "MORPHEUS_PORTAL_URL": "https://apexone.morpheus.cx/",
-    "MORPHEUS_DIAL_METHOD": "sip",
+    "MORPHEUS_DIAL_METHOD": "auto",
     "MORPHEUS_SIP_PARAMS": "user=phone",
     "MORPHEUS_OUTBOUND_PREFIX": "",
     "MORPHEUS_SIP_HOST": "",
+    "MORPHEUS_DEFAULT_CAMPAIGN_ID": "",
+    "COMMUNICATIONS_DEFAULT_CALLER_ID": "",
 }
 
 

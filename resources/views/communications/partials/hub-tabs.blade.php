@@ -53,7 +53,8 @@
                     default => ['channel' => $tabMode],
                 },
             ) }}"
-                class="ghl-hub-nav-link {{ $mode === $tabMode ? 'ghl-hub-nav-link-active' : '' }}">{{ $label }}</a>
+                class="ghl-hub-nav-link {{ $mode === $tabMode ? 'ghl-hub-nav-link-active' : '' }}"
+                data-turbo-prefetch="false">{{ $label }}</a>
         @endforeach
     </nav>
 </div>
