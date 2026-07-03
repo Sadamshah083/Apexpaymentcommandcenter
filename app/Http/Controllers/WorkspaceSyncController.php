@@ -97,7 +97,7 @@ class WorkspaceSyncController extends Controller
                     $idleChecks++;
                 }
 
-                usleep($scope === 'list' ? 2_000_000 : 500_000);
+                usleep($scope === 'list' ? 3_000_000 : 1_500_000);
             }
 
             echo "event: reconnect\ndata: {}\n\n";

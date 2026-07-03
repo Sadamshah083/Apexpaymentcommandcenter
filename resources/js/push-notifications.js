@@ -7,6 +7,7 @@ import {
 } from './system-notifications.js';
 
 let pushSubscribed = false;
+let pushInitPromise = null;
 
 function urlBase64ToUint8Array(base64String) {
     const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -170,7 +171,7 @@ function initPushNotifications() {
         return;
     }
 
-    ensureServiceWorker()
+    pushInitPromise ??= ensureServiceWorker()
         .then(() => checkPushSubscription())
         .catch(() => updatePushButton());
 

@@ -1,3 +1,5 @@
+const TOPNAV_BOUND_KEY = 'topnavGlobalBound';
+
 function closeTopnavDropdowns(except = null) {
     document.querySelectorAll('.app-topnav-dropdown[open]').forEach((dropdown) => {
         if (dropdown !== except) {
@@ -7,19 +9,17 @@ function closeTopnavDropdowns(except = null) {
 }
 
 export function initTopnav() {
-    if (document.body.dataset.topnavBound === '1') {
-        closeTopnavDropdowns();
-        return;
-    }
-
-    document.body.dataset.topnavBound = '1';
-
     const dropdowns = document.querySelectorAll('.app-topnav-dropdown');
     if (dropdowns.length === 0) {
         return;
     }
 
     dropdowns.forEach((dropdown) => {
+        if (dropdown.dataset.topnavToggleBound === '1') {
+            return;
+        }
+
+        dropdown.dataset.topnavToggleBound = '1';
         dropdown.addEventListener('toggle', () => {
             if (dropdown.open) {
                 closeTopnavDropdowns(dropdown);
@@ -27,8 +27,15 @@ export function initTopnav() {
         });
     });
 
+    if (document.documentElement.dataset[TOPNAV_BOUND_KEY] === '1') {
+        closeTopnavDropdowns();
+        return;
+    }
+
+    document.documentElement.dataset[TOPNAV_BOUND_KEY] = '1';
+
     document.addEventListener('click', (event) => {
-        dropdowns.forEach((dropdown) => {
+        document.querySelectorAll('.app-topnav-dropdown[open]').forEach((dropdown) => {
             if (!dropdown.open) {
                 return;
             }
