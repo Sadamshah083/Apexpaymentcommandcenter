@@ -1072,8 +1072,6 @@ a.admin-dash-stat-card:hover,
     --app-sidebar-collapsed-width: 5rem;
     --app-sidebar-ease: cubic-bezier(0.4, 0, 0.2, 1);
     --app-sidebar-duration: 0.3s;
-    --app-sidebar-bg: #e8edf2;
-    --app-sidebar-border: #d5dde6;
     position: relative;
     flex-shrink: 0;
     width: var(--app-sidebar-width);
@@ -1099,12 +1097,11 @@ body.app-sidebar-collapsed .app-sidebar-wrap {
     height: 100vh;
     position: sticky;
     top: 0;
-    background: var(--app-sidebar-bg);
-    border-right: 1px solid var(--app-sidebar-border);
+    background: #ffffff;
+    border-right: 1px solid #e2e8f0;
     color: #64748b;
     overflow: hidden;
     transition: transform var(--app-sidebar-duration) var(--app-sidebar-ease);
-    box-shadow: inset -1px 0 0 rgba(15, 23, 42, 0.03);
 }
 
 body.app-sidebar-collapsed .app-sidebar {
@@ -1123,9 +1120,9 @@ body.app-sidebar-collapsed .app-sidebar {
     height: 2rem;
     margin: 0;
     padding: 0;
-    border: 1px solid #c7d2de;
+    border: 1px solid #bfdbfe;
     border-radius: 9999px;
-    background: #f3f6f9;
+    background: #ffffff;
     color: #64748b;
     font-size: 1rem;
     font-weight: 500;
@@ -1153,8 +1150,7 @@ body.app-sidebar-collapsed .app-sidebar-edge-toggle {
 
 .app-sidebar-header {
     padding: 0.625rem 0.875rem 0.5rem;
-    border-bottom: 1px solid var(--app-sidebar-border);
-    background: rgba(255, 255, 255, 0.35);
+    border-bottom: 1px solid #e2e8f0;
     transition:
         padding var(--app-sidebar-duration) var(--app-sidebar-ease),
         min-height var(--app-sidebar-duration) var(--app-sidebar-ease),
@@ -1359,9 +1355,9 @@ body.app-sidebar-collapsed .app-sidebar-edge-toggle {
 }
 
 .sidebar-link:hover {
-    background: rgba(255, 255, 255, 0.62);
+    background: #f0fdf4;
     color: #047857;
-    border-color: #cbd5e1;
+    border-color: #bbf7d0;
 }
 
 .sidebar-link:hover .sidebar-link-icon {
@@ -1374,7 +1370,7 @@ body.app-sidebar-collapsed .app-sidebar-edge-toggle {
 }
 
 .sidebar-link-active {
-    background: rgba(255, 255, 255, 0.92);
+    background: #ecfdf5;
     color: #047857;
     border-color: #a7f3d0;
     font-weight: 600;
@@ -1382,7 +1378,7 @@ body.app-sidebar-collapsed .app-sidebar-edge-toggle {
 }
 
 .sidebar-link-active:hover {
-    background: #ffffff;
+    background: #d1fae5;
     color: #065f46;
     border-color: #6ee7b7;
 }
@@ -1568,8 +1564,7 @@ body.app-sidebar-collapsed .app-sidebar-edge-toggle {
 
 .app-sidebar-footer {
     padding: 0.625rem 0.75rem;
-    border-top: 1px solid var(--app-sidebar-border);
-    background: rgba(255, 255, 255, 0.28);
+    border-top: 1px solid #e2e8f0;
     flex-shrink: 0;
     transition: padding var(--app-sidebar-duration) var(--app-sidebar-ease);
 }
@@ -6942,9 +6937,8 @@ body.member-confirm-open {
 
 .sidebar-link-active {
     color: #047857;
-    background: rgba(255, 255, 255, 0.88);
+    background: #ecfdf5;
     border-color: #a7f3d0;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 .app-data-table {
