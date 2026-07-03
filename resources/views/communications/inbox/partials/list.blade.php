@@ -53,13 +53,14 @@
                 <span
                     class="ghl-inbox-row-avatar ghl-inbox-row-avatar-{{ $avatarClass }}">{{ $item['avatar'] }}</span>
                 <span class="ghl-inbox-row-body">
-                    <span class="ghl-inbox-row-name">{{ $item['label'] }}</span>
-                    <span class="ghl-inbox-row-preview">{{ $item['subtitle'] }}</span>
+                    <span class="ghl-inbox-row-name" title="{{ $item['label'] }}">{{ $item['label'] }}</span>
+                    <span class="ghl-inbox-row-preview" title="{{ $item['subtitle'] }}">{{ $item['subtitle'] }}</span>
                 </span>
                 <span class="ghl-inbox-row-meta">
                     @if (!empty($item['time']))
                         <span
-                            class="ghl-inbox-row-time">{{ \Carbon\Carbon::parse($item['time'])->diffForHumans(short: true) }}</span>
+                            class="ghl-inbox-row-time"
+                            title="{{ \Carbon\Carbon::parse($item['time'])->format('M j, Y g:i A') }}">{{ \Carbon\Carbon::parse($item['time'])->diffForHumans(short: true) }}</span>
                     @endif
                     @if (!empty($item['badge']))
                         <span

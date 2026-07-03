@@ -1,8 +1,9 @@
 <div class="ghl-conv-header">
     <span class="ghl-avatar ghl-avatar-lg">{{ strtoupper(substr($contact['name'], 0, 2)) }}</span>
     <div class="ghl-conv-header-info">
-        <h2 class="ghl-conv-header-name">{{ $contact['name'] }}</h2>
-        <p class="ghl-conv-header-sub">{{ $contact['phone'] ?? ($contact['email'] ?? 'No phone or email') }} ·
+        <h2 class="ghl-conv-header-name" title="{{ $contact['name'] }}">{{ $contact['name'] }}</h2>
+        <p class="ghl-conv-header-sub"
+            title="{{ ($contact['phone'] ?? ($contact['email'] ?? 'No phone or email')) . ' · ' . ($contact['tag'] ?? 'contact') }}">{{ $contact['phone'] ?? ($contact['email'] ?? 'No phone or email') }} ·
             {{ $contact['tag'] ?? 'contact' }}</p>
     </div>
     @include('communications.partials.contact-quick-actions', [

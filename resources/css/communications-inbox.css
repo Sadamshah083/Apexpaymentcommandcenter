@@ -410,10 +410,11 @@
     max-width: 100%;
     text-align: center;
     line-height: 1.2;
-    white-space: normal;
-    word-break: keep-all;
-    overflow-wrap: normal;
-    hyphens: none;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .ghl-inbox-nav-item:hover {
@@ -798,7 +799,13 @@
 }
 
 .ghl-inbox-row-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.25rem;
     flex-shrink: 0;
+    min-width: 3.5rem;
+    max-width: 5rem;
     text-align: right;
 }
 
@@ -812,6 +819,7 @@
 .ghl-conv-header {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 1rem;
     padding: 1rem 1.25rem;
     border-bottom: 1px solid var(--ghl-border);
@@ -837,6 +845,49 @@
     font-size: 0.8125rem;
     color: var(--ghl-muted);
     margin-top: 0.1rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ghl-quick-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-left: auto;
+}
+
+.ghl-detail-header {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--ghl-border);
+    background: var(--ghl-surface);
+}
+
+.ghl-detail-header-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.ghl-detail-header-title {
+    font-size: 1.125rem;
+    font-weight: 800;
+    color: var(--ghl-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ghl-detail-header-sub {
+    font-size: 0.8125rem;
+    color: var(--ghl-muted);
+    margin-top: 0.1rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Contact profile strip */
@@ -917,6 +968,7 @@
 .ghl-timeline-bubble {
     flex: 1;
     max-width: 85%;
+    min-width: 0;
     padding: 0.75rem 1rem;
     border-radius: 0.875rem;
     border: 1px solid var(--ghl-border);
@@ -938,12 +990,19 @@
     font-size: 0.8125rem;
     color: #52525b;
     margin-top: 0.25rem;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
 }
 
 .ghl-timeline-meta {
     font-size: 0.6875rem;
     color: #a1a1aa;
     margin-top: 0.35rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .ghl-timeline-actions {
@@ -1142,6 +1201,44 @@
     align-items: start;
 }
 
+.ghl-dl dd {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+@media (max-width: 1024px) {
+    .ghl-inbox-card {
+        flex-direction: column;
+    }
+
+    .ghl-inbox-nav {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(4.75rem, 1fr));
+        gap: 0.5rem;
+        padding: 0.625rem;
+        border-right: none;
+        border-bottom: 1px solid var(--ghl-border);
+        overflow: visible;
+    }
+
+    .ghl-inbox-nav-item {
+        min-width: 0;
+        min-height: 4.25rem;
+        padding: 0.625rem 0.4rem;
+    }
+
+    .ghl-inbox-nav-spacer {
+        display: none;
+    }
+
+    .ghl-inbox-nav-item-dial {
+        margin-left: 0;
+    }
+}
+
 @media (max-width: 1280px) {
     .ghl-inbox {
         --ghl-list-width: minmax(13rem, 16rem);
@@ -1206,27 +1303,14 @@
     }
 
     .ghl-inbox-nav {
-        width: 100%;
-        flex-direction: row;
-        flex-wrap: nowrap;
-        overflow-x: auto;
-        border-right: none;
-        border-bottom: 1px solid var(--ghl-border);
-        padding: 0.35rem;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.4rem;
+        padding: 0.5rem;
     }
 
     .ghl-inbox-nav-item {
-        min-width: 4.25rem;
-        min-height: 3.25rem;
-        flex-shrink: 0;
-    }
-
-    .ghl-inbox-nav-spacer {
-        display: none;
-    }
-
-    .ghl-inbox-nav-item-dial {
-        margin-left: auto;
+        min-height: 3.6rem;
+        padding: 0.55rem 0.35rem;
     }
 
     .ghl-inbox-body {
@@ -1242,6 +1326,50 @@
 
     .ghl-inbox-conversation {
         min-height: 50vh;
+    }
+
+    .ghl-conv-header,
+    .ghl-detail-header {
+        align-items: flex-start;
+    }
+
+    .ghl-quick-actions {
+        width: 100%;
+        margin-left: 0;
+    }
+
+    .ghl-conv-header-sub,
+    .ghl-detail-header-sub,
+    .ghl-inbox-toolbar-sub {
+        white-space: normal;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        overflow: hidden;
+    }
+}
+
+@media (max-width: 520px) {
+    .ghl-inbox-nav {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .ghl-inbox-row {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .ghl-inbox-row-meta {
+        grid-column: 2;
+        align-items: flex-start;
+        text-align: left;
+        min-width: 0;
+        max-width: none;
+        margin-top: 0.2rem;
+    }
+
+    .ghl-contact-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 

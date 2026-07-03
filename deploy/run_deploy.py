@@ -25,7 +25,7 @@ REMOTE_TAR = "/tmp/apexone-release.tar.gz"
 HOST = os.environ.get("DEPLOY_HOST", "203.215.160.44")
 USER = os.environ.get("DEPLOY_USER", "issac")
 PASSWORD = os.environ.get("DEPLOY_PASSWORD", "btdev")
-APP_URL = os.environ.get("APP_URL", f"http://{HOST}")
+APP_URL = os.environ.get("APP_URL", "https://crm.apexonepayments.com")
 SKIP_PROVISION = os.environ.get("SKIP_PROVISION", "").lower() in {"1", "true", "yes"}
 SKIP_MYSQL = os.environ.get("SKIP_MYSQL", "").lower() in {"1", "true", "yes"}
 

@@ -6,15 +6,15 @@
             'outbound' => $log['to_phone'] ?? null,
             default => $log['to_phone'] ?? ($log['from_phone'] ?? null),
         };
+        $callTitle = trim(($log['from'] ?? '—') . ' → ' . ($log['to'] ?? '—'));
+        $callMeta = ($log['start_time'] ? \Carbon\Carbon::parse($log['start_time'])->format('M j, Y g:i A') : '—')
+            . ' · ' . ($log['result'] ?? '—') . ' · ' . ($log['duration'] ?? 0) . 's';
     @endphp
     <div class="ghl-detail-header">
         <span class="ghl-avatar ghl-avatar-lg">{{ strtoupper(substr($log['direction'] ?? 'C', 0, 1)) }}</span>
-        <div class="min-w-0 flex-1">
-            <h2 class="text-xl font-bold text-zinc-900">{{ $log['from'] }} → {{ $log['to'] }}</h2>
-            <p class="text-sm text-zinc-500 mt-0.5">
-                {{ $log['start_time'] ? \Carbon\Carbon::parse($log['start_time'])->format('M j, Y g:i A') : '—' }}
-                · {{ $log['result'] }} · {{ $log['duration'] }}s
-            </p>
+        <div class="ghl-detail-header-info">
+            <h2 class="ghl-detail-header-title" title="{{ $callTitle }}">{{ $callTitle }}</h2>
+            <p class="ghl-detail-header-sub" title="{{ $callMeta }}">{{ $callMeta }}</p>
         </div>
         @if ($callbackPhone)
             @include('communications.partials.contact-quick-actions', [

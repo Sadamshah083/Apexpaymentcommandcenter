@@ -37,7 +37,7 @@ PRESERVE_KEYS = {
 FORCE_VALUES = {
     "APP_ENV": "production",
     "APP_DEBUG": "false",
-    "APP_URL": os.environ.get("APP_URL", "http://203.215.160.44"),
+    "APP_URL": os.environ.get("APP_URL", "https://crm.apexonepayments.com"),
     "APP_ALLOW_INSECURE_HTTP_IN_LOCAL": "false",
     "LOG_LEVEL": "warning",
     "SESSION_DRIVER": "database",

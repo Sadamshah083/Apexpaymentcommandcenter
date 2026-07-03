@@ -20,7 +20,7 @@ REMOTE_TAR = "/tmp/apexone-release.tar.gz"
 HOST = os.environ.get("DEPLOY_HOST", "203.215.160.44")
 USER = os.environ.get("DEPLOY_USER", "issac")
 PASSWORD = os.environ.get("DEPLOY_PASSWORD", "btdev")
-APP_URL = os.environ.get("APP_URL", f"http://{HOST}")
+APP_URL = os.environ.get("APP_URL", "https://crm.apexonepayments.com")
 
 EXCLUDE_DIRS = {".git", "node_modules", "vendor", "php83", ".cursor", "terminals", "scratch"}
 EXCLUDE_FILES = {".env", ".env.ci-test", "database/database.sqlite", "public/hot"}
