@@ -76,6 +76,16 @@ foreach ($agents as $index => $agent) {
     ]);
 
     echo "Linked {$agent->name} (".SalesOps::roleLabel($pivot->role).") -> ext {$targetExt}\n";
+
+    if (! ($ext['is_dialer_agent'] ?? false)) {
+        $patch = $api->updateExtension($ext['id'], ['is_dialer_agent' => true]);
+        if (isset($patch['error']) && ! isset($patch['id'])) {
+            echo "  Warning: could not enable dialer agent flag: {$patch['error']}\n";
+        } else {
+            echo "  Enabled is_dialer_agent on ext {$targetExt}\n";
+        }
+    }
+
     $linked++;
 }
 

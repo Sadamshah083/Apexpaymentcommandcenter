@@ -86,5 +86,4 @@
 
 @push('scripts')
     @include('communications.partials.audio-player-script')
-    @include('communications.inbox.partials.dialer-script')
 @endpush

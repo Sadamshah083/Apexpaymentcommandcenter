@@ -19,6 +19,10 @@
         </aside>
 
         <section class="ghl-dialer-panel">
+            @include('communications.partials.webphone-panel', [
+                'routePrefix' => $routePrefix,
+                'defaultCallerId' => $defaultCallerId ?? null,
+            ])
             @include('communications.partials.dialer-form', [
                 'routePrefix' => $routePrefix,
                 'callerSelectId' => 'dial-caller-id-full',
@@ -35,15 +39,3 @@
         </section>
     </div>
 </div>
-
-<script>
-    document.addEventListener('DOMContentLoaded', function() {
-        window.initGhlDialer?.({
-            numberInputId: 'dial-number-full',
-            callerSelectId: 'dial-caller-id-full',
-            dialBtnId: 'morpheus-dial-btn-full',
-            backspaceId: 'dial-backspace-full',
-            keypadRootId: 'dial-keypad-full',
-        });
-    });
-</script>

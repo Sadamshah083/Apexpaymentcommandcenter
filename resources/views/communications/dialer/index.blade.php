@@ -46,18 +46,3 @@
         </div>
     </div>
 @endsection
-
-@push('scripts')
-    @include('communications.inbox.partials.dialer-script')
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            window.initGhlDialer?.({
-                numberInputId: 'dial-number',
-                callerSelectId: 'dial-caller-id',
-                dialBtnId: 'morpheus-dial-btn',
-                backspaceId: 'dial-backspace',
-                keypadRootId: 'dial-keypad',
-            });
-        });
-    </script>
-@endpush

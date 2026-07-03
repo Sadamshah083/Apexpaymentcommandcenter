@@ -12,10 +12,33 @@
         }
     }
     $defaultExtension = $defaultCallerId ?? config('integrations.communications.default_caller_id');
+    $selectedExt = collect($extensions)->first(
+        fn ($ext) => (string) ($ext['extension_num'] ?? '') === (string) $defaultExtension,
+    );
+    $endpointOnline = (bool) ($selectedExt['endpoint_online'] ?? true);
+    $sipHost = config('integrations.morpheus.sip_host') ?: config('integrations.morpheus.host');
+    $portalUrl = app(\App\Services\Communications\ZoomClickToCallService::class)->portalUrl();
 @endphp
 
+@if (!$endpointOnline && $extensions !== [])
+    <div class="comm-hub-alert comm-hub-alert-warning mb-2 text-xs">
+        <p class="font-semibold">Phone not online</p>
+        <p class="mt-1">Register SIP to <code>{{ $sipHost }}</code> or
+            @if ($portalUrl !== '#')
+                <a href="{{ $portalUrl }}" target="_blank" rel="noopener" class="comm-hub-link">open Morpheus web phone</a>
+            @else
+                open the Morpheus web phone
+            @endif
+            before calling.</p>
+    </div>
+@endif
+
 <form method="POST" action="{{ route($routePrefix . 'communications.morpheus.calls.originate') }}"
-    class="ghl-dialer-originate-form ghl-dialer-compact">
+    class="ghl-dialer-originate-form ghl-dialer-compact"
+    data-form-loading
+    data-loading-title="Placing call"
+    data-loading-message="Ringing your extension via Morpheus CX…"
+    data-loading-button-text="Calling…">
     @csrf
     <input type="hidden" name="fallback" value="sip">
 
@@ -47,14 +70,3 @@
 
     <button type="submit" id="morpheus-dial-btn-rail" class="comm-hub-btn ghl-dialer-call-btn ghl-call-btn">Call</button>
 </form>
-
-<script>
-    document.addEventListener('DOMContentLoaded', function() {
-        window.initGhlDialer?.({
-            numberInputId: 'dial-number-rail',
-            callerSelectId: 'dial-caller-id-rail',
-            dialBtnId: 'morpheus-dial-btn-rail',
-            keypadRootId: 'dial-keypad-rail',
-        });
-    });
-</script>

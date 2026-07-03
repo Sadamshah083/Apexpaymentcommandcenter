@@ -7,6 +7,8 @@ import { initSidebar } from './sidebar.js';
 import { initWorkspaceSync, teardownWorkspaceSync } from './workspace-sync.js';
 import { initPushNotifications } from './push-notifications.js';
 import { initFormLoading } from './form-loading.js';
+import { bootCommunicationsDialer, resetDialerButtonsForCache } from './communications-dialer.js';
+import { bootCommunicationsWebphone } from './communications-webphone.js';
 import { initMemberManagement } from './member-management.js';
 import { initWorkspaceAdmin } from './workspace-admin.js';
 import { startProgressPoll } from './realtime-poll.js';
@@ -37,6 +39,8 @@ function boot() {
     initWorkspaceSync();
     initPushNotifications();
     initFormLoading();
+    bootCommunicationsDialer();
+    bootCommunicationsWebphone();
     initMemberManagement();
     initWorkspaceAdmin();
 }
@@ -48,12 +52,18 @@ if (document.readyState === 'loading') {
 }
 
 document.addEventListener('turbo:load', () => {
+    initToasts();
     initTopnav();
     initSidebar();
     initWorkspaceSync();
     initPushNotifications();
     initFormLoading();
+    bootCommunicationsDialer();
+    bootCommunicationsWebphone();
     initMemberManagement();
     initWorkspaceAdmin();
 });
-document.addEventListener('turbo:before-cache', teardownWorkspaceSync);
+document.addEventListener('turbo:before-cache', () => {
+    teardownWorkspaceSync();
+    resetDialerButtonsForCache();
+});

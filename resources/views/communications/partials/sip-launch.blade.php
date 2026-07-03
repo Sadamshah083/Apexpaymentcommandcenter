@@ -23,13 +23,18 @@
 
 @push('scripts')
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
+        function launchSipDialer() {
             const sipUrl = @json($sipUrl);
             if (sipUrl) {
-                window.setTimeout(function() {
-                    window.location.href = sipUrl;
-                }, 150);
+                window.location.href = sipUrl;
             }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            window.setTimeout(launchSipDialer, 150);
+        });
+        document.addEventListener('turbo:load', function() {
+            window.setTimeout(launchSipDialer, 150);
         });
     </script>
 @endpush

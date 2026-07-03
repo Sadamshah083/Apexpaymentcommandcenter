@@ -103,6 +103,7 @@ class CommunicationsAgentService
                 'last_name' => Str::contains($member->name, ' ') ? Str::after($member->name, ' ') : '',
                 'role' => 'user',
                 'status' => 'active',
+                'user_level' => (int) ($data['user_level'] ?? 5),
             ]);
 
             if (isset($userResult['error']) && ! isset($userResult['id'])) {
@@ -136,6 +137,16 @@ class CommunicationsAgentService
             'morpheus_extension_id' => $extResult['id'] ?? null,
             'morpheus_extension_num' => $extResult['extension_num'] ?? $data['extension_num'],
         ]);
+
+        if ($morpheusUserId) {
+            $this->morpheus->updateUser($morpheusUserId, array_filter([
+                'email' => $member->email,
+                'first_name' => Str::before($member->name, ' ') ?: $member->name,
+                'last_name' => Str::contains($member->name, ' ') ? Str::after($member->name, ' ') : '',
+                'user_level' => (int) ($data['user_level'] ?? 5),
+                'status' => 'active',
+            ], fn ($v) => filled($v)));
+        }
 
         $this->hub->bustCache();
 
@@ -298,6 +309,21 @@ class CommunicationsAgentService
         return filled($this->extensionDialOptions($extensionNum)['caller_id_number'] ?? null);
     }
 
+    public function extensionEndpointOnline(string $extensionNum): bool
+    {
+        $normalized = preg_replace('/\D/', '', $extensionNum) ?: $extensionNum;
+
+        $ext = collect($this->hub->extensions())->first(
+            fn (array $row) => (string) ($row['extension_num'] ?? '') === (string) $normalized
+        );
+
+        if (! $ext) {
+            return false;
+        }
+
+        return (bool) ($this->formatDialerExtension($ext)['endpoint_online'] ?? false);
+    }
+
     /**
      * @param  array<string, mixed>  $ext
      * @return array<string, mixed>
@@ -305,6 +331,19 @@ class CommunicationsAgentService
     protected function formatDialerExtension(array $ext): array
     {
         $callerIdNum = $ext['outbound_cid_num'] ?? $ext['caller_id_num'] ?? null;
+        $userId = $ext['user_id'] ?? null;
+        $lastLogin = null;
+
+        if ($userId) {
+            $user = collect($this->hub->users())->first(
+                fn (array $row) => (string) ($row['id'] ?? '') === (string) $userId
+            );
+            $lastLogin = $user['last_login_at'] ?? $user['last_login_time'] ?? null;
+        }
+
+        $endpointOnline = filled($lastLogin);
+        $sipHost = (string) (config('integrations.morpheus.sip_host') ?: config('integrations.morpheus.host'));
+        $portalUrl = app(\App\Services\Communications\ZoomClickToCallService::class)->portalUrl();
 
         return [
             'id' => $ext['id'] ?? null,
@@ -313,6 +352,13 @@ class CommunicationsAgentService
             'caller_id_num' => $callerIdNum,
             'outbound_cid_num' => $callerIdNum,
             'status' => $ext['status'] ?? 'active',
+            'is_dialer_agent' => (bool) ($ext['is_dialer_agent'] ?? false),
+            'endpoint_online' => $endpointOnline,
+            'endpoint_hint' => $endpointOnline
+                ? null
+                : "Extension has not connected to Morpheus yet. Register SIP to {$sipHost} or open the Morpheus web phone before dialing.",
+            'portal_url' => $portalUrl,
+            'sip_host' => $sipHost,
         ];
     }
 

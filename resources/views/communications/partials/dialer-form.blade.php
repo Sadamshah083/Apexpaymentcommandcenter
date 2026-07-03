@@ -18,7 +18,10 @@
         fn ($ext) => (string) ($ext['extension_num'] ?? '') === (string) $defaultExtension,
     );
     $hasOutboundDid = filled($selectedExt['caller_id_num'] ?? $selectedExt['outbound_cid_num'] ?? null);
+    $endpointOnline = (bool) ($selectedExt['endpoint_online'] ?? true);
+    $endpointHint = $selectedExt['endpoint_hint'] ?? null;
     $sipHost = config('integrations.morpheus.sip_host') ?: config('integrations.morpheus.host');
+    $portalUrl = $clickToCall->portalUrl();
 @endphp
 
 <div class="ghl-dialer-outbound-help">
@@ -50,10 +53,27 @@
         <p class="ghl-dialer-alert-desc">Your extension is ready, but no caller ID number is set. Once Morpheus delivers
             your DIDs, an admin must add the number under Phone Agents → Edit → Caller ID number.</p>
     </div>
+@elseif (!$endpointOnline)
+    <div class="comm-hub-alert comm-hub-alert-warning mb-4 text-sm">
+        <p class="font-semibold">Your phone line is not online</p>
+        <p class="mt-1">{{ $endpointHint ?? 'Register a SIP softphone or sign in to the Morpheus web phone before placing calls.' }}</p>
+        <ul class="text-xs text-slate-600 list-disc pl-4 mt-2 space-y-1">
+            <li>SIP server: <code>{{ $sipHost }}</code></li>
+            <li>Extension: <strong>{{ $defaultExtension }}</strong> (password from Phone Agents)</li>
+            <li>Apps: Zoiper, Linphone, or Morpheus web phone</li>
+        </ul>
+        @if ($portalUrl !== '#')
+            <a href="{{ $portalUrl }}" target="_blank" rel="noopener" class="comm-hub-link text-xs mt-2 inline-block">Open Morpheus web phone →</a>
+        @endif
+    </div>
 @endif
 
 <form method="POST" action="{{ route($routePrefix . 'communications.morpheus.calls.originate') }}"
-    class="ghl-dialer-originate-form" data-fallback-sip="1">
+    class="ghl-dialer-originate-form" data-fallback-sip="1"
+    data-form-loading
+    data-loading-title="Placing call"
+    data-loading-message="Ringing your extension via Morpheus CX…"
+    data-loading-button-text="Calling…">
     @csrf
     <input type="hidden" name="fallback" value="sip">
 
@@ -90,7 +110,7 @@
 
     <div class="ghl-dialer-actions">
         @if ($backspaceId)
-            <button type="button" id="{{ $backspaceId }}" class="comm-hub-btn comm-hub-btn-secondary">Delete</button>
+            <button type="button" id="{{ $backspaceId }}" class="comm-hub-btn comm-hub-btn-secondary" data-dial-backspace>Delete</button>
         @endif
         <button type="submit" id="{{ $dialBtnId }}" class="comm-hub-btn ghl-dialer-call-btn"
             @disabled($extensions === [])>Call with Morpheus CX</button>

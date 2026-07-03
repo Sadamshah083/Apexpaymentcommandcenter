@@ -1,5 +1,10 @@
 <aside class="ghl-inbox-tools">
     <div class="ghl-inbox-tools-inner ghl-tools-dialer">
+        @include('communications.partials.webphone-panel', [
+            'routePrefix' => $routePrefix,
+            'defaultCallerId' => $defaultCallerId ?? null,
+        ])
+
         <section class="ghl-tools-section">
             <h3 class="ghl-inbox-rail-title">Quick dial</h3>
             @include('communications.inbox.partials.rail-dialer-compact', [
