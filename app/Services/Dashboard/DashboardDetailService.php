@@ -17,6 +17,7 @@ class DashboardDetailService
     public function __construct(
         protected LeadReactivationService $reactivation,
         protected SdrPerformanceService $performance,
+        protected PipelineMetricsService $pipelineMetrics,
     ) {}
 
     /**
@@ -38,10 +39,10 @@ class DashboardDetailService
         $meta = match ($detail) {
             'ops-active' => [
                 'title' => 'Active CRM leads',
-                'description' => 'Enriched leads still in pipeline — not closed won or lost.',
-                'count_query' => (clone $query)
-                    ->where('status', 'completed')
-                    ->whereNotIn('stage', ['closed_won', 'closed_lost']),
+                'description' => 'Leads actively in setter or closer pipeline — not closed.',
+                'count_query' => (clone $query)->where(function ($q) {
+                    $this->pipelineMetrics->scopeActivePipeline($q);
+                }),
                 'workflows_link' => ['phase' => null],
             ],
             'ops-verification' => [
@@ -191,46 +192,16 @@ class DashboardDetailService
         $metric = $request->string('metric')->toString();
         $phase = $request->string('phase')->toString();
 
-        $labels = [
-            'total_leads' => 'All leads',
-            'new' => 'New leads',
-            'qualified' => 'Qualified leads',
-            'booked' => 'Booked appointments',
-            'showed' => 'Showed / in closer pipeline',
-            'closed_won' => 'Closed won',
-            'not_now' => 'Not now / nurture',
-            'dead' => 'Dead / closed lost',
-        ];
-
         $filtered = clone $query;
 
         if ($phase !== '') {
             $filtered->where('pipeline_phase', $phase);
             $title = config('sales_ops.pipeline_phases.'.$phase, ucfirst(str_replace('_', ' ', $phase)));
+        } elseif ($metric !== '' && in_array($metric, $this->pipelineMetrics->metricKeys(), true)) {
+            $this->pipelineMetrics->applyMetric($filtered, $metric);
+            $title = $this->pipelineMetrics->metricLabel($metric);
         } else {
-            match ($metric) {
-                'new' => $filtered->whereIn('stage', ['new_lead', 'new', 'imported']),
-                'qualified' => $filtered->where(function ($q) {
-                    $q->where('meeting_qualified', true)
-                        ->orWhereIn('stage', ['connected', 'discovery_completed']);
-                }),
-                'booked' => $filtered->where(function ($q) {
-                    $q->whereNotNull('appointment_settled_at')
-                        ->orWhere('stage', 'meeting_scheduled');
-                }),
-                'showed' => $filtered->whereIn('stage', ['proposal_sent', 'follow_up', 'closed_won', 'closed_lost']),
-                'closed_won' => $filtered->where(function ($q) {
-                    $q->where('stage', 'closed_won')->orWhere('closer_status', 'sale_made');
-                }),
-                'not_now' => $filtered->where(function ($q) {
-                    $q->where('setter_status', 'not_interested')->orWhere('closer_status', 'follow_up');
-                }),
-                'dead' => $filtered->where(function ($q) {
-                    $q->where('stage', 'closed_lost')->orWhere('closer_status', 'closed_lost');
-                }),
-                default => null,
-            };
-            $title = $labels[$metric] ?? 'Pipeline leads';
+            $title = 'Pipeline leads';
         }
 
         return [
@@ -242,6 +213,49 @@ class DashboardDetailService
                 'search' => $metric === 'dead' ? 'closed_lost' : null,
             ]),
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $detail
+     * @return array<string, mixed>|null
+     */
+    public function toRealtimePayload(?array $detail): ?array
+    {
+        if ($detail === null) {
+            return null;
+        }
+
+        $payload = [
+            'key' => $detail['key'] ?? null,
+            'total' => $detail['total'] ?? 0,
+            'stats' => $detail['stats'] ?? [],
+        ];
+
+        if (! empty($detail['activities'])) {
+            $payload['activities'] = collect($detail['activities']->items())->map(fn (LeadActivity $activity) => [
+                'user_name' => $activity->user?->name ?? '—',
+                'lead_id' => $activity->lead_id,
+                'lead_name' => $activity->lead?->business_name ?: 'Lead #'.$activity->lead_id,
+                'workflow_id' => $activity->lead?->workflow_id,
+                'type' => str_replace('_', ' ', $activity->type),
+                'when' => $activity->created_at?->diffForHumans() ?? '—',
+            ])->values()->all();
+        }
+
+        if (! empty($detail['leads']) && $detail['leads']->currentPage() === 1) {
+            $payload['leads'] = collect($detail['leads']->items())->map(fn (WorkflowLead $lead) => [
+                'id' => $lead->id,
+                'name' => $lead->business_name ?: $lead->owner_name ?: 'Lead #'.$lead->id,
+                'workflow_name' => $lead->workflow?->name,
+                'workflow_id' => $lead->workflow_id,
+                'pipeline_phase' => str_replace('_', ' ', $lead->pipeline_phase ?? '—'),
+                'stage' => str_replace('_', ' ', $lead->stage ?? '—'),
+                'assignee' => $lead->assignee?->name ?? $lead->setter?->name ?? $lead->closer?->name ?? '—',
+                'updated' => $lead->updated_at?->diffForHumans(short: true) ?? '—',
+            ])->values()->all();
+        }
+
+        return $payload;
     }
 
     /**
@@ -343,12 +357,10 @@ class DashboardDetailService
             ->pluck('total', 'type')
             ->all();
 
-        $funded = WorkflowLead::query()
-            ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspace->id))
+        $funded = $this->pipelineMetrics
+            ->scopeClosedWon(WorkflowLead::query()
+                ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspace->id)))
             ->where('assigned_closer_id', $userId)
-            ->where(function ($q) {
-                $q->where('stage', 'closed_won')->orWhere('closer_status', 'sale_made');
-            })
             ->where('updated_at', '>=', $start)
             ->count();
 
@@ -426,7 +438,7 @@ class DashboardDetailService
         return [
             ['label' => 'Eligible', 'value' => $leads->count()],
             ['label' => 'Follow-up stage', 'value' => $leads->where('stage', 'follow_up')->count()],
-            ['label' => 'Closed lost', 'value' => $leads->where('stage', 'closed_lost')->count()],
+            ['label' => 'Closed lost', 'value' => $leads->where('closer_status', 'closed_lost')->count()],
         ];
     }
 }

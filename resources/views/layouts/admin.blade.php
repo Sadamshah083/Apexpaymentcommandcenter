@@ -14,7 +14,7 @@
 <body class="app-shell min-h-screen font-sans antialiased" data-turbo-prefetch="false"
     @auth
 data-workspace-id="{{ auth()->user()->current_workspace_id }}"
-        data-workspace-sync-scope="{{ request()->routeIs('admin.lists.*', 'admin.deliverability.*', 'admin.content.*', 'admin.reputation.*', 'admin.communications.*') ? 'lite' : 'full' }}"
+        data-workspace-sync-scope="{{ request()->routeIs('admin.dashboard*') ? 'list' : (request()->routeIs('admin.lists.*', 'admin.deliverability.*', 'admin.content.*', 'admin.reputation.*', 'admin.communications.*') ? 'lite' : 'full') }}"
         data-workspace-sync-url="{{ route('admin.sync.poll') }}"
         data-workspace-sync-stream-url="{{ route('admin.sync.stream') }}"
         @if(app()->environment('local')) data-workspace-sync-use-poll="1" @endif

@@ -9,6 +9,7 @@ use App\Services\Pipeline\LeadPipelineService;
 use App\Services\Pipeline\RoleDashboardService;
 use App\Services\Pipeline\SetterDistributionService;
 use App\Services\Portal\PortalDashboardService;
+use App\Services\Portal\PortalLiveDataService;
 use App\Services\Workspace\WorkspaceContextService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -19,6 +20,7 @@ class PipelineController extends Controller
         protected WorkspaceContextService $workspaceContext,
         protected RoleDashboardService $dashboardService,
         protected PortalDashboardService $portalDashboard,
+        protected PortalLiveDataService $liveData,
         protected LeadPipelineService $pipelineService,
         protected CloserAssignmentService $closerAssignment,
         protected SetterDistributionService $setterDistribution,
@@ -35,6 +37,32 @@ class PipelineController extends Controller
         }
 
         return redirect()->route($route);
+    }
+
+    public function portalMetrics(Request $request)
+    {
+        $user = Auth::user();
+        $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
+
+        return response()->json(
+            $this->portalDashboard->metricsPayload($user, $workspace)
+        );
+    }
+
+    public function portalLive(Request $request)
+    {
+        $user = Auth::user();
+        $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
+
+        return response()->json(
+            $this->liveData->build($user, $workspace, array_merge(
+                $this->portalFilters($request),
+                [
+                    'view' => $request->input('view'),
+                    'page' => max(1, $request->integer('page', 1)),
+                ],
+            ))
+        );
     }
 
     public function setterDashboard(Request $request)

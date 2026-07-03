@@ -10,23 +10,33 @@
 
     $contact = LeadContactDisplay::for($lead);
 @endphp
+<div id="workspace-sync-page" class="hidden" data-lead-id="{{ $lead->id }}" aria-hidden="true"></div>
 <div class="app-page space-y-6">
     <div class="app-page-header flex items-center justify-between">
         <div>
             <h1 class="app-page-title">{{ $lead->business_name }}</h1>
-            <p class="app-page-subtitle">
-                {{ SalesOps::pipelinePhaseLabel($lead->pipeline_phase) }}
+            <p class="app-page-subtitle" id="workspace-sync-lead-subtitle">
+                <span id="workspace-sync-lead-phase">{{ SalesOps::pipelinePhaseLabel($lead->pipeline_phase) }}</span>
                 @if($lead->setter_status)
-                    &bull; Setter: {{ SalesOps::setterStatusLabel($lead->setter_status) }}
+                    &bull; Setter: <span id="workspace-sync-lead-setter-status">{{ SalesOps::setterStatusLabel($lead->setter_status) }}</span>
+                @else
+                    <span id="workspace-sync-lead-setter-status" class="hidden"></span>
                 @endif
                 @if($lead->closer_status)
-                    &bull; Closer: {{ SalesOps::closerStatusLabel($lead->closer_status) }}
+                    &bull; Closer: <span id="workspace-sync-lead-closer-status">{{ SalesOps::closerStatusLabel($lead->closer_status) }}</span>
+                @else
+                    <span id="workspace-sync-lead-closer-status" class="hidden"></span>
                 @endif
                 @if($lead->setter)
-                    &bull; Assigned: {{ $lead->setter->name }}
+                    &bull; Assigned: <span id="workspace-sync-lead-assignee">{{ $lead->setter->name }}</span>
+                @else
+                    <span id="workspace-sync-lead-assignee" class="hidden"></span>
                 @endif
             </p>
-            @include('partials.lead-tag-chips', ['tags' => $lead->tags, 'list' => $lead->leadList])
+            @include('partials.campaign-chip', ['campaign' => $lead->campaign, 'compact' => true])
+            @if($lead->leadList)
+                <div class="text-[10px] text-zinc-400 mt-0.5">List: <span class="font-medium text-zinc-600">{{ $lead->leadList->name }}</span></div>
+            @endif
         </div>
         @if($isAdminView)
             <a href="{{ route('admin.workflows.show', $lead->workflow_id) }}" class="app-btn app-btn-secondary text-sm">Back to import</a>
@@ -100,6 +110,35 @@
         </div>
 
         <div class="space-y-6">
+            @if($isAdminView ?? false)
+                @if($lead->campaign)
+                    <div class="app-card app-card-padded">
+                        <h2 class="app-section-title mb-2">Campaign</h2>
+                        <p class="text-sm text-zinc-600 mb-3">This lead belongs to the import campaign below.</p>
+                        @include('partials.campaign-chip', ['campaign' => $lead->campaign])
+                        <a href="{{ route('admin.campaigns.show', $lead->campaign) }}" class="app-link text-sm mt-3 inline-block">Manage campaign</a>
+                    </div>
+                @endif
+            @endif
+
+            <div class="app-card app-card-padded">
+                <h2 class="app-section-title mb-3">Lead metrics</h2>
+                <dl class="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                        <dt class="text-zinc-500">Tier</dt>
+                        <dd id="workspace-sync-lead-tier" class="font-semibold">{{ SalesOps::tierLabel($lead->tier) }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-zinc-500">Stage</dt>
+                        <dd id="workspace-sync-lead-stage" class="font-semibold">{{ SalesOps::crmStageLabel($lead->stage) }}</dd>
+                    </div>
+                    <div class="col-span-2">
+                        <dt class="text-zinc-500">Contact attempts</dt>
+                        <dd id="workspace-sync-lead-attempts" class="font-semibold">{{ $lead->contact_attempts }} contact attempt(s)</dd>
+                    </div>
+                </dl>
+            </div>
+
             <div class="app-card app-card-padded">
                 <h2 class="app-section-title mb-1">Status timeline</h2>
                 <p class="app-section-desc mb-4">Every setter and closer status change on this lead.</p>
@@ -121,15 +160,28 @@
 
             <div class="app-card app-card-padded">
                 <h2 class="app-section-title mb-4">All activity</h2>
+                <div id="workspace-sync-lead-activities">
                 @if($lead->activities->isNotEmpty())
-                    <ol class="lead-timeline">
-                        @foreach($lead->activities as $activity)
-                            <x-lead-activity-timeline-item :activity="$activity" />
-                        @endforeach
-                    </ol>
+                    @foreach($lead->activities as $activity)
+                        @php
+                            $activityTypes = config('sales_ops.activity_types', []);
+                            $typeLabel = $activityTypes[$activity->type] ?? $activity->type;
+                        @endphp
+                        <div class="text-xs border-b border-zinc-100 py-2 last:border-0">
+                            <span class="font-semibold text-zinc-700">{{ $typeLabel }}</span>
+                            @if($activity->user?->name)
+                                <span class="text-zinc-400"> · {{ $activity->user->name }}</span>
+                            @endif
+                            <span class="text-zinc-400"> · {{ $activity->created_at?->diffForHumans() }}</span>
+                            @if($activity->notes)
+                                <div class="text-zinc-400 mt-0.5">{{ $activity->notes }}</div>
+                            @endif
+                        </div>
+                    @endforeach
                 @else
-                    <p class="text-sm text-zinc-500">No activity yet.</p>
+                    <p class="text-xs text-zinc-400 italic">No activity logged yet.</p>
                 @endif
+                </div>
             </div>
         </div>
     </div>

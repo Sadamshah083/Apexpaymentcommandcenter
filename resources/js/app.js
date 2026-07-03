@@ -12,8 +12,11 @@ import { bootCommunicationsWebphone } from './communications-webphone.js';
 import { initMemberManagement } from './member-management.js';
 import { initWorkspaceAdmin } from './workspace-admin.js';
 import { startProgressPoll } from './realtime-poll.js';
+import { initPortalDashboard, teardownPortalDashboard } from './portal-dashboard.js';
+import { updateAdminDetailPanel } from './admin-dashboard-detail.js';
 
 window.startProgressPoll = startProgressPoll;
+window.updateAdminDetailPanel = updateAdminDetailPanel;
 
 function initPageTransitions() {
     if (document.documentElement.dataset.pageTransitionsInit === '1') {
@@ -43,6 +46,7 @@ function boot() {
     bootCommunicationsWebphone();
     initMemberManagement();
     initWorkspaceAdmin();
+    initPortalDashboard();
 }
 
 if (document.readyState === 'loading') {
@@ -62,8 +66,10 @@ document.addEventListener('turbo:load', () => {
     bootCommunicationsWebphone();
     initMemberManagement();
     initWorkspaceAdmin();
+    initPortalDashboard();
 });
 document.addEventListener('turbo:before-cache', () => {
     teardownWorkspaceSync();
+    teardownPortalDashboard();
     resetDialerButtonsForCache();
 });

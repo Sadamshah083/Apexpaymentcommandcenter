@@ -21,31 +21,14 @@ class RoleDashboardService
 
     public function setterTeamLeads(Workspace $workspace, User $user, array $filters = []): LengthAwarePaginator
     {
-        $setterIds = $workspace->users()
-            ->wherePivot('role', 'appointment_setter')
-            ->wherePivot('status', 'active')
-            ->pluck('users.id');
-
-        return $this->baseQuery($workspace, $filters)
-            ->where(function ($query) use ($setterIds) {
-                $query->where(function ($assigned) use ($setterIds) {
-                    $assigned->whereIn('pipeline_phase', ['with_setter', 'appointment_settled', 'with_closer', 'closed'])
-                        ->whereIn('assigned_setter_id', $setterIds);
-                })->orWhere(function ($unassigned) {
-                    $unassigned->where('pipeline_phase', 'enriched')
-                        ->where('status', 'enriched')
-                        ->whereNull('assigned_user_id');
-                });
-            })
+        return $this->setterTeamLeadsQuery($workspace, $filters)
             ->paginate(25)
             ->withQueryString();
     }
 
     public function closerTeamQueue(Workspace $workspace, array $filters = []): LengthAwarePaginator
     {
-        return $this->baseQuery($workspace, $filters)
-            ->where('pipeline_phase', 'appointment_settled')
-            ->whereNull('assigned_closer_id')
+        return $this->handoffQueueQuery($workspace, $filters)
             ->paginate(25)
             ->withQueryString();
     }
@@ -79,6 +62,104 @@ class RoleDashboardService
 
     public function closerTeamLeads(Workspace $workspace, User $user, array $filters = []): LengthAwarePaginator
     {
+        return $this->closerTeamLeadsQuery($workspace, $filters)
+            ->paginate(25)
+            ->withQueryString();
+    }
+
+    /**
+     * @return Collection<int, WorkflowLead>
+     */
+    public function portalLeadsForPage(
+        Workspace $workspace,
+        User $user,
+        string $view,
+        array $filters = [],
+        int $page = 1,
+        int $perPage = 25,
+    ): Collection {
+        $query = $this->portalLeadsQuery($workspace, $user, $view, $filters);
+
+        if ($query === null) {
+            return collect();
+        }
+
+        return $query
+            ->forPage(max(1, $page), max(1, min($perPage, 100)))
+            ->get();
+    }
+
+    /**
+     * @return \Illuminate\Database\Eloquent\Builder<WorkflowLead>|null
+     */
+    protected function portalLeadsQuery(Workspace $workspace, User $user, string $view, array $filters)
+    {
+        return match ($view) {
+            'setter' => $this->baseQuery($workspace, $filters)
+                ->where('pipeline_phase', 'with_setter')
+                ->where('assigned_user_id', $user->id),
+            'closer' => $this->baseQuery($workspace, $filters)
+                ->where('pipeline_phase', 'with_closer')
+                ->where('assigned_user_id', $user->id),
+            'setter_team' => $this->setterTeamLeadsQuery($workspace, $filters),
+            'closer_team' => $this->closerTeamLeadsQuery($workspace, $filters),
+            'handoff_queue' => $this->handoffQueueQuery($workspace, $filters),
+            'ae_pipeline' => $this->aePipelineQuery($workspace, $filters),
+            default => null,
+        };
+    }
+
+    /**
+     * @return \Illuminate\Database\Eloquent\Builder<WorkflowLead>
+     */
+    protected function aePipelineQuery(Workspace $workspace, array $filters)
+    {
+        $query = WorkflowLead::query()
+            ->with(['campaign:id,name', 'leadList'])
+            ->whereIn('workflow_id', $workspace->workflows()->pluck('id'))
+            ->where('status', 'completed')
+            ->whereIn('stage', ['meeting_scheduled', 'proposal_sent', 'follow_up', 'closed_won', 'closed_lost'])
+            ->orderByDesc('updated_at');
+
+        if (! empty($filters['search'])) {
+            $search = $filters['search'];
+            $query->where(function ($q) use ($search) {
+                $q->where('business_name', 'like', "%{$search}%")
+                    ->orWhere('owner_name', 'like', "%{$search}%");
+            });
+        }
+
+        return $query;
+    }
+
+    /**
+     * @return \Illuminate\Database\Eloquent\Builder<WorkflowLead>
+     */
+    protected function setterTeamLeadsQuery(Workspace $workspace, array $filters)
+    {
+        $setterIds = $workspace->users()
+            ->wherePivot('role', 'appointment_setter')
+            ->wherePivot('status', 'active')
+            ->pluck('users.id');
+
+        return $this->baseQuery($workspace, $filters)
+            ->where(function ($query) use ($setterIds) {
+                $query->where(function ($assigned) use ($setterIds) {
+                    $assigned->whereIn('pipeline_phase', ['with_setter', 'appointment_settled', 'with_closer', 'closed'])
+                        ->whereIn('assigned_setter_id', $setterIds);
+                })->orWhere(function ($unassigned) {
+                    $unassigned->where('pipeline_phase', 'enriched')
+                        ->where('status', 'enriched')
+                        ->whereNull('assigned_user_id');
+                });
+            });
+    }
+
+    /**
+     * @return \Illuminate\Database\Eloquent\Builder<WorkflowLead>
+     */
+    protected function closerTeamLeadsQuery(Workspace $workspace, array $filters)
+    {
         $closerIds = $workspace->users()
             ->wherePivot('role', 'closer')
             ->wherePivot('status', 'active')
@@ -86,12 +167,20 @@ class RoleDashboardService
 
         return $this->baseQuery($workspace, $filters)
             ->whereIn('pipeline_phase', ['with_closer', 'closed'])
-            ->where(function($query) use ($closerIds) {
+            ->where(function ($query) use ($closerIds) {
                 $query->whereIn('assigned_closer_id', $closerIds)
-                      ->orWhereIn('assigned_user_id', $closerIds);
-            })
-            ->paginate(25)
-            ->withQueryString();
+                    ->orWhereIn('assigned_user_id', $closerIds);
+            });
+    }
+
+    /**
+     * @return \Illuminate\Database\Eloquent\Builder<WorkflowLead>
+     */
+    protected function handoffQueueQuery(Workspace $workspace, array $filters)
+    {
+        return $this->baseQuery($workspace, $filters)
+            ->where('pipeline_phase', 'appointment_settled')
+            ->whereNull('assigned_closer_id');
     }
 
     public function closerTeamMetrics(Workspace $workspace): array
@@ -160,7 +249,7 @@ class RoleDashboardService
     protected function baseQuery(Workspace $workspace, array $filters)
     {
         $query = WorkflowLead::query()
-            ->with(['workflow', 'assignee', 'setter', 'tags', 'leadList'])
+            ->with(['workflow', 'assignee', 'setter', 'campaign', 'leadList'])
             ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspace->id))
             ->orderByDesc('updated_at');
 

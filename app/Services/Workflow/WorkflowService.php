@@ -7,6 +7,7 @@ use App\Jobs\ProcessWorkflowJob;
 use App\Models\Workflow;
 use App\Models\WorkflowLead;
 use App\Models\Workspace;
+use App\Services\Pipeline\CampaignService;
 use App\Services\Pipeline\LeadSegmentationService;
 use App\Services\Pipeline\PipelineLeadReleaseService;
 use App\Services\Workspace\WorkspaceSyncService;
@@ -24,11 +25,17 @@ class WorkflowService
         protected WorkspaceSyncService $syncService,
         protected WorkflowProviderStatusService $providerStatus,
         protected LeadSegmentationService $segmentation,
+        protected CampaignService $campaigns,
         protected PipelineLeadReleaseService $releaseService,
     ) {}
 
-    public function createFromUpload(Workspace $workspace, string $name, UploadedFile $file, string $processingMode = 'import_only'): Workflow
-    {
+    public function createFromUpload(
+        Workspace $workspace,
+        string $name,
+        UploadedFile $file,
+        string $processingMode = 'import_only',
+        ?int $campaignId = null,
+    ): Workflow {
         $storedPath = $file->store('workflows');
         $sheets = [];
 
@@ -44,6 +51,7 @@ class WorkflowService
 
         return Workflow::create([
             'workspace_id' => $workspace->id,
+            'campaign_id' => $campaignId,
             'name' => $name,
             'processing_mode' => $this->normalizeProcessingMode($processingMode),
             'original_filename' => $file->getClientOriginalName(),
@@ -119,7 +127,7 @@ class WorkflowService
     public function buildShowData(Workflow $workflow, Workspace $workspace, array $options = []): array
     {
         $workflow = $this->applyAutoMappingIfNeeded($workflow);
-        $workflow->load('leadList');
+        $workflow->load(['leadList', 'campaign']);
         $workflow->loadCount([
             'leads as assigned_leads_count' => fn ($query) => $query->whereNotNull('assigned_user_id'),
             'leads as pending_verification_count' => fn ($query) => $query->where('status', 'pending_verification'),
@@ -131,7 +139,7 @@ class WorkflowService
         $perPage = min(max((int) ($options['per_page'] ?? config('pagination.pipeline_leads_per_page', 25)), 5), 100);
 
         $leads = $workflow->leads()
-            ->with(['tags', 'leadList'])
+            ->with(['campaign', 'leadList'])
             ->orderByRaw("CASE WHEN status = 'pending_verification' THEN 0 WHEN status = 'extracting' THEN 1 WHEN status = 'completed' THEN 2 WHEN status = 'failed' THEN 3 ELSE 4 END ASC")
             ->orderBy('researched_at', 'desc')
             ->orderBy('row_number', 'asc')
@@ -146,7 +154,8 @@ class WorkflowService
                 ->wherePivot('role', 'appointment_setter')
                 ->wherePivot('status', 'active')
                 ->get(),
-            'leadTags' => $this->segmentation->workspaceTags($workspace),
+            'campaign' => $workflow->campaign,
+            'campaigns' => $this->campaigns->listForWorkspace($workspace),
             'leadList' => $workflow->leadList,
             'enrichmentConfigured' => $this->providerStatus->isEnrichmentConfigured(),
             'enrichmentConfigMessage' => $this->providerStatus->configurationMessage(),
@@ -235,12 +244,10 @@ class WorkflowService
         $autoAssign = ! empty($runConfig['auto_assign_setters']);
 
         $workflow->loadMissing('workspace');
-        $segmentation = $this->segmentation->prepareImportSegmentation(
+        $list = $this->segmentation->createImportList(
             $workflow->workspace,
             Auth::user(),
             $workflow->name,
-            $this->parseTagNames($runConfig['tag_names'] ?? ''),
-            array_map('intval', (array) ($runConfig['tag_ids'] ?? [])),
         );
 
         $workflow->leads()->delete();
@@ -248,8 +255,7 @@ class WorkflowService
         $workflow->update([
             'status' => 'pending',
             'processing_mode' => $processingMode,
-            'lead_list_id' => $segmentation['list']->id,
-            'import_tag_ids' => $segmentation['tag_ids'],
+            'lead_list_id' => $list->id,
             'auto_assign_setters' => $autoAssign,
             'column_mapping' => $mapping,
             'custom_prompt' => $runConfig['custom_prompt'] ?? null,
@@ -584,17 +590,5 @@ class WorkflowService
             'full_pipeline', 'import_and_enrich' => 'import_and_enrich',
             default => 'import_only',
         };
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    protected function parseTagNames(string $raw): array
-    {
-        if ($raw === '') {
-            return [];
-        }
-
-        return array_values(array_filter(array_map('trim', preg_split('/[,;]+/', $raw) ?: [])));
     }
 }

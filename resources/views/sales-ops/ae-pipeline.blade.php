@@ -9,6 +9,8 @@
         <p class="app-page-subtitle">Meetings scheduled, proposals sent, and deals in follow-up — qualified opportunities only.</p>
     </div>
 
+    @include('pipeline.partials.portal-sync-context', ['portalView' => 'ae_pipeline', 'leads' => $leads])
+
     <x-data-table :paginator="$leads" min-width="800px">
         <table>
             <thead>
@@ -22,7 +24,7 @@
                     <th></th>
                 </tr>
             </thead>
-            <tbody id="workspace-sync-ae-pipeline-body">
+            <tbody id="workspace-sync-ae-pipeline-body" data-sync-mode="patch">
                 @foreach($leads as $lead)
                     <tr data-lead-id="{{ $lead->id }}">
                         <td class="font-bold">{{ $lead->business_name }}</td>

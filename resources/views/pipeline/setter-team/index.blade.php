@@ -16,14 +16,14 @@
 
         @include('pipeline.partials.dashboard-widgets', ['dashboard' => $dashboard ?? []])
 
+        @include('pipeline.partials.portal-sync-context', ['portalView' => 'setter_team', 'leads' => $leads])
+
         @include('pipeline.partials.detail-focus-banner', ['focus' => $focus ?? null])
 
-        @if (($unassignedLeads ?? 0) > 0)
-            <div class="app-alert app-alert-info">
-                <p class="app-alert-title">{{ number_format($unassignedLeads) }} unassigned lead(s) ready for distribution</p>
-                <p class="app-alert-desc">Use Assign leads to choose how many go to each setter.</p>
-            </div>
-        @endif
+        <div id="portal-unassigned-alert" class="app-alert app-alert-info {{ ($unassignedLeads ?? 0) > 0 ? '' : 'hidden' }}">
+            <p class="app-alert-title"><span id="portal-unassigned-count">{{ number_format($unassignedLeads ?? 0) }}</span> unassigned lead(s) ready for distribution</p>
+            <p class="app-alert-desc">Use Assign leads to choose how many go to each setter.</p>
+        </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             @foreach ($teamMetrics as $metric)
@@ -31,11 +31,12 @@
                     $isActive = (string) request('setter') === (string) $metric['user']->id;
                 @endphp
                 <a href="{{ route('portal.setter-team.dashboard', array_filter(['setter' => $metric['user']->id, 'search' => request('search'), 'phase' => request('phase')])) }}"
-                    class="app-card app-card-padded block transition hover:border-indigo-200 {{ $isActive ? 'ring-2 ring-indigo-500 border-indigo-200' : '' }}">
+                    class="app-card app-card-padded block transition hover:border-indigo-200 {{ $isActive ? 'ring-2 ring-indigo-500 border-indigo-200' : '' }}"
+                    data-team-member-id="{{ $metric['user']->id }}">
                     <p class="text-xs font-semibold text-zinc-500 uppercase tracking-wide">{{ $metric['user']->name }}</p>
-                    <p class="text-2xl font-bold text-zinc-900 mt-1">{{ $metric['active_leads'] }}</p>
+                    <p class="text-2xl font-bold text-zinc-900 mt-1" data-team-metric="active">{{ $metric['active_leads'] }}</p>
                     <p class="text-xs text-zinc-500">Active leads</p>
-                    <p class="text-sm text-emerald-700 font-semibold mt-2">{{ $metric['settled_leads'] }} settled</p>
+                    <p class="text-sm text-emerald-700 font-semibold mt-2"><span data-team-metric="settled">{{ $metric['settled_leads'] }}</span> settled</p>
                 </a>
             @endforeach
         </div>
@@ -68,6 +69,7 @@
                 'statusColumn' => 'both',
                 'showAssignee' => true,
                 'readOnly' => true,
+                'liveSync' => true,
             ])
         </div>
     </div>

@@ -10,6 +10,7 @@ class Workflow extends Model
 {
     protected $fillable = [
         'workspace_id',
+        'campaign_id',
         'lead_list_id',
         'name',
         'status',
@@ -28,7 +29,6 @@ class Workflow extends Model
         'custom_prompt',
         'verification_toggles',
         'distribution_users',
-        'import_tag_ids',
         'auto_assign_setters',
         'distribution_cursor',
         'ingestion_row_offset',
@@ -40,7 +40,6 @@ class Workflow extends Model
         'column_mapping' => 'array',
         'verification_toggles' => 'array',
         'distribution_users' => 'array',
-        'import_tag_ids' => 'array',
         'auto_assign_setters' => 'boolean',
         'ingestion_complete' => 'boolean',
     ];
@@ -48,6 +47,11 @@ class Workflow extends Model
     public function workspace(): BelongsTo
     {
         return $this->belongsTo(Workspace::class);
+    }
+
+    public function campaign(): BelongsTo
+    {
+        return $this->belongsTo(LeadCampaign::class, 'campaign_id');
     }
 
     public function leadList(): BelongsTo

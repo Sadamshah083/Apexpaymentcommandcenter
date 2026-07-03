@@ -179,6 +179,40 @@ function updateLeadDetail(detail) {
         `${detail.contact_attempts} contact attempt(s)`
     );
     smoothTextUpdate(document.getElementById('workspace-sync-lead-stage'), detail.stage_label);
+    smoothTextUpdate(document.getElementById('workspace-sync-lead-phase'), detail.pipeline_phase_label);
+
+    const setterEl = document.getElementById('workspace-sync-lead-setter-status');
+    if (setterEl) {
+        if (detail.setter_status_label) {
+            setterEl.textContent = detail.setter_status_label;
+            setterEl.classList.remove('hidden');
+        } else {
+            setterEl.textContent = '';
+            setterEl.classList.add('hidden');
+        }
+    }
+
+    const closerEl = document.getElementById('workspace-sync-lead-closer-status');
+    if (closerEl) {
+        if (detail.closer_status_label) {
+            closerEl.textContent = detail.closer_status_label;
+            closerEl.classList.remove('hidden');
+        } else {
+            closerEl.textContent = '';
+            closerEl.classList.add('hidden');
+        }
+    }
+
+    const assigneeEl = document.getElementById('workspace-sync-lead-assignee');
+    if (assigneeEl) {
+        if (detail.assignee_name) {
+            assigneeEl.textContent = detail.assignee_name;
+            assigneeEl.classList.remove('hidden');
+        } else {
+            assigneeEl.textContent = '';
+            assigneeEl.classList.add('hidden');
+        }
+    }
 
     const activitiesEl = document.getElementById('workspace-sync-lead-activities');
     if (activitiesEl && Array.isArray(detail.activities)) {

@@ -7,6 +7,7 @@ use App\Models\WorkflowLead;
 use App\Services\Pipeline\LeadImportDedupService;
 use App\Services\Pipeline\LeadSegmentationService;
 use App\Services\Workspace\WorkspaceSyncService;
+use App\Support\LeadStageSync;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
@@ -110,7 +111,7 @@ class ProcessWorkflowJob implements ShouldQueue
 
             $batchPhones = [];
             $discardedDuplicates = (int) ($workflow->discarded_duplicates ?? 0);
-            $importTagIds = $workflow->import_tag_ids ?? [];
+            $campaignId = $workflow->campaign_id;
 
             Log::info("Processing workflow {$workflow->id} from row offset {$offset}");
 
@@ -164,9 +165,11 @@ class ProcessWorkflowJob implements ShouldQueue
 
                     $lead = WorkflowLead::create([
                         'workflow_id' => $workflow->id,
+                        'campaign_id' => $campaignId,
                         'lead_list_id' => $workflow->lead_list_id,
                         'import_mode' => $workflow->isImportOnly() ? 'stored' : 'pipeline',
                         'pipeline_phase' => 'imported',
+                        'stage' => LeadStageSync::forImport(),
                         'status' => 'imported',
                         'row_number' => $spreadsheetRowNumber,
                         'business_name' => $mappedData['business_name'] ?? '',
@@ -185,10 +188,6 @@ class ProcessWorkflowJob implements ShouldQueue
                     $insertedLeadIds[] = $lead->id;
                     $existingRowNumbers->put($spreadsheetRowNumber, true);
                     $totalLeadsInserted++;
-                }
-
-                if ($insertedLeadIds !== [] && $importTagIds !== []) {
-                    $segmentation->attachTagsToLeads($insertedLeadIds, $importTagIds);
                 }
 
                 $workflow->update([

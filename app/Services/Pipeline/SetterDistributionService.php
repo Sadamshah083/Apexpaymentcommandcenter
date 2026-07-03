@@ -9,6 +9,7 @@ use App\Models\Workflow;
 use App\Models\WorkflowLead;
 use App\Models\Workspace;
 use App\Services\SalesOps\LeadActivityService;
+use App\Support\LeadStageSync;
 use App\Support\SqliteConcurrency;
 use App\Support\WorkflowAssignmentRoles;
 use Illuminate\Support\Collection;
@@ -60,13 +61,13 @@ class SetterDistributionService
                     return null;
                 }
 
-                $leadModel->update([
+                $leadModel->update(LeadStageSync::mergeStage($leadModel, [
                     'assigned_user_id' => $assignedUser->id,
                     'assigned_setter_id' => $assignedUser->id,
                     'pipeline_phase' => 'with_setter',
                     'setter_status' => 'new',
                     'status' => 'completed',
-                ]);
+                ]));
 
                 $workflowModel->update(['distribution_cursor' => $cursor + 1]);
 
@@ -251,7 +252,7 @@ class SetterDistributionService
                     return false;
                 }
 
-                $locked->update([
+                $locked->update(LeadStageSync::mergeStage($locked, [
                     'assigned_user_id' => $setter->id,
                     'assigned_setter_id' => $setter->id,
                     'pipeline_phase' => 'with_setter',
@@ -260,7 +261,7 @@ class SetterDistributionService
                     'verification_status' => 'approved',
                     'verified_at' => now(),
                     'verified_by' => $actor->id,
-                ]);
+                ]));
 
                 $this->recordAssignment($locked, null, $setter, 'with_setter', $actor);
                 $note = $teamLead

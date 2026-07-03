@@ -4,9 +4,9 @@ use App\Http\Controllers\BusinessResearchController;
 use App\Http\Controllers\CommunicationsHubController;
 use App\Http\Controllers\ContentAnalyzerController;
 use App\Http\Controllers\CrmCampaignController;
+use App\Http\Controllers\CampaignController;
 use App\Http\Controllers\DeliverabilityController;
 use App\Http\Controllers\EmailListController;
-use App\Http\Controllers\LeadTagController;
 use App\Http\Controllers\ReputationController;
 use App\Http\Controllers\WorkflowController;
 use App\Http\Controllers\PipelineController;
@@ -126,12 +126,12 @@ Route::prefix('admin')->name('admin.')->middleware([
         Route::delete('/{workflow}', [WorkflowController::class, 'destroy'])->name('destroy');
     });
 
-    Route::prefix('lead-tags')->name('lead-tags.')->group(function () {
-        Route::get('/', [LeadTagController::class, 'index'])->name('index');
-        Route::get('/browse', [LeadTagController::class, 'show'])->name('show');
-        Route::post('/enrich', [LeadTagController::class, 'enrich'])->name('enrich');
-        Route::post('/distribute', [LeadTagController::class, 'distribute'])->name('distribute');
-        Route::post('/apply', [LeadTagController::class, 'applyTags'])->name('apply');
+    Route::prefix('campaigns')->name('campaigns.')->group(function () {
+        Route::get('/', [CampaignController::class, 'index'])->name('index');
+        Route::post('/', [CampaignController::class, 'store'])->name('store');
+        Route::get('/{campaign}', [CampaignController::class, 'show'])->name('show');
+        Route::post('/{campaign}/enrich', [CampaignController::class, 'enrich'])->name('enrich');
+        Route::post('/{campaign}/distribute', [CampaignController::class, 'distribute'])->name('distribute');
     });
 
     Route::post('leads/{lead}/approve', [WorkflowController::class, 'approveLead'])->name('leads.approve');
@@ -194,6 +194,8 @@ Route::prefix('admin')->name('admin.')->middleware([
 // Protected Portal Routes
 Route::prefix('portal')->name('portal.')->middleware([\App\Http\Middleware\MarketerPortalMiddleware::class])->group(function () {
     Route::get('/dashboard', [PipelineController::class, 'portalDashboard'])->name('dashboard');
+    Route::get('/dashboard/metrics', [PipelineController::class, 'portalMetrics'])->name('dashboard.metrics');
+    Route::get('/dashboard/live', [PipelineController::class, 'portalLive'])->name('dashboard.live');
 
     Route::get('/setter', [PipelineController::class, 'setterDashboard'])->name('setter.dashboard');
     Route::get('/setter-team', [PipelineController::class, 'setterTeamDashboard'])->name('setter-team.dashboard');

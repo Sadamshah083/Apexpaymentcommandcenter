@@ -26,10 +26,10 @@
         </div>
 
         @if (!empty($detail['stats']))
-            <div class="dash-detail-stats">
+            <div class="dash-detail-stats" id="detail-stats-row">
                 @foreach ($detail['stats'] as $stat)
                     <div class="dash-detail-stat">
-                        <span class="dash-detail-stat-value">{{ is_numeric($stat['value']) ? number_format($stat['value']) : $stat['value'] }}</span>
+                        <span class="dash-detail-stat-value" id="detail-stat-{{ $loop->index }}">{{ is_numeric($stat['value']) ? number_format($stat['value']) : $stat['value'] }}</span>
                         <span class="dash-detail-stat-label">{{ $stat['label'] }}</span>
                     </div>
                 @endforeach
@@ -47,7 +47,7 @@
                             <th>When</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="detail-activities-body">
                         @forelse ($detail['activities'] as $activity)
                             <tr>
                                 <td>{{ $activity->user?->name ?? '—' }}</td>

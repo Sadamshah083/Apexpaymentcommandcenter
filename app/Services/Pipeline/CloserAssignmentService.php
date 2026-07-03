@@ -6,6 +6,7 @@ use App\Models\LeadAssignment;
 use App\Models\User;
 use App\Models\WorkflowLead;
 use App\Models\Workspace;
+use App\Support\LeadStageSync;
 use Illuminate\Validation\ValidationException;
 
 class CloserAssignmentService
@@ -30,12 +31,12 @@ class CloserAssignmentService
             ]);
         }
 
-        $lead->update([
+        $lead->update(LeadStageSync::mergeStage($lead, [
             'assigned_user_id' => $closer->id,
             'assigned_closer_id' => $closer->id,
             'pipeline_phase' => 'with_closer',
             'closer_status' => 'new',
-        ]);
+        ]));
 
         LeadAssignment::create([
             'workflow_lead_id' => $lead->id,

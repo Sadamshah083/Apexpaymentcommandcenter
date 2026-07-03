@@ -411,4 +411,69 @@ class PortalDashboardService
 
         return $role ? SalesOps::normalizeLegacyRole($role) : null;
     }
+
+    /**
+     * Flat metrics payload for portal dashboard polling.
+     *
+     * @return array<string, mixed>
+     */
+    public function metricsPayload(User $user, Workspace $workspace): array
+    {
+        $dashboard = $this->forUser($user, $workspace);
+
+        return [
+            'role' => $dashboard['role'] ?? null,
+            'metrics' => $this->flattenMetrics($dashboard),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $dashboard
+     * @return array<string, mixed>
+     */
+    public function flattenMetrics(array $dashboard): array
+    {
+        $metrics = [];
+
+        foreach ($dashboard['kpis'] ?? [] as $index => $kpi) {
+            $key = $kpi['focus'] ?? ('kpi_'.$index);
+            $value = $kpi['value'];
+            if (is_string($value) && str_starts_with($value, '$')) {
+                $metrics[$key] = (float) preg_replace('/[^\d.]/', '', $value);
+                $metrics[$key.'_formatted'] = $value;
+            } else {
+                $metrics[$key] = $value;
+            }
+        }
+
+        foreach ($dashboard['daily'] ?? [] as $key => $metric) {
+            $metrics['daily_'.$key.'_actual'] = $metric['actual'] ?? 0;
+            $metrics['daily_'.$key.'_target'] = $metric['target'] ?? 0;
+            $metrics['daily_'.$key.'_pct'] = $metric['pct'] ?? 0;
+        }
+
+        if (! empty($dashboard['weekly_closes'])) {
+            $metrics['weekly_closes_actual'] = $dashboard['weekly_closes']['actual'] ?? 0;
+            $metrics['weekly_closes_target'] = $dashboard['weekly_closes']['target'] ?? 0;
+            $metrics['weekly_closes_pct'] = $dashboard['weekly_closes']['pct'] ?? 0;
+        }
+
+        foreach ($dashboard['tier_breakdown'] ?? [] as $tier => $count) {
+            $metrics['tier_'.$tier] = $count;
+        }
+
+        foreach ($dashboard['status_breakdown'] ?? [] as $status => $count) {
+            $metrics['status_'.$status] = $count;
+        }
+
+        foreach ($dashboard['team_activity'] ?? [] as $key => $count) {
+            $metrics['team_'.$key] = $count;
+        }
+
+        if (isset($dashboard['revenue_mtd'])) {
+            $metrics['revenue_mtd'] = $dashboard['revenue_mtd'];
+        }
+
+        return $metrics;
+    }
 }

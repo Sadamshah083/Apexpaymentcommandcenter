@@ -23,6 +23,8 @@
 
         @include('pipeline.partials.dashboard-widgets', ['dashboard' => $dashboard ?? []])
 
+        @include('pipeline.partials.portal-sync-context', ['portalView' => 'setter', 'leads' => $leads])
+
         @include('pipeline.partials.detail-focus-banner', ['focus' => $focus ?? null])
 
         <div id="portal-leads-section">
@@ -32,6 +34,7 @@
             'showAssignee' => false,
             'editableSetterStatus' => true,
             'setterStatuses' => $setterStatuses,
+            'liveSync' => true,
         ])
         </div>
     </div>

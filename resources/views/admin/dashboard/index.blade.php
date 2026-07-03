@@ -6,8 +6,8 @@
 <div class="admin-dashboard-page {{ !empty($detail) ? 'admin-dashboard-page--detail' : '' }}">
     <div class="admin-dashboard-header">
         <div>
-            <h2 class="admin-dashboard-title">Admin Dashboard</h2>
-            <p class="admin-dashboard-subtitle">Workspace: <span>{{ $workspace->name }}</span> · Live performance tracking and lead metrics.</p>
+            <h2 class="admin-dashboard-title">Command Center</h2>
+            <p class="admin-dashboard-subtitle">Workspace: <span>{{ $workspace->name }}</span> · Live monitoring, imports, campaigns, and pipeline reporting.</p>
         </div>
         <div class="admin-dashboard-live-badge">
             <span class="relative flex h-2 w-2">
@@ -275,6 +275,9 @@
     </div>
 </div>
 
+@include('admin.dashboard.partials.campaigns-panel')
+@include('admin.dashboard.partials.imports-panel')
+
 @endif
 </div>
 @endsection
@@ -398,8 +401,61 @@
             }
         });
 
-        const pollEndpoint = "{{ route('admin.dashboard.realtime-data') }}";
+        const pollEndpoint = "{{ route('admin.dashboard.realtime-data') }}" + window.location.search;
         let stopDashboardPoll = null;
+
+        function escapeDashboardHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        function updateOpsLeaderboard(rows) {
+            const container = document.getElementById('ops-leaderboard');
+            if (!container) {
+                return;
+            }
+
+            if (!rows.length) {
+                container.innerHTML = '<p class="admin-dash-empty">No activity logged this week yet.</p>';
+                return;
+            }
+
+            container.innerHTML = rows.map((row, index) => `
+                <a href="${escapeDashboardHtml(row.detail_url || '#')}"
+                    class="admin-dash-leaderboard-row admin-dash-leaderboard-row--clickable">
+                    <span>
+                        <span class="admin-dash-leaderboard-rank">#${index + 1}</span>
+                        <span class="admin-dash-leaderboard-name">${escapeDashboardHtml(row.name)}</span>
+                        <span class="admin-dash-leaderboard-role">· ${escapeDashboardHtml(row.role)}</span>
+                    </span>
+                    <span class="admin-dash-leaderboard-stats">${row.dials ?? 0} d · ${row.meetings ?? 0} m · ${row.deals_funded ?? 0} funded</span>
+                </a>
+            `).join('');
+        }
+
+        function updateCampaignCards(campaigns) {
+            const grid = document.getElementById('dashboard-campaigns-grid');
+            if (!grid) {
+                return;
+            }
+
+            grid.innerHTML = campaigns.map((campaign) => `
+                <a href="${escapeDashboardHtml(campaign.show_url)}" class="campaign-card">
+                    <div class="campaign-card-head">
+                        <span class="campaign-card-name">${escapeDashboardHtml(campaign.name)}</span>
+                        <span class="campaign-card-count">${Number(campaign.leads_count || 0).toLocaleString()} leads</span>
+                    </div>
+                    <dl class="campaign-card-stats">
+                        <div><dt>Imports</dt><dd>${campaign.imports_count ?? 0}</dd></div>
+                        <div><dt>Enriched</dt><dd>${Number(campaign.enriched_count || 0).toLocaleString()}</dd></div>
+                        <div><dt>Assigned</dt><dd>${Number(campaign.assigned_count || 0).toLocaleString()}</dd></div>
+                    </dl>
+                </a>
+            `).join('');
+        }
 
         function updateDashboardMetrics(data) {
             const setText = (id, value) => {
@@ -434,6 +490,18 @@
                 setText('ops-today-conversations', data.ops.today_activity?.conversations ?? 0);
                 setText('ops-today-discoveries', data.ops.today_activity?.discoveries ?? 0);
                 setText('ops-today-meetings', data.ops.today_activity?.meetings ?? 0);
+                updateOpsLeaderboard(data.ops.leaderboard || []);
+            }
+
+            if (Array.isArray(data.campaigns)) {
+                updateCampaignCards(data.campaigns);
+            }
+
+            if (Array.isArray(data.imports_leads) && window.applyCommandCenterLeadsPatch) {
+                const importsBody = document.getElementById('workspace-sync-leads-body');
+                if (importsBody) {
+                    window.applyCommandCenterLeadsPatch(importsBody, data.imports_leads);
+                }
             }
 
             if (!funnelChart) {
@@ -554,12 +622,9 @@
 <script>
     document.addEventListener('DOMContentLoaded', function () {
         const pollEndpoint = "{{ route('admin.dashboard.realtime-data') }}" + window.location.search;
-        if (window.startProgressPoll) {
+        if (window.startProgressPoll && window.updateAdminDetailPanel) {
             window.startProgressPoll(pollEndpoint, (data) => {
-                const countEl = document.getElementById('detail-total-count');
-                if (countEl && data.detail) {
-                    countEl.textContent = Number(data.detail.total || 0).toLocaleString();
-                }
+                window.updateAdminDetailPanel(data.detail);
                 return true;
             }, { activeMs: 5000, hiddenMs: 15000 });
         }
