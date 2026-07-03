@@ -15,6 +15,7 @@ use App\Services\Workflow\WorkflowLeadService;
 use App\Services\Workflow\WorkflowLeadVerificationService;
 use App\Services\Workflow\WorkflowService;
 use App\Services\SalesOps\DiscoveryQualificationService;
+use App\Support\LeadRoute;
 use App\Support\SalesOps;
 use App\Support\WorkflowAssignmentRoles;
 use Illuminate\Http\Request;
@@ -302,9 +303,11 @@ class WorkflowController extends Controller
                 || $user->canAccessAdminPortal($workspace->id)
             );
 
+        $isAdminView = LeadRoute::isAdminContext();
+
         return view('workflows.lead_show', compact(
             'lead', 'team', 'workspace', 'setterStatuses', 'closerStatuses',
-            'pipelinePhases', 'activityTypes', 'canEditSetter', 'canEditCloser', 'showSetterHistory', 'user'
+            'pipelinePhases', 'activityTypes', 'canEditSetter', 'canEditCloser', 'showSetterHistory', 'user', 'isAdminView'
         ));
     }
 
@@ -324,7 +327,7 @@ class WorkflowController extends Controller
                 $request->input('notes')
             );
 
-            return redirect()->route('portal.leads.show', $lead->id)->with('success', 'Lead status updated.');
+            return redirect()->to(LeadRoute::show($lead))->with('success', 'Lead status updated.');
         }
 
         if ($request->filled('closer_status')) {
@@ -336,7 +339,7 @@ class WorkflowController extends Controller
                 $request->input('notes')
             );
 
-            return redirect()->route('portal.leads.show', $lead->id)->with('success', 'Lead status updated.');
+            return redirect()->to(LeadRoute::show($lead))->with('success', 'Lead status updated.');
         }
 
         $data = $request->validate([
@@ -346,7 +349,7 @@ class WorkflowController extends Controller
 
         $lead->update($data);
 
-        return redirect()->route('portal.leads.show', $lead->id)->with('success', 'Lead record updated.');
+        return redirect()->to(LeadRoute::show($lead))->with('success', 'Lead record updated.');
     }
 
     public function leadDestroy(WorkflowLead $lead)
@@ -355,6 +358,10 @@ class WorkflowController extends Controller
         $this->workspaceContext->ensureLeadBelongsToWorkspace($lead, $workspace);
 
         $this->leadService->delete($lead);
+
+        if (LeadRoute::isAdminContext()) {
+            return redirect()->route('admin.workflows.index')->with('success', 'Lead record deleted successfully.');
+        }
 
         return redirect()->route('portal.dashboard')->with('success', 'Lead record deleted successfully.');
     }
