@@ -21,14 +21,14 @@
     };
 @endphp
 
-<div class="app-card app-card-padded">
+<div class="app-card app-card-padded enrichment-providers-card">
     <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
         <div class="min-w-0">
             <h2 class="app-section-title">AI enrichment providers</h2>
             <p class="app-section-desc break-words">
                 Pipeline model: <strong>{{ $status['pipeline_model'] ?? 'gemini-2.5-flash' }}</strong>
-                ┬╖ max {{ number_format($status['pipeline_max_tokens'] ?? 2048) }} tokens
-                ┬╖ DuckDuckGo context
+                &middot; max {{ number_format($status['pipeline_max_tokens'] ?? 2048) }} tokens
+                &middot; DuckDuckGo context
             </p>
         </div>
         @if(request()->routeIs('admin.*'))

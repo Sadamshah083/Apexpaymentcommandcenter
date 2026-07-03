@@ -131,7 +131,7 @@
     @default
         <div class="ghl-inbox-conversation-scroll ghl-inbox-conversation-scroll--center">
             <div class="ghl-inbox-empty">
-                <div class="ghl-inbox-empty-icon">💬</div>
+                <div class="ghl-inbox-empty-icon" aria-hidden="true">💬</div>
                 <h2>Select a conversation</h2>
                 <p>Choose someone from the {{ strtolower($channels[$channel]['label'] ?? 'inbox') }} list, or use Quick
                     dial on the right to place a call.</p>

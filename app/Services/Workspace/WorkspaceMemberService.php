@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use App\Support\AdminModules;
+use App\Support\MemberModuleAccess;
 use App\Support\SalesOps;
 
 class WorkspaceMemberService
@@ -398,17 +399,27 @@ class WorkspaceMemberService
         }
 
         $role = $pivot->role ?? null;
-        if (! SalesOps::isAdminPortalRole($role) || $role === 'super_admin') {
+        if (! MemberModuleAccess::isConfigurableRole($role)) {
             throw ValidationException::withMessages([
-                'modules' => 'Module access can only be configured for Admin or Manager accounts.',
+                'modules' => 'Module access can only be configured for Admin, Manager, Team Lead, or Agent accounts.',
+            ]);
+        }
+
+        if ($role === 'super_admin') {
+            throw ValidationException::withMessages([
+                'modules' => 'Module access cannot be restricted for Super Admin accounts.',
             ]);
         }
 
         $modules = $restrictAccess
-            ? AdminModules::sanitize($modulePermissions ?? [])
+            ? MemberModuleAccess::sanitizeForRole($role, $modulePermissions ?? [])
             : null;
 
         foreach ($modules ?? [] as $module) {
+            if (MemberModuleAccess::usesPortalModules($role)) {
+                continue;
+            }
+
             if (! AdminModules::canGrantModule($module, $admin, $workspace->id)) {
                 throw ValidationException::withMessages([
                     'modules' => 'You cannot grant access to '.(AdminModules::labels()[$module] ?? $module).'.',
@@ -434,7 +445,11 @@ class WorkspaceMemberService
 
     protected function modulePermissionsForRoleChange(string $role, User $member, Workspace $workspace): ?string
     {
-        if (! SalesOps::isAdminPortalRole($role) || $role === 'super_admin') {
+        if (! MemberModuleAccess::isConfigurableRole($role)) {
+            return null;
+        }
+
+        if ($role === 'super_admin') {
             return null;
         }
 
@@ -451,7 +466,11 @@ class WorkspaceMemberService
      */
     protected function encodeModulePermissions(string $role, ?array $modulePermissions): ?string
     {
-        if (! SalesOps::isAdminPortalRole($role) || $role === 'super_admin') {
+        if (! MemberModuleAccess::isConfigurableRole($role)) {
+            return null;
+        }
+
+        if ($role === 'super_admin') {
             return null;
         }
 
@@ -459,7 +478,7 @@ class WorkspaceMemberService
             return null;
         }
 
-        return $this->encodeStoredModulePermissions(AdminModules::sanitize($modulePermissions));
+        return $this->encodeStoredModulePermissions(MemberModuleAccess::sanitizeForRole($role, $modulePermissions));
     }
 
     /**

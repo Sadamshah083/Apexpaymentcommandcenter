@@ -44,6 +44,10 @@ class PipelineController extends Controller
             abort(403);
         }
 
+        if (! $user->canAccessPortalModule('setter_leads', $workspace->id)) {
+            abort(403, 'You do not have access to your lead queue.');
+        }
+
         $leads = $this->dashboardService->setterLeads($workspace, $user, [
             'search' => $request->input('search'),
         ]);
@@ -61,6 +65,10 @@ class PipelineController extends Controller
 
         if (! $user->isAppointmentSetterTeamLead($workspace->id)) {
             abort(403);
+        }
+
+        if (! $user->canAccessPortalModule('setter_team', $workspace->id)) {
+            abort(403, 'You do not have access to the setter team dashboard.');
         }
 
         $leads = $this->dashboardService->setterTeamLeads($workspace, $user, [
@@ -85,6 +93,10 @@ class PipelineController extends Controller
             abort(403);
         }
 
+        if (! $user->canAccessPortalModule('closer_team', $workspace->id)) {
+            abort(403, 'You do not have access to the closer team dashboard.');
+        }
+
         $leads = $this->dashboardService->closerTeamLeads($workspace, $user, [
             'search' => $request->input('search'),
             'phase' => $request->input('phase'),
@@ -106,6 +118,10 @@ class PipelineController extends Controller
             abort(403);
         }
 
+        if ($user->isClosersTeamLead($workspace->id) && ! $user->canAccessPortalModule('closer_queue', $workspace->id)) {
+            abort(403, 'You do not have access to the closer queue.');
+        }
+
         $leads = $this->dashboardService->closerTeamQueue($workspace, [
             'search' => $request->input('search'),
         ]);
@@ -121,6 +137,10 @@ class PipelineController extends Controller
 
         if (! $user->isCloser($workspace->id)) {
             abort(403);
+        }
+
+        if (! $user->canAccessPortalModule('closer_leads', $workspace->id)) {
+            abort(403, 'You do not have access to your closer leads.');
         }
 
         $leads = $this->dashboardService->closerLeads($workspace, $user, [
@@ -199,6 +219,10 @@ class PipelineController extends Controller
 
         if (! $user->isAppointmentSetterTeamLead($workspace->id) && ! $user->canAccessAdminPortal($workspace->id)) {
             abort(403);
+        }
+
+        if ($user->isAppointmentSetterTeamLead($workspace->id) && ! $user->canAccessPortalModule('assign_leads', $workspace->id)) {
+            abort(403, 'You do not have access to assign leads.');
         }
 
         $data = $request->validate([

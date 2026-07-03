@@ -533,15 +533,13 @@ class WorkspaceSyncService
     protected function moduleSummaryForMember(User $member, Workspace $workspace): ?string
     {
         $role = $member->pivot->role ?? null;
-        if (! \App\Support\SalesOps::isAdminPortalRole($role) || $role === 'super_admin') {
-            return null;
-        }
+        $summary = \App\Support\MemberModuleAccess::accessSummaryLabel(
+            (string) $role,
+            $member->getModulePermissions($workspace->id),
+            $member->usesRestrictedModuleAccess($workspace->id),
+        );
 
-        if ($member->usesRestrictedModuleAccess($workspace->id)) {
-            return count($member->getModulePermissions($workspace->id)).' module(s)';
-        }
-
-        return 'Full access';
+        return $summary === '—' ? null : $summary;
     }
 
     /**

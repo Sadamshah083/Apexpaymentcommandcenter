@@ -4,9 +4,9 @@ const ACTION_COPY = {
     suspend: {
         title: 'Suspend account?',
         tone: 'warning',
-        confirmLabel: 'Suspend account',
+        confirmLabel: 'Suspend',
         message: (name) =>
-            `${name} will immediately lose access to the agent portal. Their assigned leads stay in the workspace until you reassign them.`,
+            `Are you sure you want to suspend ${name}? They will immediately lose portal access.`,
     },
     reactivate: {
         title: 'Reactivate account?',
@@ -15,10 +15,10 @@ const ACTION_COPY = {
         message: (name) => `${name} will be able to sign in to the agent portal again.`,
     },
     remove: {
-        title: 'Remove member?',
+        title: 'Delete member?',
         tone: 'error',
-        confirmLabel: 'Remove permanently',
-        message: (name) => `Remove ${name} from this workspace? This cannot be undone.`,
+        confirmLabel: 'Delete',
+        message: (name) => `Are you sure you want to delete ${name} from this workspace? This cannot be undone.`,
     },
     role: {
         title: 'Change role?',
@@ -208,10 +208,14 @@ async function submitMemberForm(form) {
                 const list = document.getElementById('workspace-sync-team');
                 if (list && list.querySelectorAll('.member-row').length === 0) {
                     list.innerHTML = `
-                        <div class="um-empty-state" data-um-empty-members>
-                            <p class="um-empty-title">No team members yet</p>
-                            <p class="um-empty-desc">Create an agent account below to get started.</p>
-                        </div>
+                        <tr data-um-empty-members>
+                            <td colspan="6">
+                                <div class="um-empty-state">
+                                    <p class="um-empty-title">No team members yet</p>
+                                    <p class="um-empty-desc">Create an agent account below to get started.</p>
+                                </div>
+                            </td>
+                        </tr>
                     `;
                 }
             }, 320);
@@ -219,20 +223,19 @@ async function submitMemberForm(form) {
 
         if (form.dataset.memberAction === 'modules') {
             const summary = row?.querySelector('[data-member-module-summary]');
-            const restricted = form.querySelector('[name="access_mode"][value="restricted"]')?.checked;
-            const checkedCount = form.querySelectorAll('[name="modules[]"]:checked').length;
+            const restricted = form.querySelector('[data-module-access-mode]')?.value === 'restricted';
+            const checkedCount = form.querySelectorAll('.um-module-tick-item:not(.hidden) [data-module-option]:checked').length;
             if (summary) {
                 summary.textContent = restricted ? `${checkedCount} module(s)` : 'Full admin access';
                 summary.classList.remove('hidden');
             }
+
+            closeModuleAccessModal();
         }
 
         if (form.dataset.memberAction === 'reset-password') {
             form.reset();
-            const details = form.closest('details');
-            if (details) {
-                details.open = false;
-            }
+            closeResetPasswordModal();
         }
 
         showToast(payload.message || `${name} updated.`, 'success');
@@ -243,30 +246,622 @@ async function submitMemberForm(form) {
     }
 }
 
-function bindModuleAccessToggles() {
-    document.querySelectorAll('.member-module-access').forEach((form) => {
-        if (form.dataset.moduleBound === '1') {
+function syncAccessModeDropdownFromSelect(select) {
+    const wrapper = select?.closest('[data-access-mode-dropdown]');
+    if (!wrapper) {
+        return;
+    }
+
+    const label = wrapper.querySelector('.um-role-dropdown-label');
+    const option = select.selectedOptions?.[0];
+    if (label && option) {
+        label.textContent = option.textContent.trim();
+    }
+
+    wrapper.querySelectorAll('[data-access-mode-option]').forEach((button) => {
+        const selected = button.dataset.value === select.value;
+        button.classList.toggle('is-selected', selected);
+        button.setAttribute('aria-selected', selected ? 'true' : 'false');
+    });
+}
+
+function closeAccessModeDropdown(wrapper) {
+    if (!wrapper) {
+        return;
+    }
+
+    wrapper.classList.remove('is-open');
+    wrapper.querySelector('.um-role-dropdown-trigger')?.setAttribute('aria-expanded', 'false');
+    const menu = wrapper.querySelector('.um-role-dropdown-menu');
+    if (menu) {
+        menu.hidden = true;
+    }
+}
+
+function closeAllAccessModeDropdowns(except = null) {
+    document.querySelectorAll('[data-access-mode-dropdown].is-open').forEach((wrapper) => {
+        if (wrapper !== except) {
+            closeAccessModeDropdown(wrapper);
+        }
+    });
+}
+
+function syncModulePickerLabel(picker) {
+    if (!picker) {
+        return;
+    }
+
+    const label = picker.querySelector('.um-module-picker-label');
+    if (!label) {
+        return;
+    }
+
+    const checked = [...picker.querySelectorAll('[data-module-option]:checked')];
+    if (checked.length === 0) {
+        label.textContent = 'Select modules…';
+
+        return;
+    }
+
+    if (checked.length === 1) {
+        const text =
+            checked[0]
+                .closest('.um-module-picker-option')
+                ?.querySelector('.um-module-check-label')
+                ?.textContent?.trim() || '1 module selected';
+        label.textContent = text;
+
+        return;
+    }
+
+    label.textContent = `${checked.length} modules selected`;
+}
+
+function closeModulePicker(picker) {
+    if (!picker) {
+        return;
+    }
+
+    picker.classList.remove('is-open');
+    picker.querySelector('.um-module-picker-trigger')?.setAttribute('aria-expanded', 'false');
+    const menu = picker.querySelector('.um-module-picker-menu');
+    if (menu) {
+        menu.hidden = true;
+    }
+}
+
+function closeAllModulePickers(except = null) {
+    document.querySelectorAll('[data-module-picker].is-open').forEach((picker) => {
+        if (picker !== except) {
+            closeModulePicker(picker);
+        }
+    });
+}
+
+export function bindAccessModeDropdownIn(root = document) {
+    root.querySelectorAll('[data-access-mode-dropdown]').forEach((wrapper) => {
+        if (wrapper.dataset.accessModeBound === '1') {
             return;
         }
 
-        form.dataset.moduleBound = '1';
-        const grid = form.querySelector('[data-module-grid]');
-        form.querySelectorAll('.member-access-mode').forEach((input) => {
-            input.addEventListener('change', () => {
-                if (!grid) {
-                    return;
-                }
+        wrapper.dataset.accessModeBound = '1';
 
-                const restricted = form.querySelector('[name="access_mode"][value="restricted"]')?.checked;
-                grid.classList.toggle('hidden', !restricted);
+        const select = wrapper.querySelector('.member-access-mode');
+        const trigger = wrapper.querySelector('.um-role-dropdown-trigger');
+        const menu = wrapper.querySelector('.um-role-dropdown-menu');
+
+        if (!select || !trigger || !menu) {
+            return;
+        }
+
+        syncAccessModeDropdownFromSelect(select);
+
+        trigger.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            const willOpen = !wrapper.classList.contains('is-open');
+            closeAllAccessModeDropdowns(willOpen ? wrapper : null);
+            closeAllModulePickers();
+
+            wrapper.classList.toggle('is-open', willOpen);
+            trigger.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+            menu.hidden = !willOpen;
+        });
+
+        menu.querySelectorAll('[data-access-mode-option]').forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+                select.value = button.dataset.value || select.value;
+                syncAccessModeDropdownFromSelect(select);
+                closeAccessModeDropdown(wrapper);
+                select.dispatchEvent(new Event('change', { bubbles: true }));
             });
         });
     });
 }
 
+export function bindModulePickerIn(root = document) {
+    root.querySelectorAll('[data-module-picker]').forEach((picker) => {
+        if (picker.dataset.modulePickerBound === '1') {
+            return;
+        }
+
+        picker.dataset.modulePickerBound = '1';
+
+        const trigger = picker.querySelector('.um-module-picker-trigger');
+        const menu = picker.querySelector('.um-module-picker-menu');
+
+        if (!trigger || !menu) {
+            return;
+        }
+
+        syncModulePickerLabel(picker);
+
+        trigger.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            const willOpen = !picker.classList.contains('is-open');
+            closeAllModulePickers(willOpen ? picker : null);
+            closeAllAccessModeDropdowns();
+
+            picker.classList.toggle('is-open', willOpen);
+            trigger.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+            menu.hidden = !willOpen;
+        });
+
+        picker.querySelectorAll('[data-module-option]').forEach((input) => {
+            input.addEventListener('change', () => {
+                syncModulePickerLabel(picker);
+            });
+        });
+    });
+}
+
+function syncModuleAccessRoleDropdownFromSelect(select) {
+    const wrapper = select?.closest('[data-module-access-role-dropdown]');
+    if (!wrapper) {
+        return;
+    }
+
+    const label = wrapper.querySelector('.um-role-dropdown-label');
+    const option = select.selectedOptions?.[0];
+    if (label && option) {
+        label.textContent = option.textContent.trim();
+    }
+
+    wrapper.querySelectorAll('[data-module-access-role-option]').forEach((button) => {
+        const selected = button.dataset.value === select.value;
+        button.classList.toggle('is-selected', selected);
+        button.setAttribute('aria-selected', selected ? 'true' : 'false');
+    });
+}
+
+function closeModuleAccessRoleDropdown(wrapper) {
+    if (!wrapper) {
+        return;
+    }
+
+    wrapper.classList.remove('is-open');
+    wrapper.querySelector('.um-role-dropdown-trigger')?.setAttribute('aria-expanded', 'false');
+    const menu = wrapper.querySelector('.um-role-dropdown-menu');
+    if (menu) {
+        menu.hidden = true;
+    }
+}
+
+function closeAllModuleAccessRoleDropdowns(except = null) {
+    document.querySelectorAll('[data-module-access-role-dropdown].is-open').forEach((wrapper) => {
+        if (wrapper !== except) {
+            closeModuleAccessRoleDropdown(wrapper);
+        }
+    });
+}
+
+export function bindModuleAccessRoleDropdownIn(root = document) {
+    root.querySelectorAll('[data-module-access-role-dropdown]').forEach((wrapper) => {
+        if (wrapper.closest('.um-module-access-source') || wrapper.dataset.moduleAccessRoleBound === '1') {
+            return;
+        }
+
+        wrapper.dataset.moduleAccessRoleBound = '1';
+
+        const select = wrapper.querySelector('[data-module-access-role-select]');
+        const trigger = wrapper.querySelector('.um-role-dropdown-trigger');
+        const menu = wrapper.querySelector('.um-role-dropdown-menu');
+        const fixedRole = wrapper.closest('[data-member-action="modules"]')?.dataset.memberRole || '';
+
+        if (!select || !trigger || !menu) {
+            return;
+        }
+
+        syncModuleAccessRoleDropdownFromSelect(select);
+
+        trigger.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            const willOpen = !wrapper.classList.contains('is-open');
+            closeAllModuleAccessRoleDropdowns(willOpen ? wrapper : null);
+            closeAllRoleDropdowns();
+            closeAllAccessModeDropdowns();
+
+            wrapper.classList.toggle('is-open', willOpen);
+            trigger.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+            menu.hidden = !willOpen;
+        });
+
+        menu.querySelectorAll('[data-module-access-role-option]').forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+
+                if (fixedRole) {
+                    select.value = fixedRole;
+                    syncModuleAccessRoleDropdownFromSelect(select);
+                    closeModuleAccessRoleDropdown(wrapper);
+
+                    return;
+                }
+
+                select.value = button.dataset.value || select.value;
+                syncModuleAccessRoleDropdownFromSelect(select);
+                closeModuleAccessRoleDropdown(wrapper);
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+        });
+    });
+}
+
+function moduleScopeMatchesRole(role) {
+    const adminRoles = new Set(['admin', 'manager']);
+    const portalRoles = new Set([
+        'appointment_setter_team_lead',
+        'closers_team_lead',
+        'appointment_setter',
+        'closer',
+    ]);
+
+    if (adminRoles.has(role)) {
+        return (scopes) => scopes.length === 0 || scopes.some((scope) => adminRoles.has(scope));
+    }
+
+    if (portalRoles.has(role)) {
+        return (scopes, itemRoles) =>
+            scopes.includes(role) || (scopes.length === 0 && itemRoles.includes(role));
+    }
+
+    return () => false;
+}
+
+function filterModuleTickItems(form, role) {
+    const list = form.querySelector('[data-module-tick-list]');
+    if (!list) {
+        return;
+    }
+
+    list.dataset.memberRole = role;
+    const matches = moduleScopeMatchesRole(role);
+
+    list.querySelectorAll('.um-module-tick-item').forEach((item) => {
+        const scopes = (item.dataset.moduleScopes || '').split(',').filter(Boolean);
+        const itemRoles = (item.dataset.moduleRoles || '').split(',').filter(Boolean);
+        const visible = matches(scopes, itemRoles);
+        item.classList.toggle('hidden', !visible);
+
+        const input = item.querySelector('[data-module-option]');
+        if (!input) {
+            return;
+        }
+
+        if (!visible) {
+            item.classList.remove('is-checked');
+            input.checked = false;
+            input.disabled = true;
+        } else {
+            input.disabled = false;
+        }
+    });
+
+    syncModuleAccessModeInput(form);
+}
+
+function syncModuleTickItemState(item) {
+    const input = item?.querySelector('[data-module-option]');
+    if (!input) {
+        return;
+    }
+
+    item.classList.toggle('is-checked', input.checked);
+}
+
+function syncModuleAccessModeInput(form) {
+    const modeInput = form.querySelector('[data-module-access-mode]');
+    if (!modeInput) {
+        return;
+    }
+
+    const visibleInputs = [...form.querySelectorAll('.um-module-tick-item:not(.hidden) [data-module-option]:not(:disabled)')];
+    const checkedCount = visibleInputs.filter((input) => input.checked).length;
+    const allChecked = visibleInputs.length > 0 && checkedCount === visibleInputs.length;
+
+    modeInput.value = allChecked ? 'full' : 'restricted';
+}
+
+function resetModuleAccessBindings(form) {
+    delete form.dataset.moduleBound;
+}
+
+function syncModuleAccessRoleDisplay(form, role) {
+    const fields = form.querySelector('.um-module-access-form-fields') || form;
+    const display = fields.querySelector('[data-module-access-role-display]');
+    if (!display) {
+        return;
+    }
+
+    let labels = {};
+    try {
+        labels = JSON.parse(fields.dataset.roleLabels || '{}');
+    } catch {
+        labels = {};
+    }
+
+    display.textContent = labels[role] || role;
+    display.dataset.role = role;
+}
+
+export function syncModuleAccessForRole(form, role) {
+    if (!form) {
+        return;
+    }
+
+    syncModuleAccessRoleDisplay(form, role);
+    filterModuleTickItems(form, role);
+}
+
+export function bindModuleAccessFormFields(form) {
+    if (!form) {
+        return;
+    }
+
+    resetModuleAccessBindings(form);
+
+    const host = form.closest('form') || form;
+    const role =
+        form.dataset.memberRole ||
+        host.querySelector('[data-create-member-role]')?.value ||
+        form.querySelector('[data-module-access-role-display]')?.dataset.role ||
+        'admin';
+
+    syncModuleAccessRoleDisplay(form, role);
+    filterModuleTickItems(form, role);
+
+    form.querySelectorAll('.um-module-tick-item').forEach((item) => {
+        syncModuleTickItemState(item);
+    });
+
+    form.querySelectorAll('[data-module-option]').forEach((input) => {
+        input.addEventListener('change', () => {
+            syncModuleTickItemState(input.closest('.um-module-tick-item'));
+            syncModuleAccessModeInput(form);
+        });
+    });
+
+    form.dataset.moduleBound = '1';
+}
+
+function bindModuleAccessToggles() {
+    document.querySelectorAll('.member-module-access').forEach((form) => {
+        if (form.closest('.um-module-access-source')) {
+            return;
+        }
+
+        bindModuleAccessFormFields(form);
+    });
+}
+
+function closeModuleAccessModal() {
+    const modal = document.getElementById('um-module-access-modal');
+    if (!modal) {
+        return;
+    }
+
+    modal.hidden = true;
+    modal.setAttribute('aria-hidden', 'true');
+
+    const host = document.getElementById('um-module-access-form-host');
+    if (host) {
+        host.innerHTML = '';
+    }
+}
+
+function bindModuleAccessFormSubmit(form) {
+    if (!form || form.dataset.memberBound === '1') {
+        return;
+    }
+
+    form.dataset.memberBound = '1';
+
+    form.addEventListener('submit', (event) => {
+        event.preventDefault();
+
+        syncModuleAccessModeInput(form);
+
+        if (form.dataset.confirmed === '1') {
+            form.dataset.confirmed = '0';
+            submitMemberForm(form);
+
+            return;
+        }
+
+        openConfirmModal(form);
+    });
+
+    form.querySelectorAll('[data-um-module-access-dismiss]').forEach((element) => {
+        element.addEventListener('click', closeModuleAccessModal);
+    });
+}
+
+function bindModuleAccessModal() {
+    const modal = document.getElementById('um-module-access-modal');
+    const host = document.getElementById('um-module-access-form-host');
+    if (!modal || !host) {
+        return;
+    }
+
+    const open = (button) => {
+        const source = document.getElementById(`um-module-access-source-${button.dataset.memberId}`);
+        if (!source) {
+            return;
+        }
+
+        const sourceForm = source.querySelector('form');
+        if (!sourceForm) {
+            return;
+        }
+
+        host.innerHTML = '';
+        const form = sourceForm.cloneNode(true);
+        host.appendChild(form);
+
+        const title = document.getElementById('um-module-access-title');
+        const desc = document.getElementById('um-module-access-desc');
+        const memberName = button.dataset.memberName || 'this member';
+
+        if (title) {
+            title.textContent = 'Module access';
+        }
+
+        if (desc) {
+            const memberRole = button.dataset.memberRole || '';
+            const agentRoles = new Set(['appointment_setter', 'closer']);
+            const teamLeadRoles = new Set(['appointment_setter_team_lead', 'closers_team_lead']);
+
+            if (agentRoles.has(memberRole)) {
+                desc.textContent = `Choose which agent modules ${memberName} can access.`;
+            } else if (teamLeadRoles.has(memberRole)) {
+                desc.textContent = `Choose which portal modules ${memberName} can access as a team lead.`;
+            } else {
+                desc.textContent = `Choose which admin modules ${memberName} can access.`;
+            }
+        }
+
+        bindModuleAccessFormFields(form);
+        delete form.dataset.memberBound;
+        bindModuleAccessFormSubmit(form);
+
+        modal.hidden = false;
+        modal.setAttribute('aria-hidden', 'false');
+    };
+
+    document.querySelectorAll('[data-um-module-access-open]').forEach((button) => {
+        if (button.dataset.moduleAccessBound === '1') {
+            return;
+        }
+
+        button.dataset.moduleAccessBound = '1';
+        button.addEventListener('click', () => open(button));
+    });
+
+    if (modal.dataset.bound !== '1') {
+        modal.dataset.bound = '1';
+
+        modal.querySelectorAll('[data-um-module-access-dismiss]').forEach((element) => {
+            element.addEventListener('click', closeModuleAccessModal);
+        });
+
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && !modal.hidden) {
+                closeModuleAccessModal();
+            }
+        });
+    }
+}
+
+function closeResetPasswordModal() {
+    const modal = document.getElementById('um-reset-password-modal');
+    if (!modal) {
+        return;
+    }
+
+    modal.hidden = true;
+    modal.setAttribute('aria-hidden', 'true');
+}
+
+function bindResetPasswordModal() {
+    const modal = document.getElementById('um-reset-password-modal');
+    const form = document.getElementById('um-reset-password-form');
+    if (!modal || !form) {
+        return;
+    }
+
+    const open = (button) => {
+        form.action = button.dataset.resetUrl || '#';
+        form.dataset.memberName = button.dataset.memberName || 'this member';
+
+        const desc = document.getElementById('um-reset-password-desc');
+        if (desc) {
+            desc.textContent = `Set a new password for ${form.dataset.memberName}.`;
+        }
+
+        form.reset();
+        modal.hidden = false;
+        modal.setAttribute('aria-hidden', 'false');
+        document.getElementById('um-reset-password-new')?.focus();
+    };
+
+    document.querySelectorAll('[data-um-reset-password-open]').forEach((button) => {
+        if (button.dataset.resetBound === '1') {
+            return;
+        }
+
+        button.dataset.resetBound = '1';
+        button.addEventListener('click', () => open(button));
+    });
+
+    if (modal.dataset.bound !== '1') {
+        modal.dataset.bound = '1';
+
+        modal.querySelectorAll('[data-um-reset-password-dismiss]').forEach((element) => {
+            element.addEventListener('click', closeResetPasswordModal);
+        });
+
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && !modal.hidden) {
+                closeResetPasswordModal();
+            }
+        });
+    }
+
+    if (form.dataset.memberBound !== '1') {
+        form.dataset.memberBound = '1';
+
+        form.addEventListener('submit', (event) => {
+            event.preventDefault();
+
+            if (!form.checkValidity()) {
+                return;
+            }
+
+            if (form.dataset.confirmed === '1') {
+                form.dataset.confirmed = '0';
+                submitMemberForm(form);
+
+                return;
+            }
+
+            openConfirmModal(form);
+        });
+    }
+}
+
 function bindMemberForms() {
     document.querySelectorAll('form[data-member-action]').forEach((form) => {
-        if (form.dataset.memberBound === '1') {
+        if (
+            form.dataset.memberBound === '1' ||
+            form.id === 'um-reset-password-form' ||
+            form.closest('.um-module-access-source')
+        ) {
             return;
         }
 
@@ -404,6 +999,147 @@ export function replaceAdminTeam(container, members) {
     updateMemberRows(container, members);
 }
 
+function syncRoleDropdownFromSelect(select) {
+    const wrapper = select?.closest('[data-role-dropdown]');
+    if (!wrapper) {
+        return;
+    }
+
+    const label = wrapper.querySelector('.um-role-dropdown-label');
+    const option = select.selectedOptions?.[0];
+    if (label && option) {
+        label.textContent = option.textContent.trim();
+    }
+
+    wrapper.querySelectorAll('[data-role-option]').forEach((button) => {
+        const selected = button.dataset.value === select.value;
+        button.classList.toggle('is-selected', selected);
+        button.setAttribute('aria-selected', selected ? 'true' : 'false');
+    });
+}
+
+function closeRoleDropdown(wrapper) {
+    if (!wrapper) {
+        return;
+    }
+
+    wrapper.classList.remove('is-open');
+    wrapper.querySelector('.um-role-dropdown-trigger')?.setAttribute('aria-expanded', 'false');
+    const menu = wrapper.querySelector('.um-role-dropdown-menu');
+    if (menu) {
+        menu.hidden = true;
+    }
+}
+
+function closeAllRoleDropdowns(except = null) {
+    document.querySelectorAll('[data-role-dropdown].is-open').forEach((wrapper) => {
+        if (wrapper !== except) {
+            closeRoleDropdown(wrapper);
+        }
+    });
+}
+
+function bindRoleDropdowns() {
+    document.querySelectorAll('[data-role-dropdown]').forEach((wrapper) => {
+        if (wrapper.dataset.roleDropdownBound === '1') {
+            return;
+        }
+
+        wrapper.dataset.roleDropdownBound = '1';
+
+        const select = wrapper.querySelector('[data-member-role-select]');
+        const trigger = wrapper.querySelector('.um-role-dropdown-trigger');
+        const menu = wrapper.querySelector('.um-role-dropdown-menu');
+
+        if (!select || !trigger || !menu) {
+            return;
+        }
+
+        syncRoleDropdownFromSelect(select);
+
+        trigger.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            const willOpen = !wrapper.classList.contains('is-open');
+            closeAllRoleDropdowns(willOpen ? wrapper : null);
+
+            wrapper.classList.toggle('is-open', willOpen);
+            trigger.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+            menu.hidden = !willOpen;
+        });
+
+        menu.querySelectorAll('[data-role-option]').forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+                select.value = button.dataset.value || select.value;
+                syncRoleDropdownFromSelect(select);
+                closeRoleDropdown(wrapper);
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+        });
+    });
+
+    if (document.body.dataset.roleDropdownGlobalBound === '1') {
+        return;
+    }
+
+    document.body.dataset.roleDropdownGlobalBound = '1';
+
+    document.addEventListener('click', (event) => {
+        if (event.target.closest('[data-role-dropdown]')) {
+            return;
+        }
+
+        closeAllRoleDropdowns();
+    });
+
+    if (document.body.dataset.accessModeDropdownGlobalBound !== '1') {
+        document.body.dataset.accessModeDropdownGlobalBound = '1';
+
+        document.addEventListener('click', (event) => {
+            if (event.target.closest('[data-access-mode-dropdown]')) {
+                return;
+            }
+
+            closeAllAccessModeDropdowns();
+        });
+    }
+
+    if (document.body.dataset.modulePickerGlobalBound !== '1') {
+        document.body.dataset.modulePickerGlobalBound = '1';
+
+        document.addEventListener('click', (event) => {
+            if (event.target.closest('[data-module-picker]')) {
+                return;
+            }
+
+            closeAllModulePickers();
+        });
+    }
+
+    if (document.body.dataset.moduleAccessRoleDropdownGlobalBound !== '1') {
+        document.body.dataset.moduleAccessRoleDropdownGlobalBound = '1';
+
+        document.addEventListener('click', (event) => {
+            if (event.target.closest('[data-module-access-role-dropdown]')) {
+                return;
+            }
+
+            closeAllModuleAccessRoleDropdowns();
+        });
+    }
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            closeAllRoleDropdowns();
+            closeAllAccessModeDropdowns();
+            closeAllModulePickers();
+            closeAllModuleAccessRoleDropdowns();
+        }
+    });
+}
+
 function bindMemberSearch() {
     const input = document.getElementById('um-member-search');
     const list = document.getElementById('workspace-sync-team');
@@ -426,9 +1162,13 @@ export function initMemberManagement() {
     }
 
     bindConfirmModal();
+    bindResetPasswordModal();
+    bindModuleAccessModal();
     bindMemberForms();
     bindModuleAccessToggles();
     bindMemberSearch();
+    bindRoleDropdowns();
+    bindModuleAccessRoleDropdownIn();
 }
 
 export function updateMemberRows(container, members) {
@@ -478,6 +1218,7 @@ export function updateMemberRows(container, members) {
         const roleSelect = row.querySelector('[data-member-role-select]');
         if (roleSelect && member.role) {
             roleSelect.value = member.role;
+            syncRoleDropdownFromSelect(roleSelect);
         }
 
         const suspendForm = row.querySelector('[data-member-action="suspend"]');
@@ -490,7 +1231,7 @@ export function updateMemberRows(container, members) {
         }
 
         row.classList.toggle('member-row-suspended', status === 'suspended');
-        row.classList.toggle('um-member-card-suspended', status === 'suspended');
+        row.classList.toggle('um-member-row-suspended', status === 'suspended');
         row.classList.remove('member-row-busy');
     });
 }

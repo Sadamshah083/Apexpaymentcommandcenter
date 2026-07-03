@@ -2,94 +2,111 @@
 
 @section('title', 'Deliverability Report')
 
+@php
+    $routePrefix = request()->is('admin*') ? 'admin.' : 'portal.';
+@endphp
+
 @section('content')
-    <div class="mb-6">
-        <a href="{{ request()->is('admin*') ? route('admin.deliverability.index') : route('portal.deliverability.index') }}"
-            class="text-indigo-600 text-sm">&larr; Back</a>
-        <h2 class="text-2xl font-bold mt-2">{{ $test->domain }}</h2>
-        <p class="text-slate-600">Deliverability score: <span
-                class="text-3xl font-bold {{ $test->overall_score >= 7 ? 'text-green-600' : ($test->overall_score >= 4 ? 'text-amber-600' : 'text-red-600') }}">{{ $test->overall_score }}/10</span>
-        </p>
-    </div>
-
-    @if ($test->status === 'pending' || $test->status === 'processing')
-        <div id="deliverability-pending-panel" class="app-alert app-alert-warning mb-6">
-            <p class="app-alert-title">Test is {{ $test->status }}…</p>
-            <p class="app-alert-desc">Results update automatically when the scan completes.</p>
-        </div>
-    @endif
-
     @php
-        $checks = [
-            'SPF' => $test->spf_result,
-            'DKIM' => $test->dkim_result,
-            'DMARC' => $test->dmarc_result,
-            'MX' => $test->mx_result,
-            'PTR' => $test->ptr_result,
-            'DNSBL' => $test->dnsbl_result,
-        ];
+        $score = $test->overall_score;
+        $scoreClass =
+            $score >= 7 ? 'deliverability-report-score--good' : ($score >= 4 ? 'deliverability-report-score--warn' : 'deliverability-report-score--bad');
     @endphp
 
-    <div class="grid md:grid-cols-2 gap-4 mb-6">
-        @foreach ($checks as $name => $result)
-            @if ($result)
-                @php
-                    $status = $result['status'] ?? 'unknown';
-                    $statusBadge = match ($status) {
-                        'pass' => 'bg-green-100 text-green-800',
-                        'warn' => 'bg-amber-100 text-amber-800',
-                        'fail' => 'bg-red-100 text-red-800',
-                        default => 'bg-slate-100 text-slate-800',
-                    };
-                @endphp
-                <div class="bg-white rounded-xl shadow-sm border p-5">
-                    <div class="flex justify-between items-center mb-2">
-                        <h3 class="font-semibold">{{ $name }}</h3>
-                        <span class="px-2 py-1 rounded text-xs {{ $statusBadge }} uppercase">{{ $status }}</span>
-                    </div>
-                    <p class="text-sm text-slate-600">{{ $result['message'] ?? '' }}</p>
-                    @if (isset($result['score']))
-                        <p class="text-xs mt-2">Score: {{ $result['score'] }}/10</p>
-                    @endif
-                    @if (!empty($result['record']))
-                        <pre class="text-xs bg-slate-50 p-2 rounded mt-2 overflow-x-auto">{{ Str::limit($result['record'], 200) }}</pre>
-                    @endif
-                    @if (!empty($result['recommendation']))
-                        <p class="text-xs text-indigo-700 mt-2 bg-indigo-50 p-2 rounded">{{ $result['recommendation'] }}
-                        </p>
-                    @endif
-                </div>
-            @endif
-        @endforeach
-    </div>
-
-    @if ($test->recommendations)
-        <div class="bg-white rounded-xl shadow-sm border p-6">
-            <h3 class="font-semibold mb-3">Recommendations</h3>
-            <ul class="list-disc list-inside space-y-1 text-sm text-slate-700">
-                @foreach ($test->recommendations as $rec)
-                    <li>{{ $rec }}</li>
-                @endforeach
-            </ul>
+    <div class="app-page deliverability-page deliverability-report space-y-5">
+        <div class="app-page-header">
+            <a href="{{ route($routePrefix . 'deliverability.index') }}" class="deliverability-back-link">&larr; Back to
+                tests</a>
+            <h1 class="app-page-title mt-2">{{ $test->domain }}</h1>
+            <p class="app-page-subtitle">
+                Deliverability score:
+                <span class="deliverability-report-score {{ $scoreClass }}">{{ $score }}/10</span>
+            </p>
         </div>
-    @endif
+
+        @if ($test->status === 'pending' || $test->status === 'processing')
+            <div id="deliverability-pending-panel" class="app-alert app-alert-warning">
+                <p class="app-alert-title">Test is {{ $test->status }}…</p>
+                <p class="app-alert-desc">Results update automatically when the scan completes.</p>
+            </div>
+        @endif
+
+        @php
+            $checks = [
+                'SPF' => $test->spf_result,
+                'DKIM' => $test->dkim_result,
+                'DMARC' => $test->dmarc_result,
+                'MX' => $test->mx_result,
+                'PTR' => $test->ptr_result,
+                'DNSBL' => $test->dnsbl_result,
+            ];
+        @endphp
+
+        <div class="deliverability-check-grid grid gap-4 md:grid-cols-2">
+            @foreach ($checks as $name => $result)
+                @if ($result)
+                    @php
+                        $status = $result['status'] ?? 'unknown';
+                        $statusBadge = match ($status) {
+                            'pass' => 'app-badge app-badge-success',
+                            'warn' => 'app-badge app-badge-warning',
+                            'fail' => 'app-badge app-badge-danger',
+                            default => 'app-badge app-badge-muted',
+                        };
+                    @endphp
+                    <div class="app-card app-card-padded deliverability-check-card">
+                        <div class="flex justify-between items-center gap-3 mb-2">
+                            <h2 class="app-section-title mb-0">{{ $name }}</h2>
+                            <span class="{{ $statusBadge }}">{{ $status }}</span>
+                        </div>
+                        <p class="deliverability-check-message">{{ $result['message'] ?? '' }}</p>
+                        @if (isset($result['score']))
+                            <p class="deliverability-check-meta">Score: {{ $result['score'] }}/10</p>
+                        @endif
+                        @if (!empty($result['record']))
+                            <pre class="deliverability-check-record">{{ Str::limit($result['record'], 200) }}</pre>
+                        @endif
+                        @if (!empty($result['recommendation']))
+                            <p class="deliverability-check-rec">{{ $result['recommendation'] }}</p>
+                        @endif
+                    </div>
+                @endif
+            @endforeach
+        </div>
+
+        @if ($test->recommendations)
+            <div class="app-card app-card-padded">
+                <h2 class="app-section-title">Recommendations</h2>
+                <ul class="deliverability-rec-list">
+                    @foreach ($test->recommendations as $rec)
+                        <li>{{ $rec }}</li>
+                    @endforeach
+                </ul>
+            </div>
+        @endif
+    </div>
 @endsection
 
 @push('scripts')
     @if ($test->status === 'pending' || $test->status === 'processing')
         <script>
             (function() {
-                const start = window.startProgressPoll;
-                if (!start) return;
-
-                start('{{ request()->is('admin*') ? route('admin.deliverability.status', $test) : route('portal.deliverability.status', $test) }}',
-                    (data) => {
-                        if (data.complete) {
-                            window.location.reload();
-                            return false;
-                        }
-                        return true;
-                    });
+                const statusUrl = @json(route($routePrefix . 'deliverability.status', $test));
+                const poll = () => {
+                    fetch(statusUrl, {
+                            headers: {
+                                Accept: 'application/json'
+                            },
+                            credentials: 'same-origin'
+                        })
+                        .then(r => r.json())
+                        .then(data => {
+                            if (data.complete) location.reload();
+                        })
+                        .catch(() => {});
+                };
+                poll();
+                setInterval(poll, 5000);
             })();
         </script>
     @endif

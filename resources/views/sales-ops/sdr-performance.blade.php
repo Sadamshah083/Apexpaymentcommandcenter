@@ -7,7 +7,7 @@
         <x-page-header title="SDR Daily Performance"
             subtitle="Track progress against activity standards for {{ now()->format('l, M j') }}." />
 
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 app-stat-grid">
             @foreach (['dials' => 'Outbound Dials', 'conversations' => 'Live Conversations', 'decision_maker_contacts' => 'Decision-Maker Contacts', 'discoveries' => 'Discoveries'] as $key => $label)
                 @php $metric = $daily[$key]; @endphp
                 <div class="app-card app-card-padded">

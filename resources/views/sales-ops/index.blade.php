@@ -10,7 +10,7 @@
                 {{ $workspace->name }}.</p>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 app-stat-grid">
             <div class="app-card app-card-padded">
                 <p class="app-kpi-label">Active CRM Leads</p>
                 <p id="workspace-sync-kpi-active-leads" class="app-kpi-value">{{ $overview['total_active_leads'] }}</p>

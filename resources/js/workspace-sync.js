@@ -35,33 +35,63 @@ function csrfToken() {
     return document.querySelector('meta[name="csrf-token"]')?.content || '';
 }
 
+const IMPORT_ACTION_ICONS = {
+    view: '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>',
+    pause: '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6"/></svg>',
+    resume: '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
+    setup: '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>',
+    delete: '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>',
+};
+
+function getWorkflowAssignRemaining(workflow) {
+    const ready = Number(workflow.ready_to_assign ?? 0);
+    if (ready > 0) {
+        return ready;
+    }
+
+    const enriched = Number(workflow.enriched_leads ?? 0);
+    const assigned = Number(workflow.assigned_leads ?? 0);
+
+    return Math.max(0, enriched - assigned);
+}
+
+function workflowCanAssign(workflow) {
+    if (workflow.status === 'mapping' || workflow.status === 'failed') {
+        return false;
+    }
+
+    return getWorkflowAssignRemaining(workflow) > 0;
+}
+
 function workflowActionForms(workflow, showBase) {
     const pauseForm = ['pending', 'extracting'].includes(workflow.status)
         ? `<form method="POST" action="${showBase}/${workflow.id}/pause">
                 <input type="hidden" name="_token" value="${escapeHtml(csrfToken())}">
-                <button type="submit" class="app-btn app-btn-secondary app-btn-sm">Pause</button>
+                <button type="submit" class="import-action-btn" title="Pause" aria-label="Pause">${IMPORT_ACTION_ICONS.pause}</button>
            </form>`
         : '';
     const resumeForm = workflow.status === 'paused'
         ? `<form method="POST" action="${showBase}/${workflow.id}/resume">
                 <input type="hidden" name="_token" value="${escapeHtml(csrfToken())}">
-                <button type="submit" class="app-btn app-btn-secondary app-btn-sm">Resume</button>
+                <button type="submit" class="import-action-btn" title="Resume" aria-label="Resume">${IMPORT_ACTION_ICONS.resume}</button>
            </form>`
         : '';
     const setupLink = workflow.status === 'mapping'
-        ? `<a href="${showBase}/${workflow.id}" class="app-btn app-btn-secondary app-btn-sm">Setup</a>`
+        ? `<a href="${showBase}/${workflow.id}" class="import-action-btn" title="Setup" aria-label="Setup">${IMPORT_ACTION_ICONS.setup}</a>`
         : '';
     const deleteBtn = `<button
             type="button"
-            class="app-btn app-btn-ghost-danger app-btn-sm"
+            class="import-action-btn import-action-btn-danger"
+            title="Delete"
+            aria-label="Delete"
             data-import-delete-open
             data-workflow-id="${workflow.id}"
             data-workflow-name="${escapeHtml(workflow.name)}"
             data-workflow-total="${workflow.total_leads ?? 0}"
-        >Delete</button>`;
+        >${IMPORT_ACTION_ICONS.delete}</button>`;
 
     return `<div class="import-workflows-actions">
-        <a href="${showBase}/${workflow.id}" class="app-btn app-btn-secondary app-btn-sm">View</a>
+        <a href="${showBase}/${workflow.id}" class="import-action-btn" title="View" aria-label="View">${IMPORT_ACTION_ICONS.view}</a>
         ${pauseForm}${resumeForm}${setupLink}${deleteBtn}
     </div>`;
 }
@@ -75,42 +105,111 @@ function renderWorkflowProgressCell(workflow) {
     const pct = total > 0 ? Math.min(100, Math.round((attempted / total) * 100)) : 0;
 
     if (total === 0 && workflow.status === 'mapping') {
-        return '<td class="min-w-[148px]"><span class="text-xs text-zinc-400">Awaiting setup</span></td>';
+        return '<td data-label="Progress" class="col-progress min-w-[148px]"><span class="text-xs text-zinc-400">Awaiting setup</span></td>';
     }
 
     const fillClass = active ? '' : ' bg-emerald-500';
 
-    return `<td class="min-w-[148px]">
+    return `<td data-label="Progress" class="col-progress min-w-[148px]">
         <div class="space-y-1">
             <div class="app-progress-track h-1.5">
                 <div class="app-progress-fill${fillClass}" style="width: ${pct}%"></div>
             </div>
-            <p class="text-[10px] text-zinc-500 whitespace-nowrap">${attempted.toLocaleString()} / ${total.toLocaleString()} enriched</p>
+            <p class="text-[10px] text-zinc-500 import-workflow-progress-text">${attempted.toLocaleString()} / ${total.toLocaleString()} enriched</p>
         </div>
     </td>`;
 }
 
 function renderWorkflowAssignCell(workflow) {
-    const remaining = Number(workflow.ready_to_assign ?? 0);
-    const canAssign = remaining > 0 && workflow.status !== 'mapping';
+    const remaining = getWorkflowAssignRemaining(workflow);
+    const canAssign = workflowCanAssign(workflow);
 
     if (!canAssign) {
-        return '<td class="col-assign"><span class="text-xs text-zinc-400">ΓÇö</span></td>';
+        return '<td data-label="Assign" class="col-assign"><span class="import-assign-empty">&mdash;</span></td>';
     }
 
-    return `<td class="col-assign">
-        <button
+    return `<td data-label="Assign" class="col-assign">${renderWorkflowAssignButton(workflow, remaining)}</td>`;
+}
+
+function renderWorkflowAssignButton(workflow, remaining = null) {
+    const ready = remaining ?? getWorkflowAssignRemaining(workflow);
+
+    return `<button
             type="button"
-            class="app-btn app-btn-primary app-btn-sm"
+            class="app-btn app-btn-primary app-btn-sm import-assign-btn"
             data-import-assign-open
             data-workflow-id="${workflow.id}"
             data-workflow-name="${escapeHtml(workflow.name)}"
             data-workflow-total="${workflow.total_leads ?? 0}"
             data-workflow-enriched="${workflow.enriched_leads ?? 0}"
             data-workflow-assigned="${workflow.assigned_leads ?? 0}"
-            data-workflow-remaining="${remaining}"
-        >Assign</button>
-    </td>`;
+            data-workflow-remaining="${ready}"
+        >Assign</button>`;
+}
+
+function patchWorkflowAssignCell(cell, workflow) {
+    if (!cell) {
+        return;
+    }
+
+    const remaining = getWorkflowAssignRemaining(workflow);
+    const canAssign = workflowCanAssign(workflow);
+    const existingBtn = cell.querySelector('[data-import-assign-open]');
+
+    if (canAssign) {
+        if (existingBtn) {
+            existingBtn.dataset.workflowId = String(workflow.id);
+            existingBtn.dataset.workflowName = workflow.name ?? '';
+            existingBtn.dataset.workflowTotal = String(workflow.total_leads ?? 0);
+            existingBtn.dataset.workflowEnriched = String(workflow.enriched_leads ?? 0);
+            existingBtn.dataset.workflowAssigned = String(workflow.assigned_leads ?? 0);
+            existingBtn.dataset.workflowRemaining = String(remaining);
+            return;
+        }
+
+        cell.innerHTML = renderWorkflowAssignButton(workflow, remaining);
+        return;
+    }
+
+    if (!existingBtn && !cell.querySelector('.import-assign-empty')) {
+        cell.innerHTML = '<span class="import-assign-empty">&mdash;</span>';
+    }
+}
+
+function patchWorkflowActionsCell(cell, workflow, showBase) {
+    if (!cell) {
+        return;
+    }
+
+    const row = cell.closest('tr');
+    const status = workflow.status || '';
+    const hasActions = cell.querySelector('.import-workflows-actions');
+
+    if (row && row.dataset.workflowStatus === status && hasActions) {
+        const deleteBtn = cell.querySelector('[data-import-delete-open]');
+        if (deleteBtn) {
+            deleteBtn.dataset.workflowName = workflow.name ?? '';
+            deleteBtn.dataset.workflowTotal = String(workflow.total_leads ?? 0);
+        }
+        return;
+    }
+
+    if (row) {
+        row.dataset.workflowStatus = status;
+    }
+
+    cell.innerHTML = workflowActionForms(workflow, showBase);
+}
+
+function patchImportStatCell(el, value) {
+    if (!el) {
+        return;
+    }
+
+    const next = String(value ?? '');
+    if (el.textContent !== next) {
+        el.textContent = next;
+    }
 }
 
 function formatRelativeTime(isoString) {
@@ -304,27 +403,26 @@ function renderPipelineLeadRow(lead, leadShowBase, csrf) {
 }
 
 function renderWorkflowRow(workflow, showBase) {
-    const remaining = Number(workflow.ready_to_assign ?? 0);
+    const remaining = getWorkflowAssignRemaining(workflow);
     const listLine = workflow.lead_list_name
-        ? `<div class="text-[10px] text-zinc-400 mt-0.5">List: ${escapeHtml(workflow.lead_list_name)}</div>`
+        ? `<div class="import-workflow-meta">List: ${escapeHtml(workflow.lead_list_name)}</div>`
         : '';
 
     return `
         <tr data-workflow-id="${workflow.id}">
-            <td>
-                <div class="font-bold text-zinc-900">${escapeHtml(workflow.name)}</div>
+            <td data-label="Import name" class="col-import-name">
+                <div class="import-workflow-name">${escapeHtml(workflow.name)}</div>
                 ${listLine}
             </td>
-            <td class="text-sm text-zinc-600 max-w-[180px] truncate" title="${escapeHtml(workflow.original_filename || '')}">${escapeHtml(workflow.original_filename || '')}</td>
-            <td>${renderWorkflowStatusPill(workflow.status)}</td>
+            <td data-label="File" class="col-file import-workflow-file" title="${escapeHtml(workflow.original_filename || '')}">${escapeHtml(workflow.original_filename || '')}</td>
+            <td data-label="Status" class="col-status">${renderWorkflowStatusPill(workflow.status)}</td>
             ${renderWorkflowProgressCell(workflow)}
-            <td class="text-sm font-medium text-zinc-700">${Number(workflow.total_leads ?? 0).toLocaleString()}</td>
-            <td class="text-sm text-zinc-600">${Number(workflow.enriched_leads ?? 0).toLocaleString()}</td>
-            <td class="text-sm text-emerald-700 font-medium">${Number(workflow.assigned_leads ?? 0).toLocaleString()}</td>
-            <td class="text-sm text-amber-700 font-medium">${remaining.toLocaleString()}</td>
+            <td data-label="Total" class="col-total import-workflow-stat">${Number(workflow.total_leads ?? 0).toLocaleString()}</td>
+            <td data-label="Enriched" class="col-enriched import-workflow-stat">${Number(workflow.enriched_leads ?? 0).toLocaleString()}</td>
+            <td data-label="Assigned" class="col-assigned import-workflow-stat import-workflow-stat-success">${Number(workflow.assigned_leads ?? 0).toLocaleString()}</td>
+            <td data-label="Remaining" class="col-remaining import-workflow-stat import-workflow-stat-warning">${remaining.toLocaleString()}</td>
             ${renderWorkflowAssignCell(workflow)}
-            <td class="text-xs text-zinc-500 whitespace-nowrap">${formatRelativeTime(workflow.updated_at)}</td>
-            <td class="col-actions text-right">${workflowActionForms(workflow, showBase)}</td>
+            <td data-label="Actions" class="col-actions text-right">${workflowActionForms(workflow, showBase)}</td>
         </tr>
     `;
 }
@@ -417,7 +515,7 @@ function cellFromRender(html) {
 }
 
 function patchWorkflowRowCells(row, workflow, showBase) {
-    const expectedCols = Number(row.closest('tbody')?.dataset?.expectedCols || 11);
+    const expectedCols = Number(row.closest('tbody')?.dataset?.expectedCols || 10);
 
     if (row.cells.length !== expectedCols) {
         const newRow = rowFromHtml(renderWorkflowRow(workflow, showBase));
@@ -439,43 +537,36 @@ function patchWorkflowRowCells(row, workflow, showBase) {
         cells[3].className = progressCell.className;
     }
 
-    smoothTextUpdate(cells[4], Number(workflow.total_leads ?? 0).toLocaleString());
-    smoothTextUpdate(cells[5], Number(workflow.enriched_leads ?? 0).toLocaleString());
-    smoothTextUpdate(cells[6], Number(workflow.assigned_leads ?? 0).toLocaleString());
-    smoothTextUpdate(cells[7], Number(workflow.ready_to_assign ?? 0).toLocaleString());
+    patchImportStatCell(cells[4], Number(workflow.total_leads ?? 0).toLocaleString());
+    patchImportStatCell(cells[5], Number(workflow.enriched_leads ?? 0).toLocaleString());
+    patchImportStatCell(cells[6], Number(workflow.assigned_leads ?? 0).toLocaleString());
+    patchImportStatCell(cells[7], getWorkflowAssignRemaining(workflow).toLocaleString());
 
-    const assignCell = cellFromRender(renderWorkflowAssignCell(workflow));
-    if (assignCell) {
-        const assignChanged = cells[8].innerHTML.trim() !== assignCell.innerHTML.trim()
-            || cells[8].className !== assignCell.className;
-        if (assignChanged) {
-            cells[8].innerHTML = assignCell.innerHTML;
-            cells[8].className = assignCell.className;
-        }
-    }
+    patchWorkflowAssignCell(cells[8], workflow);
 
-    smoothTextUpdate(cells[9], formatRelativeTime(workflow.updated_at));
-
-    const actionsHtml = workflowActionForms(workflow, showBase);
-    if (cells[10].innerHTML.trim() !== actionsHtml.trim()) {
-        cells[10].innerHTML = actionsHtml;
-    }
+    patchWorkflowActionsCell(cells[9], workflow, showBase);
 }
 
 function workflowsVisibleOnPage(tbody, workflows) {
-    if (!tbody || !Array.isArray(workflows)) {
+    if (!Array.isArray(workflows)) {
         return [];
     }
 
-    const visibleIds = new Set(
-        [...tbody.querySelectorAll('tr[data-workflow-id]')].map((row) => String(row.dataset.workflowId)),
-    );
+    const visibleIds = new Set();
+    tbody?.querySelectorAll('tr[data-workflow-id]').forEach((row) => {
+        visibleIds.add(String(row.dataset.workflowId));
+    });
 
     return workflows.filter((workflow) => visibleIds.has(String(workflow.id)));
 }
 
 function syncWorkflowTableBody(tbody, workflows, showBase) {
-    if (!tbody || !Array.isArray(workflows) || syncModeIsStatic(tbody)) {
+    if (!Array.isArray(workflows)) {
+        return;
+    }
+
+    const staticMode = syncModeIsStatic(tbody);
+    if (staticMode && !tbody) {
         return;
     }
 
@@ -484,25 +575,27 @@ function syncWorkflowTableBody(tbody, workflows, showBase) {
         return;
     }
 
-    const syncMode = tbody.dataset.syncMode || 'patch';
+    const syncMode = tbody?.dataset?.syncMode || 'patch';
     const byId = new Map(pageWorkflows.map((wf) => [String(wf.id), wf]));
 
-    tbody.querySelectorAll('tr[data-workflow-id]').forEach((row) => {
-        const wf = byId.get(String(row.dataset.workflowId));
-        if (!wf) {
-            return;
-        }
+    if (tbody && !syncModeIsStatic(tbody)) {
+        tbody.querySelectorAll('tr[data-workflow-id]').forEach((row) => {
+            const wf = byId.get(String(row.dataset.workflowId));
+            if (!wf) {
+                return;
+            }
 
-        if (syncMode === 'cells' || syncMode === 'patch') {
-            patchWorkflowRowCells(row, wf, showBase);
-            return;
-        }
+            if (syncMode === 'cells' || syncMode === 'patch') {
+                patchWorkflowRowCells(row, wf, showBase);
+                return;
+            }
 
-        const newRow = rowFromHtml(renderWorkflowRow(wf, showBase));
-        if (newRow && newRow.outerHTML !== row.outerHTML) {
-            row.replaceWith(newRow);
-        }
-    });
+            const newRow = rowFromHtml(renderWorkflowRow(wf, showBase));
+            if (newRow && newRow.outerHTML !== row.outerHTML) {
+                row.replaceWith(newRow);
+            }
+        });
+    }
 }
 
 function updatePipelineProgress(wf) {
@@ -935,7 +1028,7 @@ export function initWorkspaceSync() {
             syncTableBody(aePipelineBody, aeLeads, renderAePipelineRow, [leadShowBase]);
         }
 
-        if (workflowsList && Array.isArray(data.workflows) && workflowsList.dataset.adminWorkflowsTable === '1') {
+        if (workflowsList && Array.isArray(data.workflows) && workflowsList?.dataset.adminWorkflowsTable === '1') {
             syncWorkflowTableBody(workflowsList, data.workflows, workflowShowBase);
         }
 

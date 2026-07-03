@@ -409,13 +409,25 @@ class WorkflowController extends Controller
             abort(403, 'You do not have access to user management.');
         }
 
-        $activeWorkspace->load(['admin:id,name,email', 'users'])->loadCount(['workflows', 'users']);
+        $activeWorkspace->load(['admin:id,name,email'])->loadCount(['workflows', 'users']);
+        $activeMemberCount = $activeWorkspace->users()->wherePivot('status', 'active')->count();
+        $suspendedMemberCount = $activeWorkspace->users()->wherePivot('status', 'suspended')->count();
+        $members = $activeWorkspace->users()
+            ->orderBy('users.name')
+            ->paginate(config('pagination.members_per_page'))
+            ->withQueryString();
         $workspaces->each(function (Workspace $workspace) {
             $workspace->loadMissing('admin:id,name');
             $workspace->loadCount(['workflows', 'users']);
         });
 
-        return view('workflows.workspaces', compact('workspaces', 'activeWorkspace'));
+        return view('workflows.workspaces', compact(
+            'workspaces',
+            'activeWorkspace',
+            'members',
+            'activeMemberCount',
+            'suspendedMemberCount',
+        ));
     }
 
     public function workspaceStore(Request $request)
@@ -425,6 +437,16 @@ class WorkflowController extends Controller
         ]);
 
         $workspace = $this->workspaceManager->createWorkspace(Auth::user(), $request->input('name'));
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'message' => "Workspace '{$workspace->name}' created successfully.",
+                'workspace' => [
+                    'id' => $workspace->id,
+                    'name' => $workspace->name,
+                ],
+            ]);
+        }
 
         return redirect()->route('admin.workspaces.index')->with('success', "Workspace '{$workspace->name}' created successfully.");
     }

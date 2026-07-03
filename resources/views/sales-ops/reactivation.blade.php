@@ -10,8 +10,8 @@
                 historically higher conversion than cold outreach.</p>
         </div>
 
-        <div class="app-card app-card-padded flex items-center justify-between">
-            <div>
+        <div class="app-stat-grid">
+            <div class="app-card app-card-padded">
                 <p class="app-kpi-label">Candidates in queue</p>
                 <p id="workspace-sync-kpi-reactivation" class="app-kpi-value">{{ $candidates->count() }}</p>
             </div>

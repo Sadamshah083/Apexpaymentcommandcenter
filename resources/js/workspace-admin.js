@@ -1,3 +1,5 @@
+import { bindModuleAccessFormFields, syncModuleAccessForRole } from './member-management.js';
+
 function escapeHtml(value) {
     return String(value ?? '')
         .replace(/&/g, '&amp;')
@@ -213,22 +215,25 @@ function bindCreateMemberRoleToggle() {
         return;
     }
 
-    const adminRoles = new Set(['admin', 'manager']);
+    const configurableRoles = new Set([
+        'admin',
+        'manager',
+        'appointment_setter_team_lead',
+        'closers_team_lead',
+        'appointment_setter',
+        'closer',
+    ]);
 
     const syncVisibility = () => {
-        modulesPanel.classList.toggle('hidden', !adminRoles.has(roleSelect.value));
+        const role = roleSelect.value;
+        modulesPanel.classList.toggle('hidden', !configurableRoles.has(role));
+        syncModuleAccessForRole(modulesPanel, role);
     };
 
     roleSelect.addEventListener('change', syncVisibility);
     syncVisibility();
 
-    modulesPanel.querySelectorAll('.member-access-mode').forEach((input) => {
-        input.addEventListener('change', () => {
-            const grid = modulesPanel.querySelector('[data-module-grid]');
-            const restricted = modulesPanel.querySelector('[name="access_mode"][value="restricted"]')?.checked;
-            grid?.classList.toggle('hidden', !restricted);
-        });
-    });
+    bindModuleAccessFormFields(modulesPanel);
 }
 
 export function initWorkspaceAdmin() {

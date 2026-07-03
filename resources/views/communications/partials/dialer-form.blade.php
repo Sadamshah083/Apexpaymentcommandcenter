@@ -21,33 +21,34 @@
     $sipHost = config('integrations.morpheus.sip_host') ?: config('integrations.morpheus.host');
 @endphp
 
-<div class="ghl-dialer-outbound-help comm-hub-card p-4 mb-4 text-sm text-slate-600">
-    <p class="font-semibold text-slate-800 mb-1">Outbound calling via Morpheus CX</p>
-    <p class="mb-2">Calls ring your <strong>Morpheus extension</strong> first, then connect the destination. Register a
-        SIP softphone (Zoiper, Linphone, or Morpheus web phone) to <code>{{ $sipHost }}</code> before dialing.</p>
-    <ol class="text-xs text-slate-500 list-decimal pl-4 space-y-1 mb-2">
+<div class="ghl-dialer-outbound-help">
+    <p class="ghl-dialer-help-title">Outbound calling via Morpheus CX</p>
+    <p class="ghl-dialer-help-desc">Calls ring your <strong>Morpheus extension</strong> first, then connect the
+        destination. Register a SIP softphone (Zoiper, Linphone, or Morpheus web phone) to
+        <code>{{ $sipHost }}</code> before dialing.</p>
+    <ol class="ghl-dialer-help-steps">
         <li>Admin provisions your phone line in <strong>Phone Agents</strong></li>
         <li>Assign your outbound DID as <strong>Caller ID number</strong> when Morpheus delivers it</li>
         <li>Register softphone with your extension + SIP password</li>
-        <li>Dial from this panel — Morpheus uses API click-to-call when available, otherwise opens your softphone</li>
+        <li>Dial from this panel — API click-to-call when available, otherwise SIP softphone</li>
     </ol>
     @if ($portalUrl !== '#')
-        <a href="{{ $portalUrl }}" target="_blank" rel="noopener" class="comm-hub-link text-xs mt-2 inline-block">Open
-            Morpheus agent portal →</a>
+        <a href="{{ $portalUrl }}" target="_blank" rel="noopener" class="ghl-dialer-help-link">Open Morpheus agent
+            portal →</a>
     @endif
 </div>
 
 @if ($extensions === [])
-    <div class="comm-hub-alert comm-hub-alert-warning mb-4 text-sm">
-        <p class="font-semibold">No phone line assigned yet</p>
-        <p class="mt-1">Ask an admin to provision your extension in Communications Hub → Phone Agents before you can
-            place outbound calls.</p>
+    <div class="comm-hub-alert comm-hub-alert-warning ghl-dialer-alert">
+        <p class="ghl-dialer-alert-title">No phone line assigned yet</p>
+        <p class="ghl-dialer-alert-desc">Ask an admin to provision your extension in Communications Hub → Phone Agents
+            before you can place outbound calls.</p>
     </div>
 @elseif (!$hasOutboundDid)
-    <div class="comm-hub-alert comm-hub-alert-warning mb-4 text-sm">
-        <p class="font-semibold">Outbound DID not configured</p>
-        <p class="mt-1">Your extension is ready, but no caller ID number is set. Once Morpheus delivers your DIDs,
-            an admin must add the number under Phone Agents → Edit → Caller ID number.</p>
+    <div class="comm-hub-alert comm-hub-alert-warning ghl-dialer-alert">
+        <p class="ghl-dialer-alert-title">Outbound DID not configured</p>
+        <p class="ghl-dialer-alert-desc">Your extension is ready, but no caller ID number is set. Once Morpheus delivers
+            your DIDs, an admin must add the number under Phone Agents → Edit → Caller ID number.</p>
     </div>
 @endif
 
@@ -56,10 +57,11 @@
     @csrf
     <input type="hidden" name="fallback" value="sip">
 
-    <label class="comm-hub-label block mb-1" for="{{ $callerSelectId }}">Your extension (call from)</label>
-    <select id="{{ $callerSelectId }}" name="from_extension" class="comm-hub-input w-full mb-4" required
+    <label class="comm-hub-label" for="{{ $callerSelectId }}">Your extension (call from)</label>
+    <select id="{{ $callerSelectId }}" name="from_extension" class="comm-hub-input ghl-dialer-field" required
         @disabled($extensions === [])>
-        <option value="" disabled @selected($defaultExtension === null || $defaultExtension === '')>Select your extension</option>
+        <option value="" disabled @selected($defaultExtension === null || $defaultExtension === '')>Select your extension
+        </option>
         @foreach ($extensions as $ext)
             @php $extNum = $ext['extension_num'] ?? ''; @endphp
             @if (filled($extNum))
@@ -75,15 +77,14 @@
         @endforeach
     </select>
 
-    <label class="comm-hub-label block mb-1" for="{{ $numberInputId }}">Destination number</label>
+    <label class="comm-hub-label" for="{{ $numberInputId }}">Destination number</label>
     <input type="tel" id="{{ $numberInputId }}" name="destination"
-        class="comm-hub-input ghl-dialer-display w-full mb-4" placeholder="+1 555 123 4567"
+        class="comm-hub-input ghl-dialer-display ghl-dialer-field" placeholder="+1 555 123 4567"
         value="{{ $prefillNumber ?? '' }}" required autocomplete="tel" @disabled($extensions === [])>
 
-    <div class="ghl-dialer-keypad mb-4" id="{{ $keypadRootId }}">
+    <div class="ghl-dialer-keypad" id="{{ $keypadRootId }}">
         @foreach (['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'] as $key)
-            <button type="button" class="ghl-dialer-key"
-                data-dial-key="{{ $key }}">{{ $key }}</button>
+            <button type="button" class="ghl-dialer-key" data-dial-key="{{ $key }}">{{ $key }}</button>
         @endforeach
     </div>
 

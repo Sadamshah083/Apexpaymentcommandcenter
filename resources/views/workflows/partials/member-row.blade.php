@@ -1,4 +1,5 @@
 @php
+    use App\Support\MemberModuleAccess;
     use App\Support\SalesOps;
 
     $status = $member->pivot->status ?? 'active';
@@ -9,94 +10,94 @@
     $roleLabel = SalesOps::roleLabel($role);
     $assignableRoles = SalesOps::assignableMemberRoles();
     $modulePermissions = $member->getModulePermissions($activeWorkspace->id);
-    $moduleSummary = $member->usesRestrictedModuleAccess($activeWorkspace->id)
-        ? count($modulePermissions) . ' module(s)'
-        : (SalesOps::isAdminPortalRole($role) && $role !== 'super_admin'
-            ? 'Full admin access'
-            : null);
+    $moduleSummary = MemberModuleAccess::accessSummaryLabel(
+        $role,
+        $modulePermissions,
+        $member->usesRestrictedModuleAccess($activeWorkspace->id),
+    );
     $portalType = SalesOps::isAdminPortalRole($role) ? 'admin' : (SalesOps::isPortalRole($role) ? 'agent' : 'other');
     $initials = strtoupper(substr($member->name, 0, 2));
 @endphp
 
-<article
-    class="member-row um-member-card {{ $status === 'suspended' ? 'member-row-suspended um-member-card-suspended' : '' }}"
+<tr
+    class="member-row um-member-row {{ $status === 'suspended' ? 'member-row-suspended um-member-row-suspended' : '' }}"
     data-member-id="{{ $member->id }}" data-member-name="{{ $member->name }}"
     data-member-search="{{ strtolower($member->name . ' ' . $member->email . ' ' . $roleLabel) }}">
-    <div class="um-member-card-main">
-        <div class="um-member-avatar" aria-hidden="true">{{ $initials }}</div>
-
-        <div class="member-row-identity um-member-info">
-            <div class="um-member-title-row">
-                <h4 class="um-member-name">{{ $member->name }}</h4>
-                @if ($isOwner)
-                    <span class="member-owner-badge um-badge um-badge-owner">Owner</span>
-                @endif
-                <span
-                    class="member-status-badge member-status-{{ $status }} um-badge um-badge-status-{{ $status }}"
-                    data-member-status>{{ $status === 'suspended' ? 'Suspended' : ($status === 'invited' ? 'Invited' : 'Active') }}</span>
-                @if ($portalType === 'admin')
-                    <span class="um-badge um-badge-portal-admin">Admin portal</span>
-                @elseif($portalType === 'agent')
-                    <span class="um-badge um-badge-portal-agent">Agent portal</span>
-                @endif
-            </div>
-            <p class="um-member-email">{{ $member->email }}</p>
-            <p class="um-member-role" data-member-role>{{ $roleLabel }}</p>
-            @if ($moduleSummary)
-                <p class="um-member-modules" data-member-module-summary>{{ $moduleSummary }}</p>
-            @else
-                <p class="um-member-modules hidden" data-member-module-summary></p>
-            @endif
-        </div>
-    </div>
-
-    @if ($canManageMembership || $canAssignModules)
-        <div class="member-row-actions um-member-actions">
-            @if ($canManageMembership)
-                <div class="um-action-group">
-                    <form method="POST"
-                        action="{{ route('admin.workspaces.members.role', [$activeWorkspace->id, $member->id]) }}"
-                        data-member-action="role" data-member-name="{{ $member->name }}" class="um-role-form">
-                        @csrf
-                        @method('PATCH')
-                        <label class="um-label um-label-inline">Role</label>
-                        <select name="role" class="um-input um-select um-select-sm member-role-select"
-                            data-member-role-select>
-                            @foreach ($assignableRoles as $value => $label)
-                                <option value="{{ $value }}" @selected($role === $value)>{{ $label }}
-                                </option>
-                            @endforeach
-                        </select>
-                        <button type="submit"
-                            class="um-btn um-btn-ghost um-btn-sm member-action-btn member-action-btn-role">Save</button>
-                    </form>
+    <td class="col-member">
+        <div class="um-table-member">
+            <span class="um-member-avatar" aria-hidden="true">{{ $initials }}</span>
+            <div class="um-table-member-meta">
+                <div class="um-member-title-row">
+                    <span class="um-member-name">{{ $member->name }}</span>
+                    @if ($isOwner)
+                        <span class="member-owner-badge um-badge um-badge-owner">Owner</span>
+                    @endif
                 </div>
+                <span class="um-member-email um-text-muted">{{ $member->email }}</span>
+            </div>
+        </div>
+    </td>
+    <td class="col-role">
+        @if ($canManageMembership)
+            <form method="POST"
+                action="{{ route('admin.workspaces.members.role', [$activeWorkspace->id, $member->id]) }}"
+                data-member-action="role" data-member-name="{{ $member->name }}" class="um-role-cell-form">
+                @csrf
+                @method('PATCH')
+                @include('workflows.partials.role-select-dropdown', [
+                    'assignableRoles' => $assignableRoles,
+                    'selectedRole' => $role,
+                    'memberName' => $member->name,
+                ])
+                <button type="submit"
+                    class="um-btn um-btn-primary um-btn-sm um-btn-icon-only member-action-btn member-action-btn-role um-manage-btn"
+                    aria-label="Save role" title="Save role">
+                    @include('workflows.partials.um-action-icon', ['name' => 'save'])
+                </button>
+            </form>
+        @else
+            <span class="um-cell-value um-role-readonly" data-member-role>{{ $roleLabel }}</span>
+        @endif
+    </td>
+    <td class="col-status">
+        <span class="member-status-badge member-status-{{ $status }} um-badge um-badge-status-{{ $status }}"
+            data-member-status>{{ $status === 'suspended' ? 'Suspended' : ($status === 'invited' ? 'Invited' : 'Active') }}</span>
+    </td>
+    <td class="col-portal">
+        @if ($portalType === 'admin')
+            <span class="um-badge um-badge-portal-admin">Admin</span>
+        @elseif($portalType === 'agent')
+            <span class="um-badge um-badge-portal-agent">Agent</span>
+        @else
+            <span class="um-text-muted">—</span>
+        @endif
+    </td>
+    <td class="col-access">
+        <span class="um-cell-value um-text-muted" data-member-module-summary>{{ $moduleSummary }}</span>
+    </td>
+    <td class="col-manage">
+        @if ($canManageMembership || $canAssignModules)
+            <div class="um-manage-actions">
+                @if ($canManageMembership)
+                    <button type="button"
+                        class="um-btn um-btn-soft um-btn-sm um-manage-btn um-btn-icon-only"
+                        data-um-reset-password-open
+                        data-reset-url="{{ route('admin.workspaces.members.reset-password', [$activeWorkspace->id, $member->id]) }}"
+                        data-member-name="{{ $member->name }}"
+                        aria-label="Reset password" title="Reset password">
+                        @include('workflows.partials.um-action-icon', ['name' => 'reset-password'])
+                    </button>
 
-                <details class="um-details member-reset-password">
-                    <summary>Reset password</summary>
-                    <form method="POST"
-                        action="{{ route('admin.workspaces.members.reset-password', [$activeWorkspace->id, $member->id]) }}"
-                        data-member-action="reset-password" data-member-name="{{ $member->name }}"
-                        class="um-form-stack um-form-stack-tight">
-                        @csrf
-                        <input type="password" name="password" required minlength="6" placeholder="New password"
-                            class="um-input um-input-sm" autocomplete="new-password">
-                        <input type="password" name="password_confirmation" required minlength="6"
-                            placeholder="Confirm password" class="um-input um-input-sm" autocomplete="new-password">
-                        <button type="submit"
-                            class="um-btn um-btn-ghost um-btn-sm um-btn-block member-action-btn member-action-btn-role">Update
-                            password</button>
-                    </form>
-                </details>
-
-                <div class="um-action-buttons">
                     <form method="POST"
                         action="{{ route('admin.workspaces.members.suspend', [$activeWorkspace->id, $member->id]) }}"
                         data-member-action="suspend" data-member-name="{{ $member->name }}"
                         @if ($status === 'suspended') hidden @endif>
                         @csrf
                         <button type="submit"
-                            class="member-action-btn member-action-btn-suspend um-btn um-btn-warning um-btn-sm">Suspend</button>
+                            class="member-action-btn member-action-btn-suspend um-btn um-btn-soft um-btn-sm um-manage-btn um-btn-icon-only um-btn-warning-text"
+                            aria-label="Suspend" title="Suspend">
+                            @include('workflows.partials.um-action-icon', ['name' => 'suspend'])
+                        </button>
                     </form>
 
                     <form method="POST"
@@ -105,7 +106,10 @@
                         @if ($status !== 'suspended') hidden @endif>
                         @csrf
                         <button type="submit"
-                            class="member-action-btn member-action-btn-reactivate um-btn um-btn-success um-btn-sm">Reactivate</button>
+                            class="member-action-btn member-action-btn-reactivate um-btn um-btn-soft um-btn-sm um-manage-btn um-btn-icon-only um-btn-success-text"
+                            aria-label="Activate" title="Activate">
+                            @include('workflows.partials.um-action-icon', ['name' => 'activate'])
+                        </button>
                     </form>
 
                     <form method="POST"
@@ -114,17 +118,22 @@
                         @csrf
                         @method('DELETE')
                         <button type="submit"
-                            class="member-action-btn member-action-btn-remove um-btn um-btn-danger um-btn-sm">Remove</button>
+                            class="member-action-btn member-action-btn-remove um-btn um-btn-soft um-btn-sm um-manage-btn um-btn-icon-only um-btn-danger-text"
+                            aria-label="Delete" title="Delete">
+                            @include('workflows.partials.um-action-icon', ['name' => 'delete'])
+                        </button>
                     </form>
-                </div>
-            @endif
+                @endif
 
-            @if ($canAssignModules)
-                @include('workflows.partials.member-module-access', [
-                    'member' => $member,
-                    'activeWorkspace' => $activeWorkspace,
-                ])
-            @endif
-        </div>
-    @endif
-</article>
+                @if ($canAssignModules)
+                    @include('workflows.partials.member-module-access', [
+                        'member' => $member,
+                        'activeWorkspace' => $activeWorkspace,
+                    ])
+                @endif
+            </div>
+        @else
+            <span class="um-text-muted">—</span>
+        @endif
+    </td>
+</tr>

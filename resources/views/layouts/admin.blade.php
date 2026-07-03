@@ -7,15 +7,17 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="auth-login-paths" content="{{ json_encode([route('admin.login', [], false), route('portal.login', [], false), '/login']) }}">
     <title>@yield('title', 'Dashboard') - {{ config('app.name') }}</title>
+    @include('layouts.partials.favicon')
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 
-<body class="bg-cream-100 text-warmgrey-900 min-h-screen font-sans antialiased" data-turbo-prefetch="false"
+<body class="app-shell min-h-screen font-sans antialiased" data-turbo-prefetch="false"
     @auth
 data-workspace-id="{{ auth()->user()->current_workspace_id }}"
         data-workspace-sync-scope="{{ request()->routeIs('admin.lists.*', 'admin.deliverability.*', 'admin.content.*', 'admin.reputation.*', 'admin.communications.*') ? 'lite' : 'full' }}"
         data-workspace-sync-url="{{ route('admin.sync.poll') }}"
         data-workspace-sync-stream-url="{{ route('admin.sync.stream') }}"
+        @if(app()->environment('local')) data-workspace-sync-use-poll="1" @endif
         data-lead-show-base="{{ url('/portal/leads') }}"
         data-workflow-show-base="{{ url('/admin/workflows') }}"
         data-push-vapid-key-url="{{ route('admin.push.vapid') }}"
@@ -25,6 +27,7 @@ data-workspace-id="{{ auth()->user()->current_workspace_id }}"
         @include('layouts.partials.sidebar-shell', [
             'brandTitle' => config('app.name'),
             'brandSubtitle' => 'Admin',
+            'logoutRoute' => route('admin.logout'),
             'nav' => view('layouts.partials.sidebar-nav-admin'),
         ])
 

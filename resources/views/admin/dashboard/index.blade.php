@@ -3,196 +3,173 @@
 @section('title', 'Admin Dashboard')
 
 @section('content')
-<div class="mb-8 flex items-center justify-between">
-    <div>
-        <h2 class="text-3xl font-bold tracking-tight text-slate-800">Admin Dashboard</h2>
-        <p class="text-slate-500">Workspace: <span class="font-semibold text-slate-700">{{ $workspace->name }}</span> · Live performance tracking and lead metrics.</p>
+<div class="admin-dashboard-page">
+    <div class="admin-dashboard-header">
+        <div>
+            <h2 class="admin-dashboard-title">Admin Dashboard</h2>
+            <p class="admin-dashboard-subtitle">Workspace: <span>{{ $workspace->name }}</span> · Live performance tracking and lead metrics.</p>
+        </div>
+        <div class="admin-dashboard-live-badge">
+            <span class="relative flex h-2 w-2">
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            Live Auto-syncing
+        </div>
     </div>
-    <div class="flex items-center gap-2 bg-indigo-50 text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-full text-xs font-semibold">
-        <span class="relative flex h-2 w-2">
-            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-            <span class="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
-        </span>
-        Live Auto-syncing
-    </div>
-</div>
 
 @if (!empty($ops))
-<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-    <a href="{{ route('admin.sales-ops.index') }}" class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 hover:border-indigo-200 transition">
-        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Active CRM Leads</p>
-        <p id="ops-active-leads" class="text-3xl font-extrabold text-slate-800 mt-1">{{ $ops['overview']['total_active_leads'] ?? 0 }}</p>
+<div class="admin-dash-grid-4">
+    <a href="{{ route('admin.sales-ops.index') }}" class="admin-dash-card admin-dash-stat-card">
+        <p class="admin-dash-stat-label">Active CRM Leads</p>
+        <p id="ops-active-leads" class="admin-dash-stat-value">{{ $ops['overview']['total_active_leads'] ?? 0 }}</p>
     </a>
-    <a href="{{ route('admin.sales-ops.index') }}" class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 hover:border-amber-200 transition">
-        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Awaiting Verification</p>
-        <p id="ops-pending-verification" class="text-3xl font-extrabold text-amber-600 mt-1">{{ $ops['overview']['pending_verification'] ?? 0 }}</p>
+    <a href="{{ route('admin.sales-ops.index') }}" class="admin-dash-card admin-dash-stat-card">
+        <p class="admin-dash-stat-label">Awaiting Verification</p>
+        <p id="ops-pending-verification" class="admin-dash-stat-value is-warning">{{ $ops['overview']['pending_verification'] ?? 0 }}</p>
     </a>
-    <a href="{{ route('admin.sales-ops.reactivation') }}" class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 hover:border-indigo-200 transition">
-        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Reactivation Queue</p>
-        <p id="ops-reactivation" class="text-3xl font-extrabold text-slate-800 mt-1">{{ $ops['overview']['reactivation_queue'] ?? 0 }}</p>
+    <a href="{{ route('admin.sales-ops.reactivation') }}" class="admin-dash-card admin-dash-stat-card">
+        <p class="admin-dash-stat-label">Reactivation Queue</p>
+        <p id="ops-reactivation" class="admin-dash-stat-value">{{ $ops['overview']['reactivation_queue'] ?? 0 }}</p>
     </a>
-    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Handoff Queue</p>
-        <p id="ops-handoff-queue" class="text-3xl font-extrabold text-indigo-600 mt-1">{{ $ops['handoff_queue'] ?? 0 }}</p>
-        <p class="text-xs text-slate-500 mt-1">Settled, awaiting closer</p>
+    <div class="admin-dash-card admin-dash-stat-card">
+        <p class="admin-dash-stat-label">Handoff Queue</p>
+        <p id="ops-handoff-queue" class="admin-dash-stat-value is-accent">{{ $ops['handoff_queue'] ?? 0 }}</p>
+        <p class="admin-dash-stat-note">Settled, awaiting closer</p>
     </div>
 </div>
 
-<div class="grid lg:grid-cols-2 gap-6 mb-8">
-    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-        <h3 class="text-lg font-bold text-slate-800 mb-4">Today's team activity</h3>
-        <div class="grid grid-cols-2 gap-4">
+<div class="admin-dash-grid-2">
+    <div class="admin-dash-card">
+        <h3 class="admin-dash-section-title">Today's team activity</h3>
+        <div class="admin-dash-activity-grid">
             @foreach (['dials' => 'Dials', 'conversations' => 'Conversations', 'discoveries' => 'Discoveries', 'meetings' => 'Meetings booked'] as $key => $label)
-                <div>
-                    <p class="text-xs font-semibold text-slate-400 uppercase">{{ $label }}</p>
-                    <p id="ops-today-{{ $key }}" class="text-2xl font-extrabold text-slate-800 mt-1">{{ $ops['today_activity'][$key] ?? 0 }}</p>
+                <div class="admin-dash-activity-item">
+                    <p class="admin-dash-stat-label">{{ $label }}</p>
+                    <p id="ops-today-{{ $key }}" class="admin-dash-stat-value">{{ $ops['today_activity'][$key] ?? 0 }}</p>
                 </div>
             @endforeach
         </div>
         @if (($ops['at_capacity_setters'] ?? 0) > 0)
-            <p class="text-sm text-amber-700 mt-4 font-medium">{{ $ops['at_capacity_setters'] }} setter(s) at book capacity — <a href="{{ route('admin.sales-ops.distribution') }}" class="text-indigo-600 hover:underline">view load</a></p>
+            <p class="admin-dash-alert">{{ $ops['at_capacity_setters'] }} setter(s) at book capacity — <a href="{{ route('admin.sales-ops.distribution') }}">view load</a></p>
         @endif
     </div>
 
-    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-        <div class="flex items-center justify-between mb-4">
-            <h3 class="text-lg font-bold text-slate-800">Weekly leaderboard</h3>
-            <a href="{{ route('admin.sales-ops.performance') }}" class="text-sm font-semibold text-indigo-600 hover:text-indigo-800">Full report</a>
+    <div class="admin-dash-card">
+        <div class="admin-dash-section-head">
+            <h3 class="admin-dash-section-title">Weekly leaderboard</h3>
+            <a href="{{ route('admin.sales-ops.performance') }}" class="admin-dash-section-link">Full report</a>
         </div>
-        <div id="ops-leaderboard" class="space-y-2">
+        <div id="ops-leaderboard" class="admin-dash-leaderboard">
             @forelse ($ops['leaderboard'] ?? [] as $i => $row)
-                <div class="flex justify-between items-center text-sm py-1">
-                    <span class="text-slate-700"><span class="font-bold text-slate-400 mr-2">#{{ $i + 1 }}</span>{{ $row['name'] }} <span class="text-slate-400">· {{ $row['role'] }}</span></span>
-                    <span class="font-semibold text-slate-600">{{ $row['dials'] }} d · {{ $row['meetings'] }} m · {{ $row['deals_funded'] }} funded</span>
+                <div class="admin-dash-leaderboard-row">
+                    <span>
+                        <span class="admin-dash-leaderboard-rank">#{{ $i + 1 }}</span>
+                        <span class="admin-dash-leaderboard-name">{{ $row['name'] }}</span>
+                        <span class="admin-dash-leaderboard-role">· {{ $row['role'] }}</span>
+                    </span>
+                    <span class="admin-dash-leaderboard-stats">{{ $row['dials'] }} d · {{ $row['meetings'] }} m · {{ $row['deals_funded'] }} funded</span>
                 </div>
             @empty
-                <p class="text-sm text-slate-500">No activity logged this week yet.</p>
+                <p class="admin-dash-empty">No activity logged this week yet.</p>
             @endforelse
         </div>
     </div>
 </div>
 @endif
 
-<!-- Main Stats Section -->
-<div class="grid lg:grid-cols-2 gap-6 mb-8">
-    <!-- Pipeline Block -->
-    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-        <h3 class="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2">
-            <span class="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
-                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-            </span>
-            PIPELINE (all-time)
-        </h3>
-        <div class="divide-y divide-slate-100">
-            <a href="{{ route('admin.workflows.index') }}" class="flex justify-between py-2.5 hover:bg-slate-50 px-2 rounded-lg transition group">
-                <span class="text-slate-500 font-medium group-hover:text-indigo-600">Total Leads</span>
-                <span id="stat-total_leads" class="font-extrabold text-slate-800 text-lg">{{ $pipeline['total_leads'] }}</span>
+<div class="admin-dash-grid-2">
+    <div class="admin-dash-card">
+        <h3 class="admin-dash-section-title">Pipeline (all-time)</h3>
+        <div class="admin-dash-rows">
+            <a href="{{ route('admin.workflows.index') }}" class="admin-dash-row">
+                <span class="admin-dash-row-label">Total Leads</span>
+                <span id="stat-total_leads" class="admin-dash-row-value">{{ $pipeline['total_leads'] }}</span>
             </a>
-            <a href="{{ route('admin.workflows.index', ['phase' => 'imported']) }}" class="flex justify-between py-2.5 hover:bg-slate-50 px-2 rounded-lg transition group">
-                <span class="text-slate-500 font-medium group-hover:text-indigo-600">New</span>
-                <span id="stat-new" class="font-extrabold text-slate-800 text-lg">{{ $pipeline['new'] }}</span>
+            <a href="{{ route('admin.workflows.index', ['phase' => 'imported']) }}" class="admin-dash-row">
+                <span class="admin-dash-row-label">New</span>
+                <span id="stat-new" class="admin-dash-row-value">{{ $pipeline['new'] }}</span>
             </a>
-            <a href="{{ route('admin.workflows.index', ['phase' => 'enriched']) }}" class="flex justify-between py-2.5 hover:bg-slate-50 px-2 rounded-lg transition group">
-                <span class="text-slate-500 font-medium group-hover:text-indigo-600">Qualified</span>
-                <span id="stat-qualified" class="font-extrabold text-slate-800 text-lg">{{ $pipeline['qualified'] }}</span>
+            <a href="{{ route('admin.workflows.index', ['phase' => 'enriched']) }}" class="admin-dash-row">
+                <span class="admin-dash-row-label">Qualified</span>
+                <span id="stat-qualified" class="admin-dash-row-value">{{ $pipeline['qualified'] }}</span>
             </a>
-            <a href="{{ route('admin.workflows.index', ['phase' => 'appointment_settled']) }}" class="flex justify-between py-2.5 hover:bg-slate-50 px-2 rounded-lg transition group">
-                <span class="text-slate-500 font-medium group-hover:text-indigo-600">Booked</span>
-                <span id="stat-booked" class="font-extrabold text-slate-800 text-lg">{{ $pipeline['booked'] }}</span>
+            <a href="{{ route('admin.workflows.index', ['phase' => 'appointment_settled']) }}" class="admin-dash-row">
+                <span class="admin-dash-row-label">Booked</span>
+                <span id="stat-booked" class="admin-dash-row-value">{{ $pipeline['booked'] }}</span>
             </a>
-            <a href="{{ route('admin.workflows.index', ['phase' => 'with_closer']) }}" class="flex justify-between py-2.5 hover:bg-slate-50 px-2 rounded-lg transition group">
-                <span class="text-slate-500 font-medium group-hover:text-indigo-600">Showed</span>
-                <span id="stat-showed" class="font-extrabold text-slate-800 text-lg">{{ $pipeline['showed'] }}</span>
+            <a href="{{ route('admin.workflows.index', ['phase' => 'with_closer']) }}" class="admin-dash-row">
+                <span class="admin-dash-row-label">Showed</span>
+                <span id="stat-showed" class="admin-dash-row-value">{{ $pipeline['showed'] }}</span>
             </a>
-            <a href="{{ route('admin.workflows.index', ['phase' => 'closed']) }}" class="flex justify-between py-2.5 hover:bg-slate-50 px-2 rounded-lg transition group">
-                <span class="text-slate-500 font-medium group-hover:text-green-600">Closed (Won)</span>
-                <span id="stat-closed_won" class="font-extrabold text-green-600 text-lg">{{ $pipeline['closed_won'] }}</span>
+            <a href="{{ route('admin.workflows.index', ['phase' => 'closed']) }}" class="admin-dash-row">
+                <span class="admin-dash-row-label">Closed (Won)</span>
+                <span id="stat-closed_won" class="admin-dash-row-value is-success">{{ $pipeline['closed_won'] }}</span>
             </a>
-            <a href="{{ route('admin.workflows.index', ['phase' => 'with_setter']) }}" class="flex justify-between py-2.5 hover:bg-slate-50 px-2 rounded-lg transition group">
-                <span class="text-slate-500 font-medium group-hover:text-indigo-600">Not Now</span>
-                <span id="stat-not_now" class="font-extrabold text-slate-800 text-lg">{{ $pipeline['not_now'] }}</span>
+            <a href="{{ route('admin.workflows.index', ['phase' => 'with_setter']) }}" class="admin-dash-row">
+                <span class="admin-dash-row-label">Not Now</span>
+                <span id="stat-not_now" class="admin-dash-row-value">{{ $pipeline['not_now'] }}</span>
             </a>
-            <a href="{{ route('admin.workflows.index', ['phase' => 'closed', 'search' => 'closed_lost']) }}" class="flex justify-between py-2.5 hover:bg-slate-50 px-2 rounded-lg transition group">
-                <span class="text-slate-500 font-medium group-hover:text-red-500">Dead</span>
-                <span id="stat-dead" class="font-extrabold text-red-500 text-lg">{{ $pipeline['dead'] }}</span>
+            <a href="{{ route('admin.workflows.index', ['phase' => 'closed', 'search' => 'closed_lost']) }}" class="admin-dash-row">
+                <span class="admin-dash-row-label">Dead</span>
+                <span id="stat-dead" class="admin-dash-row-value is-danger">{{ $pipeline['dead'] }}</span>
             </a>
         </div>
     </div>
 
-    <!-- Conversion Rates Block -->
-    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6 flex flex-col justify-between">
-        <div>
-            <h3 class="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2">
-                <span class="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
-                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                    </svg>
-                </span>
-                CONVERSION RATES
-            </h3>
-            <div class="divide-y divide-slate-100">
-                <div class="flex justify-between py-3 px-2">
-                    <span class="text-slate-500 font-medium">Book &rarr; Show Rate</span>
-                    <span id="stat-book_to_show" class="font-extrabold text-slate-800 text-lg">{{ $conversion_rates['book_to_show_rate'] !== null ? $conversion_rates['book_to_show_rate'].'%' : '-' }}</span>
-                </div>
-                <div class="flex justify-between py-3 px-2">
-                    <span class="text-slate-500 font-medium">Show &rarr; Close Rate</span>
-                    <span id="stat-show_to_close" class="font-extrabold text-slate-800 text-lg">{{ $conversion_rates['show_to_close_rate'] !== null ? $conversion_rates['show_to_close_rate'].'%' : '-' }}</span>
-                </div>
-                <div class="flex justify-between py-3 px-2">
-                    <span class="text-slate-500 font-medium">Overall Close Rate</span>
-                    <span id="stat-overall_close" class="font-extrabold text-green-600 text-lg">{{ $conversion_rates['overall_close_rate'] !== null ? $conversion_rates['overall_close_rate'].'%' : '-' }}</span>
-                </div>
-                <div class="flex justify-between py-3 px-2">
-                    <span class="text-slate-500 font-medium">Avg Closed Deal Volume</span>
-                    <span id="stat-avg_deal_volume" class="font-extrabold text-slate-800 text-lg">${{ number_format($conversion_rates['avg_closed_volume'], 2) }}</span>
-                </div>
-                <div class="flex justify-between py-3 px-2">
-                    <span class="text-slate-500 font-medium">Total Team Dials (period)</span>
-                    <span id="stat-total_dials" class="font-extrabold text-slate-800 text-lg">{{ $conversion_rates['total_dials'] }}</span>
-                </div>
-                <div class="flex justify-between py-3 px-2">
-                    <span class="text-slate-500 font-medium">Total Team Closes (period)</span>
-                    <span id="stat-total_closes" class="font-extrabold text-slate-800 text-lg">{{ $conversion_rates['total_closes'] }}</span>
-                </div>
+    <div class="admin-dash-card">
+        <h3 class="admin-dash-section-title">Conversion rates</h3>
+        <div class="admin-dash-rows">
+            <div class="admin-dash-row">
+                <span class="admin-dash-row-label">Book → Show Rate</span>
+                <span id="stat-book_to_show" class="admin-dash-row-value">{{ $conversion_rates['book_to_show_rate'] !== null ? $conversion_rates['book_to_show_rate'].'%' : '-' }}</span>
+            </div>
+            <div class="admin-dash-row">
+                <span class="admin-dash-row-label">Show → Close Rate</span>
+                <span id="stat-show_to_close" class="admin-dash-row-value">{{ $conversion_rates['show_to_close_rate'] !== null ? $conversion_rates['show_to_close_rate'].'%' : '-' }}</span>
+            </div>
+            <div class="admin-dash-row">
+                <span class="admin-dash-row-label">Overall Close Rate</span>
+                <span id="stat-overall_close" class="admin-dash-row-value is-success">{{ $conversion_rates['overall_close_rate'] !== null ? $conversion_rates['overall_close_rate'].'%' : '-' }}</span>
+            </div>
+            <div class="admin-dash-row">
+                <span class="admin-dash-row-label">Avg Closed Deal Volume</span>
+                <span id="stat-avg_deal_volume" class="admin-dash-row-value">${{ number_format($conversion_rates['avg_closed_volume'], 2) }}</span>
+            </div>
+            <div class="admin-dash-row">
+                <span class="admin-dash-row-label">Total Team Dials (period)</span>
+                <span id="stat-total_dials" class="admin-dash-row-value">{{ $conversion_rates['total_dials'] }}</span>
+            </div>
+            <div class="admin-dash-row">
+                <span class="admin-dash-row-label">Total Team Closes (period)</span>
+                <span id="stat-total_closes" class="admin-dash-row-value">{{ $conversion_rates['total_closes'] }}</span>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Leaders Tables Section -->
-<div class="grid lg:grid-cols-2 gap-6 mb-8">
-    <!-- Leads by Fronter Table -->
-    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-        <h3 class="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-            <span class="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
-                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-                </svg>
-            </span>
-            LEADS BY FRONTER (Setters)
-        </h3>
-        <div class="overflow-x-auto">
-            <table class="w-full text-left border-collapse">
+<div class="admin-dash-grid-2">
+    <div class="admin-dash-card">
+        <h3 class="admin-dash-section-title">Leads by fronter (setters)</h3>
+        <div class="admin-dash-table-wrap">
+            <table class="admin-dash-table">
                 <thead>
-                    <tr class="border-b border-slate-100 text-xs font-semibold text-slate-400 uppercase">
-                        <th class="py-3 font-medium">Fronter (Setter)</th>
-                        <th class="py-3 text-right font-medium">Leads Logged</th>
+                    <tr>
+                        <th>Fronter (Setter)</th>
+                        <th class="text-right">Leads Logged</th>
                     </tr>
                 </thead>
-                <tbody id="setters-table-body" class="divide-y divide-slate-50 text-sm text-slate-600">
+                <tbody id="setters-table-body">
                     @forelse ($setters as $setter)
-                        <tr class="hover:bg-slate-50 transition cursor-pointer" onclick="window.location='{{ route('admin.workflows.index', ['assigned_user_id' => $setter['id']]) }}'">
-                            <td class="py-3.5 font-medium text-slate-800">
-                                <a href="{{ route('admin.workflows.index', ['assigned_user_id' => $setter['id']]) }}" class="text-indigo-600 hover:text-indigo-900">{{ $setter['name'] }}</a>
+                        <tr class="is-clickable" onclick="window.location='{{ route('admin.workflows.index', ['assigned_user_id' => $setter['id']]) }}'">
+                            <td>
+                                <a href="{{ route('admin.workflows.index', ['assigned_user_id' => $setter['id']]) }}" class="admin-dash-table-link">{{ $setter['name'] }}</a>
                             </td>
-                            <td class="py-3.5 text-right font-extrabold text-slate-800">{{ $setter['leads_logged'] }}</td>
+                            <td class="text-right"><span class="admin-dash-table-num">{{ $setter['leads_logged'] }}</span></td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="2" class="py-4 text-center text-slate-400">No active setters found.</td>
+                            <td colspan="2" class="admin-dash-empty">No active setters found.</td>
                         </tr>
                     @endforelse
                 </tbody>
@@ -200,35 +177,27 @@
         </div>
     </div>
 
-    <!-- Leads by Closer Table -->
-    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-        <h3 class="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-            <span class="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
-                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
-                </svg>
-            </span>
-            LEADS BY CLOSER
-        </h3>
-        <div class="overflow-x-auto">
-            <table class="w-full text-left border-collapse">
+    <div class="admin-dash-card">
+        <h3 class="admin-dash-section-title">Leads by closer</h3>
+        <div class="admin-dash-table-wrap">
+            <table class="admin-dash-table">
                 <thead>
-                    <tr class="border-b border-slate-100 text-xs font-semibold text-slate-400 uppercase">
-                        <th class="py-3 font-medium">Closer</th>
-                        <th class="py-3 text-right font-medium">Deals Closed</th>
+                    <tr>
+                        <th>Closer</th>
+                        <th class="text-right">Deals Closed</th>
                     </tr>
                 </thead>
-                <tbody id="closers-table-body" class="divide-y divide-slate-50 text-sm text-slate-600">
+                <tbody id="closers-table-body">
                     @forelse ($closers as $closer)
-                        <tr class="hover:bg-slate-50 transition cursor-pointer" onclick="window.location='{{ route('admin.workflows.index', ['assigned_user_id' => $closer['id']]) }}'">
-                            <td class="py-3.5 font-medium text-slate-800">
-                                <a href="{{ route('admin.workflows.index', ['assigned_user_id' => $closer['id']]) }}" class="text-indigo-600 hover:text-indigo-900">{{ $closer['name'] }}</a>
+                        <tr class="is-clickable" onclick="window.location='{{ route('admin.workflows.index', ['assigned_user_id' => $closer['id']]) }}'">
+                            <td>
+                                <a href="{{ route('admin.workflows.index', ['assigned_user_id' => $closer['id']]) }}" class="admin-dash-table-link">{{ $closer['name'] }}</a>
                             </td>
-                            <td class="py-3.5 text-right font-extrabold text-green-600">{{ $closer['deals_closed'] }}</td>
+                            <td class="text-right"><span class="admin-dash-table-num is-success">{{ $closer['deals_closed'] }}</span></td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="2" class="py-4 text-center text-slate-400">No active closers found.</td>
+                            <td colspan="2" class="admin-dash-empty">No active closers found.</td>
                         </tr>
                     @endforelse
                 </tbody>
@@ -237,83 +206,60 @@
     </div>
 </div>
 
-<!-- Data Visualization & Analytics Graphs Section -->
-<div class="grid lg:grid-cols-3 gap-6 mb-8">
-    <!-- Funnel Visualization Chart -->
-    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6 lg:col-span-2">
-        <h3 class="text-sm font-bold uppercase tracking-wider text-slate-400 mb-4">Pipeline Conversion Funnel</h3>
-        <div class="relative" style="height: 300px;">
+<div class="admin-dash-grid-charts">
+    <div class="admin-dash-card">
+        <h3 class="admin-dash-section-title">Pipeline conversion funnel</h3>
+        <div class="admin-dash-chart-wrap">
             <canvas id="pipelineFunnelChart"></canvas>
         </div>
     </div>
 
-    <!-- Data Files Performance Chart -->
-    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-        <h3 class="text-sm font-bold uppercase tracking-wider text-slate-400 mb-4">Data Files Performance (Recent)</h3>
-        <div class="relative" style="height: 300px;">
+    <div class="admin-dash-card">
+        <h3 class="admin-dash-section-title">Data files performance (recent)</h3>
+        <div class="admin-dash-chart-wrap">
             <canvas id="workflowsPerformanceChart"></canvas>
         </div>
     </div>
 </div>
 
-<!-- Data Files (Workflows) Performance Table -->
-<div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6 mb-8">
-    <div class="flex items-center justify-between mb-4">
-        <h3 class="text-lg font-bold text-slate-800 flex items-center gap-2">
-            <span class="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
-                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-            </span>
-            DATA FILES & WORKFLOW PERFORMANCE
-        </h3>
-    </div>
-    <div class="overflow-x-auto">
-        <table class="w-full text-left border-collapse">
+<div class="admin-dash-card">
+    <h3 class="admin-dash-section-title">Data files &amp; workflow performance</h3>
+    <div class="admin-dash-table-wrap">
+        <table class="admin-dash-table">
             <thead>
-                <tr class="border-b border-slate-100 text-xs font-semibold text-slate-400 uppercase">
-                    <th class="py-3 font-medium">File Name</th>
-                    <th class="py-3 font-medium">Imported At</th>
-                    <th class="py-3 text-right font-medium">Total Leads</th>
-                    <th class="py-3 text-right font-medium">Enriched Success</th>
-                    <th class="py-3 text-right font-medium">Failed</th>
-                    <th class="py-3 text-right font-medium">Closed Won</th>
-                    <th class="py-3 text-right font-medium">Enrichment %</th>
-                    <th class="py-3 text-right font-medium">Close %</th>
-                    <th class="py-3 text-right font-medium">Actions</th>
+                <tr>
+                    <th>File Name</th>
+                    <th>Imported At</th>
+                    <th class="text-right">Total Leads</th>
+                    <th class="text-right">Enriched Success</th>
+                    <th class="text-right">Failed</th>
+                    <th class="text-right">Closed Won</th>
+                    <th class="text-right">Enrichment %</th>
+                    <th class="text-right">Close %</th>
+                    <th class="text-right">Actions</th>
                 </tr>
             </thead>
-            <tbody id="workflows-table-body" class="divide-y divide-slate-50 text-sm text-slate-600">
+            <tbody id="workflows-table-body">
                 @forelse ($workflows as $wf)
-                    <tr class="hover:bg-slate-50 transition">
-                        <td class="py-3.5 font-semibold text-slate-800">
-                            <a href="{{ route('admin.workflows.show', $wf['id']) }}" class="text-indigo-600 hover:text-indigo-900">{{ $wf['name'] }}</a>
-                            <span class="block text-xs font-normal text-slate-400">{{ $wf['filename'] }}</span>
+                    <tr>
+                        <td>
+                            <a href="{{ route('admin.workflows.show', $wf['id']) }}" class="admin-dash-table-link">{{ $wf['name'] }}</a>
+                            <span class="admin-dash-table-meta">{{ $wf['filename'] }}</span>
                         </td>
-                        <td class="py-3.5 text-slate-500">{{ $wf['created_at'] }}</td>
-                        <td class="py-3.5 text-right font-semibold text-slate-800">{{ $wf['total_leads'] }}</td>
-                        <td class="py-3.5 text-right text-emerald-600 font-semibold">{{ $wf['enriched_leads'] }}</td>
-                        <td class="py-3.5 text-right text-red-500 font-semibold">{{ $wf['failed_leads'] }}</td>
-                        <td class="py-3.5 text-right text-green-600 font-semibold">{{ $wf['closed_deals'] }}</td>
-                        <td class="py-3.5 text-right">
-                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">
-                                {{ $wf['enrichment_rate'] }}%
-                            </span>
-                        </td>
-                        <td class="py-3.5 text-right">
-                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-700">
-                                {{ $wf['close_rate'] }}%
-                            </span>
-                        </td>
-                        <td class="py-3.5 text-right">
-                            <a href="{{ route('admin.workflows.show', $wf['id']) }}" class="app-btn app-btn-secondary app-btn-sm !py-1 !px-2">
-                                Track file
-                            </a>
+                        <td>{{ $wf['created_at'] }}</td>
+                        <td class="text-right"><span class="admin-dash-table-num">{{ $wf['total_leads'] }}</span></td>
+                        <td class="text-right"><span class="admin-dash-table-num is-success">{{ $wf['enriched_leads'] }}</span></td>
+                        <td class="text-right"><span class="admin-dash-table-num is-danger">{{ $wf['failed_leads'] }}</span></td>
+                        <td class="text-right"><span class="admin-dash-table-num is-success">{{ $wf['closed_deals'] }}</span></td>
+                        <td class="text-right"><span class="admin-dash-badge is-success">{{ $wf['enrichment_rate'] }}%</span></td>
+                        <td class="text-right"><span class="admin-dash-badge is-success">{{ $wf['close_rate'] }}%</span></td>
+                        <td class="text-right">
+                            <a href="{{ route('admin.workflows.show', $wf['id']) }}" class="app-btn app-btn-secondary app-btn-sm">Track file</a>
                         </td>
                     </tr>
                 @empty
                     <tr>
-                        <td colspan="9" class="py-4 text-center text-slate-400">No workflow files uploaded yet.</td>
+                        <td colspan="9" class="admin-dash-empty">No workflow files uploaded yet.</td>
                     </tr>
                 @endforelse
             </tbody>
@@ -321,18 +267,16 @@
     </div>
 </div>
 
+</div>
 @endsection
 
 @push('scripts')
-<!-- Load Chart.js from secure CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
     document.addEventListener('DOMContentLoaded', function () {
-        // Initialize Charts
         const funnelCtx = document.getElementById('pipelineFunnelChart').getContext('2d');
         const workflowsCtx = document.getElementById('workflowsPerformanceChart').getContext('2d');
 
-        // Funnel Chart configuration (Horizontal Bar Chart simulating a funnel)
         const funnelChart = new Chart(funnelCtx, {
             type: 'bar',
             data: {
@@ -348,14 +292,14 @@
                         {{ $pipeline['closed_won'] }}
                     ],
                     backgroundColor: [
-                        'rgba(99, 102, 241, 0.85)',  // Indigo
-                        'rgba(59, 130, 246, 0.85)',  // Blue
-                        'rgba(14, 165, 233, 0.85)',  // Sky
-                        'rgba(245, 158, 11, 0.85)',  // Amber
-                        'rgba(236, 72, 153, 0.85)',  // Pink
-                        'rgba(34, 197, 94, 0.85)'    // Green
+                        'rgba(100, 116, 139, 0.75)',
+                        'rgba(100, 116, 139, 0.65)',
+                        'rgba(100, 116, 139, 0.55)',
+                        'rgba(100, 116, 139, 0.45)',
+                        'rgba(100, 116, 139, 0.35)',
+                        'rgba(4, 120, 87, 0.75)'
                     ],
-                    borderRadius: 6,
+                    borderRadius: 4,
                     borderWidth: 0,
                     barPercentage: 0.6
                 }]
@@ -369,17 +313,17 @@
                 },
                 scales: {
                     x: {
-                        grid: { display: false },
-                        ticks: { precision: 0 }
+                        grid: { color: '#f1f5f9' },
+                        ticks: { precision: 0, color: '#94a3b8', font: { size: 10 } }
                     },
                     y: {
-                        grid: { display: false }
+                        grid: { display: false },
+                        ticks: { color: '#64748b', font: { size: 10 } }
                     }
                 }
             }
         });
 
-        // Data Files Performance Bar Chart (comparing Top Workflows performance)
         const workflowLabels = [];
         const workflowTotals = [];
         const workflowEnriched = [];
@@ -400,19 +344,19 @@
                     {
                         label: 'Total Leads',
                         data: workflowTotals,
-                        backgroundColor: 'rgba(165, 180, 252, 0.8)', // Light Indigo
+                        backgroundColor: 'rgba(203, 213, 225, 0.85)',
                         borderRadius: 4
                     },
                     {
                         label: 'Enriched',
                         data: workflowEnriched,
-                        backgroundColor: 'rgba(99, 102, 241, 0.85)', // Indigo
+                        backgroundColor: 'rgba(100, 116, 139, 0.75)',
                         borderRadius: 4
                     },
                     {
                         label: 'Closed',
                         data: workflowClosed,
-                        backgroundColor: 'rgba(34, 197, 94, 0.85)', // Green
+                        backgroundColor: 'rgba(4, 120, 87, 0.75)',
                         borderRadius: 4
                     }
                 ]
@@ -423,17 +367,22 @@
                 plugins: {
                     legend: {
                         position: 'bottom',
-                        labels: { boxWidth: 12 }
+                        labels: { boxWidth: 10, color: '#64748b', font: { size: 10 } }
                     }
                 },
                 scales: {
-                    x: { grid: { display: false } },
-                    y: { grid: { display: false }, ticks: { precision: 0 } }
+                    x: {
+                        grid: { display: false },
+                        ticks: { color: '#94a3b8', font: { size: 9 } }
+                    },
+                    y: {
+                        grid: { color: '#f1f5f9' },
+                        ticks: { precision: 0, color: '#94a3b8', font: { size: 10 } }
+                    }
                 }
             }
         });
 
-        // Real-time dashboard updates (stops on Turbo navigation)
         const pollEndpoint = "{{ route('admin.dashboard.realtime-data') }}";
         let stopDashboardPoll = null;
 
@@ -477,103 +426,90 @@
             }
 
             funnelChart.data.datasets[0].data = [
-                        data.pipeline.total_leads,
-                        data.pipeline.new,
-                        data.pipeline.qualified,
-                        data.pipeline.booked,
-                        data.pipeline.showed,
-                        data.pipeline.closed_won
+                data.pipeline.total_leads,
+                data.pipeline.new,
+                data.pipeline.qualified,
+                data.pipeline.booked,
+                data.pipeline.showed,
+                data.pipeline.closed_won
             ];
             funnelChart.update();
 
             const settersBody = document.getElementById('setters-table-body');
             if (settersBody) {
                 let settersHTML = '';
-                    if (data.setters.length > 0) {
-                        data.setters.forEach(setter => {
-                            settersHTML += `
-                                <tr class="hover:bg-slate-50 transition cursor-pointer" onclick="window.location='/admin/workflows?assigned_user_id=${setter.id}'">
-                                    <td class="py-3.5 font-medium text-slate-800">
-                                        <a href="/admin/workflows?assigned_user_id=${setter.id}" class="text-indigo-600 hover:text-indigo-900">${setter.name}</a>
-                                    </td>
-                                    <td class="py-3.5 text-right font-extrabold text-slate-800">${setter.leads_logged}</td>
-                                </tr>
-                            `;
-                        });
-                    } else {
-                        settersHTML = `<tr><td colspan="2" class="py-4 text-center text-slate-400">No active setters found.</td></tr>`;
-                    }
+                if (data.setters.length > 0) {
+                    data.setters.forEach(setter => {
+                        settersHTML += `
+                            <tr class="is-clickable" onclick="window.location='/admin/workflows?assigned_user_id=${setter.id}'">
+                                <td><a href="/admin/workflows?assigned_user_id=${setter.id}" class="admin-dash-table-link">${setter.name}</a></td>
+                                <td class="text-right"><span class="admin-dash-table-num">${setter.leads_logged}</span></td>
+                            </tr>
+                        `;
+                    });
+                } else {
+                    settersHTML = `<tr><td colspan="2" class="admin-dash-empty">No active setters found.</td></tr>`;
+                }
                 settersBody.innerHTML = settersHTML;
             }
 
             const closersBody = document.getElementById('closers-table-body');
             if (closersBody) {
                 let closersHTML = '';
-                    if (data.closers.length > 0) {
-                        data.closers.forEach(closer => {
-                            closersHTML += `
-                                <tr class="hover:bg-slate-50 transition cursor-pointer" onclick="window.location='/admin/workflows?assigned_user_id=${closer.id}'">
-                                    <td class="py-3.5 font-medium text-slate-800">
-                                        <a href="/admin/workflows?assigned_user_id=${closer.id}" class="text-indigo-600 hover:text-indigo-900">${closer.name}</a>
-                                    </td>
-                                    <td class="py-3.5 text-right font-extrabold text-green-600">${closer.deals_closed}</td>
-                                </tr>
-                            `;
-                        });
-                    } else {
-                        closersHTML = `<tr><td colspan="2" class="py-4 text-center text-slate-400">No active closers found.</td></tr>`;
-                    }
+                if (data.closers.length > 0) {
+                    data.closers.forEach(closer => {
+                        closersHTML += `
+                            <tr class="is-clickable" onclick="window.location='/admin/workflows?assigned_user_id=${closer.id}'">
+                                <td><a href="/admin/workflows?assigned_user_id=${closer.id}" class="admin-dash-table-link">${closer.name}</a></td>
+                                <td class="text-right"><span class="admin-dash-table-num is-success">${closer.deals_closed}</span></td>
+                            </tr>
+                        `;
+                    });
+                } else {
+                    closersHTML = `<tr><td colspan="2" class="admin-dash-empty">No active closers found.</td></tr>`;
+                }
                 closersBody.innerHTML = closersHTML;
             }
 
             const workflowsBody = document.getElementById('workflows-table-body');
             if (workflowsBody) {
                 let workflowsHTML = '';
-                    const newLabels = [];
-                    const newTotals = [];
-                    const newEnriched = [];
-                    const newClosed = [];
+                const newLabels = [];
+                const newTotals = [];
+                const newEnriched = [];
+                const newClosed = [];
 
-                    if (data.workflows.length > 0) {
-                        data.workflows.forEach((wf, index) => {
-                            // Collect data for top 5 charts
-                            if (index < 5) {
-                                newLabels.push(wf.name);
-                                newTotals.push(wf.total_leads);
-                                newEnriched.push(wf.enriched_leads);
-                                newClosed.push(wf.closed_deals);
-                            }
+                if (data.workflows.length > 0) {
+                    data.workflows.forEach((wf, index) => {
+                        if (index < 5) {
+                            newLabels.push(wf.name);
+                            newTotals.push(wf.total_leads);
+                            newEnriched.push(wf.enriched_leads);
+                            newClosed.push(wf.closed_deals);
+                        }
 
-                            workflowsHTML += `
-                                <tr class="hover:bg-slate-50 transition">
-                                    <td class="py-3.5 font-semibold text-slate-800">
-                                        <a href="/admin/workflows/${wf.id}" class="text-indigo-600 hover:text-indigo-900">${wf.name}</a>
-                                        <span class="block text-xs font-normal text-slate-400">${wf.filename || ''}</span>
-                                    </td>
-                                    <td class="py-3.5 text-slate-500">${wf.created_at}</td>
-                                    <td class="py-3.5 text-right font-semibold text-slate-800">${wf.total_leads}</td>
-                                    <td class="py-3.5 text-right text-emerald-600 font-semibold">${wf.enriched_leads}</td>
-                                    <td class="py-3.5 text-right text-red-500 font-semibold">${wf.failed_leads}</td>
-                                    <td class="py-3.5 text-right text-green-600 font-semibold">${wf.closed_deals}</td>
-                                    <td class="py-3.5 text-right">
-                                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">
-                                            ${wf.enrichment_rate}%
-                                        </span>
-                                    </td>
-                                    <td class="py-3.5 text-right">
-                                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-700">
-                                            ${wf.close_rate}%
-                                        </span>
-                                    </td>
-                                    <td class="py-3.5 text-right">
-                                        <a href="/admin/workflows/${wf.id}" class="app-btn app-btn-secondary app-btn-sm !py-1 !px-2">Track file</a>
-                                    </td>
-                                </tr>
-                            `;
-                        });
-                    } else {
-                        workflowsHTML = `<tr><td colspan="9" class="py-4 text-center text-slate-400">No workflow files uploaded yet.</td></tr>`;
-                    }
+                        workflowsHTML += `
+                            <tr>
+                                <td>
+                                    <a href="/admin/workflows/${wf.id}" class="admin-dash-table-link">${wf.name}</a>
+                                    <span class="admin-dash-table-meta">${wf.filename || ''}</span>
+                                </td>
+                                <td>${wf.created_at}</td>
+                                <td class="text-right"><span class="admin-dash-table-num">${wf.total_leads}</span></td>
+                                <td class="text-right"><span class="admin-dash-table-num is-success">${wf.enriched_leads}</span></td>
+                                <td class="text-right"><span class="admin-dash-table-num is-danger">${wf.failed_leads}</span></td>
+                                <td class="text-right"><span class="admin-dash-table-num is-success">${wf.closed_deals}</span></td>
+                                <td class="text-right"><span class="admin-dash-badge is-success">${wf.enrichment_rate}%</span></td>
+                                <td class="text-right"><span class="admin-dash-badge is-success">${wf.close_rate}%</span></td>
+                                <td class="text-right">
+                                    <a href="/admin/workflows/${wf.id}" class="app-btn app-btn-secondary app-btn-sm">Track file</a>
+                                </td>
+                            </tr>
+                        `;
+                    });
+                } else {
+                    workflowsHTML = `<tr><td colspan="9" class="admin-dash-empty">No workflow files uploaded yet.</td></tr>`;
+                }
                 workflowsBody.innerHTML = workflowsHTML;
 
                 if (workflowsChart) {

@@ -7,6 +7,96 @@ class MarkdownReportParser
     /**
      * @return array<string, mixed>
      */
+    public function parseContent(string $content): array
+    {
+        $json = $this->decodeJsonReport($content);
+        if ($json !== null) {
+            return $this->parseJsonReport($json);
+        }
+
+        return $this->parse($content);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    protected function decodeJsonReport(string $content): ?array
+    {
+        $trimmed = trim($content);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        if (preg_match('/^```(?:json)?\s*([\s\S]*?)\s*```$/i', $trimmed, $match)) {
+            $trimmed = trim($match[1]);
+        }
+
+        if (! str_starts_with($trimmed, '{') && ! str_starts_with($trimmed, '[')) {
+            return null;
+        }
+
+        $decoded = json_decode($trimmed, true);
+
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $json
+     * @return array<string, mixed>
+     */
+    protected function parseJsonReport(array $json): array
+    {
+        return [
+            'business_name_official' => $this->scalarField($json['business_name'] ?? $json['business_name_official'] ?? null),
+            'physical_address' => $this->scalarField($json['address'] ?? $json['physical_address'] ?? null),
+            'owner_name' => $this->scalarField($json['owner_name'] ?? null),
+            'direct_phone' => $this->scalarField($json['phone_number'] ?? $json['direct_phone'] ?? $json['phone'] ?? null, true),
+            'direct_email' => $this->scalarField($json['owner_email'] ?? $json['direct_email'] ?? $json['email'] ?? null),
+            'payment_processor' => $this->scalarField($json['payment_processor'] ?? null),
+            'system_integration' => $this->scalarField(
+                $json['booking_pos_software'] ?? $json['system_integration'] ?? $json['pos_system'] ?? null,
+                true,
+            ),
+            'website' => $this->scalarField($json['website'] ?? null),
+            'primary_service' => $this->scalarField($json['primary_service'] ?? null),
+            'operating_hours' => $this->scalarField($json['operating_hours'] ?? null),
+        ];
+    }
+
+    protected function scalarField(mixed $value, bool $joinArrays = false): ?string
+    {
+        if (is_array($value)) {
+            if ($value === []) {
+                return null;
+            }
+
+            if ($joinArrays) {
+                $parts = array_values(array_filter(array_map(
+                    fn (mixed $item) => $this->scalarField($item),
+                    $value,
+                )));
+
+                return $parts === [] ? null : implode(', ', $parts);
+            }
+
+            return $this->scalarField($value[0] ?? null);
+        }
+
+        if (! is_scalar($value)) {
+            return null;
+        }
+
+        $value = trim((string) $value);
+        if ($value === '' || $this->isUnavailable($value)) {
+            return null;
+        }
+
+        return $value;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
     public function parse(string $markdown): array
     {
         $fields = [

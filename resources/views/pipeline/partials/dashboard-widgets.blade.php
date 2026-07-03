@@ -2,7 +2,7 @@
     <div class="space-y-4">
         {{-- KPI row --}}
         @if (!empty($dashboard['kpis']))
-            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 app-stat-grid">
                 @foreach ($dashboard['kpis'] as $kpi)
                     @if (!empty($kpi['href']))
                         <a href="{{ $kpi['href'] }}" class="app-card app-card-padded hover:border-zinc-400 transition">
