@@ -16,6 +16,8 @@
 
         @include('pipeline.partials.dashboard-widgets', ['dashboard' => $dashboard ?? []])
 
+        @include('pipeline.partials.detail-focus-banner', ['focus' => $focus ?? null])
+
         @if (($unassignedLeads ?? 0) > 0)
             <div class="app-alert app-alert-info">
                 <p class="app-alert-title">{{ number_format($unassignedLeads) }} unassigned lead(s) ready for distribution</p>

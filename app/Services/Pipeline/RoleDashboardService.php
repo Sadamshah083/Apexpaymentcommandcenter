@@ -189,6 +189,62 @@ class RoleDashboardService
             });
         }
 
+        if (! empty($filters['focus'])) {
+            $this->applyFocusFilter($query, $filters, $workspace);
+        }
+
         return $query;
+    }
+
+    protected function applyFocusFilter($query, array $filters, Workspace $workspace): void
+    {
+        switch ($filters['focus']) {
+            case 'followups':
+                $query->where(function ($q) {
+                    $q->where(function ($inner) {
+                        $inner->whereNotNull('followup_at')->where('followup_at', '<=', now());
+                    })->orWhere(function ($inner) {
+                        $inner->whereNotNull('schedule_at')->where('schedule_at', '<=', now());
+                    });
+                });
+                break;
+            case 'settled':
+                $query->where('appointment_settled_at', '>=', now()->startOfWeek());
+                break;
+            case 'unworked':
+                $query->whereDoesntHave('activities')
+                    ->where('created_at', '>=', now()->subDays(7));
+                break;
+            case 'handoff':
+                $query->where('pipeline_phase', 'appointment_settled')->whereNull('assigned_closer_id');
+                break;
+            case 'tier':
+                if (filled($filters['tier'] ?? null)) {
+                    $query->where('tier', $filters['tier']);
+                } else {
+                    $query->whereNull('tier');
+                }
+                break;
+            case 'status':
+                if (filled($filters['status'] ?? null)) {
+                    $query->where('closer_status', $filters['status']);
+                }
+                break;
+            case 'callbacks':
+                $query->where(function ($q) {
+                    $q->whereNotNull('followup_at')->orWhereNotNull('schedule_at');
+                })->orderByRaw('COALESCE(followup_at, schedule_at) asc');
+                break;
+            case 'member':
+                if (filled($filters['member'] ?? null)) {
+                    $memberId = (int) $filters['member'];
+                    $query->where(function ($q) use ($memberId) {
+                        $q->where('assigned_user_id', $memberId)
+                            ->orWhere('assigned_setter_id', $memberId)
+                            ->orWhere('assigned_closer_id', $memberId);
+                    });
+                }
+                break;
+        }
     }
 }

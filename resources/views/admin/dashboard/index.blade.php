@@ -3,7 +3,7 @@
 @section('title', 'Admin Dashboard')
 
 @section('content')
-<div class="admin-dashboard-page">
+<div class="admin-dashboard-page {{ !empty($detail) ? 'admin-dashboard-page--detail' : '' }}">
     <div class="admin-dashboard-header">
         <div>
             <h2 class="admin-dashboard-title">Admin Dashboard</h2>
@@ -18,25 +18,32 @@
         </div>
     </div>
 
+    @include('admin.dashboard.partials.detail-panel', ['detail' => $detail ?? null])
+
+    @if (empty($detail))
 @if (!empty($ops))
 <div class="admin-dash-grid-4">
-    <a href="{{ route('admin.sales-ops.index') }}" class="admin-dash-card admin-dash-stat-card">
+    <a href="{{ $detailService->adminDetailUrl('ops-active') }}" class="admin-dash-card admin-dash-stat-card admin-dash-stat-card--clickable">
         <p class="admin-dash-stat-label">Active CRM Leads</p>
         <p id="ops-active-leads" class="admin-dash-stat-value">{{ $ops['overview']['total_active_leads'] ?? 0 }}</p>
+        <span class="admin-dash-stat-chevron" aria-hidden="true">→</span>
     </a>
-    <a href="{{ route('admin.sales-ops.index') }}" class="admin-dash-card admin-dash-stat-card">
+    <a href="{{ $detailService->adminDetailUrl('ops-verification') }}" class="admin-dash-card admin-dash-stat-card admin-dash-stat-card--clickable">
         <p class="admin-dash-stat-label">Awaiting Verification</p>
         <p id="ops-pending-verification" class="admin-dash-stat-value is-warning">{{ $ops['overview']['pending_verification'] ?? 0 }}</p>
+        <span class="admin-dash-stat-chevron" aria-hidden="true">→</span>
     </a>
-    <a href="{{ route('admin.sales-ops.reactivation') }}" class="admin-dash-card admin-dash-stat-card">
+    <a href="{{ $detailService->adminDetailUrl('ops-reactivation') }}" class="admin-dash-card admin-dash-stat-card admin-dash-stat-card--clickable">
         <p class="admin-dash-stat-label">Reactivation Queue</p>
         <p id="ops-reactivation" class="admin-dash-stat-value">{{ $ops['overview']['reactivation_queue'] ?? 0 }}</p>
+        <span class="admin-dash-stat-chevron" aria-hidden="true">→</span>
     </a>
-    <div class="admin-dash-card admin-dash-stat-card">
+    <a href="{{ $detailService->adminDetailUrl('ops-handoff') }}" class="admin-dash-card admin-dash-stat-card admin-dash-stat-card--clickable">
         <p class="admin-dash-stat-label">Handoff Queue</p>
         <p id="ops-handoff-queue" class="admin-dash-stat-value is-accent">{{ $ops['handoff_queue'] ?? 0 }}</p>
         <p class="admin-dash-stat-note">Settled, awaiting closer</p>
-    </div>
+        <span class="admin-dash-stat-chevron" aria-hidden="true">→</span>
+    </a>
 </div>
 
 <div class="admin-dash-grid-2">
@@ -44,10 +51,10 @@
         <h3 class="admin-dash-section-title">Today's team activity</h3>
         <div class="admin-dash-activity-grid">
             @foreach (['dials' => 'Dials', 'conversations' => 'Conversations', 'discoveries' => 'Discoveries', 'meetings' => 'Meetings booked'] as $key => $label)
-                <div class="admin-dash-activity-item">
+                <a href="{{ $detailService->adminDetailUrl('activity', ['type' => $key]) }}" class="admin-dash-activity-item admin-dash-activity-item--clickable">
                     <p class="admin-dash-stat-label">{{ $label }}</p>
                     <p id="ops-today-{{ $key }}" class="admin-dash-stat-value">{{ $ops['today_activity'][$key] ?? 0 }}</p>
-                </div>
+                </a>
             @endforeach
         </div>
         @if (($ops['at_capacity_setters'] ?? 0) > 0)
@@ -62,14 +69,15 @@
         </div>
         <div id="ops-leaderboard" class="admin-dash-leaderboard">
             @forelse ($ops['leaderboard'] ?? [] as $i => $row)
-                <div class="admin-dash-leaderboard-row">
+                <a href="{{ $detailService->adminDetailUrl('performer', ['user_id' => $row['user_id']]) }}"
+                    class="admin-dash-leaderboard-row admin-dash-leaderboard-row--clickable">
                     <span>
                         <span class="admin-dash-leaderboard-rank">#{{ $i + 1 }}</span>
                         <span class="admin-dash-leaderboard-name">{{ $row['name'] }}</span>
                         <span class="admin-dash-leaderboard-role">· {{ $row['role'] }}</span>
                     </span>
                     <span class="admin-dash-leaderboard-stats">{{ $row['dials'] }} d · {{ $row['meetings'] }} m · {{ $row['deals_funded'] }} funded</span>
-                </div>
+                </a>
             @empty
                 <p class="admin-dash-empty">No activity logged this week yet.</p>
             @endforelse
@@ -82,35 +90,35 @@
     <div class="admin-dash-card">
         <h3 class="admin-dash-section-title">Pipeline (all-time)</h3>
         <div class="admin-dash-rows">
-            <a href="{{ route('admin.workflows.index') }}" class="admin-dash-row">
+            <a href="{{ $detailService->adminDetailUrl('pipeline', ['metric' => 'total_leads']) }}" class="admin-dash-row admin-dash-row--clickable">
                 <span class="admin-dash-row-label">Total Leads</span>
                 <span id="stat-total_leads" class="admin-dash-row-value">{{ $pipeline['total_leads'] }}</span>
             </a>
-            <a href="{{ route('admin.workflows.index', ['phase' => 'imported']) }}" class="admin-dash-row">
+            <a href="{{ $detailService->adminDetailUrl('pipeline', ['metric' => 'new']) }}" class="admin-dash-row admin-dash-row--clickable">
                 <span class="admin-dash-row-label">New</span>
                 <span id="stat-new" class="admin-dash-row-value">{{ $pipeline['new'] }}</span>
             </a>
-            <a href="{{ route('admin.workflows.index', ['phase' => 'enriched']) }}" class="admin-dash-row">
+            <a href="{{ $detailService->adminDetailUrl('pipeline', ['metric' => 'qualified']) }}" class="admin-dash-row admin-dash-row--clickable">
                 <span class="admin-dash-row-label">Qualified</span>
                 <span id="stat-qualified" class="admin-dash-row-value">{{ $pipeline['qualified'] }}</span>
             </a>
-            <a href="{{ route('admin.workflows.index', ['phase' => 'appointment_settled']) }}" class="admin-dash-row">
+            <a href="{{ $detailService->adminDetailUrl('pipeline', ['metric' => 'booked']) }}" class="admin-dash-row admin-dash-row--clickable">
                 <span class="admin-dash-row-label">Booked</span>
                 <span id="stat-booked" class="admin-dash-row-value">{{ $pipeline['booked'] }}</span>
             </a>
-            <a href="{{ route('admin.workflows.index', ['phase' => 'with_closer']) }}" class="admin-dash-row">
+            <a href="{{ $detailService->adminDetailUrl('pipeline', ['metric' => 'showed']) }}" class="admin-dash-row admin-dash-row--clickable">
                 <span class="admin-dash-row-label">Showed</span>
                 <span id="stat-showed" class="admin-dash-row-value">{{ $pipeline['showed'] }}</span>
             </a>
-            <a href="{{ route('admin.workflows.index', ['phase' => 'closed']) }}" class="admin-dash-row">
+            <a href="{{ $detailService->adminDetailUrl('pipeline', ['metric' => 'closed_won']) }}" class="admin-dash-row admin-dash-row--clickable">
                 <span class="admin-dash-row-label">Closed (Won)</span>
                 <span id="stat-closed_won" class="admin-dash-row-value is-success">{{ $pipeline['closed_won'] }}</span>
             </a>
-            <a href="{{ route('admin.workflows.index', ['phase' => 'with_setter']) }}" class="admin-dash-row">
+            <a href="{{ $detailService->adminDetailUrl('pipeline', ['metric' => 'not_now']) }}" class="admin-dash-row admin-dash-row--clickable">
                 <span class="admin-dash-row-label">Not Now</span>
                 <span id="stat-not_now" class="admin-dash-row-value">{{ $pipeline['not_now'] }}</span>
             </a>
-            <a href="{{ route('admin.workflows.index', ['phase' => 'closed', 'search' => 'closed_lost']) }}" class="admin-dash-row">
+            <a href="{{ $detailService->adminDetailUrl('pipeline', ['metric' => 'dead']) }}" class="admin-dash-row admin-dash-row--clickable">
                 <span class="admin-dash-row-label">Dead</span>
                 <span id="stat-dead" class="admin-dash-row-value is-danger">{{ $pipeline['dead'] }}</span>
             </a>
@@ -161,9 +169,9 @@
                 </thead>
                 <tbody id="setters-table-body">
                     @forelse ($setters as $setter)
-                        <tr class="is-clickable" onclick="window.location='{{ route('admin.workflows.index', ['assigned_user_id' => $setter['id']]) }}'">
+                        <tr class="is-clickable" onclick="window.location='{{ $detailService->adminDetailUrl('user', ['user_id' => $setter['id']]) }}'">
                             <td>
-                                <a href="{{ route('admin.workflows.index', ['assigned_user_id' => $setter['id']]) }}" class="admin-dash-table-link">{{ $setter['name'] }}</a>
+                                <a href="{{ $detailService->adminDetailUrl('user', ['user_id' => $setter['id']]) }}" class="admin-dash-table-link">{{ $setter['name'] }}</a>
                             </td>
                             <td class="text-right"><span class="admin-dash-table-num">{{ $setter['leads_logged'] }}</span></td>
                         </tr>
@@ -189,9 +197,9 @@
                 </thead>
                 <tbody id="closers-table-body">
                     @forelse ($closers as $closer)
-                        <tr class="is-clickable" onclick="window.location='{{ route('admin.workflows.index', ['assigned_user_id' => $closer['id']]) }}'">
+                        <tr class="is-clickable" onclick="window.location='{{ $detailService->adminDetailUrl('user', ['user_id' => $closer['id']]) }}'">
                             <td>
-                                <a href="{{ route('admin.workflows.index', ['assigned_user_id' => $closer['id']]) }}" class="admin-dash-table-link">{{ $closer['name'] }}</a>
+                                <a href="{{ $detailService->adminDetailUrl('user', ['user_id' => $closer['id']]) }}" class="admin-dash-table-link">{{ $closer['name'] }}</a>
                             </td>
                             <td class="text-right"><span class="admin-dash-table-num is-success">{{ $closer['deals_closed'] }}</span></td>
                         </tr>
@@ -243,7 +251,7 @@
                 @forelse ($workflows as $wf)
                     <tr>
                         <td>
-                            <a href="{{ route('admin.workflows.show', $wf['id']) }}" class="admin-dash-table-link">{{ $wf['name'] }}</a>
+                            <a href="{{ $detailService->adminDetailUrl('workflow', ['workflow_id' => $wf['id']]) }}" class="admin-dash-table-link">{{ $wf['name'] }}</a>
                             <span class="admin-dash-table-meta">{{ $wf['filename'] }}</span>
                         </td>
                         <td>{{ $wf['created_at'] }}</td>
@@ -254,7 +262,7 @@
                         <td class="text-right"><span class="admin-dash-badge is-success">{{ $wf['enrichment_rate'] }}%</span></td>
                         <td class="text-right"><span class="admin-dash-badge is-success">{{ $wf['close_rate'] }}%</span></td>
                         <td class="text-right">
-                            <a href="{{ route('admin.workflows.show', $wf['id']) }}" class="app-btn app-btn-secondary app-btn-sm">Track file</a>
+                            <a href="{{ $detailService->adminDetailUrl('workflow', ['workflow_id' => $wf['id']]) }}" class="app-btn app-btn-secondary app-btn-sm">View details</a>
                         </td>
                     </tr>
                 @empty
@@ -267,15 +275,22 @@
     </div>
 </div>
 
+@endif
 </div>
 @endsection
 
 @push('scripts')
+@if (empty($detail))
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
     document.addEventListener('DOMContentLoaded', function () {
-        const funnelCtx = document.getElementById('pipelineFunnelChart').getContext('2d');
-        const workflowsCtx = document.getElementById('workflowsPerformanceChart').getContext('2d');
+        const funnelEl = document.getElementById('pipelineFunnelChart');
+        const workflowsEl = document.getElementById('workflowsPerformanceChart');
+        if (!funnelEl || !workflowsEl) return;
+
+        const funnelCtx = funnelEl.getContext('2d');
+        const workflowsCtx = workflowsEl.getContext('2d');
+        const detailBase = @json(url('/admin/dashboard'));
 
         const funnelChart = new Chart(funnelCtx, {
             type: 'bar',
@@ -441,8 +456,8 @@
                 if (data.setters.length > 0) {
                     data.setters.forEach(setter => {
                         settersHTML += `
-                            <tr class="is-clickable" onclick="window.location='/admin/workflows?assigned_user_id=${setter.id}'">
-                                <td><a href="/admin/workflows?assigned_user_id=${setter.id}" class="admin-dash-table-link">${setter.name}</a></td>
+                            <tr class="is-clickable" onclick="window.location='${detailBase}?detail=user&user_id=${setter.id}'">
+                                <td><a href="${detailBase}?detail=user&user_id=${setter.id}" class="admin-dash-table-link">${setter.name}</a></td>
                                 <td class="text-right"><span class="admin-dash-table-num">${setter.leads_logged}</span></td>
                             </tr>
                         `;
@@ -459,8 +474,8 @@
                 if (data.closers.length > 0) {
                     data.closers.forEach(closer => {
                         closersHTML += `
-                            <tr class="is-clickable" onclick="window.location='/admin/workflows?assigned_user_id=${closer.id}'">
-                                <td><a href="/admin/workflows?assigned_user_id=${closer.id}" class="admin-dash-table-link">${closer.name}</a></td>
+                            <tr class="is-clickable" onclick="window.location='${detailBase}?detail=user&user_id=${closer.id}'">
+                                <td><a href="${detailBase}?detail=user&user_id=${closer.id}" class="admin-dash-table-link">${closer.name}</a></td>
                                 <td class="text-right"><span class="admin-dash-table-num is-success">${closer.deals_closed}</span></td>
                             </tr>
                         `;
@@ -491,7 +506,7 @@
                         workflowsHTML += `
                             <tr>
                                 <td>
-                                    <a href="/admin/workflows/${wf.id}" class="admin-dash-table-link">${wf.name}</a>
+                                    <a href="${detailBase}?detail=workflow&workflow_id=${wf.id}" class="admin-dash-table-link">${wf.name}</a>
                                     <span class="admin-dash-table-meta">${wf.filename || ''}</span>
                                 </td>
                                 <td>${wf.created_at}</td>
@@ -502,7 +517,7 @@
                                 <td class="text-right"><span class="admin-dash-badge is-success">${wf.enrichment_rate}%</span></td>
                                 <td class="text-right"><span class="admin-dash-badge is-success">${wf.close_rate}%</span></td>
                                 <td class="text-right">
-                                    <a href="/admin/workflows/${wf.id}" class="app-btn app-btn-secondary app-btn-sm">Track file</a>
+                                    <a href="${detailBase}?detail=workflow&workflow_id=${wf.id}" class="app-btn app-btn-secondary app-btn-sm">View details</a>
                                 </td>
                             </tr>
                         `;
@@ -535,4 +550,20 @@
         }, { once: true });
     });
 </script>
+@else
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const pollEndpoint = "{{ route('admin.dashboard.realtime-data') }}" + window.location.search;
+        if (window.startProgressPoll) {
+            window.startProgressPoll(pollEndpoint, (data) => {
+                const countEl = document.getElementById('detail-total-count');
+                if (countEl && data.detail) {
+                    countEl.textContent = Number(data.detail.total || 0).toLocaleString();
+                }
+                return true;
+            }, { activeMs: 5000, hiddenMs: 15000 });
+        }
+    });
+</script>
+@endif
 @endpush

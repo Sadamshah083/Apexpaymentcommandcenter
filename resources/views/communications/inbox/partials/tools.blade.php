@@ -5,7 +5,7 @@
             'defaultCallerId' => $defaultCallerId ?? null,
         ])
 
-        <section class="ghl-tools-section">
+        <section class="ghl-tools-section ghl-tools-section-card">
             <h3 class="ghl-inbox-rail-title">Quick dial</h3>
             @include('communications.inbox.partials.rail-dialer-compact', [
                 'routePrefix' => $routePrefix,
@@ -17,7 +17,7 @@
         </section>
 
         @if (!empty($callStats))
-            <section class="ghl-tools-section">
+            <section class="ghl-tools-section ghl-tools-section-card">
                 <h3 class="ghl-inbox-rail-title">Call summary</h3>
                 <div class="ghl-inbox-rail-stats">
                     <div><span class="ghl-inbox-rail-stat-value">{{ $callStats['total'] ?? 0 }}</span><span
@@ -33,7 +33,7 @@
         @endif
 
         @if (!empty($phoneUsers))
-            <section class="ghl-tools-section">
+            <section class="ghl-tools-section ghl-tools-section-card">
                 <h3 class="ghl-inbox-rail-title">Phone lines</h3>
                 <div class="ghl-team-list ghl-team-list-compact">
                     @foreach ($phoneUsers as $user)

@@ -20,46 +20,50 @@ class PortalDashboardService
 
     public function forUser(User $user, Workspace $workspace): array
     {
+        $route = $user->portalDashboardRoute();
+
         return match ($user->effectivePortalRole($workspace->id)) {
-            'appointment_setter' => $this->setterDashboard($user, $workspace),
-            'appointment_setter_team_lead' => $this->setterTeamDashboard($workspace),
-            'closers_team_lead' => $this->closerTeamDashboard($workspace),
-            'closer' => $this->closerDashboard($user, $workspace),
+            'appointment_setter' => $this->setterDashboard($user, $workspace, $route),
+            'appointment_setter_team_lead' => $this->setterTeamDashboard($workspace, $route),
+            'closers_team_lead' => $this->closerTeamDashboard($workspace, $route),
+            'closer' => $this->closerDashboard($user, $workspace, $route),
             default => [],
         };
     }
 
-    public function setterDashboard(User $user, Workspace $workspace): array
+    public function setterDashboard(User $user, Workspace $workspace, string $route = 'portal.setter.dashboard'): array
     {
         $leadQuery = $this->userLeadQuery($workspace, $user->id, 'with_setter');
 
         return [
             'role' => 'appointment_setter',
+            'dashboard_route' => $route,
             'daily' => $this->performance->dailyMetrics($user, $workspace),
             'weekly' => $this->performance->weeklyMetrics($user, $workspace),
             'kpis' => [
-                ['label' => 'Active leads', 'value' => (clone $leadQuery)->count()],
-                ['label' => 'Follow-ups due', 'value' => $this->followUpsDueCount($workspace, $user->id, 'with_setter')],
-                ['label' => 'Calls today', 'value' => $this->callsToday($workspace, $user->id)],
-                ['label' => 'Settled this week', 'value' => $this->settledThisWeek($workspace, $user->id)],
+                ['label' => 'Active leads', 'value' => (clone $leadQuery)->count(), 'focus' => 'active'],
+                ['label' => 'Follow-ups due', 'value' => $this->followUpsDueCount($workspace, $user->id, 'with_setter'), 'focus' => 'followups'],
+                ['label' => 'Calls today', 'value' => $this->callsToday($workspace, $user->id), 'focus' => 'calls'],
+                ['label' => 'Settled this week', 'value' => $this->settledThisWeek($workspace, $user->id), 'focus' => 'settled'],
             ],
             'upcoming' => $this->upcomingCallbacks($workspace, $user->id, 'with_setter'),
             'tier_breakdown' => $this->tierBreakdown($workspace, $user->id, 'with_setter'),
         ];
     }
 
-    public function setterTeamDashboard(Workspace $workspace): array
+    public function setterTeamDashboard(Workspace $workspace, string $route = 'portal.setter-team.dashboard'): array
     {
         $setterIds = $this->activeMemberIds($workspace, ['appointment_setter']);
         $teamRollup = $this->teamActivityRollup($workspace, $setterIds);
 
         return [
             'role' => 'appointment_setter_team_lead',
+            'dashboard_route' => $route,
             'kpis' => [
-                ['label' => 'Team active leads', 'value' => $this->teamActiveLeads($workspace, $setterIds, 'with_setter')],
-                ['label' => 'Settled this week', 'value' => $this->teamSettledThisWeek($workspace, $setterIds)],
-                ['label' => 'Awaiting closer', 'value' => $this->handoffQueueCount($workspace)],
-                ['label' => 'Team dials today', 'value' => $teamRollup['dials']],
+                ['label' => 'Team active leads', 'value' => $this->teamActiveLeads($workspace, $setterIds, 'with_setter'), 'focus' => 'active'],
+                ['label' => 'Settled this week', 'value' => $this->teamSettledThisWeek($workspace, $setterIds), 'focus' => 'settled'],
+                ['label' => 'Awaiting closer', 'value' => $this->handoffQueueCount($workspace), 'focus' => 'handoff'],
+                ['label' => 'Team dials today', 'value' => $teamRollup['dials'], 'focus' => 'calls'],
             ],
             'team_activity' => $teamRollup,
             'leaderboard' => $this->performance->teamLeaderboard($workspace, 'week')
@@ -75,7 +79,7 @@ class PortalDashboardService
         ];
     }
 
-    public function closerDashboard(User $user, Workspace $workspace): array
+    public function closerDashboard(User $user, Workspace $workspace, string $route = 'portal.closer.dashboard'): array
     {
         $statusCounts = $this->closerStatusCounts($workspace, $user->id);
         $weeklyCloses = $this->closesThisWeek($workspace, $user->id);
@@ -83,11 +87,12 @@ class PortalDashboardService
 
         return [
             'role' => 'closer',
+            'dashboard_route' => $route,
             'kpis' => [
-                ['label' => 'Active pipeline', 'value' => $statusCounts['total']],
-                ['label' => 'Follow-ups due', 'value' => $this->followUpsDueCount($workspace, $user->id, 'with_closer')],
+                ['label' => 'Active pipeline', 'value' => $statusCounts['total'], 'focus' => 'active'],
+                ['label' => 'Follow-ups due', 'value' => $this->followUpsDueCount($workspace, $user->id, 'with_closer'), 'focus' => 'followups'],
                 ['label' => 'Revenue MTD', 'value' => '$'.number_format($this->revenueMtd($workspace, $user->id), 0)],
-                ['label' => 'Calls today', 'value' => $this->callsToday($workspace, $user->id)],
+                ['label' => 'Calls today', 'value' => $this->callsToday($workspace, $user->id), 'focus' => 'calls'],
             ],
             'status_breakdown' => $statusCounts['by_status'],
             'weekly_closes' => [
@@ -99,18 +104,19 @@ class PortalDashboardService
         ];
     }
 
-    public function closerTeamDashboard(Workspace $workspace): array
+    public function closerTeamDashboard(Workspace $workspace, string $route = 'portal.closer-team.dashboard'): array
     {
         $closerIds = $this->activeMemberIds($workspace, ['closer']);
         $handoffCount = $this->handoffQueueCount($workspace);
 
         return [
             'role' => 'closers_team_lead',
+            'dashboard_route' => $route,
             'kpis' => [
                 ['label' => 'Handoff queue', 'value' => $handoffCount, 'href' => route('portal.closer-team.queue')],
-                ['label' => 'Team active leads', 'value' => $this->teamActiveLeads($workspace, $closerIds, 'with_closer')],
-                ['label' => 'Sales this week', 'value' => $this->teamSalesThisWeek($workspace, $closerIds)],
-                ['label' => 'Unworked new', 'value' => $this->unworkedNewLeads($workspace, $closerIds)],
+                ['label' => 'Team active leads', 'value' => $this->teamActiveLeads($workspace, $closerIds, 'with_closer'), 'focus' => 'active'],
+                ['label' => 'Sales this week', 'value' => $this->teamSalesThisWeek($workspace, $closerIds), 'focus' => 'settled'],
+                ['label' => 'Unworked new', 'value' => $this->unworkedNewLeads($workspace, $closerIds), 'focus' => 'unworked'],
             ],
             'revenue_mtd' => $this->teamRevenueMtd($workspace, $closerIds),
             'leaderboard' => $this->performance->teamLeaderboard($workspace, 'week')

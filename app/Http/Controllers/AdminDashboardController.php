@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use App\Models\WorkflowLead;
 use App\Models\LeadActivity;
+use App\Services\Dashboard\DashboardDetailService;
 use App\Services\Portal\PortalDashboardService;
 use App\Services\Workspace\WorkspaceContextService;
 use Illuminate\Http\Request;
@@ -16,6 +17,7 @@ class AdminDashboardController extends Controller
     public function __construct(
         protected WorkspaceContextService $workspaceContext,
         protected PortalDashboardService $portalDashboard,
+        protected DashboardDetailService $detailService,
     ) {}
 
     public function index(Request $request)
@@ -24,10 +26,13 @@ class AdminDashboardController extends Controller
         $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
 
         $data = $this->getDashboardData($workspace);
+        $detail = $this->detailService->resolveAdmin($request, $workspace);
 
         return view('admin.dashboard.index', array_merge($data, [
             'workspace' => $workspace,
             'ops' => $this->portalDashboard->adminOperationalSummary($workspace),
+            'detail' => $detail,
+            'detailService' => $this->detailService,
         ]));
     }
 
@@ -37,9 +42,15 @@ class AdminDashboardController extends Controller
         $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
 
         $data = $this->getDashboardData($workspace);
+        $detail = $this->detailService->resolveAdmin($request, $workspace);
 
         return response()->json(array_merge($data, [
             'ops' => $this->portalDashboard->adminOperationalSummary($workspace),
+            'detail' => $detail ? [
+                'key' => $detail['key'] ?? null,
+                'total' => $detail['total'] ?? 0,
+                'stats' => $detail['stats'] ?? [],
+            ] : null,
         ]));
     }
 

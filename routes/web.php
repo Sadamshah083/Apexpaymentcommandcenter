@@ -136,6 +136,14 @@ Route::prefix('admin')->name('admin.')->middleware([
 
     Route::post('leads/{lead}/approve', [WorkflowController::class, 'approveLead'])->name('leads.approve');
     Route::post('leads/{lead}/reject', [WorkflowController::class, 'rejectLead'])->name('leads.reject');
+    Route::get('leads/{lead}', [WorkflowController::class, 'leadShow'])->name('leads.show');
+    Route::post('leads/{lead}', [WorkflowController::class, 'leadUpdate'])->name('leads.update');
+    Route::delete('leads/{lead}', [WorkflowController::class, 'leadDestroy'])->name('leads.destroy');
+    Route::post('leads/{lead}/verify-email', [WorkflowController::class, 'verifyLeadEmail'])->name('leads.verify-email');
+    Route::post('leads/{lead}/analyze-email', [WorkflowController::class, 'analyzeLeadEmail'])->name('leads.analyze-email');
+    Route::post('leads/{lead}/check-domain', [WorkflowController::class, 'checkLeadDomain'])->name('leads.check-domain');
+    Route::post('leads/{lead}/setter-status', [PipelineController::class, 'updateSetterStatus'])->name('leads.setter-status');
+    Route::post('leads/{lead}/closer-status', [PipelineController::class, 'updateCloserStatus'])->name('leads.closer-status');
 
     Route::prefix('workspaces')->name('workspaces.')->group(function () {
         Route::get('/', [WorkflowController::class, 'workspaceIndex'])->name('index');

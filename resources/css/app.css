@@ -7964,7 +7964,7 @@ html {
 
 /* Admin dashboard — gray, small-text CRM style */
 .admin-dashboard-page {
-    color: #64748b;
+    color: #475569;
     font-size: 0.8125rem;
     font-weight: 400;
     line-height: 1.45;
@@ -7972,7 +7972,7 @@ html {
 
 .admin-dashboard-page h2,
 .admin-dashboard-page h3 {
-    color: #64748b;
+    color: #1e293b;
     font-weight: 600;
 }
 
@@ -8097,9 +8097,9 @@ a.admin-dash-stat-card:hover {
 
 .admin-dash-stat-value {
     margin-top: 0.25rem;
-    font-size: 1.375rem;
-    font-weight: 600;
-    color: #334155;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #0f172a;
     line-height: 1.2;
 }
 
@@ -8135,7 +8135,7 @@ a.admin-dash-stat-card:hover {
     font-weight: 700;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    color: #475569;
+    color: #334155;
     line-height: 1.3;
     margin: 0 0 0.875rem;
 }
@@ -9055,4 +9055,510 @@ a.admin-dash-row:hover .admin-dash-row-label {
     border-radius: var(--app-btn-radius) !important;
     font-size: var(--app-btn-font-size) !important;
     border: 1px solid var(--app-btn-brand) !important;
+}
+
+/* Dashboard — clickable cards & detail views */
+.admin-dash-stat-card--clickable {
+    position: relative;
+    padding-right: 2rem;
+}
+
+.admin-dash-stat-chevron {
+    position: absolute;
+    top: 1rem;
+    right: 0.875rem;
+    font-size: 0.875rem;
+    color: #94a3b8;
+    transition: transform 0.15s ease, color 0.15s ease;
+}
+
+a.admin-dash-stat-card:hover .admin-dash-stat-chevron {
+    color: #122e53;
+    transform: translateX(2px);
+}
+
+.admin-dash-activity-item--clickable {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.admin-dash-activity-item--clickable:hover {
+    border-color: #122e53 !important;
+    background: #f8fafc;
+}
+
+.admin-dash-leaderboard-row--clickable {
+    display: flex;
+    text-decoration: none;
+    color: inherit;
+    padding: 0.375rem 0.5rem;
+    margin: 0 -0.5rem;
+    border-radius: 0.5rem;
+    transition: background 0.15s ease;
+}
+
+.admin-dash-leaderboard-row--clickable:hover {
+    background: #f1f5f9;
+}
+
+.admin-dash-leaderboard-name {
+    font-weight: 600;
+    color: #1e293b;
+}
+
+.admin-dash-row--clickable {
+    border-radius: 0.375rem;
+    margin: 0 -0.375rem;
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+}
+
+.admin-dash-row--clickable:hover .admin-dash-row-value {
+    color: #122e53;
+}
+
+.admin-dashboard-page--detail .admin-dashboard-header {
+    margin-bottom: 0.75rem;
+}
+
+/* Admin detail panel */
+.dash-detail-panel {
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 0.875rem;
+    padding: 1.25rem 1.375rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+}
+
+.dash-detail-panel-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.dash-detail-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #64748b;
+    text-decoration: none;
+    margin-bottom: 0.5rem;
+}
+
+.dash-detail-back svg {
+    width: 0.875rem;
+    height: 0.875rem;
+}
+
+.dash-detail-back:hover {
+    color: #122e53;
+}
+
+.dash-detail-title {
+    font-size: 1.375rem;
+    font-weight: 700;
+    color: #0f172a;
+    letter-spacing: -0.02em;
+    margin: 0;
+    line-height: 1.25;
+}
+
+.dash-detail-desc {
+    margin: 0.35rem 0 0;
+    font-size: 0.8125rem;
+    color: #64748b;
+    line-height: 1.5;
+    max-width: 42rem;
+}
+
+.dash-detail-panel-meta {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-shrink: 0;
+}
+
+.dash-detail-count-value {
+    display: block;
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #0f172a;
+    line-height: 1;
+    text-align: right;
+}
+
+.dash-detail-count-label {
+    display: block;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #94a3b8;
+    text-align: right;
+}
+
+.dash-detail-live {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.25rem 0.625rem;
+    border-radius: 9999px;
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: #047857;
+}
+
+.dash-detail-live-dot {
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 9999px;
+    background: #22c55e;
+}
+
+.dash-detail-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+    gap: 0.625rem;
+    margin-bottom: 1rem;
+}
+
+.dash-detail-stat {
+    padding: 0.75rem;
+    border-radius: 0.625rem;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+}
+
+.dash-detail-stat-value {
+    display: block;
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.dash-detail-stat-label {
+    display: block;
+    margin-top: 0.15rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #64748b;
+}
+
+.dash-detail-table-wrap {
+    overflow-x: auto;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.625rem;
+}
+
+.dash-detail-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+}
+
+.dash-detail-table thead th {
+    padding: 0.625rem 0.875rem;
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #64748b;
+    text-align: left;
+}
+
+.dash-detail-table tbody td {
+    padding: 0.75rem 0.875rem;
+    border-bottom: 1px solid #f1f5f9;
+    color: #334155;
+    vertical-align: top;
+}
+
+.dash-detail-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.dash-detail-table tbody tr:hover {
+    background: #fafbfc;
+}
+
+.dash-detail-lead-name {
+    display: block;
+    font-weight: 600;
+    color: #0f172a;
+}
+
+.dash-detail-muted {
+    display: block;
+    font-size: 0.6875rem;
+    color: #94a3b8;
+    margin-top: 0.15rem;
+}
+
+.dash-detail-badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 9999px;
+    background: #eff6ff;
+    color: #1e40af;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
+.dash-detail-link {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #122e53;
+    text-decoration: none;
+}
+
+.dash-detail-link:hover {
+    text-decoration: underline;
+}
+
+.dash-detail-empty {
+    padding: 2rem 1rem !important;
+    text-align: center;
+    color: #94a3b8;
+}
+
+.dash-detail-pagination {
+    margin-top: 0.75rem;
+}
+
+.dash-detail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid #e2e8f0;
+}
+
+/* Portal dashboard widgets */
+.dash-kpi-card {
+    position: relative;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    border-color: #cbd5e1 !important;
+}
+
+.dash-kpi-card:hover {
+    border-color: #122e53 !important;
+    box-shadow: 0 2px 8px rgba(18, 46, 83, 0.08);
+}
+
+.dash-kpi-card--active {
+    border-color: #122e53 !important;
+    box-shadow: inset 0 0 0 1px #122e53;
+    background: #f8fafc;
+}
+
+.dash-kpi-card .app-kpi-value {
+    color: #0f172a;
+    font-weight: 700;
+}
+
+.dash-kpi-chevron {
+    position: absolute;
+    top: 0.875rem;
+    right: 0.875rem;
+    font-size: 0.8125rem;
+    color: #94a3b8;
+}
+
+.dash-kpi-card:hover .dash-kpi-chevron {
+    color: #122e53;
+}
+
+.dash-widget-card {
+    border-color: #cbd5e1 !important;
+}
+
+.dash-metric-label {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #64748b;
+}
+
+.dash-metric-value {
+    margin-top: 0.25rem;
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.dash-metric-target {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #94a3b8;
+}
+
+.dash-revenue-value {
+    font-size: 1.875rem;
+    font-weight: 700;
+    color: #047857;
+    margin-top: 0.25rem;
+}
+
+.dash-breakdown-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.5rem 0.625rem;
+    margin: 0 -0.625rem;
+    border-radius: 0.5rem;
+    font-size: 0.8125rem;
+    color: #475569;
+    text-decoration: none;
+    transition: background 0.12s ease;
+}
+
+.dash-breakdown-row:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+}
+
+.dash-breakdown-row--active {
+    background: #eff6ff;
+    color: #122e53;
+}
+
+.dash-breakdown-value {
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.dash-rank {
+    font-weight: 700;
+    color: #94a3b8;
+    margin-right: 0.25rem;
+}
+
+.dash-load-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.625rem;
+    background: #fff;
+    text-decoration: none;
+    color: inherit;
+    font-size: 0.8125rem;
+    transition: border-color 0.15s ease;
+}
+
+.dash-load-card:hover {
+    border-color: #122e53;
+}
+
+.dash-load-card--warn {
+    border-color: #fcd34d;
+    background: #fffbeb;
+}
+
+.dash-load-count {
+    font-weight: 700;
+    color: #334155;
+}
+
+.dash-load-card--warn .dash-load-count {
+    color: #b45309;
+}
+
+.dash-callback-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.625rem 0;
+    text-decoration: none;
+    color: inherit;
+    font-size: 0.8125rem;
+    transition: background 0.12s ease;
+}
+
+.dash-callback-row:hover {
+    background: #f8fafc;
+    margin: 0 -0.5rem;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+    border-radius: 0.375rem;
+}
+
+.dash-focus-banner {
+    background: linear-gradient(135deg, #122e53 0%, #1e3a5f 100%);
+    border-radius: 0.75rem;
+    padding: 1rem 1.25rem;
+    color: #fff;
+}
+
+.dash-focus-banner-body {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.dash-focus-label {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.65);
+    margin: 0 0 0.25rem;
+}
+
+.dash-focus-title {
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: #fff;
+    margin: 0;
+    line-height: 1.3;
+}
+
+.dash-focus-desc {
+    margin: 0.35rem 0 0;
+    font-size: 0.8125rem;
+    color: rgba(255, 255, 255, 0.78);
+    line-height: 1.45;
+    max-width: 36rem;
+}
+
+.dash-focus-clear {
+    flex-shrink: 0;
+    padding: 0.375rem 0.75rem;
+    border-radius: 0.5rem;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background 0.15s ease;
+}
+
+.dash-focus-clear:hover {
+    background: rgba(255, 255, 255, 0.2);
 }

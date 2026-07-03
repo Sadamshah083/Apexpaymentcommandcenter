@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\WorkflowLead;
+use App\Services\Dashboard\DashboardDetailService;
 use App\Services\Pipeline\CloserAssignmentService;
 use App\Services\Pipeline\LeadPipelineService;
 use App\Services\Pipeline\RoleDashboardService;
@@ -21,6 +22,7 @@ class PipelineController extends Controller
         protected LeadPipelineService $pipelineService,
         protected CloserAssignmentService $closerAssignment,
         protected SetterDistributionService $setterDistribution,
+        protected DashboardDetailService $detailService,
     ) {}
 
     public function portalDashboard()
@@ -48,14 +50,14 @@ class PipelineController extends Controller
             abort(403, 'You do not have access to your lead queue.');
         }
 
-        $leads = $this->dashboardService->setterLeads($workspace, $user, [
-            'search' => $request->input('search'),
-        ]);
+        $filters = $this->portalFilters($request);
+        $leads = $this->dashboardService->setterLeads($workspace, $user, $filters);
 
         $setterStatuses = config('sales_ops.setter_statuses', []);
         $dashboard = $this->portalDashboard->forUser($user, $workspace);
+        $focus = $this->detailService->resolvePortalFocus($request, $workspace, $user);
 
-        return view('pipeline.setter.index', compact('workspace', 'leads', 'user', 'setterStatuses', 'dashboard'));
+        return view('pipeline.setter.index', compact('workspace', 'leads', 'user', 'setterStatuses', 'dashboard', 'focus'));
     }
 
     public function setterTeamDashboard(Request $request)
@@ -71,17 +73,15 @@ class PipelineController extends Controller
             abort(403, 'You do not have access to the setter team dashboard.');
         }
 
-        $leads = $this->dashboardService->setterTeamLeads($workspace, $user, [
-            'search' => $request->input('search'),
-            'phase' => $request->input('phase'),
-            'setter' => $request->input('setter'),
-        ]);
+        $filters = $this->portalFilters($request);
+        $leads = $this->dashboardService->setterTeamLeads($workspace, $user, $filters);
         $teamMetrics = $this->dashboardService->setterTeamMetrics($workspace);
         $setters = $this->dashboardService->availableSetters($workspace);
         $unassignedLeads = $this->setterDistribution->unassignedLeadCount($workspace);
         $dashboard = $this->portalDashboard->forUser($user, $workspace);
+        $focus = $this->detailService->resolvePortalFocus($request, $workspace, $user);
 
-        return view('pipeline.setter-team.index', compact('workspace', 'leads', 'user', 'teamMetrics', 'dashboard', 'setters', 'unassignedLeads'));
+        return view('pipeline.setter-team.index', compact('workspace', 'leads', 'user', 'teamMetrics', 'dashboard', 'setters', 'unassignedLeads', 'focus'));
     }
 
     public function closerTeamDashboard(Request $request)
@@ -97,16 +97,14 @@ class PipelineController extends Controller
             abort(403, 'You do not have access to the closer team dashboard.');
         }
 
-        $leads = $this->dashboardService->closerTeamLeads($workspace, $user, [
-            'search' => $request->input('search'),
-            'phase' => $request->input('phase'),
-            'closer' => $request->input('closer'),
-        ]);
+        $filters = $this->portalFilters($request);
+        $leads = $this->dashboardService->closerTeamLeads($workspace, $user, $filters);
         $teamMetrics = $this->dashboardService->closerTeamMetrics($workspace);
         $closers = $this->dashboardService->availableClosers($workspace);
         $dashboard = $this->portalDashboard->forUser($user, $workspace);
+        $focus = $this->detailService->resolvePortalFocus($request, $workspace, $user);
 
-        return view('pipeline.closer-team.index', compact('workspace', 'leads', 'user', 'teamMetrics', 'dashboard', 'closers'));
+        return view('pipeline.closer-team.index', compact('workspace', 'leads', 'user', 'teamMetrics', 'dashboard', 'closers', 'focus'));
     }
 
     public function closerTeamQueue(Request $request)
@@ -143,13 +141,13 @@ class PipelineController extends Controller
             abort(403, 'You do not have access to your closer leads.');
         }
 
-        $leads = $this->dashboardService->closerLeads($workspace, $user, [
-            'search' => $request->input('search'),
-        ]);
+        $filters = $this->portalFilters($request);
+        $leads = $this->dashboardService->closerLeads($workspace, $user, $filters);
 
         $dashboard = $this->portalDashboard->forUser($user, $workspace);
+        $focus = $this->detailService->resolvePortalFocus($request, $workspace, $user);
 
-        return view('pipeline.closer.index', compact('workspace', 'leads', 'user', 'dashboard'));
+        return view('pipeline.closer.index', compact('workspace', 'leads', 'user', 'dashboard', 'focus'));
     }
 
     public function assignCloser(Request $request, WorkflowLead $lead)
@@ -257,5 +255,22 @@ class PipelineController extends Controller
         }
 
         return redirect()->back()->with('success', "Assigned {$assigned} lead(s) to {$setter->name}.");
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function portalFilters(Request $request): array
+    {
+        return array_filter([
+            'search' => $request->input('search'),
+            'phase' => $request->input('phase'),
+            'setter' => $request->input('setter'),
+            'closer' => $request->input('closer'),
+            'focus' => $request->input('focus'),
+            'tier' => $request->input('tier'),
+            'status' => $request->input('status'),
+            'member' => $request->input('member'),
+        ], fn ($value) => filled($value));
     }
 }

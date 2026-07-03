@@ -18,11 +18,15 @@
 
         @include('pipeline.partials.dashboard-widgets', ['dashboard' => $dashboard ?? []])
 
+        @include('pipeline.partials.detail-focus-banner', ['focus' => $focus ?? null])
+
+        <div id="portal-leads-section">
         @include('pipeline.partials.leads-table', [
             'leads' => $leads,
             'statusColumn' => 'closer',
             'showAssignee' => false,
             'showSetterNotes' => true,
         ])
+        </div>
     </div>
 @endsection

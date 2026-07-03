@@ -302,9 +302,11 @@ class WorkflowController extends Controller
                 || $user->canAccessAdminPortal($workspace->id)
             );
 
+        $isAdminView = request()->is('admin*') || request()->routeIs('admin.*');
+
         return view('workflows.lead_show', compact(
             'lead', 'team', 'workspace', 'setterStatuses', 'closerStatuses',
-            'pipelinePhases', 'activityTypes', 'canEditSetter', 'canEditCloser', 'showSetterHistory', 'user'
+            'pipelinePhases', 'activityTypes', 'canEditSetter', 'canEditCloser', 'showSetterHistory', 'user', 'isAdminView'
         ));
     }
 

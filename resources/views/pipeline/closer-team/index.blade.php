@@ -18,6 +18,8 @@
 
         @include('pipeline.partials.dashboard-widgets', ['dashboard' => $dashboard ?? []])
 
+        @include('pipeline.partials.detail-focus-banner', ['focus' => $focus ?? null])
+
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             @foreach ($teamMetrics as $metric)
                 @php
