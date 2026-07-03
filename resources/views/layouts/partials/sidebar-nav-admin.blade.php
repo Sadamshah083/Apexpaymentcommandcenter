@@ -18,12 +18,14 @@
     $showEmailToolkit = collect($emailToolkitModules)->contains(fn(string $module) => $can($module));
     $showWorkspaceAdmin = collect($workspaceAdminModules)->contains(fn(string $module) => $can($module));
     $showDashboard = $user?->canAccessAdminModule('dashboard', $workspaceId);
+    $dashboardSection = request('section');
+    $onAdminDashboard = request()->routeIs('admin.dashboard*');
 @endphp
 
 @if ($showDashboard)
     <x-sidebar.section title="Overview">
-        <x-sidebar.link :href="route('admin.dashboard')" label="Command Center" icon-name="dashboard"
-            :active="request()->routeIs('admin.dashboard*')">
+        <x-sidebar.link :href="route('admin.dashboard')" label="Command Center" icon-name="dashboard" query-mode="empty"
+            :active="$onAdminDashboard && ! in_array($dashboardSection, ['imports', 'ops'], true)">
             <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'dashboard'])</x-slot:icon>
         </x-sidebar.link>
     </x-sidebar.section>
@@ -32,8 +34,8 @@
 @if ($showLeadPipeline)
     <x-sidebar.section title="Lead Pipeline">
         @if ($can('lead_pipeline'))
-            <x-sidebar.link :href="route('admin.workflows.create')" label="Import leads" icon-name="pipeline"
-                :active="request()->routeIs('admin.workflows.create', 'admin.workflows.show')">
+            <x-sidebar.link :href="route('admin.workflows.index')" label="Import leads" icon-name="pipeline"
+                :active="request()->routeIs('admin.workflows.*')">
                 <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'pipeline'])</x-slot:icon>
             </x-sidebar.link>
         @endif
@@ -78,7 +80,8 @@
 @if ($can('sales_ops'))
     <x-sidebar.section title="Sales Operations">
         <x-sidebar.link :href="route('admin.dashboard', ['section' => 'ops'])" label="Team performance" icon-name="sales"
-            :active="request()->routeIs('admin.sales-ops.*') && !request()->routeIs('admin.sales-ops.distribution', 'admin.sales-ops.reactivation')">
+            :match-prefixes="['/admin/sales-ops/performance']"
+            :active="($onAdminDashboard && $dashboardSection === 'ops') || (request()->routeIs('admin.sales-ops.*') && ! request()->routeIs('admin.sales-ops.distribution', 'admin.sales-ops.reactivation'))">
             <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'sales'])</x-slot:icon>
         </x-sidebar.link>
     </x-sidebar.section>

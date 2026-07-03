@@ -1101,6 +1101,8 @@ body.app-sidebar-collapsed .app-sidebar-wrap {
     border-right: 1px solid #e2e8f0;
     color: #64748b;
     overflow: hidden;
+    contain: paint;
+    will-change: transform;
     transition: transform var(--app-sidebar-duration) var(--app-sidebar-ease);
 }
 
@@ -1308,6 +1310,8 @@ body.app-sidebar-collapsed .app-sidebar-edge-toggle {
 .sidebar-nav {
     flex: 1;
     overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
     padding: 0.75rem 0.625rem;
     display: flex;
     flex-direction: column;
@@ -1640,6 +1644,7 @@ body.app-sidebar-collapsed .app-sidebar-edge-toggle {
     z-index: 39;
     background: rgba(9, 9, 11, 0.45);
     opacity: 0;
+    will-change: opacity;
     pointer-events: none;
     transition: opacity var(--app-sidebar-duration) var(--app-sidebar-ease);
 }
@@ -1663,13 +1668,13 @@ body.app-sidebar-collapsed .app-sidebar-edge-toggle {
         left: 0;
         top: 0;
         z-index: 45;
-        transform: translateX(calc(-1 * var(--app-sidebar-mobile-width) - 0.5rem));
+        transform: translate3d(calc(-1 * var(--app-sidebar-mobile-width) - 0.5rem), 0, 0);
         pointer-events: none;
         box-shadow: 4px 0 24px rgba(0, 0, 0, 0.12);
     }
 
     body.app-sidebar-mobile-open .app-sidebar {
-        transform: translateX(0);
+        transform: translate3d(0, 0, 0);
         pointer-events: auto;
     }
 
@@ -1679,6 +1684,16 @@ body.app-sidebar-collapsed .app-sidebar-edge-toggle {
 
     body.app-sidebar-mobile-open {
         overflow: hidden;
+    }
+
+    .app-floating-chrome {
+        z-index: 46;
+    }
+
+    body.app-sidebar-mobile-open .app-floating-notify-btn {
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(-0.25rem);
     }
 }
 
@@ -1864,17 +1879,33 @@ html.sidebar-transitions-ready .app-main {
     font-size: 1.25rem;
     line-height: 1;
     cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
     box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
     transition:
         background-color 0.15s ease,
         border-color 0.15s ease,
-        color 0.15s ease;
+        color 0.15s ease,
+        box-shadow 0.15s ease,
+        transform 0.15s ease,
+        opacity 0.15s ease;
 }
 
 .app-floating-menu-btn:hover {
     background: #f8fafc;
     border-color: #cbd5e1;
     color: #475569;
+}
+
+.app-floating-menu-btn:active {
+    transform: scale(0.98);
+}
+
+.app-floating-menu-btn[aria-expanded='true'] {
+    background: #122e53;
+    border-color: #122e53;
+    color: #ffffff;
+    box-shadow: 0 6px 16px rgba(18, 46, 83, 0.18);
 }
 
 .app-floating-notify-btn {
@@ -8336,6 +8367,14 @@ html {
     border-radius: 0.75rem;
     padding: 1rem 1.125rem;
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.enrichment-providers-card--embedded {
+    margin-bottom: 1rem;
+    padding: 1rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.75rem;
+    background: #f8fafc;
 }
 
 .admin-dash-stat-card {

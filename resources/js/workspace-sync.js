@@ -1011,6 +1011,9 @@ let syncVisibilityHandler = null;
 let syncRequestHandler = null;
 let syncPollTimer = null;
 let syncPollAborted = false;
+const SYNC_LIST_POLL_MS = 8000;
+const SYNC_FULL_POLL_MS = 5000;
+const SYNC_HIDDEN_POLL_MS = 30000;
 
 const SYNC_TARGET_IDS = [
     'workspace-sync-leads-body',
@@ -1024,6 +1027,10 @@ const SYNC_TARGET_IDS = [
 ];
 
 function pageNeedsWorkspaceSync() {
+    if (document.getElementById('portal-sync-context')) {
+        return false;
+    }
+
     const root = document.body;
     if (root.dataset.workspaceSyncScope === 'lite' && root.dataset.workspaceSyncUrl) {
         return true;
@@ -1242,8 +1249,13 @@ export function initWorkspaceSync() {
             return;
         }
 
-        const pollInterval = syncLite ? SYNC_LITE_MS : (syncScope === 'list' ? 5000 : 3000);
-        const hiddenInterval = 10000;
+        const pollInterval = syncLite ? SYNC_LITE_MS : (syncScope === 'list' ? SYNC_LIST_POLL_MS : SYNC_FULL_POLL_MS);
+        const hiddenInterval = SYNC_HIDDEN_POLL_MS;
+
+        if (document.hidden) {
+            schedulePoll(hiddenInterval);
+            return;
+        }
 
         try {
             const response = await fetch(buildSyncUrl(pollUrl), {

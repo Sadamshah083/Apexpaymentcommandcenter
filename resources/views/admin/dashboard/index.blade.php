@@ -7,7 +7,7 @@
     <div class="admin-dashboard-header">
         <div>
             <h2 class="admin-dashboard-title">Command Center</h2>
-            <p class="admin-dashboard-subtitle">Workspace: <span>{{ $workspace->name }}</span> · Live monitoring, imports, campaigns, and pipeline reporting.</p>
+            <p class="admin-dashboard-subtitle">Workspace: <span>{{ $workspace->name }}</span> · Live monitoring, team activity, and pipeline reporting.</p>
         </div>
         <div class="admin-dashboard-live-badge">
             <span class="relative flex h-2 w-2">
@@ -221,62 +221,7 @@
             <canvas id="pipelineFunnelChart"></canvas>
         </div>
     </div>
-
-    <div class="admin-dash-card">
-        <h3 class="admin-dash-section-title">Data files performance (recent)</h3>
-        <div class="admin-dash-chart-wrap">
-            <canvas id="workflowsPerformanceChart"></canvas>
-        </div>
-    </div>
 </div>
-
-<div class="admin-dash-card">
-    <h3 class="admin-dash-section-title">Data files &amp; workflow performance</h3>
-    <div class="admin-dash-table-wrap">
-        <table class="admin-dash-table">
-            <thead>
-                <tr>
-                    <th>File Name</th>
-                    <th>Imported At</th>
-                    <th class="text-right">Total Leads</th>
-                    <th class="text-right">Enriched Success</th>
-                    <th class="text-right">Failed</th>
-                    <th class="text-right">Closed Won</th>
-                    <th class="text-right">Enrichment %</th>
-                    <th class="text-right">Close %</th>
-                    <th class="text-right">Actions</th>
-                </tr>
-            </thead>
-            <tbody id="workflows-table-body">
-                @forelse ($workflows as $wf)
-                    <tr>
-                        <td>
-                            <a href="{{ $detailService->adminDetailUrl('workflow', ['workflow_id' => $wf['id']]) }}" class="admin-dash-table-link">{{ $wf['name'] }}</a>
-                            <span class="admin-dash-table-meta">{{ $wf['filename'] }}</span>
-                        </td>
-                        <td>{{ $wf['created_at'] }}</td>
-                        <td class="text-right"><span class="admin-dash-table-num">{{ $wf['total_leads'] }}</span></td>
-                        <td class="text-right"><span class="admin-dash-table-num is-success">{{ $wf['enriched_leads'] }}</span></td>
-                        <td class="text-right"><span class="admin-dash-table-num is-danger">{{ $wf['failed_leads'] }}</span></td>
-                        <td class="text-right"><span class="admin-dash-table-num is-success">{{ $wf['closed_deals'] }}</span></td>
-                        <td class="text-right"><span class="admin-dash-badge is-success">{{ $wf['enrichment_rate'] }}%</span></td>
-                        <td class="text-right"><span class="admin-dash-badge is-success">{{ $wf['close_rate'] }}%</span></td>
-                        <td class="text-right">
-                            <a href="{{ $detailService->adminDetailUrl('workflow', ['workflow_id' => $wf['id']]) }}" class="app-btn app-btn-secondary app-btn-sm">View details</a>
-                        </td>
-                    </tr>
-                @empty
-                    <tr>
-                        <td colspan="9" class="admin-dash-empty">No workflow files uploaded yet.</td>
-                    </tr>
-                @endforelse
-            </tbody>
-        </table>
-    </div>
-</div>
-
-@include('admin.dashboard.partials.campaigns-panel')
-@include('admin.dashboard.partials.imports-panel')
 
 @endif
 </div>
@@ -288,11 +233,9 @@
 <script>
     document.addEventListener('DOMContentLoaded', function () {
         const funnelEl = document.getElementById('pipelineFunnelChart');
-        const workflowsEl = document.getElementById('workflowsPerformanceChart');
-        if (!funnelEl || !workflowsEl) return;
+        if (!funnelEl) return;
 
         const funnelCtx = funnelEl.getContext('2d');
-        const workflowsCtx = workflowsEl.getContext('2d');
         const detailBase = @json(url('/admin/dashboard'));
 
         const funnelChart = new Chart(funnelCtx, {
@@ -337,65 +280,6 @@
                     y: {
                         grid: { display: false },
                         ticks: { color: '#64748b', font: { size: 10 } }
-                    }
-                }
-            }
-        });
-
-        const workflowLabels = [];
-        const workflowTotals = [];
-        const workflowEnriched = [];
-        const workflowClosed = [];
-
-        @foreach (collect($workflows instanceof \Illuminate\Contracts\Pagination\Paginator ? $workflows->items() : $workflows)->take(5) as $wf)
-            workflowLabels.push("{{ $wf['name'] }}");
-            workflowTotals.push({{ $wf['total_leads'] }});
-            workflowEnriched.push({{ $wf['enriched_leads'] }});
-            workflowClosed.push({{ $wf['closed_deals'] }});
-        @endforeach
-
-        const workflowsChart = new Chart(workflowsCtx, {
-            type: 'bar',
-            data: {
-                labels: workflowLabels,
-                datasets: [
-                    {
-                        label: 'Total Leads',
-                        data: workflowTotals,
-                        backgroundColor: 'rgba(203, 213, 225, 0.85)',
-                        borderRadius: 4
-                    },
-                    {
-                        label: 'Enriched',
-                        data: workflowEnriched,
-                        backgroundColor: 'rgba(100, 116, 139, 0.75)',
-                        borderRadius: 4
-                    },
-                    {
-                        label: 'Closed',
-                        data: workflowClosed,
-                        backgroundColor: 'rgba(4, 120, 87, 0.75)',
-                        borderRadius: 4
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: 'bottom',
-                        labels: { boxWidth: 10, color: '#64748b', font: { size: 10 } }
-                    }
-                },
-                scales: {
-                    x: {
-                        grid: { display: false },
-                        ticks: { color: '#94a3b8', font: { size: 9 } }
-                    },
-                    y: {
-                        grid: { color: '#f1f5f9' },
-                        ticks: { precision: 0, color: '#94a3b8', font: { size: 10 } }
                     }
                 }
             }

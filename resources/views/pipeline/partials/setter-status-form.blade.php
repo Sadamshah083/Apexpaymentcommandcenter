@@ -1,9 +1,10 @@
 @php
     $compact = $compact ?? false;
+    $routePrefix = $routePrefix ?? 'portal';
     $inputClass = $compact ? 'app-input app-input-sm' : 'app-input';
 @endphp
 
-<form method="POST" action="{{ route('portal.leads.setter-status', $lead->id) }}"
+<form method="POST" action="{{ route($routePrefix . '.leads.setter-status', $lead->id) }}"
     class="setter-status-form space-y-2 {{ $compact ? 'setter-status-form-compact' : 'space-y-3' }}">
     @csrf
     <div>

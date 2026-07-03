@@ -1,4 +1,4 @@
-﻿@props(['status'])
+﻿@props(['status', 'embedded' => false])
 
 @php
     $gemini = $status['gemini'] ?? [];
@@ -21,7 +21,11 @@
     };
 @endphp
 
-<div class="app-card app-card-padded enrichment-providers-card">
+<div @class([
+    'enrichment-providers-card',
+    'app-card app-card-padded' => ! $embedded,
+    'enrichment-providers-card--embedded' => $embedded,
+])>
     <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
         <div class="min-w-0">
             <h2 class="app-section-title">AI enrichment providers</h2>

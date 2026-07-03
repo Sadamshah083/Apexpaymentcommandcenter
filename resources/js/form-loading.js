@@ -1,6 +1,7 @@
 import { showToast } from './toast.js';
 
 let overlayEl = null;
+const FORM_LOADING_BOUND_KEY = 'formLoadingGlobalBound';
 
 function getOverlay() {
     if (overlayEl) {
@@ -112,11 +113,13 @@ export function attachFormLoading(form) {
 export function initFormLoading() {
     document.querySelectorAll('form[data-form-loading]').forEach(attachFormLoading);
 
-    document.addEventListener('turbo:submit-end', (event) => {
-        hideLoadingOverlay();
-    });
+    if (document.documentElement.dataset[FORM_LOADING_BOUND_KEY] === '1') {
+        return;
+    }
 
-    document.addEventListener('turbo:load', () => {
-        document.querySelectorAll('form[data-form-loading]').forEach(attachFormLoading);
+    document.documentElement.dataset[FORM_LOADING_BOUND_KEY] = '1';
+
+    document.addEventListener('turbo:submit-end', () => {
+        hideLoadingOverlay();
     });
 }

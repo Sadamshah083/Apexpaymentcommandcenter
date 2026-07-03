@@ -16,6 +16,7 @@ use App\Services\Workflow\WorkflowLeadService;
 use App\Services\Workflow\WorkflowLeadVerificationService;
 use App\Services\Workflow\WorkflowService;
 use App\Services\SalesOps\DiscoveryQualificationService;
+use App\Support\LeadRoute;
 use App\Support\SalesOps;
 use App\Support\WorkflowAssignmentRoles;
 use Illuminate\Http\Request;
@@ -40,12 +41,59 @@ class WorkflowController extends Controller
     public function index(Request $request)
     {
         if ($request->is('admin*') || $request->routeIs('admin.*')) {
-            return redirect()->route('admin.dashboard', array_filter([
-                'section' => 'imports',
+            $user = Auth::user();
+            $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
+            $data = $this->dashboardService->buildIndexData($workspace, $user, [
                 'search' => $request->input('search'),
                 'phase' => $request->input('phase'),
                 'assigned_user_id' => $request->input('assigned_user_id'),
-            ]));
+                'refresh_enrichment' => $request->boolean('refresh_enrichment'),
+            ]);
+
+            $data['importsWorkflows'] = $data['workflows'];
+            $data['campaigns'] = $this->campaignService->campaignsWithStats($workspace);
+            $summaryWorkflows = $workspace->workflows()
+                ->latest()
+                ->get(['id', 'name', 'original_filename', 'created_at', 'total_leads', 'failed_leads']);
+            $workflowLeadStats = $summaryWorkflows->isEmpty()
+                ? collect()
+                : WorkflowLead::query()
+                    ->selectRaw(
+                        "workflow_id,
+                        SUM(CASE WHEN pipeline_phase IN ('enriched', 'with_setter', 'appointment_settled', 'with_closer', 'closed')
+                            AND status IN ('enriched', 'completed') THEN 1 ELSE 0 END) as enriched_count,
+                        SUM(CASE WHEN ((pipeline_phase = 'closed' AND closer_status = 'sale_made') OR stage = 'closed_won')
+                            THEN 1 ELSE 0 END) as closed_count"
+                    )
+                    ->whereIn('workflow_id', $summaryWorkflows->modelKeys())
+                    ->groupBy('workflow_id')
+                    ->get()
+                    ->keyBy('workflow_id');
+
+            $data['workflowSummaries'] = $summaryWorkflows
+                ->map(function (Workflow $workflow) use ($workflowLeadStats) {
+                    $stats = $workflowLeadStats->get($workflow->id);
+                    $closedCount = (int) ($stats->closed_count ?? 0);
+                    $enrichedCount = (int) ($stats->enriched_count ?? 0);
+                    $totalLeadsCount = (int) ($workflow->total_leads ?? 0);
+
+                    return [
+                        'id' => $workflow->id,
+                        'name' => $workflow->name,
+                        'filename' => $workflow->original_filename,
+                        'created_at' => $workflow->created_at ? $workflow->created_at->toDateString() : '',
+                        'total_leads' => $totalLeadsCount,
+                        'enriched_leads' => $enrichedCount,
+                        'failed_leads' => (int) ($workflow->failed_leads ?? 0),
+                        'closed_deals' => $closedCount,
+                        'enrichment_rate' => $totalLeadsCount > 0 ? round(($enrichedCount / $totalLeadsCount) * 100, 1) : 0,
+                        'close_rate' => $totalLeadsCount > 0 ? round(($closedCount / $totalLeadsCount) * 100, 1) : 0,
+                    ];
+                })
+                ->all();
+            $data['activeSection'] = 'imports';
+
+            return view('workflows.index', $data);
         }
 
         $user = Auth::user();
@@ -286,7 +334,7 @@ class WorkflowController extends Controller
         $this->workspaceContext->ensureLeadBelongsToWorkspace($lead, $workspace);
 
         $team = $workspace->users;
-        $lead->load(['workflow.workspace', 'verifier', 'activities.user', 'setter', 'closer', 'tags', 'leadList']);
+        $lead->load(['workflow.workspace', 'verifier', 'activities.user', 'setter', 'closer', 'campaign', 'leadList']);
 
         $user = Auth::user();
 
@@ -324,7 +372,7 @@ class WorkflowController extends Controller
                 || $user->canAccessAdminPortal($workspace->id)
             );
 
-        $isAdminView = request()->is('admin*') || request()->routeIs('admin.*');
+        $isAdminView = LeadRoute::isAdminContext();
         $lead->loadMissing('campaign', 'leadList');
 
         return view('workflows.lead_show', compact(
@@ -349,7 +397,7 @@ class WorkflowController extends Controller
                 $request->input('notes')
             );
 
-            return redirect()->route('portal.leads.show', $lead->id)->with('success', 'Lead status updated.');
+            return redirect()->to(LeadRoute::show($lead))->with('success', 'Lead status updated.');
         }
 
         if ($request->filled('closer_status')) {
@@ -361,7 +409,7 @@ class WorkflowController extends Controller
                 $request->input('notes')
             );
 
-            return redirect()->route('portal.leads.show', $lead->id)->with('success', 'Lead status updated.');
+            return redirect()->to(LeadRoute::show($lead))->with('success', 'Lead status updated.');
         }
 
         $data = $request->validate([
@@ -371,7 +419,7 @@ class WorkflowController extends Controller
 
         $lead->update($data);
 
-        return redirect()->route('portal.leads.show', $lead->id)->with('success', 'Lead record updated.');
+        return redirect()->to(LeadRoute::show($lead))->with('success', 'Lead record updated.');
     }
 
     public function leadDestroy(WorkflowLead $lead)
@@ -380,6 +428,10 @@ class WorkflowController extends Controller
         $this->workspaceContext->ensureLeadBelongsToWorkspace($lead, $workspace);
 
         $this->leadService->delete($lead);
+
+        if (LeadRoute::isAdminContext()) {
+            return redirect()->route('admin.workflows.index')->with('success', 'Lead record deleted successfully.');
+        }
 
         return redirect()->route('portal.dashboard')->with('success', 'Lead record deleted successfully.');
     }
