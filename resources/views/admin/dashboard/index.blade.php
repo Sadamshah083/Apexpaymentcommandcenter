@@ -347,7 +347,7 @@
         const workflowEnriched = [];
         const workflowClosed = [];
 
-        @foreach (array_slice($workflows, 0, 5) as $wf)
+        @foreach (collect($workflows instanceof \Illuminate\Contracts\Pagination\Paginator ? $workflows->items() : $workflows)->take(5) as $wf)
             workflowLabels.push("{{ $wf['name'] }}");
             workflowTotals.push({{ $wf['total_leads'] }});
             workflowEnriched.push({{ $wf['enriched_leads'] }});
