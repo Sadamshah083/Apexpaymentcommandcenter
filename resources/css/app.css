@@ -2606,6 +2606,7 @@ body.app-loading-open {
 }
 
 .app-loading-card {
+    position: relative;
     width: min(100%, 22rem);
     padding: 2rem 1.75rem;
     border-radius: 1.25rem;
@@ -2613,6 +2614,30 @@ body.app-loading-open {
     background: #ffffff;
     box-shadow: 0 24px 60px rgba(0, 0, 0, 0.12);
     text-align: center;
+}
+
+.app-loading-close {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    width: 2rem;
+    height: 2rem;
+    border: 0;
+    border-radius: 9999px;
+    background: #f4f4f5;
+    color: #27272a;
+    font-size: 1.375rem;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.app-loading-close:hover {
+    background: #e4e4e7;
+    transform: scale(1.04);
 }
 
 .app-loading-animation {

@@ -31,6 +31,13 @@ function csrfToken() {
     return document.querySelector('meta[name="csrf-token"]')?.content || '';
 }
 
+function createCancelledError() {
+    const error = new Error('Connection cancelled.');
+    error.cancelled = true;
+
+    return error;
+}
+
 class ApexWebphone {
     constructor() {
         this.userAgent = null;
@@ -45,6 +52,8 @@ class ApexWebphone {
         this.lastError = '';
         this.callStartedAt = null;
         this.callTimer = null;
+        this.connectAttempt = 0;
+        this.cancelledConnectAttempt = 0;
     }
 
     bindPanel(panel) {
@@ -111,6 +120,16 @@ class ApexWebphone {
     }
 
     handleConnectFailure(error) {
+        if (error?.cancelled) {
+            this.lastError = '';
+            this.pendingClickToCall = false;
+            this.setState('offline');
+            if (this.ui?.hint) {
+                this.ui.hint.textContent = 'Call canceled before the line connected.';
+            }
+            return;
+        }
+
         const message = error?.message || 'Could not connect phone.';
         this.lastError = message;
         this.setState('error', 'Offline');
@@ -142,6 +161,12 @@ class ApexWebphone {
         window.setTimeout(() => {
             this.pendingClickToCall = false;
         }, 45000);
+    }
+
+    cancelPendingConnect() {
+        this.pendingClickToCall = false;
+        this.cancelledConnectAttempt = this.connectAttempt;
+        this.disconnect().catch(() => {});
     }
 
     syncSelectedExtension() {
@@ -363,18 +388,27 @@ class ApexWebphone {
             return this.connectPromise;
         }
 
-        this.connectPromise = this._connect(normalized).finally(() => {
+        const attempt = ++this.connectAttempt;
+        this.connectPromise = this._connect(normalized, attempt).finally(() => {
             this.connectPromise = null;
         });
 
         return this.connectPromise;
     }
 
-    async _connect(extension) {
+    throwIfConnectCancelled(attempt) {
+        if (this.cancelledConnectAttempt === attempt) {
+            throw createCancelledError();
+        }
+    }
+
+    async _connect(extension, attempt) {
         await this.disconnect(false);
+        this.throwIfConnectCancelled(attempt);
 
         this.setState('connecting');
         this.config = await this.prepareConfig(extension);
+        this.throwIfConnectCancelled(attempt);
         this.currentExtension = extension;
         this.applyConfigMeta(this.config);
         localStorage.setItem(STORAGE_KEY, extension);
@@ -416,14 +450,16 @@ class ApexWebphone {
         };
 
         await this.userAgent.start();
+        this.throwIfConnectCancelled(attempt);
 
         this.registerer = new Registerer(this.userAgent);
-        await this.waitForRegistration(this.registerer);
+        await this.waitForRegistration(this.registerer, attempt);
+        this.throwIfConnectCancelled(attempt);
 
         return true;
     }
 
-    waitForRegistration(registerer) {
+    waitForRegistration(registerer, attempt) {
         return new Promise((resolve, reject) => {
             let settled = false;
 
@@ -446,6 +482,11 @@ class ApexWebphone {
             }, 12000);
 
             registerer.stateChange.addListener((state) => {
+                if (this.cancelledConnectAttempt === attempt) {
+                    finish(reject, createCancelledError());
+                    return;
+                }
+
                 if (state === RegistererState.Registered) {
                     this.setState('registered');
                     finish(resolve);
@@ -462,6 +503,10 @@ class ApexWebphone {
             });
 
             registerer.register().catch((error) => {
+                if (this.cancelledConnectAttempt === attempt) {
+                    finish(reject, createCancelledError());
+                    return;
+                }
                 finish(reject, error);
             });
         });
@@ -668,6 +713,10 @@ export async function ensureWebphoneReady() {
 
 export function markDialerClickToCallPending() {
     getWebphone().markClickToCallPending();
+}
+
+export function cancelPendingWebphoneConnect() {
+    getWebphone().cancelPendingConnect();
 }
 
 export function bootCommunicationsWebphone() {

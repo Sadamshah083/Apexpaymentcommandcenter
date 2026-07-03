@@ -227,13 +227,15 @@ class ZoomApiService
      */
     protected function originatePayloadExtras(array $options = []): array
     {
-        $campaignId = $options['campaign_id'] ?? $this->defaultCampaignId();
-
         return array_filter([
             'caller_id_number' => $options['caller_id_number'] ?? null,
             'caller_id_name' => $options['caller_id_name'] ?? null,
             'timeout_sec' => $options['timeout_sec'] ?? null,
-            'campaign_id' => $campaignId,
+            // Manual hub calls should only target a campaign when one is passed
+            // explicitly. Auto-attaching the default ratio campaign causes
+            // Morpheus to treat click-to-call like a dialer campaign call and
+            // can override the extension DID with synthetic caller IDs.
+            'campaign_id' => $options['campaign_id'] ?? null,
         ], fn ($value) => $value !== null && $value !== '');
     }
 

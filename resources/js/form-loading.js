@@ -1,6 +1,7 @@
 import { showToast } from './toast.js';
 
 let overlayEl = null;
+let activeForm = null;
 const FORM_LOADING_BOUND_KEY = 'formLoadingGlobalBound';
 
 function getOverlay() {
@@ -18,6 +19,9 @@ function getOverlay() {
     overlayEl.hidden = true;
     overlayEl.innerHTML = `
         <div class="app-loading-card">
+            <button type="button" class="app-loading-close" id="app-loading-close" hidden aria-label="Cancel request">
+                <span aria-hidden="true">&times;</span>
+            </button>
             <div class="app-loading-animation" id="app-loading-lottie">
                 <div class="app-loading-spinner" aria-hidden="true"></div>
             </div>
@@ -27,6 +31,15 @@ function getOverlay() {
     `;
 
     document.body.appendChild(overlayEl);
+    overlayEl.querySelector('#app-loading-close')?.addEventListener('click', () => {
+        const form = activeForm;
+        hideLoadingOverlay();
+        if (form) {
+            document.dispatchEvent(new CustomEvent('app:loading-overlay-cancel', {
+                detail: { form },
+            }));
+        }
+    });
 
     return overlayEl;
 }
@@ -35,6 +48,8 @@ export function hideLoadingOverlay() {
     const overlay = getOverlay();
     overlay.hidden = true;
     document.body.classList.remove('app-loading-open');
+    overlay.querySelector('#app-loading-close')?.setAttribute('hidden', 'hidden');
+    activeForm = null;
 
     document.querySelectorAll('form[data-form-loading][data-submitting="1"]').forEach((form) => {
         form.dataset.submitting = '0';
@@ -49,10 +64,11 @@ export function hideLoadingOverlay() {
     });
 }
 
-export function showLoadingOverlay(message, title = 'Please wait') {
+export function showLoadingOverlay(message, title = 'Please wait', options = {}) {
     const overlay = getOverlay();
     const titleEl = overlay.querySelector('#app-loading-title');
     const messageEl = overlay.querySelector('#app-loading-message');
+    const closeBtn = overlay.querySelector('#app-loading-close');
 
     if (titleEl) {
         titleEl.textContent = title;
@@ -60,6 +76,15 @@ export function showLoadingOverlay(message, title = 'Please wait') {
 
     if (messageEl) {
         messageEl.textContent = message;
+    }
+
+    activeForm = options.form || null;
+    if (closeBtn) {
+        if (options.cancelable) {
+            closeBtn.removeAttribute('hidden');
+        } else {
+            closeBtn.setAttribute('hidden', 'hidden');
+        }
     }
 
     overlay.hidden = false;
@@ -104,9 +129,10 @@ export function attachFormLoading(form) {
         const title = form.dataset.loadingTitle || 'Please wait';
         const buttonText = form.dataset.loadingButtonText || 'Processing…';
         const submitButton = form.querySelector('button[type="submit"]');
+        const cancelable = form.dataset.loadingCancelable === '1';
 
         setSubmitButtonState(submitButton, buttonText);
-        showLoadingOverlay(message, title);
+        showLoadingOverlay(message, title, { form, cancelable });
     });
 }
 

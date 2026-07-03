@@ -619,6 +619,7 @@ class MorpheusHubController extends Controller
             'outbound_cid_name' => $validated['caller_id_name'] ?? null,
             'outbound_cid_num' => $validated['caller_id_num'] ?? null,
             'is_dialer_agent' => true,
+            'override_campaign_cid' => true,
         ], fn ($v) => ! is_null($v));
 
         return $this->mutateAction(fn () => $this->morpheus->createExtension($payload), 'Extension created.');
@@ -637,6 +638,7 @@ class MorpheusHubController extends Controller
             ...$validated,
             'outbound_cid_name' => $validated['caller_id_name'] ?? null,
             'outbound_cid_num' => $validated['caller_id_num'] ?? null,
+            'override_campaign_cid' => true,
         ], fn ($v) => ! is_null($v));
 
         return $this->mutateAction(fn () => $this->morpheus->updateExtension($id, $payload), 'Extension updated.');

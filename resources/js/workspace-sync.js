@@ -1326,7 +1326,7 @@ export function initWorkspaceSync() {
     }
 
     function onSyncRequest() {
-        if (usePoll) {
+        if (syncLite || usePoll) {
             connectPoll();
             return;
         }
@@ -1340,7 +1340,7 @@ export function initWorkspaceSync() {
         if (document.hidden) {
             return;
         }
-        if (usePoll) {
+        if (syncLite || usePoll) {
             if (!syncPollTimer && !syncPollAborted) {
                 schedulePoll(0);
             }

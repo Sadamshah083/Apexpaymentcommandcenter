@@ -124,6 +124,9 @@ class CommunicationsAgentService
             'status' => 'active',
             'voicemail_enabled' => true,
             'is_dialer_agent' => true,
+            // Manual hub calls should keep the extension DID even if the
+            // extension is also used by dialer/campaign flows.
+            'override_campaign_cid' => true,
         ], fn ($v) => ! is_null($v));
 
         $extResult = $this->morpheus->createExtension($extensionPayload);
@@ -178,6 +181,8 @@ class CommunicationsAgentService
             'outbound_cid_name' => $data['caller_id_name'] ?? null,
             'outbound_cid_num' => $data['caller_id_num'] ?? null,
             'status' => $data['status'] ?? null,
+            // Keep campaign CID overrides from hijacking manual click-to-call.
+            'override_campaign_cid' => true,
         ], fn ($v) => filled($v));
 
         if ($patch !== []) {

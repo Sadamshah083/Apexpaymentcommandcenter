@@ -71,6 +71,7 @@
 <form method="POST" action="{{ route($routePrefix . 'communications.morpheus.calls.originate') }}"
     class="ghl-dialer-originate-form" data-fallback-sip="1"
     data-form-loading
+    data-loading-cancelable="1"
     data-loading-title="Placing call"
     data-loading-message="Ringing your extension via Morpheus CX…"
     data-loading-button-text="Calling…">

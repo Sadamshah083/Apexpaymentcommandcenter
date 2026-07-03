@@ -1,6 +1,10 @@
 import { hideLoadingOverlay } from './form-loading.js';
 import { showToast } from './toast.js';
-import { ensureWebphoneReady, markDialerClickToCallPending } from './communications-webphone.js';
+import {
+    cancelPendingWebphoneConnect,
+    ensureWebphoneReady,
+    markDialerClickToCallPending,
+} from './communications-webphone.js';
 const STORAGE_KEY = 'communications.dialer_extension';
 
 function normalizePhone(value) {
@@ -41,6 +45,25 @@ function refreshDialButton(numberInput, callerSelect, dialBtn) {
     dialBtn.removeAttribute('disabled');
     dialBtn.classList.remove('opacity-50', 'cursor-not-allowed');
     dialBtn.removeAttribute('aria-disabled');
+}
+
+function initDialerOverlayCancel() {
+    if (document.documentElement.dataset.dialerOverlayCancelInit === '1') {
+        return;
+    }
+
+    document.documentElement.dataset.dialerOverlayCancelInit = '1';
+    document.addEventListener('app:loading-overlay-cancel', (event) => {
+        const form = event.detail?.form;
+        if (!(form instanceof HTMLFormElement) || !form.matches('.ghl-dialer-originate-form')) {
+            return;
+        }
+
+        form.dataset.dialerConnectCancelled = '1';
+        form.dataset.dialerConnectPending = '0';
+        form.dataset.webphoneChecked = '';
+        cancelPendingWebphoneConnect();
+    });
 }
 
 function attachDialerForm(form) {
@@ -113,19 +136,37 @@ function attachDialerForm(form) {
 
         if (form.dataset.webphoneChecked === '1') {
             form.dataset.webphoneChecked = '';
+            form.dataset.dialerConnectPending = '0';
+            form.dataset.dialerConnectCancelled = '0';
 
             return;
         }
 
         if (document.querySelector('[data-webphone-panel]')) {
             event.preventDefault();
+            form.dataset.dialerConnectPending = '1';
+            form.dataset.dialerConnectCancelled = '0';
 
             const ready = await ensureWebphoneReady();
+            const wasCancelled = form.dataset.dialerConnectCancelled === '1';
+            form.dataset.dialerConnectPending = '0';
+            form.dataset.dialerConnectCancelled = '0';
+
+            if (wasCancelled) {
+                hideLoadingOverlay();
+                return;
+            }
+
             if (!ready) {
+                hideLoadingOverlay();
                 return;
             }
 
             markDialerClickToCallPending();
+            // The generic form-loading hook already marked the first submit as
+            // "in progress". Clear it before re-submitting so the real
+            // originate POST is not blocked by the duplicate-submit guard.
+            hideLoadingOverlay();
             form.dataset.webphoneChecked = '1';
             form.requestSubmit();
         }
@@ -177,6 +218,7 @@ function initDialerSubmitFeedback() {
 }
 
 export function bootCommunicationsDialer() {
+    initDialerOverlayCancel();
     initCommunicationsDialer();
     initDialerSubmitFeedback();
 }
