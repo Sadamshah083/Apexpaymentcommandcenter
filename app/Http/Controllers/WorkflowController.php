@@ -10,6 +10,7 @@ use App\Services\Workspace\WorkspaceManager;
 use App\Services\Workspace\WorkspaceMemberService;
 use App\Services\Pipeline\LeadPipelineService;
 use App\Services\Pipeline\SetterDistributionService;
+use App\Services\Pipeline\CampaignService;
 use App\Services\Workflow\WorkflowDashboardService;
 use App\Services\Workflow\WorkflowLeadService;
 use App\Services\Workflow\WorkflowLeadVerificationService;
@@ -34,10 +35,20 @@ class WorkflowController extends Controller
         protected DiscoveryQualificationService $discoveryService,
         protected LeadPipelineService $pipelineService,
         protected SetterDistributionService $setterDistribution,
+        protected CampaignService $campaignService,
     ) {}
 
     public function index(Request $request)
     {
+        if ($request->is('admin*') || $request->routeIs('admin.*')) {
+            return redirect()->route('admin.dashboard', array_filter([
+                'section' => 'imports',
+                'search' => $request->input('search'),
+                'phase' => $request->input('phase'),
+                'assigned_user_id' => $request->input('assigned_user_id'),
+            ]));
+        }
+
         $user = Auth::user();
         $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
 
@@ -54,7 +65,10 @@ class WorkflowController extends Controller
     {
         $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
 
-        return view('workflows.create', compact('workspace'));
+        return view('workflows.create', [
+            'workspace' => $workspace,
+            'campaigns' => $this->campaignService->listForWorkspace($workspace),
+        ]);
     }
 
     public function store(Request $request)
@@ -63,14 +77,24 @@ class WorkflowController extends Controller
             'name' => 'required|string|max:255',
             'file' => 'required|file|mimes:csv,txt,xlsx,xls|max:10240',
             'processing_mode' => 'required|in:store_only,full_pipeline,import_only,import_and_enrich',
+            'campaign_id' => 'nullable|integer',
+            'campaign_name' => 'nullable|string|max:100',
         ]);
 
         $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+        $campaign = $this->campaignService->resolveForImport(
+            $workspace,
+            Auth::user(),
+            $request->filled('campaign_id') ? (int) $request->input('campaign_id') : null,
+            $request->input('campaign_name'),
+        );
+
         $workflow = $this->workflowService->createFromUpload(
             $workspace,
             $request->input('name'),
             $request->file('file'),
-            $request->input('processing_mode')
+            $request->input('processing_mode'),
+            $campaign->id,
         );
 
         $workflow = $this->workflowService->applyAutoMappingIfNeeded($workflow);
@@ -126,8 +150,6 @@ class WorkflowController extends Controller
             'mapping_confirmed' => $request->boolean('mapping_confirmed'),
             'run_enrichment_on_import' => $request->boolean('run_enrichment_on_import'),
             'auto_assign_setters' => $request->boolean('auto_assign_setters'),
-            'tag_ids' => $request->input('tag_ids', []),
-            'tag_names' => $request->input('tag_names', ''),
         ]);
 
         return redirect()->route('admin.workflows.show', $workflow->id)->with('success', 'Import started. Leads will appear as rows are processed.');
@@ -304,6 +326,7 @@ class WorkflowController extends Controller
             );
 
         $isAdminView = LeadRoute::isAdminContext();
+        $lead->loadMissing('campaign', 'leadList');
 
         return view('workflows.lead_show', compact(
             'lead', 'team', 'workspace', 'setterStatuses', 'closerStatuses',

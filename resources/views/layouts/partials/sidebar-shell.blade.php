@@ -4,7 +4,7 @@
     $title = $brandTitle ?? config('app.name');
 @endphp
 
-<div class="app-sidebar-wrap">
+<div class="app-sidebar-wrap" id="app-sidebar-root" data-turbo-permanent>
     <div class="app-sidebar-backdrop" data-sidebar-backdrop hidden aria-hidden="true"></div>
 
     <aside class="app-sidebar" id="app-sidebar">

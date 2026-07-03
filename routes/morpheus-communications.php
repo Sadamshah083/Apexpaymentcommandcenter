@@ -5,6 +5,9 @@ use Illuminate\Support\Facades\Route;
 
 return function (): void {
     Route::prefix('morpheus')->name('morpheus.')->group(function () {
+        Route::get('/webphone/config', [MorpheusHubController::class, 'webphoneConfig'])->name('webphone.config');
+        Route::post('/webphone/prepare', [MorpheusHubController::class, 'prepareWebphone'])->name('webphone.prepare');
+
         // Agent + admin: live call operations (dial, hold, transfer, disposition, etc.)
         Route::prefix('calls')->name('calls.')->group(function () {
             Route::post('/originate', [MorpheusHubController::class, 'originateCall'])->name('originate');

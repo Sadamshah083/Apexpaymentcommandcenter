@@ -12,7 +12,10 @@ use App\Models\WorkspaceSyncEvent;
 use App\Models\Workflow;
 use App\Models\WorkflowLead;
 use App\Models\DeliverabilityTest;
+use App\Models\LeadCampaign;
+use App\Services\SalesOps\LeadReactivationService;
 use App\Services\SalesOps\SdrPerformanceService;
+use App\Support\LeadContactDisplay;
 use App\Support\PipelineProgress;
 use App\Support\SalesOps;
 use Illuminate\Support\Collection;
@@ -235,10 +238,17 @@ class WorkspaceSyncService
         $eventStamp = WorkspaceSyncEvent::where('workspace_id', $workspace->id)->max('id') ?? 0;
 
         if ($syncScope === 'list') {
+            $leadStamp = $workflowIds->isEmpty()
+                ? ''
+                : (WorkflowLead::whereIn('workflow_id', $workflowIds)->max('updated_at') ?? '');
+            $campaignStamp = LeadCampaign::where('workspace_id', $workspace->id)->max('updated_at') ?? '';
+
             return md5(implode('|', [
                 $workspace->id,
                 $workflowStamp,
                 $eventStamp,
+                $campaignStamp,
+                $leadStamp,
             ]));
         }
 
@@ -296,6 +306,7 @@ class WorkspaceSyncService
         $query = $workspace->workflows()
             ->when($workflowId, fn ($q) => $q->where('id', $workflowId))
             ->with('leadList:id,name')
+            ->with('campaign:id,name')
             ->latest();
 
         if ($light) {
@@ -310,7 +321,7 @@ class WorkspaceSyncService
                     'processed_leads',
                     'enriched_leads',
                     'failed_leads',
-                    'import_tag_ids',
+                    'campaign_id',
                     'lead_list_id',
                     'updated_at',
                 ])
@@ -350,22 +361,44 @@ class WorkspaceSyncService
 
         $query = WorkflowLead::query()
             ->whereIn('workflow_id', $workflowIds)
-            ->with(['assignee:id,name', 'tags', 'leadList']);
+            ->with(['assignee:id,name', 'setter:id,name', 'campaign:id,name', 'leadList']);
 
         if ($workflowId) {
             $query->where('workflow_id', $workflowId);
         } elseif (! $isAdmin) {
             $role = $user->getWorkspaceRole($workspace->id);
 
-            $query->where(function ($q) use ($user, $role) {
+            $query->where(function ($q) use ($user, $role, $workspace) {
                 if ($role === 'appointment_setter') {
                     $q->where('pipeline_phase', 'with_setter')
                         ->where('assigned_user_id', $user->id);
                 } elseif ($role === 'appointment_setter_team_lead') {
-                    $q->whereIn('pipeline_phase', ['with_setter', 'appointment_settled', 'with_closer', 'closed'])
-                        ->whereNotNull('assigned_setter_id');
+                    $setterIds = $workspace->users()
+                        ->wherePivot('role', 'appointment_setter')
+                        ->wherePivot('status', 'active')
+                        ->pluck('users.id');
+
+                    $q->where(function ($inner) use ($setterIds) {
+                        $inner->where(function ($assigned) use ($setterIds) {
+                            $assigned->whereIn('pipeline_phase', ['with_setter', 'appointment_settled', 'with_closer', 'closed'])
+                                ->whereIn('assigned_setter_id', $setterIds);
+                        })->orWhere(function ($unassigned) {
+                            $unassigned->where('pipeline_phase', 'enriched')
+                                ->where('status', 'enriched')
+                                ->whereNull('assigned_user_id');
+                        });
+                    });
                 } elseif ($role === 'closers_team_lead') {
-                    $q->whereIn('pipeline_phase', ['appointment_settled', 'with_closer', 'closed']);
+                    $closerIds = $workspace->users()
+                        ->wherePivot('role', 'closer')
+                        ->wherePivot('status', 'active')
+                        ->pluck('users.id');
+
+                    $q->whereIn('pipeline_phase', ['with_closer', 'closed'])
+                        ->where(function ($inner) use ($closerIds) {
+                            $inner->whereIn('assigned_closer_id', $closerIds)
+                                ->orWhereIn('assigned_user_id', $closerIds);
+                        });
                 } elseif ($role === 'closer') {
                     $q->where('pipeline_phase', 'with_closer')
                         ->where('assigned_user_id', $user->id);
@@ -396,7 +429,7 @@ class WorkspaceSyncService
         $lead = WorkflowLead::query()
             ->whereIn('workflow_id', $workflowIds)
             ->where('id', $leadId)
-            ->with(['tags', 'leadList'])
+            ->with(['campaign:id,name', 'leadList', 'assignee:id,name', 'setter:id,name'])
             ->first();
 
         if (! $lead) {
@@ -428,6 +461,11 @@ class WorkspaceSyncService
             'tier_label' => SalesOps::tierLabel($lead->tier),
             'stage' => $lead->stage,
             'stage_label' => SalesOps::crmStageLabel($lead->stage),
+            'pipeline_phase' => $lead->pipeline_phase,
+            'pipeline_phase_label' => SalesOps::pipelinePhaseLabel($lead->pipeline_phase),
+            'setter_status_label' => SalesOps::setterStatusLabel($lead->setter_status),
+            'closer_status_label' => SalesOps::closerStatusLabel($lead->closer_status),
+            'assignee_name' => $lead->assignee?->name,
         ];
     }
 
@@ -437,6 +475,7 @@ class WorkspaceSyncService
     protected function buildSalesOpsPayload(Workspace $workspace, User $user, bool $isAdmin): array
     {
         $payload = [];
+        $overview = $this->performance->workspaceOverview($workspace);
 
         if ($isAdmin) {
             $workflowIds = $this->workflowIds($workspace);
@@ -445,9 +484,37 @@ class WorkspaceSyncService
                 ->selectRaw('pipeline_phase, count(*) as total')
                 ->groupBy('pipeline_phase')
                 ->pluck('total', 'pipeline_phase');
+
+            $payload['overview'] = [
+                'total_active_leads' => $overview['total_active_leads'],
+                'pending_verification' => $overview['pending_verification'],
+                'reactivation_queue' => $overview['reactivation_queue'],
+                'tier_breakdown' => $overview['tier_breakdown'],
+                'stage_breakdown' => $overview['stage_breakdown'],
+            ];
+            $payload['leaderboard'] = $this->performance->teamLeaderboard($workspace, 'week')->values()->all();
+            $payload['leaderboard_day'] = $this->performance->teamLeaderboard($workspace, 'day')->values()->all();
+            $payload['sdr_load'] = $overview['sdr_load']->values()->all();
+
+            $reactivationService = app(LeadReactivationService::class);
+            $payload['reactivation'] = [
+                'count' => $overview['reactivation_queue'],
+                'sources' => config('sales_ops.reactivation_sources', []),
+                'candidates' => $reactivationService->candidates($workspace, 50)
+                    ->map(fn (WorkflowLead $lead) => [
+                        'id' => $lead->id,
+                        'business_name' => $lead->business_name,
+                        'stage_label' => SalesOps::crmStageLabel($lead->stage),
+                        'updated_at' => $lead->updated_at?->format('M j, Y'),
+                    ])
+                    ->values()
+                    ->all(),
+            ];
         }
 
         if ($user->isAppointmentSetter($workspace->id) || $user->isCloser($workspace->id)) {
+            $payload['daily'] = $this->performance->dailyMetrics($user, $workspace);
+            $payload['weekly'] = $this->performance->weeklyMetrics($user, $workspace);
             $payload['pipeline'] = [
                 'active_leads' => WorkflowLead::query()
                     ->whereIn('workflow_id', $this->workflowIds($workspace))
@@ -516,6 +583,8 @@ class WorkspaceSyncService
     {
         $isOwner = $workspace->admin_id === $member->id;
 
+        $isSuperAdminMember = ($member->pivot->role ?? null) === 'super_admin';
+
         return [
             'id' => $member->id,
             'name' => $member->name,
@@ -524,8 +593,9 @@ class WorkspaceSyncService
             'role_label' => \App\Support\SalesOps::roleLabel($member->pivot->role),
             'status' => $member->pivot->status ?? 'active',
             'is_owner' => $isOwner,
-            'can_manage' => $viewer->canManageWorkspaceMembers($workspace->id) && ! $isOwner,
-            'can_assign_modules' => $viewer->canAssignModulePermissions($workspace->id) && ! $isOwner,
+            'is_super_admin' => $isSuperAdminMember,
+            'can_manage' => $viewer->canManageWorkspaceMembers($workspace->id) && ! $isSuperAdminMember,
+            'can_assign_modules' => $viewer->canAssignModulePermissions($workspace->id) && ! $isSuperAdminMember,
             'module_summary' => $this->moduleSummaryForMember($member, $workspace),
         ];
     }
@@ -602,7 +672,8 @@ class WorkspaceSyncService
             'completion_pct' => $workflow->total_leads > 0
                 ? (int) round(($attempted / $workflow->total_leads) * 100)
                 : 0,
-            'import_tag_ids' => $workflow->import_tag_ids ?? [],
+            'campaign_id' => $workflow->campaign_id,
+            'campaign_name' => $workflow->relationLoaded('campaign') ? $workflow->campaign?->name : null,
             'lead_list_name' => $workflow->leadList?->name,
             'discarded_duplicates' => (int) ($workflow->discarded_duplicates ?? 0),
             'assigned_leads' => (int) ($workflow->assigned_leads_count ?? 0),
@@ -623,14 +694,33 @@ class WorkspaceSyncService
         ];
     }
 
+    /**
+     * @param  \Illuminate\Support\Collection<int, WorkflowLead>|\Illuminate\Database\Eloquent\Collection<int, WorkflowLead>  $leads
+     * @return list<array<string, mixed>>
+     */
+    public function serializeLeadsCollection($leads): array
+    {
+        return $leads
+            ->map(fn (WorkflowLead $lead) => $this->serializeLead($lead))
+            ->values()
+            ->all();
+    }
+
     protected function serializeLead(WorkflowLead $lead): array
     {
+        $contact = LeadContactDisplay::for($lead);
+
         return [
             'id' => $lead->id,
             'workflow_id' => $lead->workflow_id,
             'row_number' => $lead->row_number,
             'assigned_user_id' => $lead->assigned_user_id,
             'assignee_name' => $lead->assignee?->name,
+            'setter_name' => $lead->relationLoaded('setter') ? $lead->setter?->name : null,
+            'handoff_notes' => filled($lead->handoff_notes)
+                ? \Illuminate\Support\Str::limit($lead->handoff_notes, 500)
+                : null,
+            'is_setter_locked' => method_exists($lead, 'isSetterLocked') ? $lead->isSetterLocked() : false,
             'status' => $lead->status,
             'verification_status' => $lead->verification_status,
             'business_name' => $lead->business_name,
@@ -658,13 +748,14 @@ class WorkspaceSyncService
             'tier_label' => SalesOps::tierLabel($lead->tier),
             'contact_attempts' => (int) $lead->contact_attempts,
             'error_message' => $lead->error_message,
-            'tags' => $lead->relationLoaded('tags')
-                ? $lead->tags->map(fn ($tag) => [
-                    'id' => $tag->id,
-                    'name' => $tag->name,
-                    'color' => $tag->color,
-                ])->values()->all()
-                : [],
+            'display_owner' => $contact['owner'],
+            'display_email' => $contact['email'],
+            'display_phone' => $contact['phone'],
+            'display_social_media' => $contact['social_media'],
+            'display_website' => $contact['website'],
+            'display_processor' => $contact['processor'],
+            'campaign_id' => $lead->campaign_id,
+            'campaign_name' => $lead->relationLoaded('campaign') ? $lead->campaign?->name : null,
             'lead_list_id' => $lead->lead_list_id,
             'lead_list_name' => $lead->relationLoaded('leadList') ? $lead->leadList?->name : null,
             'updated_at' => $lead->updated_at?->toIso8601String(),

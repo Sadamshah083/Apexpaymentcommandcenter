@@ -66,6 +66,26 @@ class WorkspaceMemberController extends Controller
         return $this->respond($request, "Updated {$member->name}'s role to ".SalesOps::roleLabel($data['role']).'.');
     }
 
+    public function update(Request $request, Workspace $workspace, User $member)
+    {
+        $data = $request->validate([
+            'username' => 'required|string|max:255|unique:users,name,'.$member->id,
+            'email' => 'required|email|max:255|unique:users,email,'.$member->id,
+            'password' => 'nullable|string|min:6|confirmed',
+        ]);
+
+        $member = $this->memberService->updateMemberProfile(
+            $workspace,
+            Auth::user(),
+            $member,
+            $data['username'],
+            $data['email'],
+            $data['password'] ?? null,
+        );
+
+        return $this->respond($request, "Updated account for {$member->name}.");
+    }
+
     public function resetPassword(Request $request, Workspace $workspace, User $member)
     {
         $data = $request->validate([

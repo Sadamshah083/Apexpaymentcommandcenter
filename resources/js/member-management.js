@@ -31,6 +31,12 @@ const ACTION_COPY = {
             return `Change ${name}'s role to ${label}?`;
         },
     },
+    'update': {
+        title: 'Save account changes?',
+        tone: 'warning',
+        confirmLabel: 'Save changes',
+        message: (name) => `Save the updated username, email, and password settings for ${name}?`,
+    },
     'reset-password': {
         title: 'Reset password?',
         tone: 'warning',
@@ -231,6 +237,30 @@ async function submitMemberForm(form) {
             }
 
             closeModuleAccessModal();
+        }
+
+        if (form.dataset.memberAction === 'update') {
+            const username = form.querySelector('[name="username"]')?.value?.trim();
+            const email = form.querySelector('[name="email"]')?.value?.trim();
+            const nameEl = row?.querySelector('.um-member-name');
+            const emailEl = row?.querySelector('.um-member-email');
+            const roleLabel = row?.querySelector('.um-role-readonly')?.textContent?.trim() || '';
+
+            if (nameEl && username) {
+                nameEl.textContent = username;
+            }
+
+            if (emailEl && email) {
+                emailEl.textContent = email;
+            }
+
+            if (row && username) {
+                row.dataset.memberName = username;
+                row.dataset.memberSearch = `${username} ${email || ''} ${roleLabel}`.toLowerCase();
+            }
+
+            form.reset();
+            closeEditMemberModal();
         }
 
         if (form.dataset.memberAction === 'reset-password') {
@@ -778,6 +808,115 @@ function bindModuleAccessModal() {
     }
 }
 
+function closeEditMemberModal() {
+    const modal = document.getElementById('um-edit-member-modal');
+    if (!modal) {
+        return;
+    }
+
+    modal.hidden = true;
+    modal.setAttribute('aria-hidden', 'true');
+}
+
+function bindEditMemberModal() {
+    const modal = document.getElementById('um-edit-member-modal');
+    const form = document.getElementById('um-edit-member-form');
+    if (!modal || !form) {
+        return;
+    }
+
+    const open = (button) => {
+        form.action = button.dataset.editUrl || '#';
+        form.dataset.memberName = button.dataset.memberName || 'this member';
+
+        const desc = document.getElementById('um-edit-member-desc');
+        if (desc) {
+            desc.textContent = `Update username, email, and password for ${form.dataset.memberName}.`;
+        }
+
+        const usernameInput = document.getElementById('um-edit-member-username');
+        const emailInput = document.getElementById('um-edit-member-email');
+        if (usernameInput) {
+            usernameInput.value = button.dataset.memberName || '';
+        }
+        if (emailInput) {
+            emailInput.value = button.dataset.memberEmail || '';
+        }
+
+        const passwordInput = form.querySelector('[name="password"]');
+        const confirmationInput = form.querySelector('[name="password_confirmation"]');
+        if (passwordInput) {
+            passwordInput.value = '';
+        }
+        if (confirmationInput) {
+            confirmationInput.value = '';
+        }
+
+        modal.hidden = false;
+        modal.setAttribute('aria-hidden', 'false');
+        usernameInput?.focus();
+    };
+
+    document.querySelectorAll('[data-um-edit-member-open]').forEach((button) => {
+        if (button.dataset.editBound === '1') {
+            return;
+        }
+
+        button.dataset.editBound = '1';
+        button.addEventListener('click', () => open(button));
+    });
+
+    if (modal.dataset.bound !== '1') {
+        modal.dataset.bound = '1';
+
+        modal.querySelectorAll('[data-um-edit-member-dismiss]').forEach((element) => {
+            element.addEventListener('click', closeEditMemberModal);
+        });
+
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && !modal.hidden) {
+                closeEditMemberModal();
+            }
+        });
+    }
+
+    if (form.dataset.memberBound !== '1') {
+        form.dataset.memberBound = '1';
+
+        form.addEventListener('submit', (event) => {
+            event.preventDefault();
+
+            const password = form.querySelector('[name="password"]')?.value || '';
+            const confirmation = form.querySelector('[name="password_confirmation"]')?.value || '';
+
+            if (password !== '' && password.length < 6) {
+                showToast('Password must be at least 6 characters.', 'error');
+
+                return;
+            }
+
+            if (password !== '' && password !== confirmation) {
+                showToast('Password confirmation does not match.', 'error');
+
+                return;
+            }
+
+            if (!form.checkValidity()) {
+                return;
+            }
+
+            if (form.dataset.confirmed === '1') {
+                form.dataset.confirmed = '0';
+                submitMemberForm(form);
+
+                return;
+            }
+
+            openConfirmModal(form);
+        });
+    }
+}
+
 function closeResetPasswordModal() {
     const modal = document.getElementById('um-reset-password-modal');
     if (!modal) {
@@ -859,6 +998,7 @@ function bindMemberForms() {
     document.querySelectorAll('form[data-member-action]').forEach((form) => {
         if (
             form.dataset.memberBound === '1' ||
+            form.id === 'um-edit-member-form' ||
             form.id === 'um-reset-password-form' ||
             form.closest('.um-module-access-source')
         ) {
@@ -1162,6 +1302,7 @@ export function initMemberManagement() {
     }
 
     bindConfirmModal();
+    bindEditMemberModal();
     bindResetPasswordModal();
     bindModuleAccessModal();
     bindMemberForms();
@@ -1203,6 +1344,20 @@ export function updateMemberRows(container, members) {
         if (badge) {
             badge.className = `member-status-badge member-status-${status} um-badge um-badge-status-${status}`;
             badge.textContent = status === 'suspended' ? 'Suspended' : status === 'invited' ? 'Invited' : 'Active';
+        }
+
+        const nameEl = row.querySelector('.um-member-name');
+        if (nameEl && member.name) {
+            nameEl.textContent = member.name;
+        }
+
+        const emailEl = row.querySelector('.um-member-email');
+        if (emailEl && member.email) {
+            emailEl.textContent = member.email;
+        }
+
+        if (member.name) {
+            row.dataset.memberName = member.name;
         }
 
         const roleEl = row.querySelector('[data-member-role]');

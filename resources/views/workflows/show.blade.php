@@ -126,35 +126,23 @@
                 <div class="app-step-header">
                     <span class="app-step-number">2</span>
                     <div>
-                        <h2 class="app-section-title">Segment your list</h2>
-                        <p class="app-section-desc">HubSpot-style lists and tags ΓÇö every imported lead is added to a static list and tagged for filtering.</p>
+                        <h2 class="app-section-title">Campaign & list</h2>
+                        <p class="app-section-desc">Leads are grouped under your campaign and a static list for this import.</p>
                     </div>
                 </div>
 
-                <div class="app-field">
-                    <label class="app-label">Static list</label>
-                    <p class="text-sm text-zinc-700 font-semibold">{{ $workflow->name }}</p>
-                    <p class="app-field-hint">A new list is created with this import name.</p>
-                </div>
-
-                @if(($leadTags ?? collect())->isNotEmpty())
+                @if($campaign ?? null)
                     <div class="app-field">
-                        <span class="app-label">Tags</span>
-                        <div class="flex flex-wrap gap-2 mt-2">
-                            @foreach($leadTags as $tag)
-                                <label class="app-member-chip">
-                                    <input type="checkbox" name="tag_ids[]" value="{{ $tag->id }}">
-                                    <span class="app-member-chip-name" style="border-left: 3px solid {{ $tag->color }}">{{ $tag->name }}</span>
-                                </label>
-                            @endforeach
-                        </div>
+                        <span class="app-label">Campaign</span>
+                        <p class="text-sm text-zinc-700 font-semibold">{{ $campaign->name }}</p>
+                        <p class="app-field-hint">All leads from this file belong to this campaign.</p>
                     </div>
                 @endif
 
                 <div class="app-field">
-                    <label for="tag_names" class="app-label">New tags</label>
-                    <input type="text" name="tag_names" id="tag_names" class="app-input" placeholder="e.g. cold-outreach, texas, june-2026">
-                    <p class="app-field-hint">Comma-separated. Tags trace leads across imports ΓÇö use them for batch enrich and assign in Lead Tags.</p>
+                    <label class="app-label">Static list</label>
+                    <p class="text-sm text-zinc-700 font-semibold">{{ $workflow->name }}</p>
+                    <p class="app-field-hint">A list is created with this import name.</p>
                 </div>
 
                 <input type="hidden" name="verification_toggles[email]" value="0">
@@ -236,20 +224,18 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                 </div>
             @endif
 
-            @if(!empty($workflow->import_tag_ids) || ($leadList ?? null))
+            @if(($campaign ?? null) || ($leadList ?? null))
                 <div class="app-alert app-alert-info flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
-                        @if($leadList ?? null)
-                            <p class="app-alert-title">List: {{ $leadList->name }}</p>
+                        @if($campaign ?? null)
+                            <p class="app-alert-title">Campaign: {{ $campaign->name }}</p>
                         @endif
-                        @if(!empty($workflow->import_tag_ids))
-                            <p class="app-alert-desc">Batch enrich or assign all leads with these tags ΓÇö including from other files.</p>
-                        @elseif($leadList ?? null)
-                            <p class="app-alert-desc">All leads in this import belong to this static list.</p>
+                        @if($leadList ?? null)
+                            <p class="app-alert-desc">List: {{ $leadList->name }}</p>
                         @endif
                     </div>
-                    @if(!empty($workflow->import_tag_ids))
-                        <a href="{{ route('admin.lead-tags.show', ['tag_ids' => $workflow->import_tag_ids]) }}" class="app-btn app-btn-secondary app-btn-sm whitespace-nowrap">Open in Lead Tags</a>
+                    @if($campaign ?? null)
+                        <a href="{{ route('admin.campaigns.show', $campaign) }}" class="app-btn app-btn-secondary app-btn-sm whitespace-nowrap">Open campaign</a>
                     @endif
                 </div>
             @endif
@@ -377,7 +363,7 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                                         @if($lead->city || $lead->state)
                                             <div class="text-xs text-zinc-400 mt-0.5">{{ $lead->city }}{{ $lead->city && $lead->state ? ', ' : '' }}{{ $lead->state }}</div>
                                         @endif
-                                        @include('partials.lead-tag-chips', ['tags' => $lead->tags, 'list' => $lead->leadList, 'compact' => true])
+                                        @include('partials.campaign-chip', ['campaign' => $lead->campaign, 'compact' => true])
                                     </td>
                                     <td class="text-sm text-zinc-600">{{ LeadContactDisplay::cell($display['owner']) ?: 'ΓÇö' }}</td>
                                     <td class="text-sm text-zinc-600">{{ LeadContactDisplay::cell($display['email']) ?: 'ΓÇö' }}</td>

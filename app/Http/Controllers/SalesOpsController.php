@@ -23,11 +23,7 @@ class SalesOpsController extends Controller
 
     public function index()
     {
-        $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
-        $overview = $this->performance->workspaceOverview($workspace);
-        $leaderboard = $this->performance->teamLeaderboard($workspace, 'week');
-
-        return view('sales-ops.index', compact('workspace', 'overview', 'leaderboard'));
+        return redirect()->route('admin.dashboard', ['section' => 'ops']);
     }
 
     public function performance(Request $request)

@@ -21,13 +21,13 @@ class WorkspaceMemberModulePermissionsTest extends TestCase
             $workspace,
             $owner,
             $manager,
-            ['lead_pipeline', 'lead_tags'],
+            ['lead_pipeline', 'campaigns'],
             true,
         );
 
         $manager = $manager->fresh(['workspaces']);
 
-        $this->assertSame(['lead_pipeline', 'lead_tags'], $manager->getModulePermissions($workspace->id));
+        $this->assertSame(['lead_pipeline', 'campaigns'], $manager->getModulePermissions($workspace->id));
         $this->assertTrue($manager->canAccessAdminModule('lead_pipeline', $workspace->id));
         $this->assertFalse($manager->canAccessAdminModule('email_lists', $workspace->id));
     }

@@ -6,6 +6,7 @@ use App\Models\LeadActivity;
 use App\Models\User;
 use App\Models\WorkflowLead;
 use App\Models\Workspace;
+use App\Services\Dashboard\PipelineMetricsService;
 use App\Support\SalesOps;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
@@ -128,21 +129,25 @@ class SdrPerformanceService
     public function workspaceOverview(Workspace $workspace): array
     {
         $workflowIds = $workspace->workflows()->pluck('id');
+        $metrics = app(PipelineMetricsService::class);
+        $activeQuery = $metrics->scopeActivePipeline($metrics->workspaceQuery($workspace));
 
-        $leadsQuery = WorkflowLead::query()->whereIn('workflow_id', $workflowIds)->where('status', 'completed');
+        $releasedQuery = WorkflowLead::query()
+            ->whereIn('workflow_id', $workflowIds)
+            ->where('status', 'completed');
 
         return [
-            'total_active_leads' => (clone $leadsQuery)->whereNotIn('stage', ['closed_won', 'closed_lost'])->count(),
+            'total_active_leads' => (clone $activeQuery)->count(),
             'pending_verification' => WorkflowLead::whereIn('workflow_id', $workflowIds)->where('status', 'pending_verification')->count(),
-            'tier_breakdown' => (clone $leadsQuery)
+            'tier_breakdown' => (clone $releasedQuery)
                 ->select('tier', DB::raw('count(*) as total'))
                 ->groupBy('tier')
                 ->pluck('total', 'tier')
                 ->all(),
-            'stage_breakdown' => (clone $leadsQuery)
-                ->select('stage', DB::raw('count(*) as total'))
-                ->groupBy('stage')
-                ->pluck('total', 'stage')
+            'stage_breakdown' => (clone $releasedQuery)
+                ->select('pipeline_phase', DB::raw('count(*) as total'))
+                ->groupBy('pipeline_phase')
+                ->pluck('total', 'pipeline_phase')
                 ->all(),
             'sdr_load' => $this->sdrLoad($workspace),
             'reactivation_queue' => app(LeadReactivationService::class)->candidates($workspace)->count(),

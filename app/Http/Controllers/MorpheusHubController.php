@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Services\Communications\CommunicationsWebphoneService;
 use App\Services\Communications\CommunicationsAgentService;
 use App\Services\Communications\CommunicationsCallHistoryService;
 use App\Services\Communications\CommunicationsDataService;
@@ -20,8 +21,71 @@ class MorpheusHubController extends Controller
         protected CommunicationsDataService $data,
         protected CommunicationsAgentService $agents,
         protected CommunicationsCallHistoryService $callHistory,
+        protected CommunicationsWebphoneService $webphone,
         protected WorkspaceContextService $workspaceContext,
     ) {}
+
+    // -------------------------------------------------------------------------
+    // Webphone (embedded SIP/WebRTC)
+    // -------------------------------------------------------------------------
+
+    public function webphoneConfig(Request $request)
+    {
+        $validated = $request->validate([
+            'extension' => ['required', 'string', 'max:32'],
+        ]);
+
+        if (! $this->morpheus->isConfigured()) {
+            return response()->json(['ok' => false, 'error' => 'Morpheus is not configured.'], 503);
+        }
+
+        $user = Auth::user();
+        $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
+        $routePrefix = $this->redirectRoutePrefix($request);
+
+        $config = $this->webphone->configFor(
+            $user,
+            $workspace,
+            $validated['extension'],
+            $routePrefix,
+        );
+
+        if ($config === null) {
+            return response()->json(['ok' => false, 'error' => 'Webphone not available for this extension.'], 403);
+        }
+
+        return response()->json(['ok' => true, 'config' => $config]);
+    }
+
+    public function prepareWebphone(Request $request)
+    {
+        $validated = $request->validate([
+            'extension' => ['required', 'string', 'max:32'],
+        ]);
+
+        $user = Auth::user();
+        $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
+        $routePrefix = $this->redirectRoutePrefix($request);
+
+        $result = $this->webphone->prepareExtension(
+            $user,
+            $workspace,
+            $validated['extension'],
+            $routePrefix,
+        );
+
+        if (! ($result['ok'] ?? false)) {
+            return response()->json($result, 422);
+        }
+
+        $config = $this->webphone->configFor($user, $workspace, $validated['extension'], $routePrefix);
+
+        return response()->json([
+            'ok' => true,
+            'message' => $result['message'] ?? 'Ready.',
+            'config' => $config,
+        ]);
+    }
 
     // -------------------------------------------------------------------------
     // Call actions
@@ -59,6 +123,24 @@ class MorpheusHubController extends Controller
             ? 'Outbound DID is not set on this extension yet — assign a caller ID in Phone Agents before calling customers.'
             : null;
 
+        $endpointOnline = $this->agents->extensionEndpointOnline($fromExtension);
+
+        if (! $endpointOnline && in_array($dialMethod, ['auto', 'sip'], true)) {
+            $launched = $this->launchOutboundDial($request, $clickToCall, $destination, $fromExtension, 'sip');
+            if ($launched) {
+                $this->logOutboundDial($request, $fromExtension, $destination);
+
+                if (! $request->wantsJson()) {
+                    session()->flash(
+                        'warning',
+                        'Your Morpheus extension is not registered yet. Opening direct SIP dial — register Zoiper, Linphone, or the Morpheus web phone first.'
+                    );
+                }
+
+                return $launched;
+            }
+        }
+
         if (in_array($dialMethod, ['api', 'auto'], true)) {
             $result = $this->morpheus->originateCall($fromExtension, $destination, $dialOptions);
 
@@ -67,16 +149,25 @@ class MorpheusHubController extends Controller
                 $this->data->bustCache();
                 $this->hub->bustCache();
 
+                $successMessage = match ($result['outcome'] ?? 'initiated') {
+                    'connected' => 'Call connected.',
+                    'ringing' => 'Outbound call ringing. Answer your extension or softphone when it rings.',
+                    'no_answer' => 'Call placed but extension did not answer in time.',
+                    default => 'Outbound call initiated. Answer your extension or softphone when it rings.',
+                };
+
                 if ($request->wantsJson()) {
                     return response()->json(array_merge(['ok' => true], $result));
                 }
 
-                $redirect = redirect()
-                    ->route($this->redirectRoutePrefix($request).'communications.index', ['channel' => 'calls'])
-                    ->with('success', 'Outbound call initiated. Answer your extension/softphone when it rings.');
+                $redirect = back()->with('success', $successMessage);
 
                 if ($didWarning) {
                     $redirect->with('warning', $didWarning);
+                }
+
+                if (filled($result['warning'] ?? null)) {
+                    $redirect->with('warning', $result['warning']);
                 }
 
                 return $redirect;
@@ -95,6 +186,49 @@ class MorpheusHubController extends Controller
                     ->withInput()
                     ->with('error', $result['error'] ?? 'Could not place outbound call.');
             }
+        }
+
+        if (($result['extension_busy'] ?? false) === true && in_array($dialMethod, ['auto', 'sip'], true)) {
+            $launched = $this->launchOutboundDial($request, $clickToCall, $destination, $fromExtension, 'sip');
+            if ($launched) {
+                $this->logOutboundDial($request, $fromExtension, $destination, $result['call_uuid'] ?? null);
+
+                if (! $request->wantsJson()) {
+                    session()->flash(
+                        'warning',
+                        ($result['error'] ?? 'Extension rejected the ring.').' Opening direct SIP dial instead.'
+                    );
+                }
+
+                return $launched;
+            }
+        }
+
+        if (($result['extension_offline'] ?? false) === true && in_array($dialMethod, ['auto', 'sip'], true)) {
+            $launched = $this->launchOutboundDial($request, $clickToCall, $destination, $fromExtension, 'sip');
+            if ($launched) {
+                $this->logOutboundDial($request, $fromExtension, $destination, $result['call_uuid'] ?? null);
+
+                if (! $request->wantsJson()) {
+                    session()->flash('warning', ($result['error'] ?? 'Extension offline.').' Opening direct SIP dial instead.');
+                }
+
+                return $launched;
+            }
+        }
+
+        if (($result['extension_offline'] ?? false) === true) {
+            if ($request->wantsJson()) {
+                return response()->json([
+                    'ok' => false,
+                    'error' => $result['error'] ?? 'Extension is not online.',
+                    'attempted' => $result['attempted'] ?? [],
+                ], 422);
+            }
+
+            return back()
+                ->withInput()
+                ->with('error', $result['error'] ?? 'Extension is not online.');
         }
 
         if ($dialMethod === 'sip') {
@@ -151,67 +285,67 @@ class MorpheusHubController extends Controller
     {
         $validated = $request->validate(['destination' => ['required', 'string', 'max:64']]);
 
-        return $this->callAction($request, fn () => $this->morpheus->transferCall($uuid, $validated['destination']), 'Call transferred.');
+        return $this->executeCallAction($request, fn () => $this->morpheus->transferCall($uuid, $validated['destination']), 'Call transferred.');
     }
 
     public function hangupCall(Request $request, string $uuid)
     {
-        return $this->callAction($request, fn () => $this->morpheus->hangup($uuid), 'Call ended.');
+        return $this->executeCallAction($request, fn () => $this->morpheus->hangup($uuid), 'Call ended.');
     }
 
     public function holdCall(Request $request, string $uuid)
     {
-        return $this->callAction($request, fn () => $this->morpheus->hold($uuid), 'Call placed on hold.');
+        return $this->executeCallAction($request, fn () => $this->morpheus->hold($uuid), 'Call placed on hold.');
     }
 
     public function unholdCall(Request $request, string $uuid)
     {
-        return $this->callAction($request, fn () => $this->morpheus->unhold($uuid), 'Call removed from hold.');
+        return $this->executeCallAction($request, fn () => $this->morpheus->unhold($uuid), 'Call removed from hold.');
     }
 
     public function parkCall(Request $request, string $uuid)
     {
-        return $this->callAction($request, fn () => $this->morpheus->park($uuid), 'Call parked.');
+        return $this->executeCallAction($request, fn () => $this->morpheus->park($uuid), 'Call parked.');
     }
 
     public function unparkCall(Request $request, string $uuid)
     {
         $validated = $request->validate(['destination' => ['required', 'string', 'max:64']]);
 
-        return $this->callAction($request, fn () => $this->morpheus->unpark($uuid, $validated['destination']), 'Call unparked.');
+        return $this->executeCallAction($request, fn () => $this->morpheus->unpark($uuid, $validated['destination']), 'Call unparked.');
     }
 
     public function unbridgeCall(Request $request, string $uuid)
     {
-        return $this->callAction($request, fn () => $this->morpheus->unbridge($uuid), 'Call unbridged.');
+        return $this->executeCallAction($request, fn () => $this->morpheus->unbridge($uuid), 'Call unbridged.');
     }
 
     public function bridgeCall(Request $request, string $uuid)
     {
         $validated = $request->validate(['other_uuid' => ['required', 'string', 'uuid']]);
 
-        return $this->callAction($request, fn () => $this->morpheus->bridge($uuid, $validated['other_uuid']), 'Calls bridged.');
+        return $this->executeCallAction($request, fn () => $this->morpheus->bridge($uuid, $validated['other_uuid']), 'Calls bridged.');
     }
 
     public function joinConferenceCall(Request $request, string $uuid)
     {
         $validated = $request->validate(['conference' => ['required', 'string', 'max:128']]);
 
-        return $this->callAction($request, fn () => $this->morpheus->joinConference($uuid, $validated['conference']), 'Call joined conference.');
+        return $this->executeCallAction($request, fn () => $this->morpheus->joinConference($uuid, $validated['conference']), 'Call joined conference.');
     }
 
     public function transferCallToQueue(Request $request, string $uuid)
     {
         $validated = $request->validate(['queue_id' => ['required', 'string']]);
 
-        return $this->callAction($request, fn () => $this->morpheus->transferToQueue($uuid, $validated['queue_id']), 'Call transferred to queue.');
+        return $this->executeCallAction($request, fn () => $this->morpheus->transferToQueue($uuid, $validated['queue_id']), 'Call transferred to queue.');
     }
 
     public function transferCallToAgent(Request $request, string $uuid)
     {
         $validated = $request->validate(['agent_user_id' => ['required', 'string', 'uuid']]);
 
-        return $this->callAction($request, fn () => $this->morpheus->transferToAgent($uuid, $validated['agent_user_id']), 'Call transferred to agent.');
+        return $this->executeCallAction($request, fn () => $this->morpheus->transferToAgent($uuid, $validated['agent_user_id']), 'Call transferred to agent.');
     }
 
     public function dispositionCall(Request $request, string $uuid)
@@ -230,7 +364,7 @@ class MorpheusHubController extends Controller
             $payload['note'] = $validated['note'];
         }
 
-        return $this->callAction($request, function () use ($uuid, $payload, $request) {
+        return $this->executeCallAction($request, function () use ($uuid, $payload, $request) {
             $result = $this->morpheus->dispositionCall($uuid, $payload);
             $this->recordDispositionHistory($request, $uuid, $payload['disposition'], $payload['note'] ?? null);
 
@@ -440,6 +574,7 @@ class MorpheusHubController extends Controller
             'email' => ['nullable', 'email', 'max:255'],
             'role' => ['nullable', 'string', 'in:admin,user'],
             'status' => ['nullable', 'string', 'in:active,inactive,locked'],
+            'user_level' => ['nullable', 'integer', 'min:1', 'max:9'],
         ]);
 
         return $this->mutateAction(fn () => $this->morpheus->createUser($validated), 'User created.');
@@ -454,6 +589,7 @@ class MorpheusHubController extends Controller
             'role' => ['nullable', 'string', 'in:admin,user'],
             'status' => ['nullable', 'string', 'in:active,inactive,locked'],
             'password' => ['nullable', 'string', 'min:8', 'max:128'],
+            'user_level' => ['nullable', 'integer', 'min:1', 'max:9'],
         ]);
 
         return $this->mutateAction(fn () => $this->morpheus->updateUser($id, array_filter($validated, fn ($v) => ! is_null($v))), 'User updated.');
@@ -606,7 +742,7 @@ class MorpheusHubController extends Controller
     // Helpers
     // -------------------------------------------------------------------------
 
-    protected function callAction(Request $request, callable $action, string $successMessage)
+    protected function executeCallAction(Request $request, callable $action, string $successMessage)
     {
         if (! $this->morpheus->isConfigured()) {
             return back()->with('error', 'Morpheus CX is not configured.');

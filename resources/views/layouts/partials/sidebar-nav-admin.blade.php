@@ -11,7 +11,7 @@
         return $allowedModules[$module] ??= $user->canAccessAdminModule($module, $workspaceId);
     };
 
-    $leadPipelineModules = ['lead_pipeline', 'lead_tags'];
+    $leadPipelineModules = ['lead_pipeline', 'campaigns'];
     $emailToolkitModules = ['email_lists', 'deliverability', 'content_analyzer', 'reputation'];
     $workspaceAdminModules = ['user_management', 'server_monitoring'];
     $showLeadPipeline = collect($leadPipelineModules)->contains(fn(string $module) => $can($module));
@@ -22,7 +22,7 @@
 
 @if ($showDashboard)
     <x-sidebar.section title="Overview">
-        <x-sidebar.link :href="route('admin.dashboard')" label="Dashboard" icon-name="dashboard"
+        <x-sidebar.link :href="route('admin.dashboard')" label="Command Center" icon-name="dashboard"
             :active="request()->routeIs('admin.dashboard*')">
             <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'dashboard'])</x-slot:icon>
         </x-sidebar.link>
@@ -32,15 +32,15 @@
 @if ($showLeadPipeline)
     <x-sidebar.section title="Lead Pipeline">
         @if ($can('lead_pipeline'))
-            <x-sidebar.link :href="route('admin.workflows.index')" label="Import & Overview" icon-name="pipeline"
-                :active="request()->routeIs('admin.workflows.*')">
+            <x-sidebar.link :href="route('admin.workflows.create')" label="Import leads" icon-name="pipeline"
+                :active="request()->routeIs('admin.workflows.create', 'admin.workflows.show')">
                 <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'pipeline'])</x-slot:icon>
             </x-sidebar.link>
         @endif
-        @if ($can('lead_tags'))
-            <x-sidebar.link :href="route('admin.lead-tags.index')" label="Lead Tags" icon-name="tags"
-                :active="request()->routeIs('admin.lead-tags.*')">
-                <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'tags'])</x-slot:icon>
+        @if ($can('campaigns'))
+            <x-sidebar.link :href="route('admin.campaigns.index')" label="Campaigns" icon-name="campaigns"
+                :active="request()->routeIs('admin.campaigns.*')">
+                <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'campaigns'])</x-slot:icon>
             </x-sidebar.link>
         @endif
     </x-sidebar.section>
@@ -77,8 +77,8 @@
 
 @if ($can('sales_ops'))
     <x-sidebar.section title="Sales Operations">
-        <x-sidebar.link :href="route('admin.sales-ops.index')" label="Overview" icon-name="sales"
-            :active="request()->routeIs('admin.sales-ops.*')">
+        <x-sidebar.link :href="route('admin.dashboard', ['section' => 'ops'])" label="Team performance" icon-name="sales"
+            :active="request()->routeIs('admin.sales-ops.*') && !request()->routeIs('admin.sales-ops.distribution', 'admin.sales-ops.reactivation')">
             <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'sales'])</x-slot:icon>
         </x-sidebar.link>
     </x-sidebar.section>

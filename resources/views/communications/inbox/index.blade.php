@@ -50,11 +50,31 @@
                         @endif
                     </div>
                 @else
-                    @foreach ($warnings ?? [] as $warning)
-                        <div class="comm-hub-alert comm-hub-alert-warning">{{ $warning }}</div>
+                    @foreach ($warnings ?? [] as $index => $warning)
+                        <div class="comm-hub-alert comm-hub-alert-warning ghl-inbox-alert-dismissible"
+                            data-dismiss-key="comm-hub-warning-{{ md5($warning) }}">
+                            <span class="ghl-inbox-alert-text">{{ $warning }}</span>
+                            <button type="button" class="ghl-inbox-alert-close" data-dismiss-target
+                                aria-label="Dismiss">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                    aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 6l12 12M6 18L18 6" />
+                                </svg>
+                            </button>
+                        </div>
                     @endforeach
                     @if ($error)
-                        <div class="comm-hub-alert comm-hub-alert-warning">{{ $error }}</div>
+                        <div class="comm-hub-alert comm-hub-alert-warning ghl-inbox-alert-dismissible"
+                            data-dismiss-key="comm-hub-error-{{ md5($error) }}">
+                            <span class="ghl-inbox-alert-text">{{ $error }}</span>
+                            <button type="button" class="ghl-inbox-alert-close" data-dismiss-target
+                                aria-label="Dismiss">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                    aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 6l12 12M6 18L18 6" />
+                                </svg>
+                            </button>
+                        </div>
                     @endif
                 @endif
             </div>
@@ -86,5 +106,38 @@
 
 @push('scripts')
     @include('communications.partials.audio-player-script')
-    @include('communications.inbox.partials.dialer-script')
+    <script>
+        (function () {
+            function initAlertDismiss(root) {
+                var scope = root || document;
+                var storage = null;
+                try {
+                    storage = window.sessionStorage;
+                } catch (e) {
+                    storage = null;
+                }
+
+                scope.querySelectorAll('.ghl-inbox-alert-dismissible').forEach(function (alert) {
+                    var key = alert.getAttribute('data-dismiss-key');
+                    if (key && storage && storage.getItem(key) === '1') {
+                        alert.setAttribute('hidden', 'hidden');
+                        return;
+                    }
+                    var btn = alert.querySelector('[data-dismiss-target]');
+                    if (!btn || btn.dataset.bound === '1') return;
+                    btn.dataset.bound = '1';
+                    btn.addEventListener('click', function () {
+                        alert.setAttribute('hidden', 'hidden');
+                        if (key && storage) {
+                            try { storage.setItem(key, '1'); } catch (e) { /* noop */ }
+                        }
+                    });
+                });
+            }
+
+            initAlertDismiss(document);
+            document.addEventListener('turbo:load', function () { initAlertDismiss(document); });
+            document.addEventListener('turbo:frame-load', function (e) { initAlertDismiss(e.target); });
+        })();
+    </script>
 @endpush

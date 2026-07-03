@@ -109,6 +109,9 @@
                                             @if($wf->leadList)
                                                 <div class="import-workflow-meta">List: {{ $wf->leadList->name }}</div>
                                             @endif
+                                            @if($wf->campaign)
+                                                <a href="{{ route('admin.campaigns.show', $wf->campaign_id) }}" class="campaign-chip campaign-chip--sm mt-1">{{ $wf->campaign->name }}</a>
+                                            @endif
                                         </td>
                                         <td data-label="File" class="col-file import-workflow-file" title="{{ $wf->original_filename }}">{{ $wf->original_filename }}</td>
                                         <td data-label="Status" class="col-status"><x-workflow-status-pill :status="$wf->status" /></td>
@@ -222,7 +225,7 @@
                                         <div class="text-[10px] text-zinc-400 font-normal mt-0.5">
                                             {{ $lead->city }}, {{ $lead->state }}
                                         </div>
-                                        @include('partials.lead-tag-chips', ['tags' => $lead->tags, 'list' => $lead->leadList, 'compact' => true])
+                                        @include('partials.campaign-chip', ['campaign' => $lead->campaign, 'compact' => true])
                                     </td>
                                     <td class="font-medium text-zinc-600">{{ \App\Support\LeadContactDisplay::cell($display['owner']) ?: '—' }}</td>
                                     <td class="text-sm text-zinc-600">{{ \App\Support\LeadContactDisplay::cell($display['email']) ?: '—' }}</td>

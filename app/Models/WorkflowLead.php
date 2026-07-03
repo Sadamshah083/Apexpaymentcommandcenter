@@ -4,13 +4,13 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class WorkflowLead extends Model
 {
     protected $fillable = [
         'workflow_id',
+        'campaign_id',
         'lead_list_id',
         'import_mode',
         'pipeline_phase',
@@ -105,9 +105,9 @@ class WorkflowLead extends Model
         return $this->belongsTo(LeadList::class);
     }
 
-    public function tags(): BelongsToMany
+    public function campaign(): BelongsTo
     {
-        return $this->belongsToMany(LeadTag::class, 'lead_tag_workflow_lead', 'workflow_lead_id', 'lead_tag_id');
+        return $this->belongsTo(LeadCampaign::class, 'campaign_id');
     }
 
     public function isEnriched(): bool

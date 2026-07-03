@@ -251,16 +251,64 @@ function escapeHtml(value) {
         .replace(/"/g, '&quot;');
 }
 
-function renderLeadTagChips(lead) {
-    const tags = Array.isArray(lead.tags) ? lead.tags : [];
-    const tagHtml = tags.length
-        ? `<div class="flex flex-wrap gap-1 mt-0.5">${tags.map((tag) => `<span class="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-zinc-100 text-zinc-600" style="border-left: 2px solid ${escapeHtml(tag.color || '#6366f1')}">${escapeHtml(tag.name)}</span>`).join('')}</div>`
+function renderLeadCampaignMeta(lead) {
+    const campaignHtml = lead.campaign_name
+        ? `<span class="campaign-chip campaign-chip--sm">${escapeHtml(lead.campaign_name)}</span>`
         : '';
     const listHtml = lead.lead_list_name
         ? `<div class="text-[10px] text-zinc-400 mt-0.5">List: <span class="font-medium text-zinc-600">${escapeHtml(lead.lead_list_name)}</span></div>`
         : '';
 
-    return `${listHtml}${tagHtml}`;
+    return `${campaignHtml}${listHtml ? `<div class="mt-0.5">${listHtml}</div>` : ''}`;
+}
+
+function campaignChipHtml(campaignId, campaignName, campaignBase) {
+    if (!campaignName) {
+        return '';
+    }
+
+    const href = campaignId && campaignBase
+        ? `${campaignBase}/${campaignId}`
+        : null;
+
+    return href
+        ? `<a href="${escapeHtml(href)}" class="campaign-chip campaign-chip--sm mt-1">${escapeHtml(campaignName)}</a>`
+        : `<span class="campaign-chip campaign-chip--sm mt-1">${escapeHtml(campaignName)}</span>`;
+}
+
+function workflowImportCellHtml(workflow, campaignBase) {
+    const listLine = workflow.lead_list_name
+        ? `<div class="import-workflow-meta">List: ${escapeHtml(workflow.lead_list_name)}</div>`
+        : '';
+
+    return `
+        <div class="import-workflow-name">${escapeHtml(workflow.name)}</div>
+        ${listLine}
+        ${campaignChipHtml(workflow.campaign_id, workflow.campaign_name, campaignBase)}
+    `;
+}
+
+function renderCommandCenterLeadRow(lead, leadShowBase, campaignBase) {
+    const display = resolveLeadDisplay(lead);
+    const location = [lead.city, lead.state].filter(Boolean).join(', ');
+    const campaignCell = lead.campaign_name
+        ? campaignChipHtml(lead.campaign_id, lead.campaign_name, campaignBase)
+        : '<span class="text-zinc-400">—</span>';
+
+    return `
+        <tr data-lead-id="${lead.id}">
+            <td>
+                <div class="font-bold text-zinc-900">${escapeHtml(lead.business_name)}</div>
+                ${location ? `<div class="text-xs text-zinc-400">${escapeHtml(location)}</div>` : ''}
+            </td>
+            <td>${campaignCell}</td>
+            <td class="text-sm text-zinc-600">${formatLeadCell(display.phone)}</td>
+            <td><span class="app-badge app-badge-muted">${escapeHtml(lead.pipeline_phase_label || lead.stage_label || stageLabel(lead.stage))}</span></td>
+            <td class="text-right">
+                <a href="${leadShowBase}/${lead.id}" class="app-btn app-btn-secondary app-btn-sm">Open</a>
+            </td>
+        </tr>
+    `;
 }
 
 function resolveLeadDisplay(lead) {
@@ -296,6 +344,91 @@ function resolveLeadContact(lead) {
     };
 }
 
+function formatLeadCellInner(value) {
+    const trimmed = String(value || '').trim();
+    return trimmed ? escapeHtml(trimmed) : '<span class="text-zinc-400">—</span>';
+}
+
+function portalStatusHtml(lead, statusColumn) {
+    if (statusColumn === 'closer') {
+        return escapeHtml(lead.closer_status_label || '—');
+    }
+
+    if (statusColumn === 'both') {
+        const setter = escapeHtml(lead.setter_status_label || '—');
+        const closer = lead.closer_status
+            ? `<span class="text-zinc-400"> / ${escapeHtml(lead.closer_status_label || '')}</span>`
+            : '';
+
+        return `${setter}${closer}`;
+    }
+
+    return escapeHtml(lead.setter_status_label || '—');
+}
+
+function portalAssigneeHtml(lead) {
+    if (lead.pipeline_phase === 'enriched' && !lead.assigned_user_id) {
+        return '<span class="text-amber-700 font-medium">Unassigned</span>';
+    }
+
+    return escapeHtml(lead.assignee_name || lead.setter_name || '—');
+}
+
+function patchPortalLeadCell(row, col, html) {
+    const cell = row.querySelector(`[data-col="${col}"]`);
+    if (!cell || cell.innerHTML.trim() === html.trim()) {
+        return;
+    }
+
+    cell.innerHTML = html;
+    cell.classList.add('live-sync-flash');
+    window.setTimeout(() => cell.classList.remove('live-sync-flash'), 320);
+}
+
+function patchPortalLeadRows(tbody, leads) {
+    if (!tbody || !Array.isArray(leads) || leads.length === 0) {
+        return;
+    }
+
+    const statusColumn = tbody.dataset.statusColumn || 'setter';
+    const showAssignee = tbody.dataset.showAssignee === '1';
+    const showSetterNotes = tbody.dataset.showSetterNotes === '1';
+    const byId = new Map(leads.map((lead) => [String(lead.id), lead]));
+
+    tbody.querySelectorAll('tr[data-lead-id]').forEach((row) => {
+        const lead = byId.get(row.dataset.leadId);
+        if (!lead) {
+            return;
+        }
+
+        const display = resolveLeadDisplay(lead);
+
+        patchPortalLeadCell(row, 'email', formatLeadCellInner(display.email));
+        patchPortalLeadCell(row, 'social', formatLeadCellInner(display.socialMedia));
+        patchPortalLeadCell(row, 'contact', formatLeadCellInner(display.phone));
+        patchPortalLeadCell(row, 'phase', escapeHtml(lead.pipeline_phase_label || ''));
+        patchPortalLeadCell(row, 'status', portalStatusHtml(lead, statusColumn));
+
+        if (showAssignee) {
+            patchPortalLeadCell(row, 'assignee', portalAssigneeHtml(lead));
+        }
+
+        if (showSetterNotes) {
+            const notesHtml = lead.handoff_notes
+                ? `<p class="line-clamp-3 whitespace-pre-wrap">${escapeHtml(lead.handoff_notes)}</p>`
+                : '<span class="text-zinc-400">—</span>';
+            patchPortalLeadCell(row, 'setter_notes', notesHtml);
+        }
+
+        if (tbody.dataset.showEditableSetter === '1') {
+            const updateCell = row.querySelector('[data-col="update"]');
+            if (updateCell && lead.is_setter_locked) {
+                updateCell.innerHTML = '<span class="text-xs text-zinc-400">—</span>';
+            }
+        }
+    });
+}
+
 function renderLeadRow(lead, leadShowBase) {
     const display = resolveLeadDisplay(lead);
     const tierLabel = lead.tier_label || TIER_LABELS[lead.tier] || '';
@@ -307,7 +440,7 @@ function renderLeadRow(lead, leadShowBase) {
                 <div class="font-bold text-zinc-900">${escapeHtml(lead.business_name)}</div>
                 ${lead.address ? `<div class="text-xs text-zinc-500 mt-0.5">${escapeHtml(lead.address)}</div>` : ''}
                 <div class="text-[10px] text-zinc-400 font-normal mt-0.5">${escapeHtml(lead.city)}, ${escapeHtml(lead.state)}</div>
-                ${renderLeadTagChips(lead)}
+                ${renderLeadCampaignMeta(lead)}
             </td>
             <td class="font-medium text-zinc-600">${formatLeadCell(lead.display_owner || lead.owner_name)}</td>
             <td class="text-sm text-zinc-600">${formatLeadCell(display.email)}</td>
@@ -390,7 +523,7 @@ function renderPipelineLeadRow(lead, leadShowBase, csrf) {
             <td>
                 <a href="${leadShowBase}/${lead.id}" class="font-bold text-zinc-900 hover:underline">${escapeHtml(lead.business_name)}</a>
                 ${location ? `<div class="text-xs text-zinc-400 mt-0.5">${escapeHtml(location)}</div>` : ''}
-                ${renderLeadTagChips(lead)}
+                ${renderLeadCampaignMeta(lead)}
             </td>
             <td class="text-sm text-zinc-600">${formatLeadCell(lead.display_owner || lead.owner_name)}</td>
             <td class="text-sm text-zinc-600">${formatLeadCell(display.email)}</td>
@@ -402,17 +535,13 @@ function renderPipelineLeadRow(lead, leadShowBase, csrf) {
     `;
 }
 
-function renderWorkflowRow(workflow, showBase) {
+function renderWorkflowRow(workflow, showBase, campaignBase = '') {
     const remaining = getWorkflowAssignRemaining(workflow);
-    const listLine = workflow.lead_list_name
-        ? `<div class="import-workflow-meta">List: ${escapeHtml(workflow.lead_list_name)}</div>`
-        : '';
 
     return `
         <tr data-workflow-id="${workflow.id}">
             <td data-label="Import name" class="col-import-name">
-                <div class="import-workflow-name">${escapeHtml(workflow.name)}</div>
-                ${listLine}
+                ${workflowImportCellHtml(workflow, campaignBase)}
             </td>
             <td data-label="File" class="col-file import-workflow-file" title="${escapeHtml(workflow.original_filename || '')}">${escapeHtml(workflow.original_filename || '')}</td>
             <td data-label="Status" class="col-status">${renderWorkflowStatusPill(workflow.status)}</td>
@@ -497,6 +626,10 @@ function syncTableBody(tbody, items, renderRow, renderArgs = []) {
         return;
     }
 
+    if (items.length === 0 && !syncModeIsPatch(tbody) && tbody.querySelector('tr[data-lead-id], tr[data-workflow-id]')) {
+        return;
+    }
+
     if (syncModeIsPatch(tbody)) {
         patchTableRows(tbody, items, renderRow, renderArgs);
         return;
@@ -514,11 +647,11 @@ function cellFromRender(html) {
     return temp.querySelector('td');
 }
 
-function patchWorkflowRowCells(row, workflow, showBase) {
+function patchWorkflowRowCells(row, workflow, showBase, campaignBase = '') {
     const expectedCols = Number(row.closest('tbody')?.dataset?.expectedCols || 10);
 
     if (row.cells.length !== expectedCols) {
-        const newRow = rowFromHtml(renderWorkflowRow(workflow, showBase));
+        const newRow = rowFromHtml(renderWorkflowRow(workflow, showBase, campaignBase));
         if (newRow) {
             row.replaceWith(newRow);
         }
@@ -526,6 +659,11 @@ function patchWorkflowRowCells(row, workflow, showBase) {
     }
 
     const cells = row.cells;
+    const nameHtml = workflowImportCellHtml(workflow, campaignBase);
+    if (cells[0].innerHTML.trim() !== nameHtml.trim()) {
+        cells[0].innerHTML = nameHtml;
+    }
+
     const statusHtml = renderWorkflowStatusPill(workflow.status);
     if (cells[2].innerHTML.trim() !== statusHtml.trim()) {
         cells[2].innerHTML = statusHtml;
@@ -570,6 +708,7 @@ function syncWorkflowTableBody(tbody, workflows, showBase) {
         return;
     }
 
+    const campaignBase = tbody?.dataset?.campaignShowBase || '';
     const pageWorkflows = workflowsVisibleOnPage(tbody, workflows);
     if (pageWorkflows.length === 0) {
         return;
@@ -586,11 +725,11 @@ function syncWorkflowTableBody(tbody, workflows, showBase) {
             }
 
             if (syncMode === 'cells' || syncMode === 'patch') {
-                patchWorkflowRowCells(row, wf, showBase);
+                patchWorkflowRowCells(row, wf, showBase, campaignBase);
                 return;
             }
 
-            const newRow = rowFromHtml(renderWorkflowRow(wf, showBase));
+            const newRow = rowFromHtml(renderWorkflowRow(wf, showBase, campaignBase));
             if (newRow && newRow.outerHTML !== row.outerHTML) {
                 row.replaceWith(newRow);
             }
@@ -875,6 +1014,8 @@ let syncPollAborted = false;
 
 const SYNC_TARGET_IDS = [
     'workspace-sync-leads-body',
+    'workspace-sync-portal-leads-body',
+    'workspace-sync-handoff-queue-body',
     'workspace-sync-workflows',
     'workspace-sync-pipeline-leads',
     'workspace-sync-team',
@@ -966,6 +1107,7 @@ export function initWorkspaceSync() {
     const workflowProgressBar = document.getElementById('workspace-sync-workflow-progress-bar');
     const workflowProgressLabel = document.getElementById('workspace-sync-workflow-progress-label');
     const aePipelineBody = document.getElementById('workspace-sync-ae-pipeline-body');
+    const portalLeadsBody = document.getElementById('workspace-sync-portal-leads-body');
 
     initAjaxActivityForms();
 
@@ -1014,8 +1156,21 @@ export function initWorkspaceSync() {
         hasSyncedOnce = true;
         sessionStorage.setItem(readyStorageKey(workspaceId), '1');
 
-        if (leadsBody && Array.isArray(data.leads)) {
-            syncTableBody(leadsBody, data.leads, renderLeadRow, [leadShowBase]);
+        if (leadsBody && Array.isArray(data.leads) && syncScope !== 'list' && data.leads.length > 0) {
+            const campaignBase = leadsBody.dataset.campaignShowBase || workflowsList?.dataset?.campaignShowBase || '';
+            const leadRenderFn = leadsBody.dataset.syncLeadsFormat === 'command-center'
+                ? renderCommandCenterLeadRow
+                : renderLeadRow;
+            const leadArgs = leadsBody.dataset.syncLeadsFormat === 'command-center'
+                ? [leadShowBase, campaignBase]
+                : [leadShowBase];
+            syncTableBody(leadsBody, data.leads, leadRenderFn, leadArgs);
+        }
+
+        const portalSyncContext = document.getElementById('portal-sync-context');
+
+        if (portalLeadsBody && Array.isArray(data.leads) && data.leads.length > 0 && !portalSyncContext) {
+            patchPortalLeadRows(portalLeadsBody, data.leads);
         }
 
         if (pipelineLeadsBody && Array.isArray(data.leads)) {
@@ -1023,7 +1178,7 @@ export function initWorkspaceSync() {
             reapplyPipelineLeadFilter();
         }
 
-        if (aePipelineBody && Array.isArray(data.leads)) {
+        if (aePipelineBody && Array.isArray(data.leads) && !portalSyncContext) {
             const aeLeads = data.leads.filter((lead) => AE_PIPELINE_STAGES.has(lead.stage));
             syncTableBody(aePipelineBody, aeLeads, renderAePipelineRow, [leadShowBase]);
         }
@@ -1194,4 +1349,126 @@ export function initWorkspaceSync() {
     } else {
         connectStream();
     }
+}
+
+function patchHandoffQueueRows(tbody, leads) {
+    if (!tbody || !Array.isArray(leads)) {
+        return;
+    }
+
+    let closers = [];
+    try {
+        closers = JSON.parse(tbody.dataset.closers || '[]');
+    } catch {
+        closers = [];
+    }
+
+    const leadShowBase = document.body?.dataset?.leadShowBase || '/portal/leads';
+    const byId = new Map(leads.map((lead) => [String(lead.id), lead]));
+    const existingIds = new Set();
+
+    tbody.querySelectorAll('tr[data-lead-id]').forEach((row) => {
+        existingIds.add(row.dataset.leadId);
+        const lead = byId.get(row.dataset.leadId);
+        if (!lead) {
+            row.remove();
+            return;
+        }
+
+        patchPortalLeadCell(row, 'setter', escapeHtml(lead.setter_name || '—'));
+        const notesHtml = lead.handoff_notes
+            ? `<p class="whitespace-pre-wrap line-clamp-4">${escapeHtml(lead.handoff_notes)}</p><a href="${leadShowBase}/${lead.id}" class="text-xs text-indigo-600 font-medium mt-1 inline-block">View full history</a>`
+            : '<span class="text-zinc-400">—</span>';
+        patchPortalLeadCell(row, 'notes', notesHtml);
+    });
+
+    leads.forEach((lead) => {
+        if (existingIds.has(String(lead.id))) {
+            return;
+        }
+
+        tbody.insertAdjacentHTML('beforeend', renderHandoffQueueRow(lead, closers, leadShowBase));
+    });
+}
+
+function renderHandoffQueueRow(lead, closers, leadShowBase) {
+    const location = [lead.city, lead.state].filter(Boolean).join(', ');
+    const closerOptions = closers
+        .map((closer) => `<option value="${closer.id}">${escapeHtml(closer.name)}</option>`)
+        .join('');
+    const notesHtml = lead.handoff_notes
+        ? `<p class="whitespace-pre-wrap line-clamp-4">${escapeHtml(lead.handoff_notes)}</p><a href="${leadShowBase}/${lead.id}" class="text-xs text-indigo-600 font-medium mt-1 inline-block">View full history</a>`
+        : '<span class="text-zinc-400">—</span>';
+
+    return `
+        <tr data-lead-id="${lead.id}">
+            <td data-col="business">
+                <a href="${leadShowBase}/${lead.id}" class="font-bold text-zinc-900 hover:underline">${escapeHtml(lead.business_name)}</a>
+                ${location ? `<div class="text-xs text-zinc-400">${escapeHtml(location)}</div>` : ''}
+            </td>
+            <td class="text-sm" data-col="setter">${escapeHtml(lead.setter_name || '—')}</td>
+            <td class="text-sm text-zinc-600 max-w-md align-top" data-col="notes">${notesHtml}</td>
+            <td class="text-right">
+                <form method="POST" action="${leadShowBase}/${lead.id}/assign-closer" class="flex items-center justify-end gap-2">
+                    <input type="hidden" name="_token" value="${csrfToken()}">
+                    <select name="closer_id" required class="app-input app-input-sm">
+                        <option value="">Select closer…</option>
+                        ${closerOptions}
+                    </select>
+                    <button type="submit" class="app-btn app-btn-primary app-btn-sm">Assign</button>
+                </form>
+            </td>
+        </tr>
+    `;
+}
+
+export function applyCommandCenterLeadsPatch(tbody, leads) {
+    if (!tbody || !Array.isArray(leads) || leads.length === 0) {
+        return;
+    }
+
+    const campaignBase = tbody.dataset.campaignShowBase || '';
+    const leadShowBase = tbody.dataset.leadShowBase || document.body?.dataset?.leadShowBase || '/admin/leads';
+    patchTableRows(tbody, leads, renderCommandCenterLeadRow, [leadShowBase, campaignBase]);
+
+    const existingIds = new Set(
+        [...tbody.querySelectorAll('tr[data-lead-id]')].map((row) => row.dataset.leadId)
+    );
+    leads.forEach((lead) => {
+        if (existingIds.has(String(lead.id))) {
+            return;
+        }
+        tbody.insertAdjacentHTML('beforeend', renderCommandCenterLeadRow(lead, leadShowBase, campaignBase));
+    });
+}
+
+export function applyAePipelineLivePatch(tbody, leads) {
+    if (!tbody || !Array.isArray(leads)) {
+        return;
+    }
+
+    const leadShowBase = document.body?.dataset?.leadShowBase || '/portal/leads';
+    patchTableRows(tbody, leads, renderAePipelineRow, [leadShowBase]);
+
+    const existingIds = new Set(
+        [...tbody.querySelectorAll('tr[data-lead-id]')].map((row) => row.dataset.leadId)
+    );
+    leads.forEach((lead) => {
+        if (existingIds.has(String(lead.id))) {
+            return;
+        }
+        tbody.insertAdjacentHTML('beforeend', renderAePipelineRow(lead, leadShowBase));
+    });
+}
+
+export function applyPortalLeadsLivePatch(tbody, leads) {
+    patchPortalLeadRows(tbody, leads);
+}
+
+export function applyHandoffQueueLivePatch(tbody, leads) {
+    patchHandoffQueueRows(tbody, leads);
+}
+
+if (typeof window !== 'undefined') {
+    window.applyCommandCenterLeadsPatch = applyCommandCenterLeadsPatch;
 }

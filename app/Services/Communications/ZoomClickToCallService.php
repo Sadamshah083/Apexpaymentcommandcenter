@@ -6,7 +6,14 @@ class ZoomClickToCallService
 {
     public function normalizePhone(string $phone): string
     {
-        $digits = preg_replace('/[^\d+]/', '', trim($phone)) ?? '';
+        $phone = trim($phone);
+
+        // Lead exports often use carrier prefixes like 482983#12699086765
+        if (str_contains($phone, '#')) {
+            $phone = trim(substr($phone, strrpos($phone, '#') + 1));
+        }
+
+        $digits = preg_replace('/[^\d+]/', '', $phone) ?? '';
 
         if ($digits === '') {
             return '';

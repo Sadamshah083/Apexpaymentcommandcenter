@@ -36,4 +36,9 @@ class Workspace extends Model
     {
         return $this->hasMany(Workflow::class);
     }
+
+    public function campaigns(): HasMany
+    {
+        return $this->hasMany(LeadCampaign::class);
+    }
 }

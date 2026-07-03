@@ -9,12 +9,14 @@
             <p class="app-page-subtitle">Appointment-settled leads waiting for closer assignment.</p>
         </div>
 
-        @if ($leads->isEmpty())
-            <div class="app-empty-state">
-                <p class="app-empty-state-title">Queue is empty</p>
-                <p class="app-empty-state-desc">Leads appear here when setters mark an appointment as settled.</p>
-            </div>
-        @else
+        @include('pipeline.partials.portal-sync-context', ['portalView' => 'handoff_queue', 'leads' => $leads])
+
+        <div id="portal-handoff-queue-empty" class="app-empty-state {{ $leads->isEmpty() ? '' : 'hidden' }}">
+            <p class="app-empty-state-title">Queue is empty</p>
+            <p class="app-empty-state-desc">Leads appear here when setters mark an appointment as settled.</p>
+        </div>
+
+        <div id="portal-handoff-queue-table" class="{{ $leads->isEmpty() ? 'hidden' : '' }}">
             <x-data-table :paginator="$leads" min-width="720px">
                 <table>
                     <thead>
@@ -25,17 +27,18 @@
                             <th class="text-right">Assign</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="workspace-sync-handoff-queue-body"
+                        data-closers='@json($closers->map(fn ($closer) => ['id' => $closer->id, 'name' => $closer->name])->values())'>
                         @foreach ($leads as $lead)
-                            <tr>
-                                <td>
+                            <tr data-lead-id="{{ $lead->id }}">
+                                <td data-col="business">
                                     <a href="{{ route('portal.leads.show', $lead->id) }}"
                                         class="font-bold text-zinc-900 hover:underline">{{ $lead->business_name }}</a>
                                     <div class="text-xs text-zinc-400">
                                         {{ $lead->city }}{{ $lead->state ? ', ' . $lead->state : '' }}</div>
                                 </td>
-                                <td class="text-sm">{{ $lead->setter?->name ?? '—' }}</td>
-                                <td class="text-sm text-zinc-600 max-w-md align-top">
+                                <td class="text-sm" data-col="setter">{{ $lead->setter?->name ?? '—' }}</td>
+                                <td class="text-sm text-zinc-600 max-w-md align-top" data-col="notes">
                                     @if (filled($lead->handoff_notes))
                                         <p class="whitespace-pre-wrap line-clamp-4">{{ $lead->handoff_notes }}</p>
                                         <a href="{{ route('portal.leads.show', $lead->id) }}"
@@ -63,6 +66,6 @@
                     </tbody>
                 </table>
             </x-data-table>
-        @endif
+        </div>
     </div>
 @endsection

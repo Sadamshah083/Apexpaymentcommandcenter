@@ -6,6 +6,7 @@
     $showAssignee = $showAssignee ?? false;
     $editableSetterStatus = $editableSetterStatus ?? false;
     $showSetterNotes = $showSetterNotes ?? false;
+    $liveSync = $liveSync ?? false;
     $setterStatuses = $setterStatuses ?? config('sales_ops.setter_statuses', []);
 @endphp
 
@@ -36,26 +37,31 @@
                     <th class="text-right">Action</th>
                 </tr>
             </thead>
-            <tbody>
+            <tbody
+                @if ($liveSync)
+                    id="workspace-sync-portal-leads-body"
+                    data-sync-mode="patch"
+                    data-status-column="{{ $statusColumn ?? 'setter' }}"
+                    data-show-assignee="{{ $showAssignee ? '1' : '0' }}"
+                    data-show-setter-notes="{{ $showSetterNotes ? '1' : '0' }}"
+                    data-show-editable-setter="{{ $editableSetterStatus ? '1' : '0' }}"
+                @endif
+            >
                 @foreach ($leads as $lead)
                     @php
                         $contact = LeadContactDisplay::for($lead);
                     @endphp
-                    <tr>
-                        <td>
+                    <tr @if ($liveSync) data-lead-id="{{ $lead->id }}" @endif>
+                        <td @if ($liveSync) data-col="business" @endif>
                             <a href="{{ route('portal.leads.show', $lead->id) }}" data-turbo="false"
                                 class="font-bold text-zinc-900 hover:underline">{{ $lead->business_name }}</a>
-                            @include('partials.lead-tag-chips', [
-                                'tags' => $lead->tags ?? collect(),
-                                'list' => $lead->leadList ?? null,
-                                'compact' => true,
-                            ])
+                            @include('partials.campaign-chip', ['campaign' => $lead->campaign ?? null, 'compact' => true, 'linked' => false])
                         </td>
-                        <td class="text-sm text-zinc-600">{{ LeadContactDisplay::cell($contact['email']) ?: '—' }}</td>
-                        <td class="text-sm text-zinc-600">{{ LeadContactDisplay::cell($contact['social_media']) ?: '—' }}</td>
-                        <td class="text-sm text-zinc-600">{{ LeadContactDisplay::cell($contact['phone']) ?: '—' }}</td>
+                        <td class="text-sm text-zinc-600" @if ($liveSync) data-col="email" @endif>{{ LeadContactDisplay::cell($contact['email']) ?: '—' }}</td>
+                        <td class="text-sm text-zinc-600" @if ($liveSync) data-col="social" @endif>{{ LeadContactDisplay::cell($contact['social_media']) ?: '—' }}</td>
+                        <td class="text-sm text-zinc-600" @if ($liveSync) data-col="contact" @endif>{{ LeadContactDisplay::cell($contact['phone']) ?: '—' }}</td>
                         @if ($showAssignee)
-                            <td class="text-sm">
+                            <td class="text-sm" @if ($liveSync) data-col="assignee" @endif>
                                 @if ($lead->pipeline_phase === 'enriched' && ! $lead->assigned_user_id)
                                     <span class="text-amber-700 font-medium">Unassigned</span>
                                 @else
@@ -63,8 +69,8 @@
                                 @endif
                             </td>
                         @endif
-                        <td class="text-sm">{{ SalesOps::pipelinePhaseLabel($lead->pipeline_phase) }}</td>
-                        <td class="text-sm">
+                        <td class="text-sm" @if ($liveSync) data-col="phase" @endif>{{ SalesOps::pipelinePhaseLabel($lead->pipeline_phase) }}</td>
+                        <td class="text-sm" @if ($liveSync) data-col="status" @endif>
                             @if (($statusColumn ?? 'setter') === 'closer')
                                 {{ SalesOps::closerStatusLabel($lead->closer_status) }}
                             @elseif(($statusColumn ?? 'setter') === 'both')
@@ -78,7 +84,7 @@
                             @endif
                         </td>
                         @if ($showSetterNotes)
-                            <td class="text-sm text-zinc-600 max-w-xs align-top">
+                            <td class="text-sm text-zinc-600 max-w-xs align-top" @if ($liveSync) data-col="setter_notes" @endif>
                                 @if (filled($lead->handoff_notes))
                                     <p class="line-clamp-3 whitespace-pre-wrap">{{ $lead->handoff_notes }}</p>
                                 @else
@@ -87,7 +93,7 @@
                             </td>
                         @endif
                         @if ($editableSetterStatus)
-                            <td class="min-w-[220px] align-top">
+                            <td class="min-w-[220px] align-top" @if ($liveSync) data-col="update" @endif>
                                 @if ($lead->pipeline_phase === 'with_setter' && ! $lead->isSetterLocked())
                                     <details class="setter-status-details">
                                         <summary

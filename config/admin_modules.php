@@ -26,19 +26,20 @@ return [
             'label' => 'Lead Pipeline',
             'description' => 'Import leads, workflows, and pipeline overview',
             'section' => 'Lead Pipeline',
-            'default_route' => 'admin.workflows.index',
+            'default_route' => 'admin.dashboard',
             'routes' => [
                 'admin.workflows.*',
                 'admin.leads.*',
+                'admin.dashboard',
             ],
         ],
-        'lead_tags' => [
-            'label' => 'Lead Tags',
-            'description' => 'Tag leads and run batch enrich or distribute actions',
+        'campaigns' => [
+            'label' => 'Campaigns',
+            'description' => 'Manage lead campaigns and batch operations',
             'section' => 'Lead Pipeline',
-            'default_route' => 'admin.lead-tags.index',
+            'default_route' => 'admin.campaigns.index',
             'routes' => [
-                'admin.lead-tags.*',
+                'admin.campaigns.*',
             ],
         ],
         'email_lists' => [

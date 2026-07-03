@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Models\WorkflowLead;
 use App\Models\Workspace;
 use App\Services\SalesOps\LeadActivityService;
+use App\Support\LeadStageSync;
 use App\Support\SalesOps;
 use Illuminate\Validation\ValidationException;
 
@@ -60,12 +61,12 @@ class LeadPipelineService
 
         $previousStatus = $lead->setter_status;
 
-        $lead->update(['setter_status' => $status]);
+        $lead->update(LeadStageSync::mergeStage($lead, ['setter_status' => $status]));
 
         if ($previousStatus !== $status) {
-            $this->activities->logStatusChange($lead, $user, 'setter', $previousStatus, $status, $notes);
+            $this->activities->logStatusChange($lead->fresh(), $user, 'setter', $previousStatus, $status, $notes);
         } elseif ($notes) {
-            $this->activities->logStatusChange($lead, $user, 'setter', $previousStatus, $status, $notes);
+            $this->activities->logStatusChange($lead->fresh(), $user, 'setter', $previousStatus, $status, $notes);
         }
 
         if ($status === 'appointment_settled') {
@@ -119,20 +120,22 @@ class LeadPipelineService
 
         $previousStatus = $lead->closer_status;
 
-        $lead->update(['closer_status' => $status]);
-
-        if ($notes) {
-            $lead->update(['notes' => $notes]);
+        $updates = ['closer_status' => $status];
+        if (in_array($status, ['sale_made', 'closed_lost'], true)) {
+            $updates['pipeline_phase'] = 'closed';
         }
+
+        $payload = LeadStageSync::mergeStage($lead, $updates);
+        if ($notes) {
+            $payload['notes'] = $notes;
+        }
+
+        $lead->update($payload);
 
         if ($previousStatus !== $status) {
-            $this->activities->logStatusChange($lead, $user, 'closer', $previousStatus, $status, $notes);
+            $this->activities->logStatusChange($lead->fresh(), $user, 'closer', $previousStatus, $status, $notes);
         } elseif ($notes) {
-            $this->activities->log($lead, $user, 'note', null, $notes);
-        }
-
-        if (in_array($status, ['sale_made', 'closed_lost'], true)) {
-            $lead->update(['pipeline_phase' => 'closed']);
+            $this->activities->log($lead->fresh(), $user, 'note', null, $notes);
         }
 
         return $lead->fresh();
@@ -142,13 +145,13 @@ class LeadPipelineService
     {
         $handoffSummary = $this->compileSetterNotesSummary($lead, $notes);
 
-        $lead->update([
+        $lead->update(LeadStageSync::mergeStage($lead, [
             'pipeline_phase' => 'appointment_settled',
             'assigned_user_id' => null,
             'assigned_setter_id' => $lead->assigned_user_id ?: $lead->assigned_setter_id,
             'appointment_settled_at' => now(),
             'handoff_notes' => $handoffSummary,
-        ]);
+        ]));
 
         LeadAssignment::create([
             'workflow_lead_id' => $lead->id,

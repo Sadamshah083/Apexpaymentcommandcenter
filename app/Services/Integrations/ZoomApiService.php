@@ -148,12 +148,24 @@ class ZoomApiService
      */
     public function getCall(string $uuid): ?array
     {
+        return $this->quickGetCall($uuid);
+    }
+
+    /**
+     * Fast call snapshot for originate verification (short HTTP timeout).
+     *
+     * @return array<string, mixed>|null
+     */
+    protected function quickGetCall(string $uuid): ?array
+    {
         try {
-            $response = $this->client()->get($this->url("/calls/{$uuid}"));
+            $response = $this->pollClient()->get($this->url("/calls/{$uuid}"));
             if ($response->successful()) {
                 return $response->json();
             }
-        } catch (\Throwable) {}
+        } catch (\Throwable) {
+        }
+
         return null;
     }
 
@@ -190,27 +202,24 @@ class ZoomApiService
         $click = $this->postOriginate('/click-to-call', array_merge([
             'extension' => $fromExtension,
             'destination' => $destination,
+            'timeout_sec' => (int) config('integrations.morpheus.ring_timeout', 30),
         ], $extra));
         $attempted[] = 'POST /click-to-call';
-        if ($click['ok'] ?? false) {
+
+        if (! ($click['ok'] ?? false)) {
             return array_merge($click, ['attempted' => $attempted]);
         }
 
-        $originate = $this->postOriginate('/calls/originate', array_merge([
-            'from' => $fromExtension,
-            'to' => $destination,
-        ], $extra));
-        $attempted[] = 'POST /calls/originate';
+        $outcome = $this->resolveOriginateOutcome($click['call_uuid'] ?? null, $fromExtension);
 
-        if ($originate['ok'] ?? false) {
-            return array_merge($originate, ['attempted' => $attempted]);
+        if ($outcome['ok'] ?? false) {
+            return array_merge($click, $outcome, ['attempted' => $attempted]);
         }
 
-        return [
+        return array_merge($click, $outcome, [
             'ok' => false,
-            'error' => $originate['error'] ?? $click['error'] ?? 'Could not originate call.',
             'attempted' => $attempted,
-        ];
+        ]);
     }
 
     /**
@@ -273,6 +282,121 @@ class ZoomApiService
         } catch (\Throwable $e) {
             return ['ok' => false, 'error' => $e->getMessage()];
         }
+    }
+
+    /**
+     * Poll Morpheus for the real result of a click-to-call request.
+     *
+     * @return array{ok: bool, outcome?: string, error?: string, warning?: string, extension_offline?: bool, extension_busy?: bool, routing_error?: bool, hangup_cause?: string, sip_code?: string}
+     */
+    protected function resolveOriginateOutcome(?string $callUuid, string $extension): array
+    {
+        if (blank($callUuid)) {
+            return ['ok' => false, 'error' => 'Morpheus did not return a call ID.'];
+        }
+
+        $snapshot = $this->quickGetCall($callUuid);
+
+        if ($snapshot === null) {
+            usleep(450_000);
+            $snapshot = $this->quickGetCall($callUuid);
+        }
+
+        if ($snapshot === null) {
+            $snapshot = $this->findRecentCdrByUuid($callUuid);
+        }
+
+        if ($snapshot === null) {
+            return [
+                'ok' => true,
+                'outcome' => 'initiated',
+                'warning' => "Call request sent to Morpheus. Answer extension {$extension} if it rings. "
+                    .'If nothing happens, register your softphone to Morpheus and try again.',
+            ];
+        }
+
+        $hangup = strtoupper((string) ($snapshot['hangup_cause'] ?? ''));
+        $sipCode = (string) ($snapshot['sip_code'] ?? '');
+        $billsec = (int) ($snapshot['billsec'] ?? 0);
+        $status = strtolower((string) ($snapshot['status'] ?? ''));
+        $live = (bool) ($snapshot['live'] ?? false);
+
+        if ($live || in_array($status, ['active', 'ringing'], true)) {
+            return ['ok' => true, 'outcome' => 'ringing'];
+        }
+
+        if ($billsec > 0 || filled($snapshot['answer_time'] ?? null)) {
+            return ['ok' => true, 'outcome' => 'connected'];
+        }
+
+        if (in_array($hangup, ['USER_BUSY', 'CALL_REJECTED'], true) || in_array($sipCode, ['486', '603'], true)) {
+            return [
+                'ok' => false,
+                'outcome' => 'extension_busy',
+                'extension_busy' => true,
+                'error' => "Extension {$extension} rejected the ring (SIP {$sipCode} {$hangup}). "
+                    .'Close other calls, disable Do Not Disturb, then re-register your softphone to Morpheus.',
+                'hangup_cause' => $hangup,
+                'sip_code' => $sipCode,
+            ];
+        }
+
+        if (in_array($hangup, ['NO_ROUTE_DESTINATION', 'UNALLOCATED_NUMBER', 'INVALID_NUMBER_FORMAT'], true)) {
+            return [
+                'ok' => false,
+                'routing_error' => true,
+                'error' => 'Morpheus could not route this outbound call. Verify trunk/DID routing in the Morpheus admin portal.',
+                'hangup_cause' => $hangup,
+            ];
+        }
+
+        if ($hangup === 'NO_ANSWER' || ($snapshot['call_outcome'] ?? '') === 'no_answer') {
+            return [
+                'ok' => true,
+                'outcome' => 'no_answer',
+                'warning' => "Extension {$extension} did not answer in time. Keep your softphone registered and ready.",
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'outcome' => 'initiated',
+            'hangup_cause' => $hangup !== '' ? $hangup : null,
+        ];
+    }
+
+    protected function extensionOfflineMessage(string $extension): string
+    {
+        $host = (string) (config('integrations.morpheus.sip_host') ?: config('integrations.morpheus.host'));
+        $portal = app(\App\Services\Communications\ZoomClickToCallService::class)->portalUrl();
+
+        return "Extension {$extension} is not online in Morpheus — no phone registered to ring. "
+            ."Register a SIP softphone to {$host} (ext {$extension}, password from Phone Agents) "
+            .'or sign in to the Morpheus web phone'
+            .($portal !== '#' ? " ({$portal})" : '')
+            .', then try again.';
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    protected function findRecentCdrByUuid(string $callUuid): ?array
+    {
+        try {
+            $response = $this->pollClient()->get($this->url('/cdr'), ['limit' => 10]);
+            if (! $response->successful()) {
+                return null;
+            }
+
+            foreach ($response->json('cdr') ?? [] as $row) {
+                if ((string) ($row['call_uuid'] ?? '') === $callUuid) {
+                    return $row;
+                }
+            }
+        } catch (\Throwable) {
+        }
+
+        return null;
     }
 
     // =========================================================================
@@ -856,11 +980,14 @@ class ZoomApiService
                 foreach ($response->json('users') ?? [] as $row) {
                     $users[] = [
                         'id'         => $row['id'],
+                        'username'   => $row['username'] ?? null,
                         'first_name' => $row['first_name'] ?? ($row['username'] ?? ''),
                         'last_name'  => $row['last_name']  ?? '',
                         'email'      => $row['email']      ?? '',
                         'type'       => 'user',
                         'status'     => $row['status']     ?? 'active',
+                        'last_login_at' => $row['last_login_at'] ?? null,
+                        'last_login_time' => $row['last_login_at'] ?? null,
                     ];
                 }
                 return ['users' => $users, 'next_page_token' => null];
@@ -1586,6 +1713,16 @@ class ZoomApiService
         return Http::withHeaders(['X-API-Key' => $apiKey])
             ->acceptJson()
             ->timeout((int) config('integrations.communications.http_timeout_seconds', 12));
+    }
+
+    private function pollClient(): PendingRequest
+    {
+        $apiKey = config('integrations.morpheus.api_key');
+
+        return Http::withHeaders(['X-API-Key' => $apiKey])
+            ->acceptJson()
+            ->connectTimeout(2)
+            ->timeout(3);
     }
 
     private function url(string $path): string

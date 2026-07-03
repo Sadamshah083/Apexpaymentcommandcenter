@@ -167,6 +167,6 @@
     ])
 
     @include('workflows.partials.confirm-modal')
-    @include('workflows.partials.reset-password-modal')
+    @include('workflows.partials.edit-member-modal')
     @include('workflows.partials.module-access-modal')
 @endsection

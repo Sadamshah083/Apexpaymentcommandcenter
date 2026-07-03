@@ -4,18 +4,26 @@ namespace App\Http\Controllers;
 
 use App\Models\User;
 use App\Models\WorkflowLead;
-use App\Models\LeadActivity;
+use App\Services\Dashboard\DashboardDetailService;
+use App\Services\Dashboard\PipelineMetricsService;
+use App\Services\Pipeline\CampaignService;
 use App\Services\Portal\PortalDashboardService;
+use App\Services\Workflow\WorkflowDashboardService;
 use App\Services\Workspace\WorkspaceContextService;
+use App\Services\Workspace\WorkspaceSyncService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
 
 class AdminDashboardController extends Controller
 {
     public function __construct(
         protected WorkspaceContextService $workspaceContext,
         protected PortalDashboardService $portalDashboard,
+        protected DashboardDetailService $detailService,
+        protected PipelineMetricsService $pipelineMetrics,
+        protected WorkflowDashboardService $workflowDashboard,
+        protected CampaignService $campaignService,
+        protected WorkspaceSyncService $sync,
     ) {}
 
     public function index(Request $request)
@@ -24,10 +32,24 @@ class AdminDashboardController extends Controller
         $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
 
         $data = $this->getDashboardData($workspace);
+        $detail = $this->detailService->resolveAdmin($request, $workspace);
 
-        return view('admin.dashboard.index', array_merge($data, [
+        $imports = empty($detail)
+            ? $this->workflowDashboard->buildIndexData($workspace, $user, [
+                'search' => $request->input('search'),
+                'phase' => $request->input('phase'),
+                'assigned_user_id' => $request->input('assigned_user_id'),
+                'refresh_enrichment' => $request->boolean('refresh_enrichment'),
+            ])
+            : [];
+
+        return view('admin.dashboard.index', array_merge($data, $imports, [
             'workspace' => $workspace,
+            'campaigns' => $this->campaignService->campaignsWithStats($workspace),
             'ops' => $this->portalDashboard->adminOperationalSummary($workspace),
+            'detail' => $detail,
+            'detailService' => $this->detailService,
+            'activeSection' => $request->input('section'),
         ]));
     }
 
@@ -37,87 +59,78 @@ class AdminDashboardController extends Controller
         $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
 
         $data = $this->getDashboardData($workspace);
+        $detail = $this->detailService->resolveAdmin($request, $workspace);
 
-        return response()->json(array_merge($data, [
-            'ops' => $this->portalDashboard->adminOperationalSummary($workspace),
-        ]));
+        $payload = array_merge($data, [
+            'ops' => $this->serializeOpsForRealtime($workspace),
+            'campaigns' => $this->serializeCampaignsForRealtime($workspace),
+            'detail' => $this->detailService->toRealtimePayload($detail),
+        ]);
+
+        if ($request->input('section') === 'imports' && empty($detail)) {
+            $imports = $this->workflowDashboard->buildIndexData($workspace, $user, [
+                'search' => $request->input('search'),
+                'phase' => $request->input('phase'),
+                'assigned_user_id' => $request->input('assigned_user_id'),
+            ]);
+            $leads = $imports['leads'] ?? null;
+            if ($leads instanceof \Illuminate\Contracts\Pagination\Paginator) {
+                $payload['imports_leads'] = $this->sync->serializeLeadsCollection($leads->getCollection());
+            }
+        }
+
+        return response()->json($payload);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function serializeOpsForRealtime($workspace): array
+    {
+        $ops = $this->portalDashboard->adminOperationalSummary($workspace);
+        $ops['leaderboard'] = collect($ops['leaderboard'] ?? [])
+            ->map(fn (array $row) => array_merge($row, [
+                'detail_url' => $this->detailService->adminDetailUrl('performer', ['user_id' => $row['user_id']]),
+            ]))
+            ->all();
+
+        return $ops;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    protected function serializeCampaignsForRealtime($workspace): array
+    {
+        return $this->campaignService->campaignsWithStats($workspace)
+            ->take(6)
+            ->map(fn ($campaign) => [
+                'id' => $campaign->id,
+                'name' => $campaign->name,
+                'leads_count' => (int) ($campaign->leads_count ?? 0),
+                'imports_count' => (int) ($campaign->imports_count ?? 0),
+                'enriched_count' => (int) ($campaign->enriched_count ?? 0),
+                'assigned_count' => (int) ($campaign->assigned_count ?? 0),
+                'show_url' => route('admin.campaigns.show', $campaign),
+            ])
+            ->values()
+            ->all();
     }
 
     protected function getDashboardData($workspace): array
     {
         $workflowIds = $workspace->workflows()->pluck('id')->all();
+        $pipeline = $this->pipelineMetrics->pipelineCounts($workspace);
+        $conversion = $this->pipelineMetrics->conversionRates($pipeline);
+        $closedWon = $pipeline['closed_won'];
 
-        // 1. Pipeline (All Time)
-        $totalLeads = WorkflowLead::whereIn('workflow_id', $workflowIds)->count();
-        
-        $newLeads = WorkflowLead::whereIn('workflow_id', $workflowIds)
-            ->whereIn('stage', ['new_lead', 'new', 'imported'])
-            ->count();
-
-        $qualifiedLeads = WorkflowLead::whereIn('workflow_id', $workflowIds)
-            ->where(function ($q) {
-                $q->where('meeting_qualified', true)
-                  ->orWhereIn('stage', ['connected', 'discovery_completed']);
-            })
-            ->count();
-
-        $bookedLeads = WorkflowLead::whereIn('workflow_id', $workflowIds)
-            ->where(function ($q) {
-                $q->whereNotNull('appointment_settled_at')
-                  ->orWhere('stage', 'meeting_scheduled');
-            })
-            ->count();
-
-        $showedLeads = WorkflowLead::whereIn('workflow_id', $workflowIds)
-            ->whereIn('stage', ['proposal_sent', 'follow_up', 'closed_won', 'closed_lost'])
-            ->count();
-
-        $closedWonLeads = WorkflowLead::whereIn('workflow_id', $workflowIds)
-            ->where(function ($q) {
-                $q->where('stage', 'closed_won')
-                  ->orWhere('closer_status', 'sale_made');
-            })
-            ->count();
-
-        $notNowLeads = WorkflowLead::whereIn('workflow_id', $workflowIds)
-            ->where(function ($q) {
-                $q->where('setter_status', 'not_interested')
-                  ->orWhere('closer_status', 'follow_up');
-            })
-            ->count();
-
-        $deadLeads = WorkflowLead::whereIn('workflow_id', $workflowIds)
-            ->where(function ($q) {
-                $q->where('stage', 'closed_lost')
-                  ->orWhere('closer_status', 'closed_lost');
-            })
-            ->count();
-
-        // 2. Conversion Rates
-        $bookToShowRate = $bookedLeads > 0 ? round(($showedLeads / $bookedLeads) * 100, 1) : null;
-        $showToCloseRate = $showedLeads > 0 ? round(($closedWonLeads / $showedLeads) * 100, 1) : null;
-        $overallCloseRate = $totalLeads > 0 ? round(($closedWonLeads / $totalLeads) * 100, 1) : null;
-        
-        $avgClosedVolume = WorkflowLead::whereIn('workflow_id', $workflowIds)
-            ->where(function ($q) {
-                $q->where('stage', 'closed_won')
-                  ->orWhere('closer_status', 'sale_made');
-            })
-            ->avg('sale_value') ?: 0.0;
-
-        $totalDials = LeadActivity::where('type', 'dial')
-            ->whereHas('lead.workflow', function ($q) use ($workspace) {
-                $q->where('workspace_id', $workspace->id);
-            })
-            ->count();
-
-        // 3. Leads by Fronter (Appointment Setters)
         $setters = $workspace->users()
             ->wherePivot('role', 'appointment_setter')
             ->get()
             ->map(function ($user) use ($workflowIds) {
                 $leadsCount = WorkflowLead::whereIn('workflow_id', $workflowIds)
                     ->where('assigned_setter_id', $user->id)
+                    ->whereIn('pipeline_phase', ['with_setter', 'appointment_settled', 'with_closer', 'closed'])
                     ->count();
 
                 return [
@@ -130,17 +143,13 @@ class AdminDashboardController extends Controller
             ->values()
             ->all();
 
-        // 4. Leads by Closer
         $closers = $workspace->users()
             ->wherePivotIn('role', ['closer', 'closers_team_lead'])
             ->get()
-            ->map(function ($user) use ($workflowIds) {
-                $dealsClosed = WorkflowLead::whereIn('workflow_id', $workflowIds)
+            ->map(function ($user) use ($workspace) {
+                $dealsClosed = $this->pipelineMetrics
+                    ->scopeClosedWon($this->pipelineMetrics->workspaceQuery($workspace))
                     ->where('assigned_closer_id', $user->id)
-                    ->where(function ($q) {
-                        $q->where('stage', 'closed_won')
-                          ->orWhere('closer_status', 'sale_made');
-                    })
                     ->count();
 
                 return [
@@ -155,23 +164,20 @@ class AdminDashboardController extends Controller
 
         return [
             'pipeline' => [
-                'total_leads' => $totalLeads,
-                'new' => $newLeads,
-                'qualified' => $qualifiedLeads,
-                'booked' => $bookedLeads,
-                'showed' => $showedLeads,
-                'closed_won' => $closedWonLeads,
-                'not_now' => $notNowLeads,
-                'dead' => $deadLeads,
+                'total_leads' => $pipeline['total_leads'],
+                'new' => $pipeline['new'],
+                'qualified' => $pipeline['qualified'],
+                'booked' => $pipeline['booked'],
+                'showed' => $pipeline['showed'],
+                'closed_won' => $pipeline['closed_won'],
+                'not_now' => $pipeline['not_now'],
+                'dead' => $pipeline['dead'],
             ],
-            'conversion_rates' => [
-                'book_to_show_rate' => $bookToShowRate,
-                'show_to_close_rate' => $showToCloseRate,
-                'overall_close_rate' => $overallCloseRate,
-                'avg_closed_volume' => round($avgClosedVolume, 2),
-                'total_dials' => $totalDials,
-                'total_closes' => $closedWonLeads,
-            ],
+            'conversion_rates' => array_merge($conversion, [
+                'avg_closed_volume' => $this->pipelineMetrics->averageClosedVolume($workspace),
+                'total_dials' => $this->pipelineMetrics->totalDials($workspace),
+                'total_closes' => $closedWon,
+            ]),
             'setters' => $setters,
             'closers' => $closers,
             'workflows' => $workspace->workflows()
@@ -180,12 +186,18 @@ class AdminDashboardController extends Controller
                 ->map(function ($wf) {
                     $closedCount = WorkflowLead::where('workflow_id', $wf->id)
                         ->where(function ($q) {
-                            $q->where('stage', 'closed_won')
-                              ->orWhere('closer_status', 'sale_made');
+                            $q->where(function ($inner) {
+                                $inner->where('pipeline_phase', 'closed')
+                                    ->where('closer_status', 'sale_made');
+                            })->orWhere('stage', 'closed_won');
                         })
                         ->count();
 
-                    $enrichedCount = (int) $wf->enriched_leads;
+                    $enrichedCount = WorkflowLead::where('workflow_id', $wf->id)
+                        ->whereIn('pipeline_phase', ['enriched', 'with_setter', 'appointment_settled', 'with_closer', 'closed'])
+                        ->whereIn('status', ['enriched', 'completed'])
+                        ->count();
+
                     $totalLeadsCount = (int) $wf->total_leads;
 
                     return [

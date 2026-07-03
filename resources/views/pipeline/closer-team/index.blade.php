@@ -18,19 +18,24 @@
 
         @include('pipeline.partials.dashboard-widgets', ['dashboard' => $dashboard ?? []])
 
+        @include('pipeline.partials.portal-sync-context', ['portalView' => 'closer_team', 'leads' => $leads])
+
+        @include('pipeline.partials.detail-focus-banner', ['focus' => $focus ?? null])
+
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             @foreach ($teamMetrics as $metric)
                 @php
                     $isActive = (string) request('closer') === (string) $metric['user']->id;
                 @endphp
                 <a href="{{ route('portal.closer-team.dashboard', array_filter(['closer' => $metric['user']->id, 'search' => request('search'), 'phase' => request('phase')])) }}"
-                    class="app-card app-card-padded block transition hover:border-indigo-200 {{ $isActive ? 'ring-2 ring-indigo-500 border-indigo-200' : '' }}">
+                    class="app-card app-card-padded block transition hover:border-indigo-200 {{ $isActive ? 'ring-2 ring-indigo-500 border-indigo-200' : '' }}"
+                    data-team-member-id="{{ $metric['user']->id }}">
                     <p class="text-xs font-semibold text-zinc-500 uppercase tracking-wide">{{ $metric['user']->name }}</p>
                     <div class="flex justify-between items-baseline mt-1">
-                        <p class="text-2xl font-bold text-zinc-900">{{ $metric['active_leads'] }}</p>
-                        <p class="text-sm font-semibold text-emerald-700">{{ $metric['sales_made'] }} sold</p>
+                        <p class="text-2xl font-bold text-zinc-900" data-team-metric="active">{{ $metric['active_leads'] }}</p>
+                        <p class="text-sm font-semibold text-emerald-700"><span data-team-metric="sold">{{ $metric['sales_made'] }}</span> sold</p>
                     </div>
-                    <p class="text-xs text-zinc-500 mt-2">Active leads / Total closed: {{ $metric['total_closed'] }}</p>
+                    <p class="text-xs text-zinc-500 mt-2">Active leads / Total closed: <span data-team-metric="closed">{{ $metric['total_closed'] }}</span></p>
                 </a>
             @endforeach
         </div>
@@ -71,6 +76,7 @@
                 'statusColumn' => 'closer',
                 'showAssignee' => true,
                 'readOnly' => true,
+                'liveSync' => true,
             ])
         </div>
     </div>
