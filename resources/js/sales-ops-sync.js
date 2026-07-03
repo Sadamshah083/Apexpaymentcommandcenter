@@ -244,15 +244,28 @@ function renderEmailListRow(list) {
     return `
         <tr data-list-id="${list.id}">
             <td>
-                <div class="font-semibold text-zinc-900">${escapeHtml(list.name)}</div>
-                <div class="text-xs text-zinc-400 mt-0.5">${escapeHtml(list.source_file || '')}</div>
+                <div class="email-lists-name">${escapeHtml(list.name)}</div>
+                <div class="email-lists-meta">${escapeHtml(list.source_file || '')}</div>
             </td>
-            <td class="text-zinc-600">${escapeHtml(list.uploader || '—')}</td>
-            <td>${Number(list.total_count || 0).toLocaleString()}</td>
-            <td class="text-emerald-600 font-semibold">${Number(list.valid_count || 0).toLocaleString()}</td>
-            <td class="text-rose-600 font-semibold">${Number(list.invalid_count || 0).toLocaleString()}</td>
+            <td class="email-lists-cell">${escapeHtml(list.uploader || '—')}</td>
+            <td class="email-lists-cell text-right"><span class="email-lists-num">${Number(list.total_count || 0).toLocaleString()}</span></td>
+            <td class="text-right"><span class="email-lists-num is-success">${Number(list.valid_count || 0).toLocaleString()}</span></td>
+            <td class="text-right"><span class="email-lists-num is-danger">${Number(list.invalid_count || 0).toLocaleString()}</span></td>
             <td><span class="${listStatusClass(list.status)}">${escapeHtml(list.status || '')}</span></td>
-            <td class="text-right"><a href="${escapeHtml(list.show_url)}" class="app-link text-sm">Open results</a></td>
+            <td class="text-right"><a href="${escapeHtml(list.show_url)}" class="app-btn app-btn-secondary app-btn-sm">Open results</a></td>
+        </tr>
+    `;
+}
+
+function renderEmailListsEmptyRow() {
+    return `
+        <tr class="email-lists-empty-row">
+            <td colspan="7">
+                <div class="email-lists-empty">
+                    <p class="email-lists-empty-title">No verification batches yet.</p>
+                    <p class="email-lists-empty-desc">Upload a CSV or TXT file with one email per line to get started.</p>
+                </div>
+            </td>
         </tr>
     `;
 }
@@ -273,10 +286,23 @@ function renderDeliverabilityRow(test) {
 
     return `
         <tr data-deliverability-id="${test.id}">
-            <td><a href="${escapeHtml(test.show_url)}" class="app-link font-semibold">${escapeHtml(test.domain)}</a></td>
-            <td class="font-bold">${score}</td>
+            <td><a href="${escapeHtml(test.show_url)}" class="deliverability-domain-link">${escapeHtml(test.domain)}</a></td>
+            <td><span class="deliverability-score">${score}</span></td>
             <td><span class="${deliverabilityStatusClass(test.status)}">${escapeHtml(test.status || '')}</span></td>
-            <td class="text-zinc-500 text-sm">${escapeHtml(test.created_at || '')}</td>
+            <td class="deliverability-date">${escapeHtml(test.created_at || '')}</td>
+        </tr>
+    `;
+}
+
+function renderDeliverabilityEmptyRow() {
+    return `
+        <tr class="deliverability-empty-row">
+            <td colspan="4">
+                <div class="deliverability-empty">
+                    <p class="deliverability-empty-title">No tests yet.</p>
+                    <p class="deliverability-empty-desc">Run a domain authentication test above to get started.</p>
+                </div>
+            </td>
         </tr>
     `;
 }
@@ -342,7 +368,9 @@ export function applyToolkitSync(toolkit) {
 
     const listsBody = document.getElementById('workspace-sync-email-lists-body');
     if (listsBody && Array.isArray(toolkit.email_lists)) {
-        const html = toolkit.email_lists.length === 0 ? '' : toolkit.email_lists.map(renderEmailListRow).join('');
+        const html = toolkit.email_lists.length === 0
+            ? renderEmailListsEmptyRow()
+            : toolkit.email_lists.map(renderEmailListRow).join('');
         if (listsBody.dataset.syncMode === 'patch') {
             const byId = new Map(toolkit.email_lists.map((list) => [String(list.id), list]));
             listsBody.querySelectorAll('tr[data-list-id]').forEach((row) => {
@@ -364,7 +392,10 @@ export function applyToolkitSync(toolkit) {
 
     const deliverabilityBody = document.getElementById('workspace-sync-deliverability-body');
     if (deliverabilityBody && Array.isArray(toolkit.deliverability_tests)) {
-        smoothHtmlUpdate(deliverabilityBody, toolkit.deliverability_tests.map(renderDeliverabilityRow).join(''));
+        const html = toolkit.deliverability_tests.length === 0
+            ? renderDeliverabilityEmptyRow()
+            : toolkit.deliverability_tests.map(renderDeliverabilityRow).join('');
+        smoothHtmlUpdate(deliverabilityBody, html);
     }
 }
 

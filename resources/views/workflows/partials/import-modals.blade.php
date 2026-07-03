@@ -45,7 +45,7 @@
     aria-modal="true"
 >
     <div class="member-confirm-backdrop" data-import-assign-dismiss></div>
-    <div class="member-confirm-panel assign-leads-panel max-w-lg" role="document">
+    <div class="member-confirm-panel assign-leads-panel" role="document">
         <h2 id="import-assign-title" class="member-confirm-title text-left">Assign leads</h2>
         <p id="import-assign-desc" class="member-confirm-message text-left mb-4">Assign enriched leads to a team lead. Leads are distributed across that team’s active setters.</p>
 

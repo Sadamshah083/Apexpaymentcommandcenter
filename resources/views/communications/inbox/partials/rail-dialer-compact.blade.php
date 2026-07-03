@@ -19,8 +19,9 @@
     @csrf
     <input type="hidden" name="fallback" value="sip">
 
-    <label class="comm-hub-label block mb-1 text-xs" for="dial-caller-id-rail">From</label>
-    <select id="dial-caller-id-rail" name="from_extension" class="comm-hub-input w-full mb-2 comm-hub-input-sm" required>
+    <label class="comm-hub-label" for="dial-caller-id-rail">From</label>
+    <select id="dial-caller-id-rail" name="from_extension" class="comm-hub-input comm-hub-input-sm ghl-dialer-field"
+        required>
         <option value="" disabled @selected($defaultExtension === null || $defaultExtension === '')>Your extension</option>
         @foreach ($extensions as $ext)
             @php $extNum = $ext['extension_num'] ?? ''; @endphp
@@ -32,19 +33,19 @@
         @endforeach
     </select>
 
+    <label class="comm-hub-label" for="dial-number-rail">Number to dial</label>
     <input type="tel" id="dial-number-rail" name="destination"
-        class="comm-hub-input w-full mb-2 comm-hub-input-sm ghl-dialer-display" value="{{ $prefillNumber ?? '' }}"
-        placeholder="Number to dial" required autocomplete="tel">
+        class="comm-hub-input comm-hub-input-sm ghl-dialer-display ghl-dialer-field" value="{{ $prefillNumber ?? '' }}"
+        placeholder="Enter number" required autocomplete="tel">
 
-    <div class="ghl-dialer-keypad ghl-dialer-keypad-compact mb-2" id="dial-keypad-rail">
+    <div class="ghl-dialer-keypad ghl-dialer-keypad-compact" id="dial-keypad-rail">
         @foreach (['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'] as $key)
             <button type="button" class="ghl-dialer-key ghl-dialer-key-sm"
                 data-dial-key="{{ $key }}">{{ $key }}</button>
         @endforeach
     </div>
 
-    <button type="submit" id="morpheus-dial-btn-rail"
-        class="comm-hub-btn ghl-call-btn w-full text-center">Call</button>
+    <button type="submit" id="morpheus-dial-btn-rail" class="comm-hub-btn ghl-dialer-call-btn ghl-call-btn">Call</button>
 </form>
 
 <script>

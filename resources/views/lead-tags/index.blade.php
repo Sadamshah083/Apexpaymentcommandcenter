@@ -3,53 +3,51 @@
 @section('title', 'Lead tags')
 
 @section('content')
-    <div class="app-page space-y-6">
-        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+    <div class="app-page lead-tags-page">
+        <div class="app-page-header flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
                 <h1 class="app-page-title">Lead tags</h1>
                 <p class="app-page-subtitle">Trace leads across imports. Select tags to batch-enrich or assign setters from
                     any file.</p>
             </div>
-            <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-secondary app-btn-sm">New import</a>
+            <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-primary shrink-0">New import</a>
         </div>
 
         @if ($tags->isEmpty())
-            <div class="app-card app-card-padded app-empty-state">
-                <p class="app-empty-state-title">No tags yet</p>
-                <p class="app-empty-state-desc">Tags are applied during import on the column mapping step. Import a file and
+            <div class="app-card app-card-padded lead-tags-empty">
+                <p class="lead-tags-empty-title">No tags yet</p>
+                <p class="lead-tags-empty-desc">Tags are applied during import on the column mapping step. Import a file and
                     add tags like <em>texas</em> or <em>june-2026</em>.</p>
-                <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-primary mt-4">Import leads</a>
+                <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-primary lead-tags-empty-action">Import leads</a>
             </div>
         @else
-            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 lead-tags-grid">
                 @foreach ($tags as $tag)
                     <a href="{{ route('admin.lead-tags.show', ['tag_ids' => [$tag->id]]) }}"
-                        class="app-card app-card-padded hover:border-indigo-300 transition-colors group">
-                        <div class="flex items-start justify-between gap-3">
-                            <div>
-                                <span class="inline-block w-2 h-8 rounded-full mr-2 align-middle"
-                                    style="background: {{ $tag->color }}"></span>
-                                <span class="font-bold text-zinc-900 group-hover:text-indigo-700">{{ $tag->name }}</span>
+                        class="app-card app-card-padded lead-tags-card group">
+                        <div class="lead-tags-card-head">
+                            <div class="lead-tags-card-name">
+                                <span class="lead-tags-swatch" style="background: {{ $tag->color }}"></span>
+                                <span class="lead-tags-name">{{ $tag->name }}</span>
                             </div>
-                            <span class="text-xs font-semibold text-zinc-400">{{ number_format($tag->leads_count) }}
-                                leads</span>
+                            <span class="lead-tags-count">{{ number_format($tag->leads_count) }} leads</span>
                         </div>
-                        <dl class="grid grid-cols-2 gap-2 mt-4 text-xs">
+                        <dl class="lead-tags-stats">
                             <div>
-                                <dt class="text-zinc-400">Imported</dt>
-                                <dd class="font-semibold text-zinc-700">{{ number_format($tag->imported_count) }}</dd>
+                                <dt>Imported</dt>
+                                <dd>{{ number_format($tag->imported_count) }}</dd>
                             </div>
                             <div>
-                                <dt class="text-zinc-400">Enriched</dt>
-                                <dd class="font-semibold text-zinc-700">{{ number_format($tag->enriched_count) }}</dd>
+                                <dt>Enriched</dt>
+                                <dd>{{ number_format($tag->enriched_count) }}</dd>
                             </div>
                             <div>
-                                <dt class="text-zinc-400">Assigned</dt>
-                                <dd class="font-semibold text-emerald-700">{{ number_format($tag->assigned_count) }}</dd>
+                                <dt>Assigned</dt>
+                                <dd class="is-good">{{ number_format($tag->assigned_count) }}</dd>
                             </div>
                             <div>
-                                <dt class="text-zinc-400">Failed</dt>
-                                <dd class="font-semibold text-rose-600">{{ number_format($tag->failed_count) }}</dd>
+                                <dt>Failed</dt>
+                                <dd class="is-bad">{{ number_format($tag->failed_count) }}</dd>
                             </div>
                         </dl>
                     </a>

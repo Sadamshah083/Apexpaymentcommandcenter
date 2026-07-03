@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use App\Support\AdminModules;
+use App\Support\MemberModuleAccess;
+use App\Support\PortalModules;
 use App\Support\SalesOps;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -386,7 +388,45 @@ class User extends Authenticatable
     {
         $role = $this->getWorkspaceRole($workspaceId);
 
-        return $role && SalesOps::isPortalRole($role);
+        if (! $role || ! SalesOps::isPortalRole($role)) {
+            return false;
+        }
+
+        if (MemberModuleAccess::usesPortalModules($role)) {
+            $permissions = $this->getModulePermissions($workspaceId);
+
+            return ! is_array($permissions) || count($permissions) > 0;
+        }
+
+        return true;
+    }
+
+    public function canAccessPortalModule(string $module, ?int $workspaceId = null): bool
+    {
+        if (! PortalModules::isValid($module)) {
+            return false;
+        }
+
+        $workspaceId = $workspaceId ?: $this->current_workspace_id;
+        if (! $workspaceId || ! $this->canAccessPortal($workspaceId)) {
+            return false;
+        }
+
+        $role = $this->getWorkspaceRole($workspaceId);
+        if (! PortalModules::isAvailableForRole($module, (string) $role)) {
+            return false;
+        }
+
+        if (PortalModules::all()[$module]['always_available'] ?? false) {
+            return true;
+        }
+
+        $permissions = $this->getModulePermissions($workspaceId);
+        if ($permissions === null) {
+            return true;
+        }
+
+        return in_array($module, $permissions, true);
     }
 
     public function portalDashboardRoute(): string

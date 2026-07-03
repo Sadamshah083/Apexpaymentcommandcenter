@@ -27,7 +27,11 @@ class ServerMonitoringController extends Controller
 
         // 5. Database Status
         $dbStatus = 'Connected';
-        $dbName = config('database.connections.mysql.database');
+        $connection = config('database.default');
+        $dbName = config("database.connections.{$connection}.database", '—');
+        if ($connection === 'sqlite' && $dbName) {
+            $dbName = basename(str_replace('\\', '/', $dbName));
+        }
         try {
             DB::connection()->getPdo();
         } catch (\Exception $e) {

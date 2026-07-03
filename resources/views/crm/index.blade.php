@@ -3,95 +3,100 @@
 @section('title', 'Business CRM')
 
 @section('content')
-    <div class="mb-8 flex flex-wrap justify-between items-start gap-4">
-        <div>
-            <h2 class="text-2xl font-bold">Business CRM</h2>
-            <p class="text-slate-600 mt-1">Upload CSV leads — AI enriches owner, phone, email, payment processor, and POS
-                data.</p>
+    <div class="app-page crm-page">
+        <div class="app-page-header flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+            <div>
+                <h1 class="app-page-title">Business CRM</h1>
+                <p class="app-page-subtitle">Upload CSV leads — AI enriches owner, phone, email, payment processor, and POS
+                    data.</p>
+            </div>
+            <a href="{{ route('admin.crm.create') }}" class="app-btn app-btn-primary shrink-0">Upload CSV</a>
         </div>
-        <a href="{{ route('admin.crm.create') }}" class="bg-indigo-600 text-white px-5 py-2 rounded-lg hover:bg-indigo-700">
-            Upload CSV
-        </a>
-    </div>
 
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <div class="bg-white rounded-xl p-5 shadow-sm border">
-            <p class="text-sm text-slate-500">Campaigns</p>
-            <p class="text-3xl font-bold text-indigo-600">{{ $stats['total_campaigns'] }}</p>
+        <div class="grid grid-cols-2 gap-3 md:grid-cols-4 app-stat-grid crm-stats">
+            <div class="app-card app-card-padded">
+                <p class="app-kpi-label">Campaigns</p>
+                <p class="app-kpi-value crm-kpi--primary">{{ $stats['total_campaigns'] }}</p>
+            </div>
+            <div class="app-card app-card-padded">
+                <p class="app-kpi-label">Total Leads</p>
+                <p class="app-kpi-value">{{ number_format($stats['total_leads']) }}</p>
+            </div>
+            <div class="app-card app-card-padded">
+                <p class="app-kpi-label">Enriched</p>
+                <p class="app-kpi-value crm-kpi--good">{{ number_format($stats['completed_leads']) }}</p>
+            </div>
+            <div class="app-card app-card-padded">
+                <p class="app-kpi-label">Processing</p>
+                <p class="app-kpi-value crm-kpi--warn">{{ $stats['processing_campaigns'] }}</p>
+            </div>
         </div>
-        <div class="bg-white rounded-xl p-5 shadow-sm border">
-            <p class="text-sm text-slate-500">Total Leads</p>
-            <p class="text-3xl font-bold">{{ number_format($stats['total_leads']) }}</p>
-        </div>
-        <div class="bg-white rounded-xl p-5 shadow-sm border">
-            <p class="text-sm text-slate-500">Enriched</p>
-            <p class="text-3xl font-bold text-green-600">{{ number_format($stats['completed_leads']) }}</p>
-        </div>
-        <div class="bg-white rounded-xl p-5 shadow-sm border">
-            <p class="text-sm text-slate-500">Processing</p>
-            <p class="text-3xl font-bold text-amber-600">{{ $stats['processing_campaigns'] }}</p>
-        </div>
-    </div>
 
-    <x-data-table :paginator="$campaigns">
-        <x-slot:header>
-            <h3 class="app-data-table-title">Campaigns</h3>
-            <a href="{{ route('admin.business-research.index') }}" class="text-sm text-indigo-600 hover:underline">Single
-                business lookup</a>
-        </x-slot:header>
-        <table>
-            <thead>
-                <tr>
-                    <th>Name</th>
-                    <th>File</th>
-                    <th>Leads</th>
-                    <th>Progress</th>
-                    <th>Status</th>
-                    <th>Created</th>
-                </tr>
-            </thead>
-            <tbody>
-                @forelse($campaigns as $campaign)
+        <x-data-table :paginator="$campaigns" min-width="880px" class="crm-data-table">
+            <x-slot:header>
+                <div class="crm-table-header">
+                    <h2 class="app-data-table-title">Campaigns</h2>
+                    <a href="{{ route('admin.business-research.index') }}" class="crm-table-link">Single business lookup</a>
+                </div>
+            </x-slot:header>
+            <table class="crm-table">
+                <thead>
                     <tr>
-                        <td>
-                            <a href="{{ route('admin.crm.show', $campaign) }}"
-                                class="font-medium text-indigo-600 hover:underline">
-                                {{ $campaign->name }}
-                            </a>
-                        </td>
-                        <td class="text-slate-500">{{ $campaign->original_filename ?? '—' }}</td>
-                        <td>{{ $campaign->total_leads }}</td>
-                        <td>
-                            <div class="flex items-center gap-2">
-                                <div class="w-24 bg-slate-200 rounded-full h-2">
-                                    <div class="bg-indigo-600 h-2 rounded-full progress-bar-live"
-                                        style="width: {{ $campaign->progressPercent() }}%"></div>
+                        <th>Name</th>
+                        <th>File</th>
+                        <th>Leads</th>
+                        <th>Progress</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @forelse($campaigns as $campaign)
+                        @php
+                            $statusClass = match ($campaign->status) {
+                                'completed' => 'app-badge app-badge-success',
+                                'processing', 'importing' => 'app-badge app-badge-warning',
+                                'failed' => 'app-badge app-badge-danger',
+                                default => 'app-badge app-badge-muted',
+                            };
+                        @endphp
+                        <tr>
+                            <td>
+                                <a href="{{ route('admin.crm.show', $campaign) }}" class="crm-campaign-link">
+                                    {{ $campaign->name }}
+                                </a>
+                            </td>
+                            <td class="crm-file">{{ $campaign->original_filename ?? '—' }}</td>
+                            <td class="crm-leads">{{ $campaign->total_leads }}</td>
+                            <td>
+                                <div class="crm-progress">
+                                    <div class="crm-progress-track">
+                                        <div class="crm-progress-bar progress-bar-live"
+                                            style="width: {{ $campaign->progressPercent() }}%"></div>
+                                    </div>
+                                    <span class="crm-progress-label">{{ $campaign->progressPercent() }}%</span>
                                 </div>
-                                <span class="text-xs text-slate-500">{{ $campaign->progressPercent() }}%</span>
-                            </div>
-                        </td>
-                        <td>
-                            @php
-                                $badge = match ($campaign->status) {
-                                    'completed' => 'bg-green-100 text-green-800',
-                                    'processing', 'importing' => 'bg-amber-100 text-amber-800',
-                                    'failed' => 'bg-red-100 text-red-800',
-                                    default => 'bg-slate-100 text-slate-700',
-                                };
-                            @endphp
-                            <span class="px-2 py-0.5 rounded text-xs {{ $badge }}">{{ $campaign->status }}</span>
-                        </td>
-                        <td class="text-slate-500">{{ $campaign->created_at->diffForHumans() }}</td>
-                    </tr>
-                @empty
-                    <tr>
-                        <td colspan="6" class="text-center py-8 text-slate-500">
-                            No campaigns yet. <a href="{{ route('admin.crm.create') }}" class="text-indigo-600">Upload a
-                                CSV</a> to start.
-                        </td>
-                    </tr>
-                @endforelse
-            </tbody>
-        </table>
-    </x-data-table>
+                            </td>
+                            <td>
+                                <span class="{{ $statusClass }}">{{ $campaign->status }}</span>
+                            </td>
+                            <td class="crm-date">{{ $campaign->created_at->diffForHumans() }}</td>
+                        </tr>
+                    @empty
+                        <tr class="crm-empty-row">
+                            <td colspan="6">
+                                <div class="crm-empty">
+                                    <p class="crm-empty-title">No campaigns yet.</p>
+                                    <p class="crm-empty-desc">
+                                        <a href="{{ route('admin.crm.create') }}" class="crm-empty-link">Upload a CSV</a>
+                                        to start.
+                                    </p>
+                                </div>
+                            </td>
+                        </tr>
+                    @endforelse
+                </tbody>
+            </table>
+        </x-data-table>
+    </div>
 @endsection

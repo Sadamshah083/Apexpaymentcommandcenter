@@ -33,11 +33,29 @@
     <div class="ghl-inbox">
         @if (!empty($warnings) || !empty($error))
             <div class="ghl-inbox-alerts">
-                @foreach ($warnings ?? [] as $warning)
-                    <div class="comm-hub-alert comm-hub-alert-warning">{{ $warning }}</div>
-                @endforeach
-                @if ($error)
-                    <div class="comm-hub-alert comm-hub-alert-warning">{{ $error }}</div>
+                @if ($error && str_contains($error, 'not configured'))
+                    <div class="ghl-setup-alert">
+                        <p class="ghl-setup-alert-title">Morpheus CX is not configured</p>
+                        <p class="ghl-setup-alert-desc">Add your Call-Control API key to <code>.env</code>, then clear
+                            config cache. The hub will show live calls, SMS, and dialer once connected.</p>
+                        <ul class="ghl-setup-alert-list">
+                            <li><code>MORPHEUS_HOST=apexone.morpheus.cx</code></li>
+                            <li><code>MORPHEUS_API_KEY=ck_your_key_here</code></li>
+                            <li><code>MORPHEUS_SIP_HOST=apexone.morpheus.cx</code> (for softphone dial fallback)</li>
+                        </ul>
+                        @if ($hubAccess['canConfigure'] ?? false)
+                            <a href="{{ route($routePrefix . 'communications.index', array_merge($baseQuery, ['panel' => 'settings'])) }}"
+                                class="comm-hub-btn comm-hub-btn-secondary comm-hub-btn-sm ghl-setup-alert-link">Open
+                                integration settings</a>
+                        @endif
+                    </div>
+                @else
+                    @foreach ($warnings ?? [] as $warning)
+                        <div class="comm-hub-alert comm-hub-alert-warning">{{ $warning }}</div>
+                    @endforeach
+                    @if ($error)
+                        <div class="comm-hub-alert comm-hub-alert-warning">{{ $error }}</div>
+                    @endif
                 @endif
             </div>
         @endif

@@ -4,100 +4,136 @@
 
 @section('content')
     @php $routePrefix = request()->is('admin*') ? 'admin.' : 'portal.'; @endphp
-    <div class="mb-8">
-        <h2 class="text-2xl font-bold">Deliverability Checker</h2>
-        <p class="text-slate-600">Test SPF, DKIM, DMARC, MX, PTR, and DNS blocklists — like mail-tester.com DNS checks.</p>
-    </div>
 
-    <div class="grid md:grid-cols-2 gap-6 mb-8">
-        <form action="{{ route($routePrefix . 'deliverability.store') }}" method="POST"
-            class="bg-white rounded-xl shadow-sm border p-6 space-y-4">
-            @csrf
-            <h3 class="font-semibold">Domain Authentication Test</h3>
-            <div>
-                <label class="block text-sm font-medium mb-1">Sending Domain</label>
-                <input type="text" name="domain" placeholder="yourdomain.com" required
-                    class="w-full border rounded-lg px-3 py-2">
-            </div>
-            <div>
-                <label class="block text-sm font-medium mb-1">Sending IP (optional)</label>
-                <input type="text" name="sending_ip" placeholder="203.0.113.1"
-                    class="w-full border rounded-lg px-3 py-2">
-            </div>
-            <div>
-                <label class="block text-sm font-medium mb-1">DKIM Selector (optional)</label>
-                <input type="text" name="dkim_selector" placeholder="default" class="w-full border rounded-lg px-3 py-2">
-            </div>
-            <label class="flex items-center gap-2 text-sm">
-                <input type="checkbox" name="run_sync" value="1"> Run immediately (sync)
-            </label>
-            <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-lg">Run Test</button>
-        </form>
-
-        <div class="bg-white rounded-xl shadow-sm border p-6">
-            <h3 class="font-semibold mb-4">Send Test Email (Inbound Analysis)</h3>
-            <p class="text-sm text-slate-600 mb-4">Create a unique test address, send your campaign email to it, and IMAP
-                polling will analyze authentication headers and spam content.</p>
-            @if (!$inboundDomainConfigured)
-                <p class="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
-                    Configure <code>EMAIL_CHECKER_INBOUND_DOMAIN</code> to generate test addresses.
-                </p>
-            @elseif(!$inboundImapConfigured)
-                <p class="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
-                    Set <code>EMAIL_CHECKER_IMAP_*</code> variables so inbound emails are analyzed automatically (polled
-                    every 5 minutes).
-                </p>
-            @endif
-            <form action="{{ route($routePrefix . 'deliverability.inbox') }}" method="POST">
-                @csrf
-                <button type="submit" class="bg-slate-700 text-white px-4 py-2 rounded-lg"
-                    @disabled(!$inboundDomainConfigured)>Generate Test Inbox</button>
-            </form>
-            @if ($inboxes->count())
-                <div class="mt-4 space-y-2" id="inbox-list">
-                    @foreach ($inboxes as $inbox)
-                        <div class="text-xs font-mono bg-slate-50 p-2 rounded flex justify-between gap-2 inbox-row"
-                            data-inbox-id="{{ $inbox->id }}"
-                            data-status-url="{{ route($routePrefix . 'deliverability.inbox.status', $inbox) }}">
-                            <span>{{ $inbox->email_address }}</span>
-                            <span class="inbox-status">{{ $inbox->status }}@if ($inbox->overall_score)
-                                    — {{ $inbox->overall_score }}/10
-                                @endif
-                            </span>
-                        </div>
-                    @endforeach
-                </div>
-            @endif
+    <div class="app-page deliverability-page space-y-5">
+        <div class="app-page-header">
+            <h1 class="app-page-title">Deliverability Checker</h1>
+            <p class="app-page-subtitle">Test SPF, DKIM, DMARC, MX, PTR, and DNS blocklists — like mail-tester.com DNS
+                checks.</p>
         </div>
-    </div>
 
-    <x-data-table title="Recent Tests" :paginator="$tests">
-        <table>
-            <thead>
-                <tr>
-                    <th>Domain</th>
-                    <th>Score</th>
-                    <th>Status</th>
-                    <th>Date</th>
-                </tr>
-            </thead>
-            <tbody>
-                @forelse($tests as $test)
+        <div class="deliverability-panels grid md:grid-cols-2 gap-4">
+            <form action="{{ route($routePrefix . 'deliverability.store') }}" method="POST"
+                class="app-card app-card-padded deliverability-panel space-y-4">
+                @csrf
+                <h2 class="app-section-title">Domain Authentication Test</h2>
+
+                <div class="app-field">
+                    <label class="app-label" for="domain">Sending Domain</label>
+                    <input type="text" name="domain" id="domain" placeholder="yourdomain.com" required
+                        class="app-input" value="{{ old('domain') }}">
+                </div>
+
+                <div class="app-field">
+                    <label class="app-label" for="sending_ip">Sending IP (optional)</label>
+                    <input type="text" name="sending_ip" id="sending_ip" placeholder="203.0.113.1"
+                        class="app-input" value="{{ old('sending_ip') }}">
+                </div>
+
+                <div class="app-field">
+                    <label class="app-label" for="dkim_selector">DKIM Selector (optional)</label>
+                    <input type="text" name="dkim_selector" id="dkim_selector" placeholder="default"
+                        class="app-input" value="{{ old('dkim_selector') }}">
+                </div>
+
+                <label class="deliverability-checkbox">
+                    <input type="checkbox" name="run_sync" value="1" @checked(old('run_sync'))>
+                    <span>Run immediately (sync)</span>
+                </label>
+
+                <button type="submit" class="app-btn app-btn-primary">Run Test</button>
+            </form>
+
+            <div class="app-card app-card-padded deliverability-panel space-y-4">
+                <h2 class="app-section-title">Send Test Email (Inbound Analysis)</h2>
+                <p class="deliverability-panel-desc">Create a unique test address, send your campaign email to it, and IMAP
+                    polling will analyze authentication headers and spam content.</p>
+
+                @if (!$inboundDomainConfigured)
+                    <div class="deliverability-alert">
+                        Configure <code>EMAIL_CHECKER_INBOUND_DOMAIN</code> to generate test addresses.
+                    </div>
+                @elseif(!$inboundImapConfigured)
+                    <div class="deliverability-alert">
+                        Set <code>EMAIL_CHECKER_IMAP_*</code> variables so inbound emails are analyzed automatically
+                        (polled every 5 minutes).
+                    </div>
+                @endif
+
+                <form action="{{ route($routePrefix . 'deliverability.inbox') }}" method="POST">
+                    @csrf
+                    <button type="submit" class="app-btn app-btn-primary"
+                        @disabled(!$inboundDomainConfigured)>Generate Test Inbox</button>
+                </form>
+
+                @if ($inboxes->count())
+                    <div class="deliverability-inbox-list" id="inbox-list">
+                        @foreach ($inboxes as $inbox)
+                            <div class="deliverability-inbox-row inbox-row" data-inbox-id="{{ $inbox->id }}"
+                                data-status-url="{{ route($routePrefix . 'deliverability.inbox.status', $inbox) }}">
+                                <span class="deliverability-inbox-email">{{ $inbox->email_address }}</span>
+                                <span class="deliverability-inbox-status inbox-status">{{ $inbox->status }}@if ($inbox->overall_score)
+                                        — {{ $inbox->overall_score }}/10
+                                    @endif
+                                </span>
+                            </div>
+                        @endforeach
+                    </div>
+                @endif
+            </div>
+        </div>
+
+        <x-data-table title="Recent Tests" :paginator="$tests" min-width="720px" class="deliverability-data-table">
+            <table class="deliverability-table">
+                <thead>
                     <tr>
-                        <td><a href="{{ route($routePrefix . 'deliverability.show', $test) }}"
-                                class="text-indigo-600">{{ $test->domain }}</a></td>
-                        <td class="font-bold">{{ $test->overall_score }}/10</td>
-                        <td>{{ $test->status }}</td>
-                        <td class="text-slate-500">{{ $test->created_at->diffForHumans() }}</td>
+                        <th>Domain</th>
+                        <th>Score</th>
+                        <th>Status</th>
+                        <th>Date</th>
                     </tr>
-                @empty
-                    <tr>
-                        <td colspan="4" class="text-center py-8 text-slate-500">No tests yet.</td>
-                    </tr>
-                @endforelse
-            </tbody>
-        </table>
-    </x-data-table>
+                </thead>
+                <tbody id="workspace-sync-deliverability-body">
+                    @forelse($tests as $test)
+                        <tr data-deliverability-id="{{ $test->id }}">
+                            <td>
+                                <a href="{{ route($routePrefix . 'deliverability.show', $test) }}"
+                                    class="deliverability-domain-link">{{ $test->domain }}</a>
+                            </td>
+                            <td>
+                                <span class="deliverability-score">{{ $test->overall_score ?? '—' }}@if ($test->overall_score !== null)
+                                        /10
+                                    @endif
+                                </span>
+                            </td>
+                            <td>
+                                @php
+                                    $statusClass = match ($test->status) {
+                                        'completed' => 'app-badge app-badge-success',
+                                        'processing', 'pending' => 'app-badge app-badge-warning',
+                                        'failed' => 'app-badge app-badge-danger',
+                                        default => 'app-badge app-badge-muted',
+                                    };
+                                @endphp
+                                <span class="{{ $statusClass }}">{{ $test->status }}</span>
+                            </td>
+                            <td class="deliverability-date">{{ $test->created_at->diffForHumans() }}</td>
+                        </tr>
+                    @empty
+                        <tr class="deliverability-empty-row">
+                            <td colspan="4">
+                                <div class="deliverability-empty">
+                                    <p class="deliverability-empty-title">No tests yet.</p>
+                                    <p class="deliverability-empty-desc">Run a domain authentication test above to get
+                                        started.</p>
+                                </div>
+                            </td>
+                        </tr>
+                    @endforelse
+                </tbody>
+            </table>
+        </x-data-table>
+    </div>
 @endsection
 
 @push('scripts')

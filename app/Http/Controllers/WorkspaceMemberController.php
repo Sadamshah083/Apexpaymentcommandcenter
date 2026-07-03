@@ -7,6 +7,7 @@ use App\Models\Workspace;
 use App\Services\Workspace\WorkspaceContextService;
 use App\Services\Workspace\WorkspaceMemberService;
 use App\Support\AdminModules;
+use App\Support\MemberModuleAccess;
 use App\Support\SalesOps;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -99,7 +100,9 @@ class WorkspaceMemberController extends Controller
 
     public function updateModules(Request $request, Workspace $workspace, User $member)
     {
-        $validModules = array_keys(AdminModules::all());
+        $pivot = $workspace->users()->where('user_id', $member->id)->first()?->pivot;
+        $memberRole = $pivot->role ?? 'appointment_setter';
+        $validModules = MemberModuleAccess::validKeysForRole($memberRole);
 
         $data = $request->validate([
             'modules' => 'nullable|array',
@@ -123,7 +126,7 @@ class WorkspaceMemberController extends Controller
      */
     protected function modulePermissionsFromRequest(Request $request, string $role): ?array
     {
-        if (! SalesOps::isAdminPortalRole($role) || $role === 'super_admin') {
+        if (! MemberModuleAccess::isConfigurableRole($role) || $role === 'super_admin') {
             return null;
         }
 
@@ -131,7 +134,7 @@ class WorkspaceMemberController extends Controller
             return null;
         }
 
-        return AdminModules::sanitize($request->input('modules', []));
+        return MemberModuleAccess::sanitizeForRole($role, $request->input('modules', []));
     }
 
     protected function respond(Request $request, string $message): JsonResponse|RedirectResponse

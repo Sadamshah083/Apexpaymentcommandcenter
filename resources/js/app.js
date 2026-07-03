@@ -3,6 +3,7 @@ import { initTurboAuthGuard } from './turbo-auth.js';
 import { initToasts } from './toast.js';
 import './system-notifications.js';
 import { initTopnav } from './topnav.js';
+import { initSidebar } from './sidebar.js';
 import { initWorkspaceSync, teardownWorkspaceSync } from './workspace-sync.js';
 import { initPushNotifications } from './push-notifications.js';
 import { initFormLoading } from './form-loading.js';
@@ -32,6 +33,7 @@ function boot() {
     initPageTransitions();
     initToasts();
     initTopnav();
+    initSidebar();
     initWorkspaceSync();
     initPushNotifications();
     initFormLoading();
@@ -47,6 +49,7 @@ if (document.readyState === 'loading') {
 
 document.addEventListener('turbo:load', () => {
     initTopnav();
+    initSidebar();
     initWorkspaceSync();
     initPushNotifications();
     initFormLoading();

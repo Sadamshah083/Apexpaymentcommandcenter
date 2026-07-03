@@ -6,7 +6,7 @@
 @if(request()->is('admin*'))
     <div id="workspace-sync-page" data-sync-scope="list" class="hidden" aria-hidden="true"></div>
 @endif
-<div class="app-page space-y-6">
+<div class="app-page import-workflows-page space-y-5">
     <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
             @if(request()->is('admin*'))
@@ -18,7 +18,7 @@
             @endif
         </div>
         @if(request()->is('admin*'))
-            <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-primary">
+            <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-primary w-full sm:w-auto shrink-0">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                 Import file
             </a>
@@ -26,7 +26,7 @@
     </div>
 
     @if(isset($dailyMetrics))
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 app-stat-grid">
             @foreach(['dials' => 'Dials', 'conversations' => 'Conversations', 'decision_maker_contacts' => 'DM Contacts', 'discoveries' => 'Discoveries'] as $key => $label)
                 @php $m = $dailyMetrics[$key]; @endphp
                 <div class="app-card app-card-padded">
@@ -51,12 +51,15 @@
                 @include('workflows.partials.enrichment-status', ['status' => $enrichmentStatus])
             @endif
 
-            <div class="app-card app-card-padded">
-                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+            <div class="app-card app-card-padded import-workflows-section">
+                <div class="flex flex-col gap-3 mb-4">
                     <div>
                         <h2 class="app-section-title">Recent imports</h2>
                         <p class="app-section-desc">Manage imports, view enriched data, assign to your team, or delete from the database.</p>
                     </div>
+                    <p class="import-table-scroll-hint">
+                        Swipe the table left and right on smaller screens to see all columns.
+                    </p>
                 </div>
 
                 @if($workflows->isEmpty())
@@ -69,44 +72,47 @@
                         <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-primary app-btn-sm mt-4">Import file</a>
                     </div>
                 @else
-                    <x-data-table :paginator="$workflows" min-width="1280px">
+                    <x-data-table :paginator="$workflows" min-width="1080px" class="import-workflows-data-table">
                         <table class="import-workflows-table">
                             <thead>
                                 <tr>
-                                    <th>Import name</th>
-                                    <th>File</th>
-                                    <th>Status</th>
-                                    <th class="min-w-[148px]">Progress</th>
-                                    <th>Total</th>
-                                    <th>Enriched</th>
-                                    <th>Assigned</th>
-                                    <th>Remaining</th>
+                                    <th class="col-import-name">Import name</th>
+                                    <th class="col-file">File</th>
+                                    <th class="col-status">Status</th>
+                                    <th class="col-progress min-w-[148px]">Progress</th>
+                                    <th class="col-total">Total</th>
+                                    <th class="col-enriched">Enriched</th>
+                                    <th class="col-assigned">Assigned</th>
+                                    <th class="col-remaining">Remaining</th>
                                     <th class="col-assign">Assign</th>
-                                    <th>Updated</th>
                                     <th class="col-actions text-right">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody id="workspace-sync-workflows" data-sync-mode="cells" data-expected-cols="11" data-admin-workflows-table="1">
+                            <tbody id="workspace-sync-workflows" data-sync-mode="cells" data-expected-cols="10" data-admin-workflows-table="1">
                                 @foreach($workflows as $wf)
                                     @php
-                                        $remaining = (int) ($wf->ready_to_assign_count ?? 0);
-                                        $canAssign = $remaining > 0 && $wf->status !== 'mapping';
-                                        $totalLeads = (int) ($wf->total_leads ?? 0);
+                                        $assignedCount = (int) ($wf->assigned_leads_count ?? 0);
                                         $enrichedCount = (int) ($wf->enriched_leads ?? 0);
+                                        $remaining = max(0, (int) ($wf->ready_to_assign_count ?? 0));
+                                        if ($remaining === 0 && $enrichedCount > $assignedCount && ! in_array($wf->status, ['mapping', 'failed'], true)) {
+                                            $remaining = $enrichedCount - $assignedCount;
+                                        }
+                                        $canAssign = $remaining > 0 && ! in_array($wf->status, ['mapping', 'failed'], true);
+                                        $totalLeads = (int) ($wf->total_leads ?? 0);
                                         $attempted = $enrichedCount + (int) ($wf->failed_leads ?? 0);
                                         $progressPct = $totalLeads > 0 ? min(100, (int) round(($attempted / $totalLeads) * 100)) : 0;
                                         $isActive = in_array($wf->status, ['pending', 'extracting', 'paused'], true);
                                     @endphp
-                                    <tr data-workflow-id="{{ $wf->id }}">
-                                        <td>
-                                            <div class="font-bold text-zinc-900">{{ $wf->name }}</div>
+                                    <tr data-workflow-id="{{ $wf->id }}" data-workflow-status="{{ $wf->status }}">
+                                        <td data-label="Import name" class="col-import-name">
+                                            <div class="import-workflow-name">{{ $wf->name }}</div>
                                             @if($wf->leadList)
-                                                <div class="text-[10px] text-zinc-400 mt-0.5">List: {{ $wf->leadList->name }}</div>
+                                                <div class="import-workflow-meta">List: {{ $wf->leadList->name }}</div>
                                             @endif
                                         </td>
-                                        <td class="text-sm text-zinc-600 max-w-[180px] truncate" title="{{ $wf->original_filename }}">{{ $wf->original_filename }}</td>
-                                        <td><x-workflow-status-pill :status="$wf->status" /></td>
-                                        <td class="min-w-[148px]">
+                                        <td data-label="File" class="col-file import-workflow-file" title="{{ $wf->original_filename }}">{{ $wf->original_filename }}</td>
+                                        <td data-label="Status" class="col-status"><x-workflow-status-pill :status="$wf->status" /></td>
+                                        <td data-label="Progress" class="col-progress min-w-[148px]">
                                             @if($totalLeads === 0 && $wf->status === 'mapping')
                                                 <span class="text-xs text-zinc-400">Awaiting setup</span>
                                             @else
@@ -114,21 +120,21 @@
                                                     <div class="app-progress-track h-1.5">
                                                         <div class="app-progress-fill {{ $isActive ? '' : 'bg-emerald-500' }}" style="width: {{ $progressPct }}%"></div>
                                                     </div>
-                                                    <p class="text-[10px] text-zinc-500 whitespace-nowrap">
+                                                    <p class="import-workflow-progress-text">
                                                         {{ number_format($attempted) }} / {{ number_format($totalLeads) }} enriched
                                                     </p>
                                                 </div>
                                             @endif
                                         </td>
-                                        <td class="text-sm font-medium text-zinc-700">{{ number_format($totalLeads) }}</td>
-                                        <td class="text-sm text-zinc-600">{{ number_format($enrichedCount) }}</td>
-                                        <td class="text-sm text-emerald-700 font-medium">{{ number_format($wf->assigned_leads_count ?? 0) }}</td>
-                                        <td class="text-sm text-amber-700 font-medium">{{ number_format($remaining) }}</td>
-                                        <td class="col-assign">
+                                        <td data-label="Total" class="col-total import-workflow-stat">{{ number_format($totalLeads) }}</td>
+                                        <td data-label="Enriched" class="col-enriched import-workflow-stat">{{ number_format($enrichedCount) }}</td>
+                                        <td data-label="Assigned" class="col-assigned import-workflow-stat import-workflow-stat-success">{{ number_format($wf->assigned_leads_count ?? 0) }}</td>
+                                        <td data-label="Remaining" class="col-remaining import-workflow-stat import-workflow-stat-warning">{{ number_format($remaining) }}</td>
+                                        <td data-label="Assign" class="col-assign">
                                             @if($canAssign)
                                                 <button
                                                     type="button"
-                                                    class="app-btn app-btn-primary app-btn-sm"
+                                                    class="app-btn app-btn-primary app-btn-sm import-assign-btn"
                                                     data-import-assign-open
                                                     data-workflow-id="{{ $wf->id }}"
                                                     data-workflow-name="{{ $wf->name }}"
@@ -138,11 +144,10 @@
                                                     data-workflow-remaining="{{ $remaining }}"
                                                 >Assign</button>
                                             @else
-                                                <span class="text-xs text-zinc-400">ΓÇö</span>
+                                                <span class="import-assign-empty">&mdash;</span>
                                             @endif
                                         </td>
-                                        <td class="text-xs text-zinc-500 whitespace-nowrap">{{ $wf->updated_at->diffForHumans() }}</td>
-                                        <td class="col-actions text-right">
+                                        <td data-label="Actions" class="col-actions text-right">
                                             @include('workflows.partials.import-row-actions', ['wf' => $wf, 'totalLeads' => $totalLeads])
                                         </td>
                                     </tr>
@@ -168,7 +173,7 @@
                 <form method="GET" action="{{ route('portal.dashboard') }}" class="flex flex-wrap items-center gap-2">
                     <div class="app-search-wrap">
                         <svg class="app-search-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                        <input type="text" name="search" value="{{ request('search') }}" placeholder="Search business, ownerΓÇª" class="app-input">
+                        <input type="text" name="search" value="{{ request('search') }}" placeholder="Search business, owner…" class="app-input">
                     </div>
                     <select name="phase" onchange="this.form.submit()" class="app-input !w-auto">
                         <option value="">All phases</option>
@@ -219,15 +224,15 @@
                                         </div>
                                         @include('partials.lead-tag-chips', ['tags' => $lead->tags, 'list' => $lead->leadList, 'compact' => true])
                                     </td>
-                                    <td class="font-medium text-zinc-600">{{ \App\Support\LeadContactDisplay::cell($display['owner']) ?: 'ΓÇö' }}</td>
-                                    <td class="text-sm text-zinc-600">{{ \App\Support\LeadContactDisplay::cell($display['email']) ?: 'ΓÇö' }}</td>
-                                    <td class="text-sm text-zinc-600">{{ \App\Support\LeadContactDisplay::cell($display['social_media']) ?: 'ΓÇö' }}</td>
-                                    <td class="text-sm text-zinc-600">{{ \App\Support\LeadContactDisplay::cell($display['phone']) ?: 'ΓÇö' }}</td>
+                                    <td class="font-medium text-zinc-600">{{ \App\Support\LeadContactDisplay::cell($display['owner']) ?: '—' }}</td>
+                                    <td class="text-sm text-zinc-600">{{ \App\Support\LeadContactDisplay::cell($display['email']) ?: '—' }}</td>
+                                    <td class="text-sm text-zinc-600">{{ \App\Support\LeadContactDisplay::cell($display['social_media']) ?: '—' }}</td>
+                                    <td class="text-sm text-zinc-600">{{ \App\Support\LeadContactDisplay::cell($display['phone']) ?: '—' }}</td>
                                     <td class="text-sm text-zinc-600">
                                         @if(\App\Support\LeadContactDisplay::cell($display['processor']))
                                             <span class="app-badge app-badge-info">{{ \App\Support\LeadContactDisplay::cell($display['processor']) }}</span>
                                         @else
-                                            <span class="text-zinc-400">ΓÇö</span>
+                                            <span class="text-zinc-400">—</span>
                                         @endif
                                     </td>
                                     <td>

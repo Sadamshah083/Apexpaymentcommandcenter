@@ -22,7 +22,8 @@
 
 @if ($showDashboard)
     <x-sidebar.section title="Overview">
-        <x-sidebar.link :href="route('admin.dashboard')" label="Dashboard" :active="request()->routeIs('admin.dashboard*')">
+        <x-sidebar.link :href="route('admin.dashboard')" label="Dashboard" icon-name="dashboard"
+            :active="request()->routeIs('admin.dashboard*')">
             <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'dashboard'])</x-slot:icon>
         </x-sidebar.link>
     </x-sidebar.section>
@@ -31,13 +32,15 @@
 @if ($showLeadPipeline)
     <x-sidebar.section title="Lead Pipeline">
         @if ($can('lead_pipeline'))
-            <x-sidebar.link :href="route('admin.workflows.index')" label="Import & Overview" :active="request()->routeIs('admin.workflows.*')">
+            <x-sidebar.link :href="route('admin.workflows.index')" label="Import & Overview" icon-name="pipeline"
+                :active="request()->routeIs('admin.workflows.*')">
                 <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'pipeline'])</x-slot:icon>
             </x-sidebar.link>
         @endif
         @if ($can('lead_tags'))
-            <x-sidebar.link :href="route('admin.lead-tags.index')" label="Lead Tags" :active="request()->routeIs('admin.lead-tags.*')">
-                <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'team'])</x-slot:icon>
+            <x-sidebar.link :href="route('admin.lead-tags.index')" label="Lead Tags" icon-name="tags"
+                :active="request()->routeIs('admin.lead-tags.*')">
+                <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'tags'])</x-slot:icon>
             </x-sidebar.link>
         @endif
     </x-sidebar.section>
@@ -46,22 +49,26 @@
 @if ($showEmailToolkit)
     <x-sidebar.section title="Email Toolkit">
         @if ($can('email_lists'))
-            <x-sidebar.link :href="route('admin.lists.index')" label="Bulk Email Verifier" :active="request()->routeIs('admin.lists.*')">
+            <x-sidebar.link :href="route('admin.lists.index')" label="Bulk Email Verifier" icon-name="verify"
+                :active="request()->routeIs('admin.lists.*')">
                 <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'verify'])</x-slot:icon>
             </x-sidebar.link>
         @endif
         @if ($can('deliverability'))
-            <x-sidebar.link :href="route('admin.deliverability.index')" label="Domain Deliverability Scan" :active="request()->routeIs('admin.deliverability.*')">
+            <x-sidebar.link :href="route('admin.deliverability.index')" label="Domain Deliverability Scan" icon-name="domain"
+                :active="request()->routeIs('admin.deliverability.*')">
                 <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'domain'])</x-slot:icon>
             </x-sidebar.link>
         @endif
         @if ($can('content_analyzer'))
-            <x-sidebar.link :href="route('admin.content.index')" label="Outbound Spam Analyzer" :active="request()->routeIs('admin.content.*')">
+            <x-sidebar.link :href="route('admin.content.index')" label="Outbound Spam Analyzer" icon-name="spam"
+                :active="request()->routeIs('admin.content.*')">
                 <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'spam'])</x-slot:icon>
             </x-sidebar.link>
         @endif
         @if ($can('reputation'))
-            <x-sidebar.link :href="route('admin.reputation.index')" label="Sender Reputation Center" :active="request()->routeIs('admin.reputation.*')">
+            <x-sidebar.link :href="route('admin.reputation.index')" label="Sender Reputation Center" icon-name="reputation"
+                :active="request()->routeIs('admin.reputation.*')">
                 <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'reputation'])</x-slot:icon>
             </x-sidebar.link>
         @endif
@@ -70,31 +77,34 @@
 
 @if ($can('sales_ops'))
     <x-sidebar.section title="Sales Operations">
-        <x-sidebar.link :href="route('admin.sales-ops.index')" label="Overview" :active="request()->routeIs('admin.sales-ops.*')">
-            <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'pipeline'])</x-slot:icon>
+        <x-sidebar.link :href="route('admin.sales-ops.index')" label="Overview" icon-name="sales"
+            :active="request()->routeIs('admin.sales-ops.*')">
+            <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'sales'])</x-slot:icon>
         </x-sidebar.link>
     </x-sidebar.section>
 @endif
 
 @if ($can('crm'))
     <x-sidebar.section title="CRM">
-        <x-sidebar.link :href="route('admin.crm.index')" label="Campaigns" :active="request()->routeIs('admin.crm.*')">
-            <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'pipeline'])</x-slot:icon>
+        <x-sidebar.link :href="route('admin.crm.index')" label="Campaigns" icon-name="campaigns"
+            :active="request()->routeIs('admin.crm.*')">
+            <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'campaigns'])</x-slot:icon>
         </x-sidebar.link>
     </x-sidebar.section>
 @endif
 
 @if ($can('business_research'))
     <x-sidebar.section title="Research">
-        <x-sidebar.link :href="route('admin.business-research.index')" label="Business Research" :active="request()->routeIs('admin.business-research.*')">
-            <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'domain'])</x-slot:icon>
+        <x-sidebar.link :href="route('admin.business-research.index')" label="Business Research" icon-name="research"
+            :active="request()->routeIs('admin.business-research.*')">
+            <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'research'])</x-slot:icon>
         </x-sidebar.link>
     </x-sidebar.section>
 @endif
 
 @if ($can('communications') || auth()->user()?->canAccessAdminPortal())
     <x-sidebar.section title="Communications">
-        <x-sidebar.link :href="route('admin.communications.index')" label="Communications Hub"
+        <x-sidebar.link :href="route('admin.communications.index')" label="Communications Hub" icon-name="communications"
             :active="request()->routeIs('admin.communications.*')">
             <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'communications'])</x-slot:icon>
         </x-sidebar.link>
@@ -104,12 +114,14 @@
 @if ($showWorkspaceAdmin)
     <x-sidebar.section title="Workspace Admin">
         @if ($can('user_management'))
-            <x-sidebar.link :href="route('admin.workspaces.index')" label="User Management" :active="request()->routeIs('admin.workspaces.*')">
+            <x-sidebar.link :href="route('admin.workspaces.index')" label="User Management" icon-name="team"
+                :active="request()->routeIs('admin.workspaces.*')">
                 <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'team'])</x-slot:icon>
             </x-sidebar.link>
         @endif
         @if ($can('server_monitoring'))
-            <x-sidebar.link :href="route('admin.server.monitoring')" label="Server Monitoring" :active="request()->routeIs('admin.server.monitoring')">
+            <x-sidebar.link :href="route('admin.server.monitoring')" label="Server Monitoring" icon-name="server"
+                :active="request()->routeIs('admin.server.monitoring')">
                 <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'server'])</x-slot:icon>
             </x-sidebar.link>
         @endif
