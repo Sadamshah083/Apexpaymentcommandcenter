@@ -60,4 +60,23 @@ class WorkflowProviderStatusServiceTest extends TestCase
 
         $this->assertSame('ready', $health['state']);
     }
+
+    public function test_gemini_health_can_skip_probe_when_cache_missing(): void
+    {
+        Cache::flush();
+        config([
+            'gemini.api_key' => 'test-key',
+            'workflow_enrichment.gemini_model' => 'gemini-2.0-flash',
+        ]);
+
+        Http::fake();
+
+        $service = new WorkflowProviderStatusService;
+        $health = $service->getGeminiHealth(false);
+
+        $this->assertSame('unknown', $health['state']);
+        $this->assertSame('Not checked', $health['label']);
+        $this->assertNull($health['checked_at']);
+        Http::assertNothingSent();
+    }
 }

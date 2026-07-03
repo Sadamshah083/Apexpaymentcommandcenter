@@ -12,7 +12,9 @@ class WorkflowProviderStatusService
 
     protected const GEMINI_HEALTH_CACHE_KEY = 'workflow.gemini_health';
 
-    public function getOpenRouterBalance(): mixed
+    protected const OPENROUTER_BALANCE_CACHE_KEY = 'workflow.openrouter_balance';
+
+    public function getOpenRouterBalance(bool $probeIfMissing = true): mixed
     {
         $apiKey = config('openrouter.api_key');
 
@@ -20,7 +22,11 @@ class WorkflowProviderStatusService
             return null;
         }
 
-        return Cache::remember('workflow.openrouter_balance', now()->addMinutes(10), function () {
+        if (! $probeIfMissing && ! Cache::has(self::OPENROUTER_BALANCE_CACHE_KEY)) {
+            return null;
+        }
+
+        return Cache::remember(self::OPENROUTER_BALANCE_CACHE_KEY, now()->addMinutes(10), function () {
             try {
                 $request = Http::timeout(1.5)
                     ->withHeaders(['Authorization' => 'Bearer '.config('openrouter.api_key')]);
@@ -65,15 +71,15 @@ class WorkflowProviderStatusService
      *     openrouter: array<string, mixed>
      * }
      */
-    public function getEnrichmentStatus(bool $refresh = false): array
+    public function getEnrichmentStatus(bool $refresh = false, bool $probeIfMissing = true): array
     {
         if ($refresh) {
             Cache::forget(self::GEMINI_HEALTH_CACHE_KEY);
-            Cache::forget('workflow.openrouter_balance');
+            Cache::forget(self::OPENROUTER_BALANCE_CACHE_KEY);
         }
 
-        $gemini = $this->getGeminiHealth();
-        $openRouter = $this->getOpenRouterHealth();
+        $gemini = $this->getGeminiHealth($probeIfMissing);
+        $openRouter = $this->getOpenRouterHealth($probeIfMissing);
 
         return [
             'configured' => $this->isEnrichmentConfigured(),
@@ -88,7 +94,7 @@ class WorkflowProviderStatusService
     /**
      * @return array{state: string, label: string, message: string|null, last_error: string|null, checked_at: string|null, probe_model: string|null}
      */
-    public function getGeminiHealth(): array
+    public function getGeminiHealth(bool $probeIfMissing = true): array
     {
         if (! filled(config('gemini.api_key'))) {
             return [
@@ -102,6 +108,17 @@ class WorkflowProviderStatusService
         }
 
         $minutes = max(1, (int) config('workflow_enrichment.health_check_cache_minutes', 10));
+
+        if (! $probeIfMissing && ! Cache::has(self::GEMINI_HEALTH_CACHE_KEY)) {
+            return [
+                'state' => 'unknown',
+                'label' => 'Not checked',
+                'message' => 'Status will appear after a manual refresh or the next enrichment run.',
+                'last_error' => Cache::get(self::GEMINI_ERROR_CACHE_KEY),
+                'checked_at' => null,
+                'probe_model' => (string) config('workflow_enrichment.gemini_model', 'gemini-2.0-flash'),
+            ];
+        }
 
         return Cache::remember(self::GEMINI_HEALTH_CACHE_KEY, now()->addMinutes($minutes), function () {
             return $this->probeGemini();
@@ -137,7 +154,7 @@ class WorkflowProviderStatusService
     /**
      * @return array{state: string, label: string, balance: mixed, message: string|null}
      */
-    protected function getOpenRouterHealth(): array
+    protected function getOpenRouterHealth(bool $probeIfMissing = true): array
     {
         if (! filled(config('openrouter.api_key'))) {
             return [
@@ -148,7 +165,16 @@ class WorkflowProviderStatusService
             ];
         }
 
-        $balance = $this->getOpenRouterBalance();
+        if (! $probeIfMissing && ! Cache::has(self::OPENROUTER_BALANCE_CACHE_KEY)) {
+            return [
+                'state' => 'unknown',
+                'label' => 'Not checked',
+                'balance' => null,
+                'message' => 'Balance will appear after a manual refresh.',
+            ];
+        }
+
+        $balance = $this->getOpenRouterBalance($probeIfMissing);
 
         return [
             'state' => $balance !== null ? 'ready' : 'unknown',

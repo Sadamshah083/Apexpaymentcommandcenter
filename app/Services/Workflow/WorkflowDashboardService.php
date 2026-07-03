@@ -5,7 +5,7 @@ namespace App\Services\Workflow;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkflowLead;
-use App\Support\SalesOps;
+use App\Support\WorkflowAssignmentRoles;
 
 class WorkflowDashboardService
 {
@@ -60,18 +60,16 @@ class WorkflowDashboardService
             'workspace' => $workspace,
             'workflows' => $workflows,
             'leads' => $leadsQuery->latest()->paginate(config('pagination.leads_per_page', 20))->withQueryString(),
-            'team' => $workspace->users,
+            'team' => $workspace->users()
+                ->wherePivot('status', 'active')
+                ->wherePivotIn('role', WorkflowAssignmentRoles::teamLeadRoles())
+                ->orderBy('users.name')
+                ->get(['users.id', 'users.name', 'users.email']),
             'pipelinePhases' => config('sales_ops.pipeline_phases', []),
-            'openRouterBalance' => $this->providerStatus->getOpenRouterBalance(),
-            'geminiStatus' => $this->providerStatus->getGeminiStatus(),
             'enrichmentStatus' => $this->providerStatus->getEnrichmentStatus(
+                (bool) ($filters['refresh_enrichment'] ?? false),
                 (bool) ($filters['refresh_enrichment'] ?? false)
             ),
-            'phaseCounts' => WorkflowLead::query()
-                ->whereIn('workflow_id', $workflowIds)
-                ->selectRaw('pipeline_phase, count(*) as total')
-                ->groupBy('pipeline_phase')
-                ->pluck('total', 'pipeline_phase'),
         ];
     }
 }

@@ -52,24 +52,29 @@ class WorkflowController extends Controller
 
             $data['importsWorkflows'] = $data['workflows'];
             $data['campaigns'] = $this->campaignService->campaignsWithStats($workspace);
-            $data['workflowSummaries'] = $workspace->workflows()
+            $summaryWorkflows = $workspace->workflows()
                 ->latest()
-                ->get()
-                ->map(function (Workflow $workflow) {
-                    $closedCount = WorkflowLead::where('workflow_id', $workflow->id)
-                        ->where(function ($query) {
-                            $query->where(function ($inner) {
-                                $inner->where('pipeline_phase', 'closed')
-                                    ->where('closer_status', 'sale_made');
-                            })->orWhere('stage', 'closed_won');
-                        })
-                        ->count();
+                ->get(['id', 'name', 'original_filename', 'created_at', 'total_leads', 'failed_leads']);
+            $workflowLeadStats = $summaryWorkflows->isEmpty()
+                ? collect()
+                : WorkflowLead::query()
+                    ->selectRaw(
+                        "workflow_id,
+                        SUM(CASE WHEN pipeline_phase IN ('enriched', 'with_setter', 'appointment_settled', 'with_closer', 'closed')
+                            AND status IN ('enriched', 'completed') THEN 1 ELSE 0 END) as enriched_count,
+                        SUM(CASE WHEN ((pipeline_phase = 'closed' AND closer_status = 'sale_made') OR stage = 'closed_won')
+                            THEN 1 ELSE 0 END) as closed_count"
+                    )
+                    ->whereIn('workflow_id', $summaryWorkflows->modelKeys())
+                    ->groupBy('workflow_id')
+                    ->get()
+                    ->keyBy('workflow_id');
 
-                    $enrichedCount = WorkflowLead::where('workflow_id', $workflow->id)
-                        ->whereIn('pipeline_phase', ['enriched', 'with_setter', 'appointment_settled', 'with_closer', 'closed'])
-                        ->whereIn('status', ['enriched', 'completed'])
-                        ->count();
-
+            $data['workflowSummaries'] = $summaryWorkflows
+                ->map(function (Workflow $workflow) use ($workflowLeadStats) {
+                    $stats = $workflowLeadStats->get($workflow->id);
+                    $closedCount = (int) ($stats->closed_count ?? 0);
+                    $enrichedCount = (int) ($stats->enriched_count ?? 0);
                     $totalLeadsCount = (int) ($workflow->total_leads ?? 0);
 
                     return [
