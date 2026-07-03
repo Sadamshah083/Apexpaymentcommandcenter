@@ -4,9 +4,9 @@
 
     $status = $member->pivot->status ?? 'active';
     $role = $member->pivot->role ?? 'appointment_setter';
-    $isOwner = $activeWorkspace->admin_id === $member->id;
-    $canManageMembership = Auth::user()->canManageWorkspaceMembers($activeWorkspace->id) && !$isOwner;
-    $canAssignModules = Auth::user()->canAssignModulePermissions($activeWorkspace->id) && !$isOwner;
+    $isSuperAdminMember = $role === 'super_admin';
+    $canManageMembership = Auth::user()->canManageWorkspaceMembers($activeWorkspace->id) && ! $isSuperAdminMember;
+    $canAssignModules = Auth::user()->canAssignModulePermissions($activeWorkspace->id) && ! $isSuperAdminMember;
     $roleLabel = SalesOps::roleLabel($role);
     $assignableRoles = SalesOps::assignableMemberRoles();
     $modulePermissions = $member->getModulePermissions($activeWorkspace->id);
@@ -29,7 +29,9 @@
             <div class="um-table-member-meta">
                 <div class="um-member-title-row">
                     <span class="um-member-name">{{ $member->name }}</span>
-                    @if ($isOwner)
+                    @if ($isSuperAdminMember)
+                        <span class="member-owner-badge um-badge um-badge-owner">Super Admin</span>
+                    @elseif ($activeWorkspace->admin_id === $member->id)
                         <span class="member-owner-badge um-badge um-badge-owner">Owner</span>
                     @endif
                 </div>
@@ -81,11 +83,12 @@
                 @if ($canManageMembership)
                     <button type="button"
                         class="um-btn um-btn-soft um-btn-sm um-manage-btn um-btn-icon-only"
-                        data-um-reset-password-open
-                        data-reset-url="{{ route('admin.workspaces.members.reset-password', [$activeWorkspace->id, $member->id]) }}"
+                        data-um-edit-member-open
+                        data-edit-url="{{ route('admin.workspaces.members.update', [$activeWorkspace->id, $member->id]) }}"
                         data-member-name="{{ $member->name }}"
-                        aria-label="Reset password" title="Reset password">
-                        @include('workflows.partials.um-action-icon', ['name' => 'reset-password'])
+                        data-member-email="{{ $member->email }}"
+                        aria-label="Edit account" title="Edit account">
+                        @include('workflows.partials.um-action-icon', ['name' => 'edit'])
                     </button>
 
                     <form method="POST"

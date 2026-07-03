@@ -516,6 +516,8 @@ class WorkspaceSyncService
     {
         $isOwner = $workspace->admin_id === $member->id;
 
+        $isSuperAdminMember = ($member->pivot->role ?? null) === 'super_admin';
+
         return [
             'id' => $member->id,
             'name' => $member->name,
@@ -524,8 +526,9 @@ class WorkspaceSyncService
             'role_label' => \App\Support\SalesOps::roleLabel($member->pivot->role),
             'status' => $member->pivot->status ?? 'active',
             'is_owner' => $isOwner,
-            'can_manage' => $viewer->canManageWorkspaceMembers($workspace->id) && ! $isOwner,
-            'can_assign_modules' => $viewer->canAssignModulePermissions($workspace->id) && ! $isOwner,
+            'is_super_admin' => $isSuperAdminMember,
+            'can_manage' => $viewer->canManageWorkspaceMembers($workspace->id) && ! $isSuperAdminMember,
+            'can_assign_modules' => $viewer->canAssignModulePermissions($workspace->id) && ! $isSuperAdminMember,
             'module_summary' => $this->moduleSummaryForMember($member, $workspace),
         ];
     }

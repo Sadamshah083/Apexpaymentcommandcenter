@@ -228,15 +228,69 @@ class WorkspaceMemberService
         });
     }
 
+    public function updateMemberProfile(
+        Workspace $workspace,
+        User $admin,
+        User $member,
+        string $username,
+        string $email,
+        ?string $password = null,
+    ): User {
+        $this->workspaceContext->ensureCanManageMembers($admin, $workspace);
+        $this->ensureMemberIsEditable($workspace, $member, 'account');
+
+        if (! $workspace->users()->where('user_id', $member->id)->exists()) {
+            abort(404);
+        }
+
+        $username = trim($username);
+        $email = strtolower(trim($email));
+
+        if ($username === '') {
+            throw ValidationException::withMessages([
+                'username' => 'Username is required.',
+            ]);
+        }
+
+        if (User::where('name', $username)->where('id', '!=', $member->id)->exists()) {
+            throw ValidationException::withMessages([
+                'username' => 'This username is already taken.',
+            ]);
+        }
+
+        if (User::where('email', $email)->where('id', '!=', $member->id)->exists()) {
+            throw ValidationException::withMessages([
+                'email' => 'This email is already in use.',
+            ]);
+        }
+
+        $updates = [
+            'name' => $username,
+            'email' => $email,
+        ];
+
+        if ($password !== null && $password !== '') {
+            $updates['password'] = Hash::make($password);
+        }
+
+        $member->update($updates);
+
+        $this->syncService->record(
+            $workspace,
+            'member.updated',
+            'user',
+            $member->id,
+            $this->memberPayload($member->fresh(), $workspace),
+            $admin->id
+        );
+
+        return $member->fresh();
+    }
+
     public function updateMemberRole(Workspace $workspace, User $admin, User $member, string $role): void
     {
         $this->workspaceContext->ensureCanManageMembers($admin, $workspace);
-
-        if ($workspace->admin_id === $member->id) {
-            throw ValidationException::withMessages([
-                'role' => 'The workspace Super Admin role cannot be changed.',
-            ]);
-        }
+        $this->ensureMemberIsEditable($workspace, $member, 'role');
 
         if ($role === 'super_admin') {
             throw ValidationException::withMessages([
@@ -272,12 +326,7 @@ class WorkspaceMemberService
     public function suspendMember(Workspace $workspace, User $admin, User $member): void
     {
         $this->workspaceContext->ensureCanManageMembers($admin, $workspace);
-
-        if ($workspace->admin_id === $member->id) {
-            throw ValidationException::withMessages([
-                'member' => 'The workspace owner cannot be suspended.',
-            ]);
-        }
+        $this->ensureMemberIsEditable($workspace, $member, 'member');
 
         $pivot = $workspace->users()->where('user_id', $member->id)->first()?->pivot;
         if (($pivot->status ?? 'active') === 'suspended') {
@@ -327,12 +376,7 @@ class WorkspaceMemberService
     public function removeMember(Workspace $workspace, User $admin, User $member): void
     {
         $this->workspaceContext->ensureCanManageMembers($admin, $workspace);
-
-        if ($workspace->admin_id === $member->id) {
-            throw ValidationException::withMessages([
-                'member' => 'The workspace owner cannot be removed.',
-            ]);
-        }
+        $this->ensureMemberIsEditable($workspace, $member, 'member');
 
         $payload = $this->memberPayload($member, $workspace);
 
@@ -361,6 +405,7 @@ class WorkspaceMemberService
     public function resetMemberPassword(Workspace $workspace, User $admin, User $member, string $password): void
     {
         $this->workspaceContext->ensureCanManageMembers($admin, $workspace);
+        $this->ensureMemberIsEditable($workspace, $member, 'password');
 
         if (! $workspace->users()->where('user_id', $member->id)->exists()) {
             abort(404);
@@ -387,9 +432,9 @@ class WorkspaceMemberService
     ): void {
         $this->workspaceContext->ensureCanAssignModulePermissions($admin, $workspace);
 
-        if ($workspace->admin_id === $member->id) {
+        if ($this->isProtectedSuperAdmin($workspace, $member)) {
             throw ValidationException::withMessages([
-                'modules' => 'The workspace owner always has full access.',
+                'modules' => 'Super Admin accounts always have full access.',
             ]);
         }
 
@@ -498,6 +543,31 @@ class WorkspaceMemberService
         $allowed = array_keys(config('sales_ops.roles', []));
 
         return in_array($role, $allowed, true) ? $role : 'appointment_setter';
+    }
+
+    protected function isProtectedSuperAdmin(Workspace $workspace, User $member): bool
+    {
+        $pivot = $workspace->users()->where('user_id', $member->id)->first()?->pivot;
+
+        return ($pivot->role ?? null) === 'super_admin';
+    }
+
+    protected function ensureMemberIsEditable(Workspace $workspace, User $member, string $field): void
+    {
+        if (! $this->isProtectedSuperAdmin($workspace, $member)) {
+            return;
+        }
+
+        $messages = [
+            'account' => 'Super Admin accounts cannot be edited.',
+            'role' => 'The Super Admin role cannot be changed.',
+            'password' => 'Super Admin passwords cannot be changed here.',
+            'member' => 'Super Admin accounts cannot be modified.',
+        ];
+
+        throw ValidationException::withMessages([
+            $field => $messages[$field] ?? 'Super Admin accounts cannot be modified.',
+        ]);
     }
 
     /**

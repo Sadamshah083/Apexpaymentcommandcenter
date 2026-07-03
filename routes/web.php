@@ -145,6 +145,7 @@ Route::prefix('admin')->name('admin.')->middleware([
 
     Route::prefix('workspaces')->name('workspaces.')->middleware([\App\Http\Middleware\EnsureSuperAdmin::class])->group(function () {
         Route::post('/{workspace}/members', [WorkspaceMemberController::class, 'store'])->name('members.store');
+        Route::patch('/{workspace}/members/{member}', [WorkspaceMemberController::class, 'update'])->name('members.update');
         Route::patch('/{workspace}/members/{member}/role', [WorkspaceMemberController::class, 'updateRole'])->name('members.role');
         Route::post('/{workspace}/members/{member}/reset-password', [WorkspaceMemberController::class, 'resetPassword'])->name('members.reset-password');
         Route::post('/{workspace}/members/{member}/suspend', [WorkspaceMemberController::class, 'suspend'])->name('members.suspend');
