@@ -23,6 +23,7 @@ data-workspace-id="{{ auth()->user()->current_workspace_id }}"
         data-push-vapid-key-url="{{ route('admin.push.vapid') }}"
         data-push-subscribe-url="{{ route('admin.push.subscribe') }}"
         data-push-test-url="{{ route('admin.push.test') }}" @endauth>
+    @include('layouts.partials.sidebar-state-boot')
     <div class="flex min-h-screen">
         @include('layouts.partials.sidebar-shell', [
             'brandTitle' => config('app.name'),
