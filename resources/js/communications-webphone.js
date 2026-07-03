@@ -5,6 +5,17 @@ const STORAGE_KEY = 'communications.webphone_extension';
 
 let singleton = null;
 
+function formatDuration(totalSeconds) {
+    const minutes = Math.floor(totalSeconds / 60)
+        .toString()
+        .padStart(2, '0');
+    const seconds = Math.floor(totalSeconds % 60)
+        .toString()
+        .padStart(2, '0');
+
+    return `${minutes}:${seconds}`;
+}
+
 function selectedExtension() {
     const select = document.querySelector('[name="from_extension"]');
     if (select?.value) {
@@ -32,6 +43,8 @@ class ApexWebphone {
         this.connectPromise = null;
         this.currentExtension = '';
         this.lastError = '';
+        this.callStartedAt = null;
+        this.callTimer = null;
     }
 
     bindPanel(panel) {
@@ -45,12 +58,23 @@ class ApexWebphone {
             statusText: panel.querySelector('[data-webphone-status-text]'),
             dot: panel.querySelector('[data-webphone-dot]'),
             hint: panel.querySelector('[data-webphone-hint]'),
+            stage: panel.querySelector('[data-webphone-stage]'),
+            stageNote: panel.querySelector('[data-webphone-stage-note]'),
+            extension: panel.querySelector('[data-webphone-extension]'),
+            domain: panel.querySelector('[data-webphone-domain]'),
+            transport: panel.querySelector('[data-webphone-transport]'),
             callInfo: panel.querySelector('[data-webphone-call-info]'),
+            callCard: panel.querySelector('[data-webphone-call-card]'),
+            callTitle: panel.querySelector('[data-webphone-call-title]'),
+            callSubtitle: panel.querySelector('[data-webphone-call-subtitle]'),
+            callTimer: panel.querySelector('[data-webphone-call-timer]'),
             connectBtn: panel.querySelector('[data-webphone-connect]'),
+            disconnectBtn: panel.querySelector('[data-webphone-disconnect]'),
             answerBtn: panel.querySelector('[data-webphone-answer]'),
             hangupBtn: panel.querySelector('[data-webphone-hangup]'),
             bridgeBtn: panel.querySelector('[data-webphone-bridge]'),
             bridgePanel: panel.querySelector('[data-webphone-bridge-panel]'),
+            bridgeExtension: panel.querySelector('[data-webphone-bridge-extension]'),
             iframe: panel.querySelector('[data-webphone-iframe]'),
             remoteAudio: panel.querySelector('[data-webphone-remote]'),
         };
@@ -59,6 +83,10 @@ class ApexWebphone {
             this.connect(selectedExtension()).catch((error) => {
                 this.handleConnectFailure(error);
             });
+        });
+
+        this.ui.disconnectBtn?.addEventListener('click', () => {
+            this.disconnect().catch(() => {});
         });
 
         this.ui.answerBtn?.addEventListener('click', () => {
@@ -74,6 +102,12 @@ class ApexWebphone {
         this.ui.bridgeBtn?.addEventListener('click', () => {
             this.openBridge();
         });
+
+        const extSelect = document.querySelector('[name="from_extension"]');
+        extSelect?.addEventListener('change', () => this.syncSelectedExtension());
+
+        this.syncSelectedExtension();
+        this.setState('offline');
     }
 
     handleConnectFailure(error) {
@@ -97,6 +131,9 @@ class ApexWebphone {
         this.setState('registered', 'Embedded phone');
         this.ui.hint.textContent =
             'Morpheus phone loaded below. Log in there, then dial from Quick dial above.';
+        if (this.ui.stageNote) {
+            this.ui.stageNote.textContent = 'Fallback phone is open and ready to use.';
+        }
         showToast('Use the embedded Morpheus phone below to register your line.', 'warning');
     }
 
@@ -105,6 +142,93 @@ class ApexWebphone {
         window.setTimeout(() => {
             this.pendingClickToCall = false;
         }, 45000);
+    }
+
+    syncSelectedExtension() {
+        if (!this.ui) {
+            return;
+        }
+
+        const extension = selectedExtension() || this.currentExtension || this.panel?.dataset.defaultExtension || '—';
+        if (this.ui.extension) {
+            this.ui.extension.textContent = extension;
+        }
+        if (this.ui.bridgeExtension) {
+            this.ui.bridgeExtension.textContent = extension;
+        }
+
+        if (
+            this.state === 'registered' &&
+            this.currentExtension &&
+            extension !== this.currentExtension &&
+            this.ui.stageNote
+        ) {
+            this.ui.stageNote.textContent = `Ready on ${this.currentExtension}. Click Reconnect to switch to ${extension}.`;
+        }
+    }
+
+    applyConfigMeta(config) {
+        if (!this.ui || !config) {
+            return;
+        }
+
+        if (this.ui.domain) {
+            this.ui.domain.textContent = config.domain || '—';
+        }
+        if (this.ui.transport) {
+            this.ui.transport.textContent = config.wss_url || '—';
+        }
+        if (this.ui.extension) {
+            this.ui.extension.textContent = config.extension || this.currentExtension || '—';
+        }
+        if (this.ui.bridgeExtension) {
+            this.ui.bridgeExtension.textContent = config.extension || this.currentExtension || '—';
+        }
+    }
+
+    updateCallCard({ title = '', subtitle = '', detail = '', visible = false, timer = '00:00' } = {}) {
+        if (!this.ui) {
+            return;
+        }
+
+        this.ui.callCard?.classList.toggle('hidden', !visible);
+        if (this.ui.callTitle) {
+            this.ui.callTitle.textContent = title;
+        }
+        if (this.ui.callSubtitle) {
+            this.ui.callSubtitle.textContent = subtitle;
+        }
+        if (this.ui.callTimer) {
+            this.ui.callTimer.textContent = timer;
+        }
+        if (this.ui.callInfo) {
+            this.ui.callInfo.textContent = detail;
+            this.ui.callInfo.classList.toggle('hidden', !detail);
+        }
+    }
+
+    startCallTimer() {
+        this.stopCallTimer();
+        this.callStartedAt = Date.now();
+        this.ui?.callTimer?.classList.remove('hidden');
+        this.callTimer = window.setInterval(() => {
+            if (!this.callStartedAt || !this.ui?.callTimer) {
+                return;
+            }
+            const seconds = Math.max(0, Math.floor((Date.now() - this.callStartedAt) / 1000));
+            this.ui.callTimer.textContent = formatDuration(seconds);
+        }, 1000);
+    }
+
+    stopCallTimer() {
+        if (this.callTimer) {
+            window.clearInterval(this.callTimer);
+            this.callTimer = null;
+        }
+        this.callStartedAt = null;
+        if (this.ui?.callTimer) {
+            this.ui.callTimer.textContent = '00:00';
+        }
     }
 
     setState(state, message = '') {
@@ -122,13 +246,31 @@ class ApexWebphone {
             'in-call': 'On call',
             error: 'Error',
         };
+        const stageNotes = {
+            offline: 'Waiting to connect your line.',
+            connecting: 'Preparing extension credentials and opening SIP over WSS.',
+            registered: 'Line is live and ready for inbound or outbound calls.',
+            ringing: 'Live invite received. Answer to join the call.',
+            'in-call': 'Audio is connected. Keep this tab open while you talk.',
+            error: 'Connection failed. You can retry or open the fallback phone.',
+        };
 
         this.ui.statusText.textContent = message || labels[state] || state;
         this.ui.dot.dataset.state = state;
+        if (this.ui.stage) {
+            this.ui.stage.dataset.state = state;
+            this.ui.stage.textContent = labels[state] || state;
+        }
+        if (this.ui.stageNote) {
+            this.ui.stageNote.textContent = stageNotes[state] || '';
+        }
 
         const registered = state === 'registered' || state === 'ringing' || state === 'in-call';
-        this.ui.connectBtn.textContent = registered ? 'Reconnect' : 'Connect';
+        this.ui.connectBtn.textContent = state === 'connecting' ? 'Connecting…' : registered ? 'Reconnect line' : 'Connect line';
+        this.ui.connectBtn.disabled = state === 'connecting';
         this.ui.connectBtn.classList.toggle('hidden', state === 'in-call');
+        this.ui.disconnectBtn?.classList.toggle('hidden', !registered || state === 'in-call');
+        this.ui.disconnectBtn && (this.ui.disconnectBtn.disabled = state === 'connecting');
         this.ui.answerBtn.classList.toggle('hidden', state !== 'ringing');
         this.ui.hangupBtn.classList.toggle('hidden', state !== 'ringing' && state !== 'in-call');
 
@@ -141,11 +283,17 @@ class ApexWebphone {
             this.ui.bridgeBtn?.classList.add('hidden');
         } else if (state === 'connecting') {
             this.ui.hint.textContent = 'Syncing SIP credentials and registering with Morpheus…';
+        } else if (state === 'ringing') {
+            this.ui.hint.textContent = 'Incoming call detected. Answer when ready.';
+        } else if (state === 'in-call') {
+            this.ui.hint.textContent = 'Call is live. Audio should be routed through your browser now.';
         } else if (state === 'offline' || state === 'error') {
             this.ui.hint.textContent =
                 this.lastError ||
                 'Built-in web phone — click Connect and allow microphone access.';
         }
+
+        this.syncSelectedExtension();
     }
 
     async prepareConfig(extension) {
@@ -171,6 +319,7 @@ class ApexWebphone {
             throw new Error(payload.error || 'Could not prepare phone settings.');
         }
 
+        this.applyConfigMeta(payload.config);
         return payload.config;
     }
 
@@ -196,6 +345,7 @@ class ApexWebphone {
             throw new Error(payload.error || 'Could not load phone settings.');
         }
 
+        this.applyConfigMeta(payload.config);
         return payload.config;
     }
 
@@ -226,6 +376,7 @@ class ApexWebphone {
         this.setState('connecting');
         this.config = await this.prepareConfig(extension);
         this.currentExtension = extension;
+        this.applyConfigMeta(this.config);
         localStorage.setItem(STORAGE_KEY, extension);
 
         if (!window.isSecureContext && window.location.protocol === 'http:') {
@@ -321,8 +472,12 @@ class ApexWebphone {
         this.bindSession(invitation);
 
         const caller = invitation.remoteIdentity?.uri?.user || 'Unknown';
-        this.ui.callInfo.textContent = `Incoming: ${caller}`;
-        this.ui.callInfo.classList.remove('hidden');
+        this.updateCallCard({
+            title: 'Incoming call',
+            subtitle: 'A live call is waiting on your line.',
+            detail: `Caller: ${caller}`,
+            visible: true,
+        });
         this.setState('ringing');
 
         if (this.config?.auto_answer_click_to_call && this.pendingClickToCall) {
@@ -339,7 +494,24 @@ class ApexWebphone {
 
     bindSession(session) {
         session.stateChange.addListener((state) => {
+            if (state === SessionState.Establishing) {
+                this.updateCallCard({
+                    title: 'Connecting call',
+                    subtitle: 'Negotiating media with Morpheus…',
+                    detail: this.ui?.callInfo?.textContent || '',
+                    visible: true,
+                });
+            }
+
             if (state === SessionState.Established) {
+                this.startCallTimer();
+                this.updateCallCard({
+                    title: 'Call live',
+                    subtitle: 'Two-way audio is active.',
+                    detail: this.ui?.callInfo?.textContent || '',
+                    visible: true,
+                    timer: '00:00',
+                });
                 this.setState('in-call');
                 this.attachRemoteAudio(session);
             }
@@ -405,11 +577,9 @@ class ApexWebphone {
 
     clearSession() {
         this.session = null;
+        this.stopCallTimer();
 
-        if (this.ui?.callInfo) {
-            this.ui.callInfo.textContent = '';
-            this.ui.callInfo.classList.add('hidden');
-        }
+        this.updateCallCard({ visible: false });
 
         if (this.ui?.remoteAudio) {
             this.ui.remoteAudio.srcObject = null;
@@ -430,6 +600,7 @@ class ApexWebphone {
 
     async disconnect(resetUi = true) {
         this.session = null;
+        this.stopCallTimer();
 
         if (this.registerer) {
             try {
@@ -459,7 +630,7 @@ class ApexWebphone {
             return true;
         }
 
-        return this.state === 'registered' || this.state === 'in-call';
+        return this.state === 'registered' || this.state === 'in-call' || this.state === 'ringing';
     }
 }
 
