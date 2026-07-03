@@ -41,12 +41,54 @@ class WorkflowController extends Controller
     public function index(Request $request)
     {
         if ($request->is('admin*') || $request->routeIs('admin.*')) {
-            return redirect()->route('admin.dashboard', array_filter([
-                'section' => 'imports',
+            $user = Auth::user();
+            $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
+            $data = $this->dashboardService->buildIndexData($workspace, $user, [
                 'search' => $request->input('search'),
                 'phase' => $request->input('phase'),
                 'assigned_user_id' => $request->input('assigned_user_id'),
-            ]));
+                'refresh_enrichment' => $request->boolean('refresh_enrichment'),
+            ]);
+
+            $data['importsWorkflows'] = $data['workflows'];
+            $data['campaigns'] = $this->campaignService->campaignsWithStats($workspace);
+            $data['workflowSummaries'] = $workspace->workflows()
+                ->latest()
+                ->get()
+                ->map(function (Workflow $workflow) {
+                    $closedCount = WorkflowLead::where('workflow_id', $workflow->id)
+                        ->where(function ($query) {
+                            $query->where(function ($inner) {
+                                $inner->where('pipeline_phase', 'closed')
+                                    ->where('closer_status', 'sale_made');
+                            })->orWhere('stage', 'closed_won');
+                        })
+                        ->count();
+
+                    $enrichedCount = WorkflowLead::where('workflow_id', $workflow->id)
+                        ->whereIn('pipeline_phase', ['enriched', 'with_setter', 'appointment_settled', 'with_closer', 'closed'])
+                        ->whereIn('status', ['enriched', 'completed'])
+                        ->count();
+
+                    $totalLeadsCount = (int) ($workflow->total_leads ?? 0);
+
+                    return [
+                        'id' => $workflow->id,
+                        'name' => $workflow->name,
+                        'filename' => $workflow->original_filename,
+                        'created_at' => $workflow->created_at ? $workflow->created_at->toDateString() : '',
+                        'total_leads' => $totalLeadsCount,
+                        'enriched_leads' => $enrichedCount,
+                        'failed_leads' => (int) ($workflow->failed_leads ?? 0),
+                        'closed_deals' => $closedCount,
+                        'enrichment_rate' => $totalLeadsCount > 0 ? round(($enrichedCount / $totalLeadsCount) * 100, 1) : 0,
+                        'close_rate' => $totalLeadsCount > 0 ? round(($closedCount / $totalLeadsCount) * 100, 1) : 0,
+                    ];
+                })
+                ->all();
+            $data['activeSection'] = 'imports';
+
+            return view('workflows.index', $data);
         }
 
         $user = Auth::user();
@@ -287,7 +329,7 @@ class WorkflowController extends Controller
         $this->workspaceContext->ensureLeadBelongsToWorkspace($lead, $workspace);
 
         $team = $workspace->users;
-        $lead->load(['workflow.workspace', 'verifier', 'activities.user', 'setter', 'closer', 'tags', 'leadList']);
+        $lead->load(['workflow.workspace', 'verifier', 'activities.user', 'setter', 'closer', 'campaign', 'leadList']);
 
         $user = Auth::user();
 

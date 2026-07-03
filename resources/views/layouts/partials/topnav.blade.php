@@ -4,8 +4,8 @@
 ])
 
 <div class="app-floating-chrome" aria-label="Page controls">
-    <button type="button" class="app-floating-menu-btn" data-sidebar-toggle aria-label="Open sidebar"
-        aria-expanded="false" title="Menu">
+    <button type="button" class="app-floating-menu-btn" data-sidebar-toggle aria-controls="app-sidebar"
+        aria-label="Open sidebar" aria-expanded="false" title="Menu">
         <span data-sidebar-mobile-icon aria-hidden="true">&#9776;</span>
     </button>
 

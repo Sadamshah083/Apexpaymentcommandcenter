@@ -1,28 +1,33 @@
-@if (isset($workflows))
+@if (isset($importsWorkflows))
+@php
+    $importsIndexRoute = request()->routeIs('admin.workflows.*')
+        ? route('admin.workflows.index')
+        : route('admin.dashboard');
+@endphp
 <div id="imports" class="admin-dash-section {{ ($activeSection ?? '') === 'imports' ? 'admin-dash-section--focus' : '' }}">
     <div id="workspace-sync-page" data-sync-scope="list" class="hidden" aria-hidden="true"></div>
-
-    @if (isset($enrichmentStatus))
-        @include('workflows.partials.enrichment-status', ['status' => $enrichmentStatus])
-    @endif
 
     <div class="admin-dash-card">
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
             <div>
-                <h3 class="admin-dash-section-title">Imports & assignment</h3>
+                <h3 class="admin-dash-section-title">Import leads</h3>
                 <p class="admin-dash-section-desc">Upload files under campaigns, enrich, and assign to your team.</p>
             </div>
-            <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-primary app-btn-sm shrink-0">Import file</a>
+            <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-primary app-btn-sm shrink-0">Import leads</a>
         </div>
 
-        @if ($workflows->isEmpty())
+        @if (isset($enrichmentStatus))
+            @include('workflows.partials.enrichment-status', ['status' => $enrichmentStatus, 'embedded' => true])
+        @endif
+
+        @if ($importsWorkflows->isEmpty())
             <div class="app-empty-state">
                 <p class="app-empty-state-title">No imports yet</p>
                 <p class="app-empty-state-desc">Create a campaign and upload your first file.</p>
-                <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-primary app-btn-sm mt-4">Import file</a>
+                <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-primary app-btn-sm mt-4">Import leads</a>
             </div>
         @else
-            <x-data-table :paginator="$workflows" min-width="1080px" class="import-workflows-data-table">
+            <x-data-table :paginator="$importsWorkflows" min-width="1080px" class="import-workflows-data-table">
                 <table class="import-workflows-table">
                     <thead>
                         <tr>
@@ -39,7 +44,7 @@
                         </tr>
                     </thead>
                     <tbody id="workspace-sync-workflows" data-sync-mode="cells" data-expected-cols="10" data-admin-workflows-table="1" data-campaign-show-base="{{ url('admin/campaigns') }}">
-                        @foreach ($workflows as $wf)
+                        @foreach ($importsWorkflows as $wf)
                             @php
                                 $assignedCount = (int) ($wf->assigned_leads_count ?? 0);
                                 $enrichedCount = (int) ($wf->enriched_leads ?? 0);
@@ -108,8 +113,10 @@
                     <h3 class="admin-dash-section-title">Active leads</h3>
                     <p class="admin-dash-section-desc">Search and filter leads across all imports.</p>
                 </div>
-                <form method="GET" action="{{ route('admin.dashboard') }}" class="flex flex-wrap items-center gap-2">
-                    <input type="hidden" name="section" value="imports">
+                <form method="GET" action="{{ $importsIndexRoute }}" class="flex flex-wrap items-center gap-2">
+                    @unless (request()->routeIs('admin.workflows.*'))
+                        <input type="hidden" name="section" value="imports">
+                    @endunless
                     <input type="search" name="search" value="{{ request('search') }}" placeholder="Search leads…" class="app-input app-input-sm">
                     <select name="phase" class="app-input app-input-sm" onchange="this.form.submit()">
                         <option value="">All phases</option>

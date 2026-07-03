@@ -43,6 +43,11 @@ class AdminDashboardController extends Controller
             ])
             : [];
 
+        if (isset($imports['workflows'])) {
+            $imports['importsWorkflows'] = $imports['workflows'];
+            unset($imports['workflows']);
+        }
+
         return view('admin.dashboard.index', array_merge($data, $imports, [
             'workspace' => $workspace,
             'campaigns' => $this->campaignService->campaignsWithStats($workspace),

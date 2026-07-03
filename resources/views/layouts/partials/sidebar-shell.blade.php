@@ -42,8 +42,8 @@
         @endif
     </aside>
 
-    <button type="button" class="app-sidebar-edge-toggle" data-sidebar-toggle aria-label="Toggle sidebar"
-        aria-expanded="true" title="Toggle sidebar">
+    <button type="button" class="app-sidebar-edge-toggle" data-sidebar-toggle aria-controls="app-sidebar"
+        aria-label="Toggle sidebar" aria-expanded="true" title="Toggle sidebar">
         <span data-sidebar-edge-icon aria-hidden="true">&lsaquo;</span>
     </button>
 </div>

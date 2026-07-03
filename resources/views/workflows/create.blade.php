@@ -5,7 +5,7 @@
 @section('content')
 <div class="app-page max-w-xl mx-auto space-y-6">
     <div>
-        <x-back-link :href="route('admin.dashboard', ['section' => 'imports'])" />
+        <x-back-link :href="route('admin.workflows.index')" />
         <h1 class="app-page-title mt-2">Import leads</h1>
         <p class="app-page-subtitle">Upload a spreadsheet under a campaign. Map columns, then enrich and assign from the Command Center.</p>
     </div>
