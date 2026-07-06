@@ -1796,6 +1796,8 @@ class ZoomApiService
     {
         $destination = trim((string) ($row['destination_number'] ?? ''));
         $agentExtension = trim((string) ($row['agent_extension'] ?? ''));
+        $callerDigits = preg_replace('/\D/', '', (string) ($row['caller_id_number'] ?? '')) ?? '';
+        $destDigits = preg_replace('/\D/', '', $destination) ?? '';
 
         if ($destination === '') {
             return true;
@@ -1805,9 +1807,12 @@ class ZoomApiService
             return true;
         }
 
-        $digits = preg_replace('/\D/', '', $destination) ?? '';
+        // Morpheus loopback legs echo the outbound DID as both caller and destination.
+        if (strlen($callerDigits) >= 10 && strlen($destDigits) >= 10 && $callerDigits === $destDigits) {
+            return true;
+        }
 
-        if (strlen($digits) >= 10) {
+        if (strlen($destDigits) >= 10) {
             return false;
         }
 

@@ -88,7 +88,7 @@
             @php $extNum = $ext['extension_num'] ?? ''; @endphp
             @if (filled($extNum))
                 <option value="{{ $extNum }}" @selected((string) $defaultExtension === (string) $extNum)
-                    data-outbound-did="{{ $ext['caller_id_num'] ?? $ext['outbound_cid_num'] ?? $defaultOutboundDid }}">
+                    data-outbound-did="{{ $ext['outbound_cid_num'] ?? $ext['caller_id_num'] ?? $defaultOutboundDid }}">
                     {{ $ext['caller_id_name'] ?? 'Extension' }} — {{ $extNum }}
                     @if (!empty($ext['caller_id_num']))
                         (DID {{ $ext['caller_id_num'] }})

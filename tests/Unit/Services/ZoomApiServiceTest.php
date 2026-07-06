@@ -244,6 +244,43 @@ class ZoomApiServiceTest extends TestCase
         $this->assertSame('+12722001232', $logs[0]['to_phone']);
     }
 
+    public function test_list_cdr_filters_loopback_did_legs(): void
+    {
+        config([
+            'integrations.morpheus.host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.api_key' => 'test-key',
+        ]);
+
+        Http::fake([
+            'https://apexone.morpheus.cx/api/v1/call-control/cdr*' => Http::response([
+                'cdr' => [
+                    [
+                        'call_uuid' => 'uuid-loopback',
+                        'direction' => 'outbound',
+                        'caller_id_number' => '13133851223',
+                        'destination_number' => '13133851223',
+                        'call_outcome' => 'no_answer',
+                    ],
+                    [
+                        'call_uuid' => 'uuid-pstn',
+                        'direction' => 'outbound',
+                        'caller_id_number' => 'n6qiqk02',
+                        'destination_number' => '12722001232',
+                        'agent_extension' => '1020',
+                        'billsec' => 6,
+                        'call_outcome' => 'short',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $logs = (new ZoomApiService)->listCdr()['logs'];
+
+        $this->assertCount(1, $logs);
+        $this->assertSame('uuid-pstn', $logs[0]['id']);
+        $this->assertSame('+12722001232', $logs[0]['to_phone']);
+    }
+
     public function test_resolve_call_snapshot_prefers_pstn_cdr_leg_over_agent_ring_leg(): void
     {
         config([

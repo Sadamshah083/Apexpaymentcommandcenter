@@ -345,15 +345,10 @@ class MorpheusHubController extends Controller
             return response()->json(['ok' => false, 'error' => 'Morpheus is not configured.'], 503);
         }
 
+        $destination = is_string($request->query('destination')) ? $request->query('destination') : null;
         $snapshot = $this->morpheus->getCall($uuid);
-        $destination = $request->query('destination');
 
         if ($snapshot === null) {
-            $destinationConnected = $this->morpheus->destinationAnsweredOnCall(
-                $uuid,
-                is_string($destination) ? $destination : null,
-            );
-
             return response()->json([
                 'ok' => true,
                 'pending' => true,
@@ -361,28 +356,45 @@ class MorpheusHubController extends Controller
                 'state' => 'PENDING',
                 'bridged_to' => null,
                 'billsec' => 0,
+                'answer_time' => null,
                 'hangup_cause' => null,
-                'destination_connected' => $destinationConnected,
+                'destination_connected' => $this->morpheus->destinationAnsweredOnCall($uuid, $destination),
             ]);
         }
 
         $state = strtoupper((string) ($snapshot['state'] ?? $snapshot['status'] ?? ''));
-        $bridgedTo = $snapshot['bridged_to'] ?? null;
+        $bridgedTo = filled($snapshot['bridged_to'] ?? null) ? (string) $snapshot['bridged_to'] : null;
         $live = (bool) ($snapshot['live'] ?? in_array(strtolower((string) ($snapshot['status'] ?? '')), ['active', 'ringing'], true));
-        $billsec = (int) ($snapshot['billsec'] ?? 0);
+        $billsec = (int) ($snapshot['billsec'] ?? $snapshot['duration_sec'] ?? 0);
         $hangup = strtoupper((string) ($snapshot['hangup_cause'] ?? ''));
+        $destinationConnected = $this->morpheus->destinationAnsweredOnCall($uuid, $destination);
+
+        if (! $destinationConnected && filled($bridgedTo)) {
+            $destinationConnected = $this->morpheus->destinationAnsweredOnCall($bridgedTo, $destination);
+        }
+
+        if (! $destinationConnected && $billsec >= 2) {
+            $snapshotDest = preg_replace('/\D/', '', (string) ($snapshot['destination_number'] ?? '')) ?? '';
+            $requestedDest = preg_replace('/\D/', '', (string) $destination) ?? '';
+
+            if (strlen($snapshotDest) >= 10 && ! preg_match('/[a-z]/i', (string) ($snapshot['destination_number'] ?? ''))) {
+                $destinationConnected = $requestedDest === ''
+                    || $snapshotDest === $requestedDest
+                    || str_ends_with($requestedDest, $snapshotDest)
+                    || str_ends_with($snapshotDest, $requestedDest);
+            }
+        }
 
         return response()->json([
             'ok' => true,
             'live' => $live,
             'state' => $state !== '' ? $state : null,
-            'bridged_to' => filled($bridgedTo) ? (string) $bridgedTo : null,
+            'bridged_to' => $bridgedTo,
             'billsec' => $billsec,
+            'answer_time' => $snapshot['answer_time'] ?? $snapshot['answered_at'] ?? null,
             'hangup_cause' => $hangup !== '' ? $hangup : null,
-            'destination_connected' => $this->morpheus->destinationAnsweredOnCall(
-                $uuid,
-                is_string($destination) ? $destination : null,
-            ),
+            'destination_connected' => $destinationConnected,
+            'destination_number' => $snapshot['destination_number'] ?? null,
         ]);
     }
 

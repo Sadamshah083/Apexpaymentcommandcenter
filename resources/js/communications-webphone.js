@@ -548,7 +548,11 @@ class ApexWebphone {
                 return;
             }
 
-            if (data.destination_connected) {
+            if (data.bridged_to && data.bridged_to !== uuid) {
+                this.morpheusCallUuid = data.bridged_to;
+            }
+
+            if (data.destination_connected || (Number(data.billsec) >= 2 && data.live === false)) {
                 this.markDestinationConnected();
 
                 return;
