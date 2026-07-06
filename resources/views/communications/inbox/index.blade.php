@@ -30,7 +30,7 @@
         $channelLabel = $channels[$channel]['label'] ?? 'Inbox';
     @endphp
 
-    <div class="ghl-inbox">
+    <div class="ghl-inbox ch-hub-shell">
         @if (!empty($warnings) || !empty($error))
             <div class="ghl-inbox-alerts">
                 @if ($error && str_contains($error, 'not configured'))

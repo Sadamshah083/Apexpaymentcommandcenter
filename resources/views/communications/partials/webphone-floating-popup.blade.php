@@ -32,6 +32,10 @@
         <div class="ghl-webphone-floating-actions">
             <button type="button" class="ghl-webphone-btn-answer hidden" data-webphone-floating-answer
                 title="Answer the incoming call on your browser line">Answer</button>
+            <button type="button" class="ghl-webphone-btn-hold hidden" data-webphone-floating-hold
+                title="Place caller on hold">Hold</button>
+            <button type="button" class="ghl-webphone-btn-transfer hidden" data-webphone-floating-transfer
+                title="Transfer this call">Transfer</button>
             <button type="button" class="ghl-webphone-btn-record hidden" data-webphone-floating-record
                 title="Toggle call recording indicator">
                 <span class="ghl-webphone-btn-record-dot" aria-hidden="true"></span>

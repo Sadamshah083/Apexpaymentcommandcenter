@@ -10,7 +10,7 @@ return [
         'outbound_prefix' => env('MORPHEUS_OUTBOUND_PREFIX', ''),
         'sip_params' => env('MORPHEUS_SIP_PARAMS', 'user=phone'),
         'dial_method' => env('MORPHEUS_DIAL_METHOD', 'auto'),
-        'originate_method' => env('MORPHEUS_ORIGINATE_METHOD', 'originate'),
+        'originate_method' => env('MORPHEUS_ORIGINATE_METHOD', 'click-to-call'),
         'originate_customer_first' => (bool) env('MORPHEUS_ORIGINATE_CUSTOMER_FIRST', false),
         'ring_timeout' => (int) env('MORPHEUS_RING_TIMEOUT', 90),
         'extension_password' => env('MORPHEUS_EXTENSION_PASSWORD'),

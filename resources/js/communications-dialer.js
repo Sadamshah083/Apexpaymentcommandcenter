@@ -162,7 +162,9 @@ async function originateViaJson(form, dialBtn) {
         const data = await response.json().catch(() => ({}));
 
         if (!response.ok || data.ok === false) {
-            const message = data.error || 'Could not place the call. Check your extension and try again.';
+            const message = data.extension_busy
+                ? (data.error || 'Your extension is busy. Click Connect line again, or try extension 1001.')
+                : (data.error || 'Could not place the call. Check your extension and try again.');
 
             showToast(message, 'error');
 
@@ -171,6 +173,12 @@ async function originateViaJson(form, dialBtn) {
 
         if (data.call_uuid) {
             phone.setMorpheusCallUuid(data.call_uuid);
+        }
+
+        if (data.line_reset) {
+            showToast('Line was reset to clear a busy extension — reconnecting…', 'warning');
+            await phone.connect(phone.currentExtension || undefined).catch(() => {});
+            phone.markClickToCallPending();
         }
 
         const dialTarget =

@@ -130,6 +130,7 @@ class ApexWebphone {
         this.directDialActive = false;
         this.customerFirstOutbound = false;
         this.outboundDialStartedAt = 0;
+        this.callOnHold = false;
     }
 
     bindPanel(panel) {
@@ -179,6 +180,10 @@ class ApexWebphone {
             recordBtn: panel.querySelector('[data-webphone-record]'),
             recordLabel: panel.querySelector('[data-webphone-record-label]'),
             endCallBtn: panel.querySelector('[data-webphone-end-call]'),
+            holdBtn: panel.querySelector('[data-webphone-hold]'),
+            transferBtn: panel.querySelector('[data-webphone-transfer]'),
+            floatingHold: document.querySelector('[data-webphone-floating-hold]'),
+            floatingTransfer: document.querySelector('[data-webphone-floating-transfer]'),
         };
 
         this.ui.connectBtn?.addEventListener('click', () => {
@@ -225,6 +230,30 @@ class ApexWebphone {
         this.ui.endCallBtn?.addEventListener('click', () => {
             this.ensureAudioContext().catch(() => {});
             this.hangup().catch(() => {});
+        });
+
+        this.ui.holdBtn?.addEventListener('click', () => {
+            this.toggleHold().catch((error) => {
+                showToast(error.message || 'Could not update hold.', 'error');
+            });
+        });
+
+        this.ui.floatingHold?.addEventListener('click', () => {
+            this.toggleHold().catch((error) => {
+                showToast(error.message || 'Could not update hold.', 'error');
+            });
+        });
+
+        this.ui.transferBtn?.addEventListener('click', () => {
+            this.promptTransfer().catch((error) => {
+                showToast(error.message || 'Could not transfer call.', 'error');
+            });
+        });
+
+        this.ui.floatingTransfer?.addEventListener('click', () => {
+            this.promptTransfer().catch((error) => {
+                showToast(error.message || 'Could not transfer call.', 'error');
+            });
         });
 
         const extSelect = document.querySelector('[name="from_extension"]');
@@ -381,12 +410,16 @@ class ApexWebphone {
         }
     }
 
-    setCallControlsVisible(visible, { showRecord = false, showEndCall = false, showAnswer = false } = {}) {
+    setCallControlsVisible(visible, { showRecord = false, showEndCall = false, showAnswer = false, showHold = false, showTransfer = false } = {}) {
         this.ui?.callControls?.classList.toggle('hidden', !visible);
         this.ui?.recordBtn?.classList.toggle('hidden', !showRecord);
         this.ui?.endCallBtn?.classList.toggle('hidden', !showEndCall);
+        this.ui?.holdBtn?.classList.toggle('hidden', !showHold);
+        this.ui?.transferBtn?.classList.toggle('hidden', !showTransfer);
         this.ui?.floatingRecord?.classList.toggle('hidden', !showRecord);
         this.ui?.floatingHangup?.classList.toggle('hidden', !showEndCall);
+        this.ui?.floatingHold?.classList.toggle('hidden', !showHold);
+        this.ui?.floatingTransfer?.classList.toggle('hidden', !showTransfer);
         this.ui?.floatingAnswer?.classList.toggle('hidden', !showAnswer);
     }
 
@@ -523,6 +556,85 @@ class ApexWebphone {
         return panel?.dataset.callStatusUrl || '';
     }
 
+    callActionUrlTemplate(action) {
+        const panel = this.panel || document.querySelector('[data-webphone-panel]');
+        const key = `${action}Url`;
+
+        return panel?.dataset[key] || '';
+    }
+
+    async postCallAction(action, body = {}) {
+        const uuid = this.morpheusCallUuid;
+        const template = this.callActionUrlTemplate(action);
+
+        if (!uuid || !template) {
+            throw new Error('No active Morpheus call to control.');
+        }
+
+        const url = template.replace('__UUID__', encodeURIComponent(uuid));
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-TOKEN': csrfToken(),
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify(body),
+        });
+
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok || data.ok === false) {
+            throw new Error(data.error || `Call ${action} failed.`);
+        }
+
+        return data;
+    }
+
+    updateHoldUi() {
+        const label = this.callOnHold ? 'Resume' : 'Hold';
+        if (this.ui?.holdBtn) {
+            this.ui.holdBtn.textContent = label;
+            this.ui.holdBtn.classList.toggle('is-active', this.callOnHold);
+        }
+        if (this.ui?.floatingHold) {
+            this.ui.floatingHold.textContent = label;
+            this.ui.floatingHold.classList.toggle('is-active', this.callOnHold);
+        }
+    }
+
+    async toggleHold() {
+        if (!this.morpheusCallUuid) {
+            throw new Error('Connect a call before using hold.');
+        }
+
+        const action = this.callOnHold ? 'unhold' : 'hold';
+        await this.postCallAction(action);
+        this.callOnHold = !this.callOnHold;
+        this.updateHoldUi();
+        showToast(this.callOnHold ? 'Call on hold.' : 'Call resumed.', 'success');
+    }
+
+    async promptTransfer() {
+        if (!this.morpheusCallUuid) {
+            throw new Error('Connect a call before transferring.');
+        }
+
+        const destination = window.prompt('Transfer to extension or phone number:', '');
+        if (!destination || !String(destination).trim()) {
+            return;
+        }
+
+        const digits = String(destination).replace(/\D/g, '');
+        const payload = digits.length <= 6 ? digits : digits;
+
+        await this.postCallAction('transfer', { destination: payload });
+        showToast(`Call transferred to ${destination}.`, 'success');
+        await this.hangup().catch(() => {});
+    }
+
     stopDestinationPoll() {
         if (!this.destinationPollTimer) {
             return;
@@ -631,7 +743,7 @@ class ApexWebphone {
         this.clickToCallActive = false;
         this.stopDestinationPoll();
         this.stopRingback();
-        this.morpheusCallUuid = null;
+        // Keep morpheusCallUuid for hold/transfer/hangup until the user ends the call.
 
         if (!this.callStartedAt) {
             this.startCallTimer();
@@ -656,7 +768,15 @@ class ApexWebphone {
             showAnswer: false,
             showHangup: true,
             showRecord: true,
+            showHold: Boolean(this.morpheusCallUuid),
+            showTransfer: Boolean(this.morpheusCallUuid),
             state: 'in-call',
+        });
+        this.setCallControlsVisible(true, {
+            showRecord: true,
+            showEndCall: true,
+            showHold: Boolean(this.morpheusCallUuid),
+            showTransfer: Boolean(this.morpheusCallUuid),
         });
         this.setState('in-call');
     }
@@ -784,6 +904,8 @@ class ApexWebphone {
         showAnswer = false,
         showHangup = false,
         showRecord = false,
+        showHold = false,
+        showTransfer = false,
         state = 'offline',
     } = {}) {
         if (!this.ui?.floatingPopup) {
@@ -824,6 +946,8 @@ class ApexWebphone {
         this.ui.floatingAnswer?.classList.toggle('hidden', !showAnswer);
         this.ui.floatingHangup?.classList.toggle('hidden', !showHangup);
         this.ui.floatingRecord?.classList.toggle('hidden', !showRecord);
+        this.ui.floatingHold?.classList.toggle('hidden', !showHold);
+        this.ui.floatingTransfer?.classList.toggle('hidden', !showTransfer);
     }
 
     startCallTimer() {
@@ -931,6 +1055,8 @@ class ApexWebphone {
         this.setCallControlsVisible(onActiveCall, {
             showRecord: onActiveCall,
             showEndCall: onActiveCall,
+            showHold: state === 'in-call' && Boolean(this.morpheusCallUuid),
+            showTransfer: state === 'in-call' && Boolean(this.morpheusCallUuid),
             showAnswer: state === 'ringing' && !outboundActive,
         });
 
@@ -959,6 +1085,10 @@ class ApexWebphone {
         }
 
         this.syncSelectedExtension();
+
+        document.dispatchEvent(
+            new CustomEvent('apex:webphone-state', { detail: { state, message: message || labels[state] || state } }),
+        );
     }
 
     async syncExtensionInBackground(extension) {
@@ -1753,7 +1883,9 @@ class ApexWebphone {
             } else {
                 await this.session.bye();
             }
-        } else if (morpheusUuid) {
+        }
+
+        if (morpheusUuid) {
             await this.hangupMorpheusCall(morpheusUuid);
         }
 
@@ -1777,6 +1909,8 @@ class ApexWebphone {
         this.clickToCallActive = false;
         this.awaitingDestinationBridge = false;
         this.directDialActive = false;
+        this.callOnHold = false;
+        this.updateHoldUi();
 
         this.updateCallCard({ visible: false });
         this.updateFloatingPopup({ visible: false });

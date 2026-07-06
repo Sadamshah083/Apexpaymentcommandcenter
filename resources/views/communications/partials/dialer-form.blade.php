@@ -47,40 +47,35 @@
 @endunless
 
 @if ($extensions === [])
-    <div class="comm-hub-alert comm-hub-alert-warning ghl-dialer-alert">
-        <p class="ghl-dialer-alert-title">No phone line assigned yet</p>
-        <p class="ghl-dialer-alert-desc">Ask an admin to provision your extension in Communications Hub → Phone Agents
-            before you can place outbound calls.</p>
-    </div>
+    <x-communications.molecules.alert variant="warning" class="ghl-dialer-alert mb-4" title="No phone line assigned">
+        Ask an admin to provision your extension in Communications Hub → Phone Agents before you can place outbound calls.
+    </x-communications.molecules.alert>
 @elseif (!$hasOutboundDid)
-    <div class="comm-hub-alert comm-hub-alert-warning ghl-dialer-alert">
-        <p class="ghl-dialer-alert-title">Outbound DID not configured</p>
-        <p class="ghl-dialer-alert-desc">Your extension is ready, but no caller ID number is set. Once Morpheus delivers
-            your DIDs, an admin must add the number under Phone Agents → Edit → Caller ID number.</p>
-    </div>
-@elseif (!$endpointOnline)
-    <div class="comm-hub-alert comm-hub-alert-warning mb-4 text-sm">
-        <p class="font-semibold">Your phone line is not online</p>
-        <p class="mt-1">{{ $endpointHint ?? 'Register a SIP softphone or sign in to the Morpheus web phone before placing calls.' }}</p>
-        <ul class="text-xs text-slate-600 list-disc pl-4 mt-2 space-y-1">
-            <li>SIP server: <code>{{ $sipHost }}</code></li>
-            <li>Extension: <strong>{{ $defaultExtension }}</strong> (password from Phone Agents)</li>
-            <li>Apps: Zoiper, Linphone, or Morpheus web phone</li>
-        </ul>
+    <x-communications.molecules.alert variant="warning" class="ghl-dialer-alert mb-4" title="Outbound DID not configured">
+        Your extension is ready, but no caller ID number is set. Once Morpheus delivers your DIDs, an admin must add the number under Phone Agents → Edit → Caller ID number.
+    </x-communications.molecules.alert>
+@elseif (!$endpointOnline && $layout !== 'center')
+    <x-communications.molecules.alert variant="warning" class="mb-4" title="Your phone line is not online">
+        {{ $endpointHint ?? 'Register a SIP softphone or sign in to the Morpheus web phone before placing calls.' }}
         @if ($portalUrl !== '#')
             <a href="{{ $portalUrl }}" target="_blank" rel="noopener" class="comm-hub-link text-xs mt-2 inline-block">Open Morpheus web phone →</a>
         @endif
-    </div>
+    </x-communications.molecules.alert>
+@endif
+
+@if ($layout === 'center')
+    <x-communications.molecules.alert variant="info" class="mb-4">
+        After your line shows <strong>Registered</strong>, enter a number and press <strong>Call</strong>. Your browser may ring first — answer to connect the outbound leg.
+    </x-communications.molecules.alert>
 @endif
 
 <form method="POST" action="{{ route($routePrefix . 'communications.morpheus.calls.originate') }}"
-    class="ghl-dialer-originate-form {{ ($layout ?? '') === 'center' ? 'ghl-dialer-form--center' : '' }}" data-fallback-sip="1" data-originate-json="1"
-    data-originate-json="1">
+    class="ghl-dialer-originate-form {{ ($layout ?? '') === 'center' ? 'ghl-dialer-form--center ghl-dialer-form--enterprise' : '' }}" data-fallback-sip="1" data-originate-json="1">
     @csrf
     <input type="hidden" name="fallback" value="sip">
 
-    <label class="comm-hub-label" for="{{ $callerSelectId }}">Your extension (call from)</label>
-    <select id="{{ $callerSelectId }}" name="from_extension" class="comm-hub-input ghl-dialer-field" required
+    <label class="ch-label" for="{{ $callerSelectId }}">Your extension</label>
+    <select id="{{ $callerSelectId }}" name="from_extension" class="ch-input ghl-dialer-field mb-3" required
         @disabled($extensions === [])>
         <option value="" disabled @selected($defaultExtension === null || $defaultExtension === '')>Select your extension
         </option>
@@ -106,12 +101,12 @@
         · destination rings as this number on the callee's phone.
     </p>
 
-    <label class="comm-hub-label" for="{{ $numberInputId }}">Destination number</label>
+    <label class="ch-label" for="{{ $numberInputId }}">Destination number</label>
     <input type="tel" id="{{ $numberInputId }}" name="destination"
-        class="comm-hub-input ghl-dialer-display ghl-dialer-field" placeholder="+1 555 123 4567"
+        class="ch-input ghl-dialer-display ghl-dialer-field mb-3" placeholder="+1 555 123 4567"
         value="{{ $prefillNumber ?? '' }}" required autocomplete="tel" @disabled($extensions === [])>
 
-    <div class="ghl-dialer-keypad" id="{{ $keypadRootId }}">
+    <div class="ghl-dialer-keypad mb-4" id="{{ $keypadRootId }}">
         @foreach (['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'] as $key)
             <button type="button" class="ghl-dialer-key" data-dial-key="{{ $key }}">{{ $key }}</button>
         @endforeach
@@ -119,9 +114,9 @@
 
     <div class="ghl-dialer-actions">
         @if ($backspaceId)
-            <button type="button" id="{{ $backspaceId }}" class="comm-hub-btn comm-hub-btn-secondary" data-dial-backspace>Delete</button>
+            <button type="button" id="{{ $backspaceId }}" class="ch-btn ch-btn--secondary" data-dial-backspace>Delete</button>
         @endif
-        <button type="submit" id="{{ $dialBtnId }}" class="comm-hub-btn ghl-dialer-call-btn"
+        <button type="submit" id="{{ $dialBtnId }}" class="ch-btn ch-btn--call ghl-dialer-call-btn"
             @disabled($extensions === [])>{{ ($layout ?? '') === 'center' ? 'Call' : 'Call with Morpheus CX' }}</button>
     </div>
 </form>

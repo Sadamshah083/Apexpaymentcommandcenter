@@ -404,10 +404,24 @@ class ZoomApiService
      */
     public function clickToCall(string $extension, string $destination, array $options = []): array
     {
-        return $this->postOriginate('/click-to-call', array_merge([
+        $this->ensureManualOutboundCampaign();
+
+        $response = $this->postOriginate('/click-to-call', array_merge([
             'extension' => trim($extension),
             'destination' => $this->formatClickToCallApiDestination($destination),
+            'timeout_sec' => $this->originateRingTimeout(),
         ], $this->originatePayloadExtras($options)));
+
+        if (($response['ok'] ?? false) && filled($response['call_uuid'] ?? null)
+            && ! $this->verifyOriginateStarted((string) $response['call_uuid'])) {
+            return array_merge($response, [
+                'ok' => false,
+                'routing_error' => true,
+                'error' => 'Morpheus accepted click-to-call but no call was created on the PBX.',
+            ]);
+        }
+
+        return $response;
     }
 
     /**
@@ -424,7 +438,7 @@ class ZoomApiService
             return ['ok' => false, 'error' => 'Extension and destination are required.'];
         }
 
-        $this->releaseCallsForExtension($fromExtension, aggressive: false);
+        $this->clearExtensionForOutboundDial($fromExtension, kickSip: false);
 
         $this->ensureManualOutboundCampaign();
         $extra = $this->originatePayloadExtras($options);
@@ -434,39 +448,113 @@ class ZoomApiService
         $method = strtolower((string) config('integrations.morpheus.originate_method', 'originate'));
         $customerFirst = (bool) ($options['customer_first'] ?? config('integrations.morpheus.originate_customer_first', false));
         $isPstn = strlen($dialDestination) > 6;
+        $lineReset = false;
 
-        if ($customerFirst && $isPstn && $method !== 'click-to-call') {
-            $bridgeExtension = $this->customerFirstBridgeExtension($fromExtension);
-            $response = $this->postOriginate('/calls/originate', array_merge([
-                'from' => $dialDestination,
-                'to' => $bridgeExtension,
-                'timeout_sec' => $timeout,
-            ], $extra));
-            $attempted[] = 'POST /calls/originate (customer-first)';
-        } elseif ($method === 'click-to-call') {
-            $response = $this->postOriginate('/click-to-call', array_merge([
-                'extension' => $fromExtension,
-                'destination' => $dialDestination,
-                'timeout_sec' => $timeout,
-            ], $extra));
-            $attempted[] = 'POST /click-to-call';
-        } else {
+        $place = function () use ($customerFirst, $isPstn, $method, $fromExtension, $dialDestination, $timeout, $extra, &$attempted): array {
+            if ($customerFirst && $isPstn && $method !== 'click-to-call') {
+                $response = $this->postOriginate('/calls/originate', array_merge([
+                    'from' => $dialDestination,
+                    'to' => $this->customerFirstBridgeExtension($fromExtension),
+                    'timeout_sec' => $timeout,
+                ], $extra));
+                $attempted[] = 'POST /calls/originate (customer-first)';
+
+                return $response;
+            }
+
+            if ($method === 'click-to-call') {
+                $response = $this->postOriginate('/click-to-call', array_merge([
+                    'extension' => $fromExtension,
+                    'destination' => $dialDestination,
+                    'timeout_sec' => $timeout,
+                ], $extra));
+                $attempted[] = 'POST /click-to-call';
+
+                return $response;
+            }
+
             $response = $this->postOriginate('/calls/originate', array_merge([
                 'from' => $fromExtension,
                 'to' => $dialDestination,
                 'timeout_sec' => $timeout,
             ], $extra));
             $attempted[] = 'POST /calls/originate';
+
+            return $response;
+        };
+
+        $response = $place();
+
+        if (($response['ok'] ?? false) && filled($response['call_uuid'] ?? null)) {
+            $uuid = (string) $response['call_uuid'];
+            $busy = false;
+
+            for ($i = 0; $i < 3; $i++) {
+                usleep(1_000_000);
+                $snap = $this->quickGetCall($uuid) ?? [];
+                $cause = strtoupper((string) ($snap['hangup_cause'] ?? ''));
+                $live = (bool) ($snap['live'] ?? false);
+
+                if ($live) {
+                    break;
+                }
+
+                if (in_array($cause, ['USER_BUSY', 'CALL_REJECTED'], true)) {
+                    $busy = true;
+                    break;
+                }
+            }
+
+            if ($busy) {
+                $this->hangup($uuid);
+                $this->clearExtensionForOutboundDial($fromExtension, kickSip: true);
+                $lineReset = true;
+                sleep(2);
+                $response = $place();
+                $attempted[] = 'retry-after-busy';
+
+                if (($response['ok'] ?? false) && filled($response['call_uuid'] ?? null)) {
+                    usleep(1_500_000);
+                    $retrySnap = $this->quickGetCall((string) $response['call_uuid']) ?? [];
+                    $retryCause = strtoupper((string) ($retrySnap['hangup_cause'] ?? ''));
+                    if (in_array($retryCause, ['USER_BUSY', 'CALL_REJECTED'], true)) {
+                        $this->hangup((string) $response['call_uuid']);
+
+                        return [
+                            'ok' => false,
+                            'extension_busy' => true,
+                            'line_reset' => $lineReset,
+                            'error' => "Extension {$fromExtension} is busy on Morpheus. Click Connect line again, or ask your admin to clear stuck calls on this extension.",
+                            'hangup_cause' => $retryCause,
+                            'attempted' => $attempted,
+                        ];
+                    }
+                }
+            }
         }
 
         if (! ($response['ok'] ?? false)) {
-            return array_merge($response, ['attempted' => $attempted]);
+            return array_merge($response, ['attempted' => $attempted, 'line_reset' => $lineReset]);
+        }
+
+        $callUuid = (string) ($response['call_uuid'] ?? '');
+        if ($callUuid !== '' && ! $this->verifyOriginateStarted($callUuid)) {
+            return [
+                'ok' => false,
+                'routing_error' => true,
+                'error' => 'Morpheus accepted the dial but no call was created on the PBX. Ask Morpheus support to check FreeSWITCH/originate routing for campaign '
+                    .($extra['campaign_id'] ?? $this->defaultOutboundCampaignId()).'.',
+                'call_uuid' => $callUuid,
+                'attempted' => $attempted,
+                'line_reset' => $lineReset,
+            ];
         }
 
         return array_merge($response, [
             'ok' => true,
             'outcome' => 'initiated',
             'customer_first' => $customerFirst && $isPstn,
+            'line_reset' => $lineReset,
             'from' => preg_replace('/\D/', '', $fromExtension) ?: $fromExtension,
             'to' => ltrim($dialDestination, '+'),
             'internal_from' => true,
@@ -498,9 +586,14 @@ class ZoomApiService
      */
     public function releaseCallsForExtension(string $extension, bool $aggressive = true): array
     {
-        $released = $this->releaseStaleActiveCalls($aggressive ? 0 : 60);
+        $normalized = preg_replace('/\D/', '', $extension) ?: $extension;
+        $released = $this->releaseStaleActiveCalls($aggressive ? 0 : 60, $normalized);
 
         foreach ($this->listActiveCalls() as $call) {
+            if (! $this->activeCallTouchesExtension($call, $normalized)) {
+                continue;
+            }
+
             $uuid = (string) ($call['uuid'] ?? $call['call_uuid'] ?? '');
             if ($uuid === '' || in_array($uuid, $released, true)) {
                 continue;
@@ -516,15 +609,99 @@ class ZoomApiService
     }
 
     /**
+     * Hang up stale calls and optionally rotate SIP password to clear USER_BUSY zombies.
+     *
+     * @return array{released: array<int, string>, kicked: bool}
+     */
+    public function clearExtensionForOutboundDial(string $extensionNum, bool $kickSip = false): array
+    {
+        $normalized = preg_replace('/\D/', '', $extensionNum) ?: $extensionNum;
+        $released = $this->releaseCallsForExtension($normalized, aggressive: true);
+
+        $kicked = $kickSip ? $this->kickExtensionSipRegistration($normalized) : false;
+
+        return ['released' => $released, 'kicked' => $kicked];
+    }
+
+    /**
+     * Rotate SIP password to drop zombie registrations blocking USER_BUSY on an extension.
+     */
+    public function kickExtensionSipRegistration(string $extensionNum): bool
+    {
+        $normalized = preg_replace('/\D/', '', $extensionNum) ?: $extensionNum;
+        $cacheKey = 'integrations.morpheus.extension_kick.'.$normalized;
+
+        if (Cache::has($cacheKey)) {
+            return false;
+        }
+
+        $extensionId = null;
+        foreach ($this->listExtensions(['limit' => 100])['extensions'] ?? [] as $row) {
+            if ((string) ($row['extension_num'] ?? '') === (string) $normalized) {
+                $extensionId = (string) ($row['id'] ?? '');
+                break;
+            }
+        }
+
+        if (! filled($extensionId)) {
+            return false;
+        }
+
+        $password = (string) (config('integrations.morpheus.extension_password') ?: '');
+        if ($password === '') {
+            return false;
+        }
+
+        $result = $this->updateExtension($extensionId, [
+            'status' => 'active',
+            'password' => $password,
+        ]);
+
+        if (filled($result['id'] ?? null)) {
+            Cache::put($cacheKey, true, 120);
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  array<string, mixed>  $call
+     */
+    protected function activeCallTouchesExtension(array $call, string $extensionNum): bool
+    {
+        if ($extensionNum === '') {
+            return true;
+        }
+
+        foreach ([
+            'extension', 'extension_num', 'from', 'to', 'caller', 'callee',
+            'caller_id_number', 'destination_number', 'destination',
+        ] as $field) {
+            $value = preg_replace('/\D/', '', (string) ($call[$field] ?? '')) ?? '';
+            if ($value !== '' && ($value === $extensionNum || str_ends_with($value, $extensionNum))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Zombie calls on an extension block new outbound with SIP 486 USER_BUSY.
      *
      * @return array<int, string>
      */
-    public function releaseStaleActiveCalls(int $olderThanSeconds = 15): array
+    public function releaseStaleActiveCalls(int $olderThanSeconds = 15, ?string $extensionNum = null): array
     {
         $released = [];
 
         foreach ($this->listActiveCalls() as $call) {
+            if ($extensionNum !== null && ! $this->activeCallTouchesExtension($call, $extensionNum)) {
+                continue;
+            }
+
             $uuid = (string) ($call['uuid'] ?? $call['call_uuid'] ?? '');
             if ($uuid === '') {
                 continue;
@@ -549,6 +726,32 @@ class ZoomApiService
         $configured = (int) config('integrations.morpheus.ring_timeout', 90);
 
         return min(120, max(60, $configured));
+    }
+
+    /**
+     * Morpheus sometimes returns HTTP 200 + call_uuid while FreeSWITCH never creates the call.
+     */
+    protected function verifyOriginateStarted(string $uuid): bool
+    {
+        for ($i = 0; $i < 5; $i++) {
+            usleep(600_000);
+
+            if ($this->quickGetCall($uuid) !== null) {
+                return true;
+            }
+
+            foreach ($this->listActiveCalls() as $row) {
+                if ($this->callRowMatchesUuid($row, $uuid)) {
+                    return true;
+                }
+            }
+
+            if ($this->findRecentCdrByUuid($uuid) !== null) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     protected function customerFirstBridgeExtension(string $preferredExtension): string
@@ -627,6 +830,7 @@ class ZoomApiService
             'hangup_cause' => $result['hangup_cause'] ?? null,
             'sip_code' => $result['sip_code'] ?? null,
             'customer_first' => $result['customer_first'] ?? null,
+            'line_reset' => $result['line_reset'] ?? null,
         ], fn ($value) => $value !== null);
     }
 

@@ -34,8 +34,9 @@ function initPageTransitions() {
 async function bootCommunicationsFeatures() {
     const needsDialer = Boolean(document.querySelector('.ghl-dialer-originate-form'));
     const needsWebphone = Boolean(document.querySelector('[data-webphone-panel]'));
+    const needsWorkflow = Boolean(document.querySelector('[data-comm-workflow]'));
 
-    if (!needsDialer && !needsWebphone) {
+    if (!needsDialer && !needsWebphone && !needsWorkflow) {
         return;
     }
 
@@ -47,6 +48,11 @@ async function bootCommunicationsFeatures() {
     if (needsWebphone) {
         const webphoneModule = await import('./communications-webphone.js');
         webphoneModule.bootCommunicationsWebphone();
+    }
+
+    if (document.querySelector('[data-comm-workflow]')) {
+        const workflowModule = await import('./comm-hub-workflow.js');
+        workflowModule.initCommHubWorkflow();
     }
 }
 

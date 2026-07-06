@@ -2,7 +2,7 @@
     $roleLabel = $hubAccess['roleLabel'] ?? 'User';
 @endphp
 
-<header class="ghl-inbox-toolbar">
+<header class="ghl-inbox-toolbar ch-hub-toolbar-enterprise">
     <div class="ghl-inbox-toolbar-top">
         <div class="ghl-inbox-toolbar-brand">
             <div class="ghl-inbox-toolbar-brand-row">
@@ -62,7 +62,7 @@
             @endif
 
             <span
-                class="comm-hub-badge {{ $connection['connected'] ?? false ? 'comm-hub-badge-success' : 'comm-hub-badge-warning' }}">
+                class="ch-badge {{ ($connection['connected'] ?? false) ? 'ch-badge--live' : 'ch-badge--warn' }}">
                 {{ $connection['connected'] ?? false ? 'Live' : 'Offline' }}
             </span>
         </div>

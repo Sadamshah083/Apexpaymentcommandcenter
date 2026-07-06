@@ -1,0 +1,546 @@
+/**
+ * Communications Hub — Atomic design tokens & primitives
+ * Atoms → molecules → organisms (class prefixes: ch-)
+ */
+
+:root {
+    --ch-brand: #122e53;
+    --ch-brand-hover: #0e243f;
+    --ch-brand-soft: #eff6ff;
+    --ch-brand-muted: #dbeafe;
+    --ch-success: #059669;
+    --ch-success-soft: #ecfdf5;
+    --ch-warning: #d97706;
+    --ch-warning-soft: #fffbeb;
+    --ch-danger: #dc2626;
+    --ch-danger-soft: #fef2f2;
+    --ch-surface: #ffffff;
+    --ch-surface-muted: #f8fafc;
+    --ch-surface-subtle: #f1f5f9;
+    --ch-border: #e2e8f0;
+    --ch-border-strong: #cbd5e1;
+    --ch-text: #0f172a;
+    --ch-text-secondary: #475569;
+    --ch-text-muted: #64748b;
+    --ch-radius-sm: 0.5rem;
+    --ch-radius-md: 0.75rem;
+    --ch-radius-lg: 1rem;
+    --ch-radius-xl: 1.25rem;
+    --ch-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+    --ch-shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
+    --ch-font-xs: 0.6875rem;
+    --ch-font-sm: 0.8125rem;
+    --ch-font-base: 0.875rem;
+    --ch-font-lg: 1.125rem;
+    --ch-font-xl: 1.375rem;
+    --ch-space-1: 0.25rem;
+    --ch-space-2: 0.5rem;
+    --ch-space-3: 0.75rem;
+    --ch-space-4: 1rem;
+    --ch-space-5: 1.25rem;
+    --ch-space-6: 1.5rem;
+}
+
+/* --- Atoms --- */
+
+.ch-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    min-height: 2.5rem;
+    padding: 0.5rem 1rem;
+    border-radius: var(--ch-radius-sm);
+    border: 1px solid transparent;
+    font-size: var(--ch-font-sm);
+    font-weight: 600;
+    line-height: 1.2;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+}
+
+.ch-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.ch-btn--primary {
+    background: var(--ch-brand);
+    color: #fff;
+}
+
+.ch-btn--primary:hover:not(:disabled) {
+    background: var(--ch-brand-hover);
+}
+
+.ch-btn--secondary {
+    background: var(--ch-surface);
+    border-color: var(--ch-border-strong);
+    color: var(--ch-text);
+}
+
+.ch-btn--secondary:hover:not(:disabled) {
+    background: var(--ch-surface-subtle);
+}
+
+.ch-btn--call {
+    min-height: 2.75rem;
+    padding: 0.625rem 1.25rem;
+    border-radius: var(--ch-radius-md);
+    background: linear-gradient(180deg, #16a34a 0%, #15803d 100%);
+    color: #fff;
+    font-size: var(--ch-font-base);
+    box-shadow: 0 4px 14px rgba(22, 163, 74, 0.25);
+}
+
+.ch-btn--call:hover:not(:disabled) {
+    filter: brightness(1.05);
+}
+
+.ch-btn--sm {
+    min-height: 2rem;
+    padding: 0.35rem 0.75rem;
+    font-size: var(--ch-font-xs);
+}
+
+.ch-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.2rem 0.55rem;
+    border-radius: 9999px;
+    font-size: var(--ch-font-xs);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.ch-badge--live {
+    background: var(--ch-success-soft);
+    color: var(--ch-success);
+}
+
+.ch-badge--offline {
+    background: var(--ch-surface-subtle);
+    color: var(--ch-text-muted);
+}
+
+.ch-badge--warn {
+    background: var(--ch-warning-soft);
+    color: var(--ch-warning);
+}
+
+.ch-label {
+    display: block;
+    font-size: var(--ch-font-xs);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ch-text-secondary);
+    margin-bottom: 0.35rem;
+}
+
+.ch-input {
+    width: 100%;
+    min-height: 2.625rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--ch-border-strong);
+    border-radius: var(--ch-radius-sm);
+    background: var(--ch-surface);
+    color: var(--ch-text);
+    font-size: var(--ch-font-base);
+}
+
+.ch-input:focus {
+    outline: none;
+    border-color: var(--ch-brand);
+    box-shadow: 0 0 0 3px var(--ch-brand-muted);
+}
+
+.ch-status-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: #94a3b8;
+    flex-shrink: 0;
+}
+
+.ch-status-dot[data-state='registered'],
+.ch-status-dot[data-state='in-call'],
+.ch-status-dot[data-state='dialing'],
+.ch-status-dot[data-state='ringing'] {
+    background: var(--ch-success);
+    box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.2);
+}
+
+.ch-status-dot[data-state='connecting'] {
+    background: var(--ch-warning);
+    animation: ch-pulse 1.2s ease-in-out infinite;
+}
+
+.ch-status-dot[data-state='error'] {
+    background: var(--ch-danger);
+}
+
+@keyframes ch-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+}
+
+/* --- Molecules --- */
+
+.ch-alert {
+    display: flex;
+    gap: var(--ch-space-3);
+    padding: var(--ch-space-3) var(--ch-space-4);
+    border-radius: var(--ch-radius-md);
+    border: 1px solid var(--ch-border);
+    background: var(--ch-surface);
+    font-size: var(--ch-font-sm);
+    line-height: 1.45;
+}
+
+.ch-alert--warning {
+    border-color: #fcd34d;
+    background: var(--ch-warning-soft);
+    color: #92400e;
+}
+
+.ch-alert--info {
+    border-color: var(--ch-brand-muted);
+    background: var(--ch-brand-soft);
+    color: var(--ch-brand);
+}
+
+.ch-alert__title {
+    font-weight: 700;
+    margin: 0 0 0.15rem;
+}
+
+.ch-alert__body {
+    margin: 0;
+    opacity: 0.9;
+}
+
+.ch-section-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--ch-space-3);
+    margin-bottom: var(--ch-space-4);
+}
+
+.ch-section-header__title {
+    margin: 0;
+    font-size: var(--ch-font-lg);
+    font-weight: 700;
+    color: var(--ch-text);
+    letter-spacing: -0.02em;
+}
+
+.ch-section-header__subtitle {
+    margin: 0.25rem 0 0;
+    font-size: var(--ch-font-sm);
+    color: var(--ch-text-muted);
+    max-width: 42rem;
+    line-height: 1.5;
+}
+
+.ch-workflow {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--ch-space-3);
+    margin-bottom: var(--ch-space-5);
+}
+
+@media (max-width: 768px) {
+    .ch-workflow {
+        grid-template-columns: 1fr;
+    }
+}
+
+.ch-workflow__step {
+    position: relative;
+    padding: var(--ch-space-4);
+    border-radius: var(--ch-radius-lg);
+    border: 1px solid var(--ch-border);
+    background: var(--ch-surface);
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.ch-workflow__step.is-active {
+    border-color: var(--ch-brand);
+    box-shadow: 0 0 0 1px var(--ch-brand), var(--ch-shadow-sm);
+}
+
+.ch-workflow__step.is-complete {
+    border-color: #86efac;
+    background: var(--ch-success-soft);
+}
+
+.ch-workflow__num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 50%;
+    background: var(--ch-surface-subtle);
+    color: var(--ch-text-secondary);
+    font-size: var(--ch-font-xs);
+    font-weight: 800;
+    margin-bottom: var(--ch-space-2);
+}
+
+.ch-workflow__step.is-active .ch-workflow__num {
+    background: var(--ch-brand);
+    color: #fff;
+}
+
+.ch-workflow__step.is-complete .ch-workflow__num {
+    background: var(--ch-success);
+    color: #fff;
+}
+
+.ch-workflow__title {
+    margin: 0 0 0.25rem;
+    font-size: var(--ch-font-sm);
+    font-weight: 700;
+    color: var(--ch-text);
+}
+
+.ch-workflow__desc {
+    margin: 0;
+    font-size: var(--ch-font-xs);
+    color: var(--ch-text-muted);
+    line-height: 1.45;
+}
+
+.ch-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--ch-space-2);
+}
+
+.ch-stat-grid__item {
+    padding: var(--ch-space-3);
+    border-radius: var(--ch-radius-md);
+    background: var(--ch-surface-muted);
+    border: 1px solid var(--ch-border);
+}
+
+.ch-stat-grid__value {
+    display: block;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--ch-text);
+    line-height: 1.1;
+}
+
+.ch-stat-grid__label {
+    display: block;
+    font-size: var(--ch-font-xs);
+    color: var(--ch-text-muted);
+    margin-top: 0.15rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+/* --- Organisms --- */
+
+.ch-dial-workspace {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: var(--ch-space-4) var(--ch-space-5) var(--ch-space-6);
+}
+
+.ch-dial-workspace__hero {
+    text-align: center;
+    margin-bottom: var(--ch-space-5);
+}
+
+.ch-dial-workspace__title {
+    margin: var(--ch-space-3) 0 0.35rem;
+    font-size: var(--ch-font-xl);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    color: var(--ch-text);
+}
+
+.ch-dial-workspace__grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+    gap: var(--ch-space-5);
+    align-items: start;
+}
+
+@media (max-width: 960px) {
+    .ch-dial-workspace__grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.ch-panel {
+    border: 1px solid var(--ch-border);
+    border-radius: var(--ch-radius-xl);
+    background: var(--ch-surface);
+    box-shadow: var(--ch-shadow-sm);
+    overflow: hidden;
+}
+
+.ch-panel__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ch-space-3);
+    padding: var(--ch-space-4) var(--ch-space-5);
+    border-bottom: 1px solid var(--ch-border);
+    background: var(--ch-surface-muted);
+}
+
+.ch-panel__step-tag {
+    font-size: var(--ch-font-xs);
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ch-brand);
+}
+
+.ch-panel__title {
+    margin: 0.15rem 0 0;
+    font-size: var(--ch-font-base);
+    font-weight: 700;
+    color: var(--ch-text);
+}
+
+.ch-panel__body {
+    padding: var(--ch-space-5);
+}
+
+.ch-hub-toolbar-enterprise .ghl-inbox-toolbar-heading {
+    font-size: 1.375rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+}
+
+.ch-hub-toolbar-enterprise .ghl-inbox-toolbar-sub {
+    font-size: var(--ch-font-sm);
+}
+
+.ghl-webphone-panel--enterprise .ghl-webphone-control-help {
+    display: none;
+}
+
+.ghl-webphone-panel--enterprise .ghl-webphone-summary {
+    grid-template-columns: repeat(2, 1fr);
+}
+
+.ghl-dialer-form--enterprise .ghl-dialer-display {
+    font-size: 1.375rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-align: center;
+    min-height: 3rem;
+}
+
+.ghl-dialer-form--enterprise .ghl-dialer-keypad {
+    gap: 0.5rem;
+}
+
+.ghl-dialer-form--enterprise .ghl-dialer-key {
+    min-height: 3rem;
+    font-size: 1.125rem;
+    font-weight: 600;
+    border-radius: var(--ch-radius-md);
+}
+
+.ghl-inbox-nav-item-dial {
+    background: linear-gradient(180deg, var(--ch-brand-soft) 0%, #fff 100%);
+}
+
+.ghl-inbox-nav-item-dial.ghl-inbox-nav-item-active {
+    background: var(--ch-brand);
+    color: #fff;
+}
+
+/* Nested dial workspace panels */
+.ch-dial-workspace .ch-panel .ghl-webphone-panel--enterprise {
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    background: transparent;
+}
+
+.ch-dial-workspace .ghl-webphone-section--center {
+    margin: 0;
+}
+
+.ch-dial-workspace .ghl-webphone-summary.ch-stat-grid {
+    margin-bottom: var(--ch-space-3);
+}
+
+.ch-dial-workspace .ghl-dialer-center-badge {
+    margin: 0 auto;
+}
+
+.ch-dial-workspace .ghl-dialer-form--enterprise .ghl-dialer-actions {
+    display: flex;
+    gap: var(--ch-space-3);
+}
+
+.ch-dial-workspace .ghl-dialer-form--enterprise .ghl-dialer-call-btn {
+    flex: 1;
+}
+
+.ghl-webphone-panel--enterprise .ghl-webphone-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ch-space-2);
+    margin-top: var(--ch-space-4);
+}
+
+.ch-empty-state {
+    text-align: center;
+    padding: var(--ch-space-6) var(--ch-space-4);
+}
+
+.ch-empty-state__icon {
+    font-size: 2.5rem;
+    line-height: 1;
+    margin-bottom: var(--ch-space-3);
+    opacity: 0.85;
+}
+
+.ch-empty-state__title {
+    margin: 0 0 var(--ch-space-2);
+    font-weight: 700;
+    color: var(--ch-text);
+}
+
+.ch-empty-state__message {
+    margin: 0 auto;
+    color: var(--ch-text-muted);
+    font-size: var(--ch-font-sm);
+    line-height: 1.5;
+}
+
+.ch-empty-state__actions {
+    display: flex;
+    justify-content: center;
+    gap: var(--ch-space-2);
+    flex-wrap: wrap;
+}
+
+/* Inbox shell polish */
+.ghl-inbox.ch-hub-shell {
+    --ghl-accent: var(--ch-brand);
+}
+
+.ghl-inbox-list-title {
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+
+.ghl-inbox-row-active {
+    border-left-color: var(--ch-brand) !important;
+}

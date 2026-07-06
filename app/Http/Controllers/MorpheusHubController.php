@@ -200,6 +200,13 @@ class MorpheusHubController extends Controller
 
             $result = $this->morpheus->originateCall($fromExtension, $destination, $dialOptions);
 
+            if (! ($result['ok'] ?? false) && $request->wantsJson()) {
+                return response()->json(
+                    $this->morpheus->formatOriginateResponse($result, $fromExtension, $destination, $dialOptions),
+                    ($result['extension_busy'] ?? false) ? 409 : 422
+                );
+            }
+
             if ($result['ok'] ?? false) {
                 $this->logOutboundDial($request, $fromExtension, $destination, $result['call_uuid'] ?? null);
                 $this->data->bustCache();

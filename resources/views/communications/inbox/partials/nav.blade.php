@@ -38,6 +38,6 @@
         class="ghl-inbox-nav-item ghl-inbox-nav-item-dial {{ ($panel ?? '') === 'dialer' ? 'ghl-inbox-nav-item-active' : '' }}"
         title="Phone dialer">
         @include('communications.inbox.partials.nav-icon', ['icon' => 'dial'])
-        <span class="ghl-inbox-nav-label">Dial</span>
+        <span class="ghl-inbox-nav-label">Phone</span>
     </a>
 </nav>
