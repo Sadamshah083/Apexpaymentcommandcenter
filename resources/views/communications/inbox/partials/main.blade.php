@@ -130,25 +130,14 @@
 
     @default
         <div class="ghl-inbox-conversation-scroll ghl-inbox-conversation-scroll--center">
-            <div class="ghl-inbox-empty ghl-inbox-empty-hero">
-                <div class="ghl-inbox-empty-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <path stroke-linecap="round" stroke-linejoin="round"
-                            d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                    </svg>
-                </div>
-                <h2>Select a conversation</h2>
-                <p>Choose someone from the {{ strtolower($channels[$channel]['label'] ?? 'inbox') }} list, or place a call from Quick dial.</p>
-                <div class="ghl-inbox-empty-actions">
-                    <a href="{{ route($routePrefix . 'communications.index', ['channel' => 'inbox']) }}"
-                        class="comm-hub-btn comm-hub-btn-secondary comm-hub-btn-sm">Open inbox</a>
-                    <a href="{{ route($routePrefix . 'communications.index', array_merge($baseQuery, ['panel' => 'dialer'])) }}"
-                        class="comm-hub-btn comm-hub-btn-sm">Open dialer</a>
-                    @if ($channel === 'sms')
-                        <a href="{{ route($routePrefix . 'communications.index', array_merge($baseQuery, ['panel' => 'compose_sms'])) }}"
-                            class="comm-hub-btn comm-hub-btn-sm">New SMS</a>
-                    @endif
-                </div>
-            </div>
+            @include('communications.partials.center-dialer-hub', [
+                'routePrefix' => $routePrefix,
+                'phoneUsers' => $phoneUsers ?? [],
+                'morpheusExtensions' => $morpheusExtensions ?? [],
+                'defaultCallerId' => $defaultCallerId ?? null,
+                'prefillNumber' => $prefillNumber ?? null,
+                'callLogs' => $callLogs ?? [],
+                'clickToCall' => $clickToCall ?? null,
+            ])
         </div>
 @endswitch

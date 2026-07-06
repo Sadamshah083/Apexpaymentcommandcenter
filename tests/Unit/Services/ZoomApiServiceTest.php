@@ -17,12 +17,302 @@ class ZoomApiServiceTest extends TestCase
         parent::setUp();
 
         config([
+            'integrations.morpheus.api_key' => 'ck_test_super_secret_value_1234',
+            'integrations.morpheus.host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.default_campaign_id' => 'campaign-default-123',
+            'integrations.communications.http_timeout_seconds' => 8,
             'integrations.zoom.account_id' => 'acct_test',
             'integrations.zoom.client_id' => 'client_test',
             'integrations.zoom.client_secret' => 'secret_test',
         ]);
 
         Cache::forget('zoom.s2s.access_token');
+    }
+
+    public function test_originate_call_includes_default_campaign_id_when_not_explicitly_provided(): void
+    {
+        config([
+            'integrations.morpheus.host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.api_key' => 'test-key',
+            'integrations.morpheus.default_campaign_id' => '6c753496-2efd-4783-aa85-eb6ec73bc512',
+        ]);
+
+        Http::fake([
+            'https://apexone.morpheus.cx/api/v1/call-control/click-to-call' => Http::response([
+                'ok' => true,
+                'call_uuid' => 'uuid-1',
+            ], 200),
+            'https://apexone.morpheus.cx/api/v1/call-control/calls/uuid-1' => Http::response([
+                'live' => true,
+                'status' => 'ringing',
+                'call_uuid' => 'uuid-1',
+            ], 200),
+        ]);
+
+        $service = new ZoomApiService;
+        $result = $service->originateCall('1001', '+15551234567', [
+            'caller_id_number' => '+12016444668',
+            'caller_id_name' => 'Agent One',
+        ]);
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame('1001', $result['from']);
+        $this->assertSame('15551234567', $result['to']);
+        $this->assertTrue($result['internal_from']);
+        $this->assertSame('6c753496-2efd-4783-aa85-eb6ec73bc512', $result['campaign_id']);
+        Http::assertSent(function ($request) {
+            return $request->method() === 'POST'
+                && $request->url() === 'https://apexone.morpheus.cx/api/v1/call-control/click-to-call'
+                && $request['extension'] === '1001'
+                && $request['destination'] === '15551234567'
+                && $request['campaign_id'] === '6c753496-2efd-4783-aa85-eb6ec73bc512'
+                && $request['caller_id_number'] === '12016444668'
+                && $request['caller_id_name'] === 'Agent One';
+        });
+    }
+
+    public function test_resolve_call_snapshot_falls_back_to_cdr_when_live_call_missing(): void
+    {
+        config([
+            'integrations.morpheus.host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.api_key' => 'test-key',
+        ]);
+
+        Http::fake([
+            'https://apexone.morpheus.cx/api/v1/call-control/calls/uuid-cdr-only' => Http::response([], 404),
+            'https://apexone.morpheus.cx/api/v1/call-control/calls' => Http::response(['calls' => []], 200),
+            'https://apexone.morpheus.cx/api/v1/call-control/cdr*' => Http::response([
+                'cdr' => [[
+                    'call_uuid' => 'uuid-cdr-only',
+                    'billsec' => 12,
+                    'call_outcome' => 'connected',
+                    'hangup_cause' => 'NORMAL_CLEARING',
+                    'destination_number' => '12722001232',
+                ]],
+            ], 200),
+        ]);
+
+        $service = new ZoomApiService;
+        $snapshot = $service->getCall('uuid-cdr-only');
+
+        $this->assertNotNull($snapshot);
+        $this->assertSame('uuid-cdr-only', $snapshot['uuid']);
+        $this->assertSame(12, $snapshot['billsec']);
+    }
+
+    public function test_format_originate_response_normalizes_from_and_to_fields(): void
+    {
+        $service = new ZoomApiService;
+
+        $formatted = $service->formatOriginateResponse(
+            [
+                'ok' => true,
+                'action' => 'originate',
+                'call_uuid' => '14d44c38-e321-48b1-9ae0-1a437eceea98',
+                'outcome' => 'ringing',
+                'attempted' => ['POST /click-to-call'],
+            ],
+            '1020',
+            '+12722001232',
+            ['campaign_id' => '6c753496-2efd-4783-aa85-eb6ec73bc512'],
+        );
+
+        $this->assertTrue($formatted['ok']);
+        $this->assertSame('originate', $formatted['action']);
+        $this->assertSame('14d44c38-e321-48b1-9ae0-1a437eceea98', $formatted['call_uuid']);
+        $this->assertSame('6c753496-2efd-4783-aa85-eb6ec73bc512', $formatted['campaign_id']);
+        $this->assertSame('1020', $formatted['from']);
+        $this->assertSame('12722001232', $formatted['to']);
+        $this->assertTrue($formatted['internal_from']);
+        $this->assertSame('ringing', $formatted['outcome']);
+    }
+
+    public function test_normalize_originate_caller_id_strips_plus_prefix(): void
+    {
+        $service = new ZoomApiService;
+
+        $this->assertSame('12016444668', $service->normalizeOriginateCallerId('+12016444668'));
+        $this->assertNull($service->normalizeOriginateCallerId(null));
+    }
+
+    public function test_normalize_originate_destination_strips_carrier_prefix_and_plus(): void
+    {
+        $service = new ZoomApiService;
+
+        $this->assertSame('12722001232', $service->normalizeOriginateDestination('482983#+12722001232'));
+        $this->assertSame('12722001232', $service->normalizeOriginateDestination('+12722001232'));
+        $this->assertSame('1020', $service->normalizeOriginateDestination('1020'));
+    }
+
+    public function test_list_cdr_uses_agent_extension_for_outbound_from_display(): void
+    {
+        config([
+            'integrations.morpheus.host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.api_key' => 'test-key',
+            'integrations.communications.default_outbound_did' => '+13133851223',
+        ]);
+
+        Http::fake([
+            'https://apexone.morpheus.cx/api/v1/call-control/cdr*' => Http::response([
+                'cdr' => [[
+                    'call_uuid' => 'uuid-webrtc-leg',
+                    'direction' => 'outbound',
+                    'caller_id_name' => 'Outbound Call',
+                    'caller_id_number' => 'u46e0ned',
+                    'destination_number' => '12722001232',
+                    'agent_extension' => '1020',
+                    'billsec' => 33,
+                    'call_outcome' => 'short',
+                    'hangup_cause' => 'NORMAL_CLEARING',
+                ]],
+            ], 200),
+        ]);
+
+        $logs = (new ZoomApiService)->listCdr()['logs'];
+
+        $this->assertCount(1, $logs);
+        $this->assertSame('ext 1020 · +13133851223', $logs[0]['from']);
+        $this->assertSame('+13133851223', $logs[0]['from_phone']);
+        $this->assertSame('+12722001232', $logs[0]['to_phone']);
+    }
+
+    public function test_list_cdr_maps_sip_username_to_outbound_did_without_agent_extension(): void
+    {
+        config([
+            'integrations.morpheus.host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.api_key' => 'test-key',
+            'integrations.communications.default_outbound_did' => '+13133851223',
+        ]);
+
+        Http::fake([
+            'https://apexone.morpheus.cx/api/v1/call-control/cdr*' => Http::response([
+                'cdr' => [[
+                    'call_uuid' => 'uuid-sip-caller',
+                    'direction' => 'outbound',
+                    'caller_id_name' => 'Outbound Call',
+                    'caller_id_number' => 'b8s8ruho',
+                    'destination_number' => '12722001232',
+                    'agent_extension' => null,
+                    'billsec' => 3,
+                    'call_outcome' => 'short',
+                ]],
+            ], 200),
+        ]);
+
+        $logs = (new ZoomApiService)->listCdr()['logs'];
+
+        $this->assertCount(1, $logs);
+        $this->assertSame('+13133851223', $logs[0]['from_phone']);
+        $this->assertSame('+13133851223', $logs[0]['from']);
+        $this->assertSame('+12722001232', $logs[0]['to_phone']);
+    }
+
+    public function test_list_cdr_filters_internal_webrtc_bridge_legs(): void
+    {
+        config([
+            'integrations.morpheus.host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.api_key' => 'test-key',
+        ]);
+
+        Http::fake([
+            'https://apexone.morpheus.cx/api/v1/call-control/cdr*' => Http::response([
+                'cdr' => [
+                    [
+                        'call_uuid' => 'uuid-internal',
+                        'direction' => 'outbound',
+                        'caller_id_number' => '13133851223',
+                        'destination_number' => 'vv0aou9q',
+                        'call_outcome' => 'no_answer',
+                    ],
+                    [
+                        'call_uuid' => 'uuid-pstn',
+                        'direction' => 'outbound',
+                        'caller_id_number' => '8niimj2m',
+                        'destination_number' => '12722001232',
+                        'agent_extension' => '1020',
+                        'billsec' => 8,
+                        'call_outcome' => 'short',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $logs = (new ZoomApiService)->listCdr()['logs'];
+
+        $this->assertCount(1, $logs);
+        $this->assertSame('uuid-pstn', $logs[0]['id']);
+        $this->assertSame('+12722001232', $logs[0]['to_phone']);
+    }
+
+    public function test_resolve_call_snapshot_prefers_pstn_cdr_leg_over_agent_ring_leg(): void
+    {
+        config([
+            'integrations.morpheus.host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.api_key' => 'test-key',
+        ]);
+
+        Http::fake([
+            'https://apexone.morpheus.cx/api/v1/call-control/calls/shared-uuid' => Http::response([], 404),
+            'https://apexone.morpheus.cx/api/v1/call-control/calls' => Http::response(['calls' => []], 200),
+            'https://apexone.morpheus.cx/api/v1/call-control/cdr*' => Http::response([
+                'cdr' => [
+                    [
+                        'call_uuid' => 'shared-uuid',
+                        'caller_id_number' => '13133851223',
+                        'destination_number' => 'n6qiqk02',
+                        'billsec' => 0,
+                        'hangup_cause' => 'NO_ANSWER',
+                        'call_outcome' => 'no_answer',
+                    ],
+                    [
+                        'call_uuid' => 'shared-uuid',
+                        'caller_id_number' => 'n6qiqk02',
+                        'destination_number' => '12722001232',
+                        'agent_extension' => '1020',
+                        'billsec' => 12,
+                        'hangup_cause' => 'NORMAL_CLEARING',
+                        'call_outcome' => 'connected',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $snapshot = (new ZoomApiService)->getCall('shared-uuid');
+
+        $this->assertNotNull($snapshot);
+        $this->assertSame('12722001232', $snapshot['destination_number']);
+        $this->assertSame(12, $snapshot['billsec']);
+    }
+
+    public function test_originate_call_strips_carrier_prefix_from_destination(): void
+    {
+        config([
+            'integrations.morpheus.host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.api_key' => 'test-key',
+            'integrations.morpheus.default_campaign_id' => 'campaign-default-123',
+        ]);
+
+        Http::fake([
+            'https://apexone.morpheus.cx/api/v1/call-control/click-to-call' => Http::response([
+                'ok' => true,
+                'call_uuid' => 'uuid-prefix',
+            ], 200),
+            'https://apexone.morpheus.cx/api/v1/call-control/calls/uuid-prefix' => Http::response([
+                'live' => true,
+                'status' => 'ringing',
+            ], 200),
+        ]);
+
+        $service = new ZoomApiService;
+        $result = $service->originateCall('1020', '482983#12722001232');
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame('12722001232', $result['to']);
+        Http::assertSent(function ($request) {
+            return $request->method() === 'POST'
+                && $request['extension'] === '1020'
+                && $request['destination'] === '12722001232';
+        });
     }
 
     public function test_connection_status_succeeds_with_valid_token(): void

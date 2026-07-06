@@ -83,7 +83,9 @@
         @include('communications.inbox.partials.toolbar')
 
         <div class="ghl-inbox-card">
-            @include('communications.inbox.partials.nav')
+            <div class="ghl-inbox-card-top">
+                @include('communications.inbox.partials.nav')
+            </div>
 
             <div class="ghl-inbox-body {{ $isWidePanel ? 'ghl-inbox-body-wide' : '' }}">
                 @unless ($isWidePanel)
@@ -102,6 +104,7 @@
     </div>
 
     @include('communications.partials.audio-player')
+    @include('communications.partials.webphone-floating-popup')
 @endsection
 
 @push('scripts')

@@ -64,6 +64,20 @@ export function hideLoadingOverlay() {
     });
 }
 
+export function updateLoadingOverlay(message, title) {
+    const overlay = getOverlay();
+    const titleEl = overlay.querySelector('#app-loading-title');
+    const messageEl = overlay.querySelector('#app-loading-message');
+
+    if (titleEl && title) {
+        titleEl.textContent = title;
+    }
+
+    if (messageEl && message) {
+        messageEl.textContent = message;
+    }
+}
+
 export function showLoadingOverlay(message, title = 'Please wait', options = {}) {
     const overlay = getOverlay();
     const titleEl = overlay.querySelector('#app-loading-title');

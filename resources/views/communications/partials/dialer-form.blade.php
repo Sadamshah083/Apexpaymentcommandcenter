@@ -17,29 +17,34 @@
     $selectedExt = collect($extensions)->first(
         fn ($ext) => (string) ($ext['extension_num'] ?? '') === (string) $defaultExtension,
     );
-    $hasOutboundDid = filled($selectedExt['caller_id_num'] ?? $selectedExt['outbound_cid_num'] ?? null);
+    $hasOutboundDid = filled($selectedExt['caller_id_num'] ?? $selectedExt['outbound_cid_num'] ?? null)
+        || filled(config('integrations.communications.default_outbound_did'));
     $endpointOnline = (bool) ($selectedExt['endpoint_online'] ?? true);
     $endpointHint = $selectedExt['endpoint_hint'] ?? null;
-    $sipHost = config('integrations.morpheus.sip_host') ?: config('integrations.morpheus.host');
+    $sipHost = $clickToCall->publicSipHost();
     $portalUrl = $clickToCall->portalUrl();
+    $defaultOutboundDid = config('integrations.communications.default_outbound_did');
+    $layout = $layout ?? 'sidebar';
 @endphp
 
+@unless ($layout === 'center')
 <div class="ghl-dialer-outbound-help">
     <p class="ghl-dialer-help-title">Outbound calling via Morpheus CX</p>
-    <p class="ghl-dialer-help-desc">Calls ring your <strong>Morpheus extension</strong> first, then connect the
-        destination. Register a SIP softphone (Zoiper, Linphone, or Morpheus web phone) to
-        <code>{{ $sipHost }}</code> before dialing.</p>
+    <p class="ghl-dialer-help-desc">Outbound calls dial the destination directly from your connected browser line.
+        Click <strong>Connect line</strong> in the Phone panel first, then enter a number and press
+        <strong>Call</strong>. The destination phone rings — you do not need to answer on your side.</p>
     <ol class="ghl-dialer-help-steps">
         <li>Admin provisions your phone line in <strong>Phone Agents</strong></li>
         <li>Assign your outbound DID as <strong>Caller ID number</strong> when Morpheus delivers it</li>
-        <li>Register softphone with your extension + SIP password</li>
-        <li>Dial from this panel — API click-to-call when available, otherwise SIP softphone</li>
+        <li>Click <strong>Connect line</strong> in the Phone panel (SIP realm <code>{{ $sipHost }}</code>)</li>
+        <li>Enter a number and call — the destination rings until they answer</li>
     </ol>
     @if ($portalUrl !== '#')
         <a href="{{ $portalUrl }}" target="_blank" rel="noopener" class="ghl-dialer-help-link">Open Morpheus agent
             portal →</a>
     @endif
 </div>
+@endunless
 
 @if ($extensions === [])
     <div class="comm-hub-alert comm-hub-alert-warning ghl-dialer-alert">
@@ -69,12 +74,8 @@
 @endif
 
 <form method="POST" action="{{ route($routePrefix . 'communications.morpheus.calls.originate') }}"
-    class="ghl-dialer-originate-form" data-fallback-sip="1"
-    data-form-loading
-    data-loading-cancelable="1"
-    data-loading-title="Placing call"
-    data-loading-message="Ringing your extension via Morpheus CX…"
-    data-loading-button-text="Calling…">
+    class="ghl-dialer-originate-form {{ ($layout ?? '') === 'center' ? 'ghl-dialer-form--center' : '' }}" data-fallback-sip="1" data-originate-json="1"
+    data-originate-json="1">
     @csrf
     <input type="hidden" name="fallback" value="sip">
 
@@ -86,7 +87,8 @@
         @foreach ($extensions as $ext)
             @php $extNum = $ext['extension_num'] ?? ''; @endphp
             @if (filled($extNum))
-                <option value="{{ $extNum }}" @selected((string) $defaultExtension === (string) $extNum)>
+                <option value="{{ $extNum }}" @selected((string) $defaultExtension === (string) $extNum)
+                    data-outbound-did="{{ $ext['caller_id_num'] ?? $ext['outbound_cid_num'] ?? $defaultOutboundDid }}">
                     {{ $ext['caller_id_name'] ?? 'Extension' }} — {{ $extNum }}
                     @if (!empty($ext['caller_id_num']))
                         (DID {{ $ext['caller_id_num'] }})
@@ -97,6 +99,12 @@
             @endif
         @endforeach
     </select>
+
+    <p class="ghl-dialer-outbound-route text-sm text-slate-600 mt-1 mb-2" data-dialer-route-summary>
+        Outbound caller ID:
+        <strong data-dialer-from-did>{{ $defaultOutboundDid ?: 'Not configured' }}</strong>
+        · destination rings as this number on the callee's phone.
+    </p>
 
     <label class="comm-hub-label" for="{{ $numberInputId }}">Destination number</label>
     <input type="tel" id="{{ $numberInputId }}" name="destination"
@@ -114,6 +122,6 @@
             <button type="button" id="{{ $backspaceId }}" class="comm-hub-btn comm-hub-btn-secondary" data-dial-backspace>Delete</button>
         @endif
         <button type="submit" id="{{ $dialBtnId }}" class="comm-hub-btn ghl-dialer-call-btn"
-            @disabled($extensions === [])>Call with Morpheus CX</button>
+            @disabled($extensions === [])>{{ ($layout ?? '') === 'center' ? 'Call' : 'Call with Morpheus CX' }}</button>
     </div>
 </form>

@@ -113,8 +113,30 @@ class MorpheusHubService
     protected function remember(string $suffix, callable $callback): mixed
     {
         $version = (int) Cache::get('morpheus.hub.cache_version', 1);
-        $ttl = now()->addMinutes((int) config('integrations.communications.cache_ttl_minutes', 3));
+        $key = "morpheus.hub.v{$version}.{$suffix}";
+        $failureKey = "{$key}.failure";
+        $ttl = now()->addMinutes((int) config('integrations.communications.cache_ttl_minutes', 10));
 
-        return Cache::remember("morpheus.hub.v{$version}.{$suffix}", $ttl, $callback);
+        $cached = Cache::get($key);
+        if ($cached !== null) {
+            return $cached;
+        }
+
+        if (Cache::has($failureKey)) {
+            return [];
+        }
+
+        try {
+            $value = $callback();
+        } catch (\Throwable $e) {
+            app(\App\Services\Integrations\MorpheusCircuitBreaker::class)->reportFailure($e);
+            Cache::put($failureKey, true, now()->addSeconds(90));
+
+            return [];
+        }
+
+        Cache::put($key, $value, $ttl);
+
+        return $value;
     }
 }

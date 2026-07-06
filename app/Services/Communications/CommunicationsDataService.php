@@ -370,14 +370,41 @@ class CommunicationsDataService
             return $cached;
         }
 
-        /** @var T $value */
-        $value = $callback();
+        if (app(\App\Services\Integrations\MorpheusCircuitBreaker::class)->isOpen()) {
+            return $this->emptyPayload();
+        }
+
+        try {
+            /** @var array<string, mixed> $value */
+            $value = $callback();
+        } catch (\Throwable $e) {
+            app(\App\Services\Integrations\MorpheusCircuitBreaker::class)->reportFailure($e);
+
+            return $this->emptyPayload();
+        }
 
         if ($this->shouldCachePayload($value)) {
             Cache::put($cacheKey, $value, $this->ttl());
         }
 
         return $value;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function emptyPayload(): array
+    {
+        return [
+            'logs' => [],
+            'next_page_token' => null,
+            'warning' => app(\App\Services\Integrations\MorpheusCircuitBreaker::class)->unavailableMessage(),
+            'voice_mails' => [],
+            'sessions' => [],
+            'users' => [],
+            'recordings' => [],
+            'channels' => [],
+        ];
     }
 
     /**

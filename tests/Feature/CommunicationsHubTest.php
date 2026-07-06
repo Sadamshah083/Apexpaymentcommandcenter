@@ -217,6 +217,52 @@ class CommunicationsHubTest extends TestCase
             ->assertSee('sip:15551234567@apexone.morpheus.cx;user=phone', false);
     }
 
+    public function test_admin_auto_dial_attempts_api_before_sip_fallback_when_endpoint_hint_looks_offline(): void
+    {
+        config(['integrations.morpheus.dial_method' => 'auto']);
+
+        $zoom = Mockery::mock(ZoomApiService::class);
+        $zoom->shouldReceive('isConfigured')->andReturn(true);
+        $zoom->shouldReceive('listExtensions')->andReturn([
+            'extensions' => [[
+                'id' => 'ext_1001',
+                'extension_num' => '1001',
+                'caller_id_name' => 'Agent One',
+                'caller_id_num' => '+15551230001',
+                'outbound_cid_num' => '+15551230001',
+                'user_id' => 'user_1001',
+            ]],
+        ]);
+        $zoom->shouldReceive('listUsers')->andReturn([
+            'users' => [[
+                'id' => 'user_1001',
+                'email' => 'agent@example.com',
+            ]],
+        ]);
+        $zoom->shouldReceive('originateCall')
+            ->once()
+            ->with('1001', '+15551234567', Mockery::type('array'))
+            ->andReturn([
+                'ok' => true,
+                'call_uuid' => 'uuid-1',
+                'outcome' => 'ringing',
+            ]);
+
+        $this->app->instance(ZoomApiService::class, $zoom);
+
+        $admin = $this->makeAdmin();
+
+        $this->actingAs($admin)
+            ->from(route('admin.communications.index', ['panel' => 'dialer']))
+            ->post(route('admin.communications.morpheus.calls.originate'), [
+                'from_extension' => '1001',
+                'destination' => '+15551234567',
+                'fallback' => 'sip',
+            ])
+            ->assertRedirect(route('admin.communications.index', ['panel' => 'dialer']))
+            ->assertSessionHas('success', 'Outbound call ringing. Answer your extension or softphone when it rings.');
+    }
+
     public function test_admin_can_open_morpheus_hub_channels(): void
     {
         $this->mockZoomServices();
@@ -548,6 +594,7 @@ class CommunicationsHubTest extends TestCase
         $zoom->shouldReceive('maskedSecret')->andReturn('••••••••1234');
         $zoom->shouldReceive('webhookSecret')->andReturn(null);
         $zoom->shouldReceive('requiredScopes')->andReturn([]);
+        $zoom->shouldReceive('humanizeError')->andReturnUsing(fn ($m) => $m);
 
         $contacts = Mockery::mock(ZoomContactService::class);
         $contacts->shouldReceive('buildIndexPayload')->andReturn([
@@ -710,6 +757,8 @@ class CommunicationsHubTest extends TestCase
             ->with('1001', Mockery::type('string'), Mockery::type('array'))
             ->andReturn(['ok' => true, 'call_uuid' => 'uuid-1']);
         $zoom->shouldReceive('humanizeError')->andReturnUsing(fn ($m) => $m);
+        $zoom->shouldReceive('listExtensions')->andReturn(['extensions' => []]);
+        $zoom->shouldReceive('listUsers')->andReturn(['users' => []]);
         $this->app->instance(ZoomApiService::class, $zoom);
 
         $agent = $this->makePortalAgent('appointment_setter');
@@ -729,6 +778,8 @@ class CommunicationsHubTest extends TestCase
         $zoom = Mockery::mock(ZoomApiService::class);
         $zoom->shouldReceive('isConfigured')->andReturn(true);
         $zoom->shouldReceive('originateCall')->never();
+        $zoom->shouldReceive('listExtensions')->andReturn(['extensions' => []]);
+        $zoom->shouldReceive('listUsers')->andReturn(['users' => []]);
         $this->app->instance(ZoomApiService::class, $zoom);
 
         $agent = $this->makePortalAgent('appointment_setter');

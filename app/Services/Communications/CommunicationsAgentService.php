@@ -235,6 +235,32 @@ class CommunicationsAgentService
     }
 
     /**
+     * Fast extension list for the default dialer shell (no Morpheus API round-trip).
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function dialerExtensionsFast(User $user, Workspace $workspace, string $routePrefix): array
+    {
+        $tier = app(CommunicationsAccessService::class)->tierFor($user, $routePrefix);
+        $default = (string) (config('integrations.communications.default_caller_id') ?: '1020');
+
+        if (in_array($tier, ['admin', 'supervisor'], true)) {
+            $extNum = $default;
+        } else {
+            $extNum = $this->extensionForUser($user, $workspace->id) ?: $default;
+        }
+
+        return [$this->formatDialerExtension([
+            'id' => null,
+            'extension_num' => $extNum,
+            'caller_id_name' => $user->name,
+            'caller_id_num' => null,
+            'outbound_cid_num' => null,
+            'status' => 'active',
+        ])];
+    }
+
+    /**
      * Extensions shown in the dialer dropdown for the current user.
      *
      * @return array<int, array<string, mixed>>
@@ -245,11 +271,26 @@ class CommunicationsAgentService
         $all = collect($this->hub->extensions());
 
         if (in_array($tier, ['admin', 'supervisor'], true)) {
-            return $all
+            $formatted = $all
                 ->map(fn (array $ext) => $this->formatDialerExtension($ext))
                 ->filter(fn (array $ext) => filled($ext['extension_num']))
                 ->values()
                 ->all();
+
+            if ($formatted !== []) {
+                return $formatted;
+            }
+
+            $default = (string) (config('integrations.communications.default_caller_id') ?: '1020');
+
+            return [$this->formatDialerExtension([
+                'id' => null,
+                'extension_num' => $default,
+                'caller_id_name' => $user->name,
+                'caller_id_num' => null,
+                'outbound_cid_num' => null,
+                'status' => 'active',
+            ])];
         }
 
         $userExt = $this->extensionForUser($user, $workspace->id);
@@ -263,13 +304,16 @@ class CommunicationsAgentService
             return [$this->formatDialerExtension($match)];
         }
 
-        return [[
-            'id' => null,
+        $pivot = $user->workspaces()->where('workspace_id', $workspace->id)->first()?->pivot;
+
+        return [$this->formatDialerExtension([
+            'id' => $pivot->morpheus_extension_id ?? null,
             'extension_num' => $userExt,
             'caller_id_name' => $user->name,
             'caller_id_num' => null,
             'outbound_cid_num' => null,
-        ]];
+            'status' => 'active',
+        ])];
     }
 
     public function userCanDialFrom(User $user, Workspace $workspace, string $extensionNum, string $routePrefix): bool
@@ -297,15 +341,22 @@ class CommunicationsAgentService
         );
 
         if (! $ext) {
-            return [];
+            return array_filter([
+                'caller_id_number' => $this->morpheus->normalizeOriginateCallerId($this->defaultOutboundDid()),
+                'campaign_id' => $this->morpheus->defaultOutboundCampaignId(),
+            ], fn ($v) => filled($v));
         }
 
         $callerIdNum = $ext['outbound_cid_num'] ?? $ext['caller_id_num'] ?? null;
+        if (! filled($callerIdNum)) {
+            $callerIdNum = $this->defaultOutboundDid();
+        }
         $callerIdName = $ext['outbound_cid_name'] ?? $ext['caller_id_name'] ?? null;
 
         return array_filter([
-            'caller_id_number' => $callerIdNum,
+            'caller_id_number' => $this->morpheus->normalizeOriginateCallerId($callerIdNum),
             'caller_id_name' => $callerIdName,
+            'campaign_id' => $this->morpheus->defaultOutboundCampaignId(),
         ], fn ($v) => filled($v));
     }
 
@@ -316,6 +367,10 @@ class CommunicationsAgentService
 
     public function extensionEndpointOnline(string $extensionNum): bool
     {
+        if (app(\App\Services\Integrations\MorpheusCircuitBreaker::class)->isOpen()) {
+            return (bool) config('integrations.morpheus.webrtc_enabled', true);
+        }
+
         $normalized = preg_replace('/\D/', '', $extensionNum) ?: $extensionNum;
 
         $ext = collect($this->hub->extensions())->first(
@@ -336,6 +391,9 @@ class CommunicationsAgentService
     protected function formatDialerExtension(array $ext): array
     {
         $callerIdNum = $ext['outbound_cid_num'] ?? $ext['caller_id_num'] ?? null;
+        if (! filled($callerIdNum)) {
+            $callerIdNum = $this->defaultOutboundDid();
+        }
         $userId = $ext['user_id'] ?? null;
         $lastLogin = null;
 
@@ -346,7 +404,8 @@ class CommunicationsAgentService
             $lastLogin = $user['last_login_at'] ?? $user['last_login_time'] ?? null;
         }
 
-        $endpointOnline = filled($lastLogin);
+        $webrtcEnabled = (bool) config('integrations.morpheus.webrtc_enabled', true);
+        $endpointOnline = filled($lastLogin) || $webrtcEnabled;
         $sipHost = (string) (config('integrations.morpheus.sip_host') ?: config('integrations.morpheus.host'));
         $portalUrl = app(\App\Services\Communications\ZoomClickToCallService::class)->portalUrl();
 
@@ -359,9 +418,11 @@ class CommunicationsAgentService
             'status' => $ext['status'] ?? 'active',
             'is_dialer_agent' => (bool) ($ext['is_dialer_agent'] ?? false),
             'endpoint_online' => $endpointOnline,
-            'endpoint_hint' => $endpointOnline
+            'endpoint_hint' => filled($lastLogin)
                 ? null
-                : "Extension has not connected to Morpheus yet. Register SIP to {$sipHost} or open the Morpheus web phone before dialing.",
+                : ($webrtcEnabled
+                    ? 'Click Connect in the Phone panel to register your browser line before dialing.'
+                    : "Extension has not connected to Morpheus yet. Register SIP to {$sipHost} or open the Morpheus web phone before dialing."),
             'portal_url' => $portalUrl,
             'sip_host' => $sipHost,
         ];
@@ -375,5 +436,13 @@ class CommunicationsAgentService
         }
 
         return substr($base, 0, 48);
+    }
+
+    protected function defaultOutboundDid(): ?string
+    {
+        $raw = (string) (config('integrations.communications.default_outbound_did') ?? '');
+        $raw = trim($raw);
+
+        return $raw !== '' ? $raw : null;
     }
 }

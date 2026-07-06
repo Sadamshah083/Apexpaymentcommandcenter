@@ -29,6 +29,10 @@
             </aside>
 
             <section class="ghl-dialer-panel">
+                @include('communications.partials.webphone-panel', [
+                    'routePrefix' => $routePrefix,
+                    'defaultCallerId' => $defaultCallerId ?? null,
+                ])
                 @include('communications.partials.dialer-form', [
                     'routePrefix' => $routePrefix,
                     'callerSelectId' => 'dial-caller-id',
@@ -45,4 +49,6 @@
             </section>
         </div>
     </div>
+
+    @include('communications.partials.webphone-floating-popup')
 @endsection

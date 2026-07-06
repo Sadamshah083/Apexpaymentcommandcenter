@@ -15,7 +15,6 @@ import { updateAdminDetailPanel } from './admin-dashboard-detail.js';
 
 window.startProgressPoll = startProgressPoll;
 window.updateAdminDetailPanel = updateAdminDetailPanel;
-let communicationsPromise = null;
 
 function initPageTransitions() {
     if (document.documentElement.dataset.pageTransitionsInit === '1') {
@@ -40,18 +39,13 @@ async function bootCommunicationsFeatures() {
         return;
     }
 
-    communicationsPromise ??= Promise.all([
-        import('./communications-dialer.js'),
-        import('./communications-webphone.js'),
-    ]);
-
-    const [dialerModule, webphoneModule] = await communicationsPromise;
-
     if (needsDialer) {
+        const dialerModule = await import('./communications-dialer.js');
         dialerModule.bootCommunicationsDialer();
     }
 
     if (needsWebphone) {
+        const webphoneModule = await import('./communications-webphone.js');
         webphoneModule.bootCommunicationsWebphone();
     }
 }
@@ -92,7 +86,7 @@ document.addEventListener('turbo:load', () => {
 document.addEventListener('turbo:before-cache', () => {
     teardownWorkspaceSync();
     teardownPortalDashboard();
-    communicationsPromise?.then(([dialerModule]) => {
+    import('./communications-dialer.js').then((dialerModule) => {
         dialerModule.resetDialerButtonsForCache();
-    });
+    }).catch(() => {});
 });

@@ -4,6 +4,53 @@ namespace App\Services\Communications;
 
 class ZoomClickToCallService
 {
+    public function publicSipHost(): string
+    {
+        $sipHost = trim((string) config('integrations.morpheus.sip_host', ''));
+        $host = trim((string) config('integrations.morpheus.host', ''));
+
+        if ($sipHost === '') {
+            return $host;
+        }
+
+        if (str_ends_with(strtolower($sipHost), '.local') && $host !== '') {
+            return $host;
+        }
+
+        return $sipHost;
+    }
+
+    /**
+     * SIP realm for WebRTC REGISTER (e.g. apexone.pbx.local). WSS stays on the public Morpheus host.
+     */
+    public function webrtcSipDomain(): string
+    {
+        $configured = trim((string) config('integrations.morpheus.webrtc_sip_domain', ''));
+        if ($configured !== '') {
+            return $configured;
+        }
+
+        $sipHost = trim((string) config('integrations.morpheus.sip_host', ''));
+        if ($sipHost !== '' && str_ends_with(strtolower($sipHost), '.pbx.local')) {
+            return $sipHost;
+        }
+
+        $host = trim((string) config('integrations.morpheus.host', ''));
+        if ($host !== '' && str_contains($host, '.')) {
+            $subdomain = explode('.', $host)[0];
+            if ($subdomain !== '') {
+                return $subdomain.'.pbx.local';
+            }
+        }
+
+        return $this->publicSipHost();
+    }
+
+    public function publicWssHost(): string
+    {
+        return $this->publicSipHost();
+    }
+
     public function normalizePhone(string $phone): string
     {
         $phone = trim($phone);
@@ -43,6 +90,18 @@ class ZoomClickToCallService
         return $digits !== '' && strlen($digits) <= 6;
     }
 
+    public function isValidPstnDestination(string $phone): bool
+    {
+        $normalized = $this->normalizePhone($phone);
+        if ($normalized === '' || $this->isExtension($normalized)) {
+            return false;
+        }
+
+        $digits = preg_replace('/\D/', '', $normalized) ?? '';
+
+        return strlen($digits) >= 10;
+    }
+
     public function dialUrl(string $phoneNumber, ?string $callerId = null): ?string
     {
         return $this->preferredDialUrl($phoneNumber, $callerId);
@@ -75,7 +134,7 @@ class ZoomClickToCallService
 
     public function sipUrl(string $phoneNumber, ?string $fromExtension = null): ?string
     {
-        $host = (string) (config('integrations.morpheus.sip_host') ?: config('integrations.morpheus.host'));
+        $host = $this->publicSipHost();
         if ($host === '') {
             return null;
         }

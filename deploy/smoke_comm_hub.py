@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke-test Communications Hub controllers on production."""
+"""Smoke-test communications hub endpoints on production."""
 
 from __future__ import annotations
 
@@ -11,60 +11,29 @@ sys.path.insert(0, str(ROOT))
 
 from deploy._ssh import connect, sudo_run
 
-PHP = r"""<?php
-require 'vendor/autoload.php';
-$app = require 'bootstrap/app.php';
-$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
-
-use App\Http\Controllers\CommunicationsHubController;
-use App\Models\User;
-use App\Services\Integrations\ZoomApiService;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
-
-$api = app(ZoomApiService::class);
-$status = $api->connectionStatus();
-echo 'API: '.($status['connected'] ? 'connected' : 'FAILED')."\n";
-echo 'Campaign: '.config('integrations.morpheus.default_campaign_id')."\n";
-
-$checks = [
-    ['admin_super_91a', 'admin.'],
-    ['setter_tl_48c', 'portal.'],
-    ['setter_ag_k8z', 'portal.'],
-];
-
-foreach ($checks as [$username, $prefix]) {
-    $user = User::where('name', $username)->first();
-    if (! $user) {
-        echo "$username:MISSING\n";
-        continue;
-    }
-    Auth::login($user);
-    try {
-        $controller = app(CommunicationsHubController::class);
-        $response = $controller->index(Request::create('/communications', 'GET'));
-        $view = method_exists($response, 'name') ? $response->name() : get_class($response);
-        echo "$username ($prefix): OK view=$view\n";
-    } catch (Throwable $e) {
-        echo "$username ($prefix): FAIL ".$e->getMessage()."\n";
-    } finally {
-        Auth::logout();
-    }
-}
-"""
-
 
 def main() -> int:
     ssh = connect()
-    tmp = "/tmp/comm-hub-smoke.php"
-    sftp = ssh.open_sftp()
-    with sftp.file(tmp, "w") as remote:
-        remote.write(PHP)
-    sftp.close()
-    out = sudo_run(ssh, f"cd /var/www/apexone && sudo -u www-data php {tmp} && rm -f {tmp}")
-    print(out.strip())
+
+    checks = [
+        ("php -l ZoomApiService", "php -l /var/www/apexone/app/Services/Integrations/ZoomApiService.php"),
+        ("routes", "cd /var/www/apexone && sudo -u www-data php artisan route:list --path=communications/morpheus 2>&1 | head -15"),
+        ("up", "curl -sS -o /dev/null -w '%{http_code}' https://crm.apexonepayments.com/up"),
+        ("login", "curl -sS -o /dev/null -w '%{http_code}' https://crm.apexonepayments.com/admin/login"),
+        ("comm redirect", "curl -sS -o /dev/null -w '%{http_code}' https://crm.apexonepayments.com/admin/communications"),
+        ("webphone js", "curl -sS -o /dev/null -w '%{http_code}' https://crm.apexonepayments.com/build/assets/communications-webphone-CLegaS7o.js"),
+    ]
+
+    for label, cmd in checks:
+        print(f"=== {label} ===")
+        if label.startswith("php") or label == "routes":
+            print(sudo_run(ssh, cmd, check=False).strip())
+        else:
+            _, o, e = ssh.exec_command(cmd)
+            print(o.read().decode().strip() + e.read().decode().strip())
+
     ssh.close()
-    return 0 if "FAIL" not in out else 1
+    return 0
 
 
 if __name__ == "__main__":

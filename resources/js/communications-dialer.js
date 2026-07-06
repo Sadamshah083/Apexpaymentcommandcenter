@@ -3,12 +3,28 @@ import { showToast } from './toast.js';
 import {
     cancelPendingWebphoneConnect,
     ensureWebphoneReady,
-    markDialerClickToCallPending,
+    getWebphone,
 } from './communications-webphone.js';
 const STORAGE_KEY = 'communications.dialer_extension';
 
+function stripCarrierPrefix(value) {
+    const raw = String(value || '').trim();
+    if (raw.includes('#')) {
+        return raw.slice(raw.lastIndexOf('#') + 1).trim();
+    }
+
+    return raw;
+}
+
+function isValidPstnDestination(value) {
+    const normalized = normalizePhone(value);
+    const digits = normalized.replace(/\D/g, '');
+
+    return digits.length >= 10;
+}
+
 function normalizePhone(value) {
-    const digits = String(value || '').replace(/[^\d+]/g, '');
+    const digits = String(stripCarrierPrefix(value)).replace(/[^\d+]/g, '');
     if (!digits) {
         return '';
     }
@@ -26,12 +42,179 @@ function normalizePhone(value) {
     return `+${numeric}`;
 }
 
+function csrfToken() {
+    return document.querySelector('meta[name="csrf-token"]')?.content || '';
+}
+
+function updateDialerRouteSummary(callerSelect) {
+    const summary = document.querySelector('[data-dialer-from-did]');
+    if (!summary) {
+        return;
+    }
+
+    const selected = callerSelect?.selectedOptions?.[0];
+    const raw = selected?.dataset?.outboundDid || '';
+    const digits = String(raw).replace(/\D/g, '');
+
+    if (digits.length >= 10) {
+        summary.textContent = digits.length === 10 ? `+1${digits}` : `+${digits}`;
+
+        return;
+    }
+
+    summary.textContent = raw || 'Not configured';
+}
+
+async function logDirectOutbound(form, destination) {
+    const formData = new FormData(form);
+    formData.set('destination', destination);
+    formData.set('webphone_direct', '1');
+
+    try {
+        await fetch(form.action, {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-TOKEN': csrfToken(),
+            },
+            credentials: 'same-origin',
+            body: formData,
+        });
+    } catch {
+        // History logging is best-effort for browser-originated calls.
+    }
+}
+
+async function originateViaWebphone(form, dialBtn) {
+    const destination = normalizePhone(new FormData(form).get('destination'));
+
+    if (!destination) {
+        showToast('Enter a valid phone number first.', 'error');
+
+        return false;
+    }
+
+    if (!isValidPstnDestination(destination)) {
+        showToast('Enter a full phone number with at least 10 digits (e.g. +12722001232).', 'error');
+
+        return false;
+    }
+
+    hideLoadingOverlay();
+
+    const phone = getWebphone();
+
+    try {
+        await phone.dial(destination);
+        await logDirectOutbound(form, destination);
+        showToast(`Calling ${destination}… waiting for the destination to answer.`, 'success');
+
+        return true;
+    } catch (error) {
+        showToast(error.message || 'Could not place the call from your browser line.', 'error');
+
+        return false;
+    } finally {
+        hideLoadingOverlay();
+        if (dialBtn) {
+            dialBtn.removeAttribute('disabled');
+            dialBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            dialBtn.removeAttribute('aria-disabled');
+        }
+    }
+}
+
+async function originateViaJson(form, dialBtn) {
+    const formData = new FormData(form);
+    const destination = normalizePhone(formData.get('destination'));
+
+    if (!destination) {
+        showToast('Enter a valid phone number first.', 'error');
+
+        return false;
+    }
+
+    if (!isValidPstnDestination(destination)) {
+        showToast('Enter a full phone number with at least 10 digits (e.g. +12722001232).', 'error');
+
+        return false;
+    }
+
+    formData.set('destination', destination);
+    hideLoadingOverlay();
+
+    const phone = getWebphone();
+    phone.markClickToCallPending();
+
+    try {
+        const response = await fetch(form.action, {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-TOKEN': csrfToken(),
+            },
+            credentials: 'same-origin',
+            body: formData,
+        });
+
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok || data.ok === false) {
+            const message = data.error || 'Could not place the call. Check your extension and try again.';
+
+            showToast(message, 'error');
+
+            return false;
+        }
+
+        if (data.call_uuid) {
+            phone.setMorpheusCallUuid(data.call_uuid);
+        }
+
+        const dialTarget =
+            data.to && String(data.to).length >= 10
+                ? `+${String(data.to).replace(/\D/g, '')}`
+                : destination;
+
+        phone.showClickToCallRinging(dialTarget);
+
+        const fromExt = data.from ? String(data.from) : formData.get('from_extension');
+        if (fromExt) {
+            phone.syncSelectedExtension();
+        }
+
+        const successMessage =
+            data.outcome === 'connected'
+                ? 'Call connected.'
+                : data.outcome === 'no_answer'
+                  ? 'Call placed but your line did not answer in time.'
+                  : `Calling ${dialTarget} from ${data.caller_id_number ? `+${String(data.caller_id_number).replace(/\D/g, '')}` : `ext ${fromExt || 'your line'}`}… destination will see your outbound number.`;
+
+        showToast(data.warning || successMessage, data.warning ? 'warning' : 'success');
+
+        return true;
+    } catch (error) {
+        showToast(error.message || 'Could not place the call.', 'error');
+
+        return false;
+    } finally {
+        hideLoadingOverlay();
+        if (dialBtn) {
+            dialBtn.removeAttribute('disabled');
+            dialBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            dialBtn.removeAttribute('aria-disabled');
+        }
+    }
+}
+
 function refreshDialButton(numberInput, callerSelect, dialBtn) {
     if (!numberInput || !dialBtn || dialBtn.dataset.serverDisabled === '1') {
         return;
     }
 
-    const hasNumber = normalizePhone(numberInput.value) !== '';
+    const hasNumber = isValidPstnDestination(numberInput.value);
     const hasExtension = !callerSelect || callerSelect.value !== '';
 
     if (!hasNumber || !hasExtension) {
@@ -99,8 +282,12 @@ function attachDialerForm(form) {
         callerSelect.addEventListener('change', () => {
             localStorage.setItem(STORAGE_KEY, callerSelect.value || '');
             refreshDialButton(numberInput, callerSelect, dialBtn);
+            getWebphone().syncSelectedExtension();
+            updateDialerRouteSummary(callerSelect);
         });
     }
+
+    updateDialerRouteSummary(callerSelect);
 
     const handleNumberChange = () => refreshDialButton(numberInput, callerSelect, dialBtn);
 
@@ -144,28 +331,53 @@ function attachDialerForm(form) {
 
         if (document.querySelector('[data-webphone-panel]')) {
             event.preventDefault();
+            hideLoadingOverlay();
+
+            if (form.dataset.dialerConnectPending === '1') {
+                return;
+            }
+
             form.dataset.dialerConnectPending = '1';
             form.dataset.dialerConnectCancelled = '0';
 
-            const ready = await ensureWebphoneReady();
+            dialBtn.setAttribute('disabled', 'disabled');
+            dialBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            dialBtn.setAttribute('aria-disabled', 'true');
+
+            const ready = await ensureWebphoneReady({ silent: true });
             const wasCancelled = form.dataset.dialerConnectCancelled === '1';
             form.dataset.dialerConnectPending = '0';
             form.dataset.dialerConnectCancelled = '0';
 
             if (wasCancelled) {
                 hideLoadingOverlay();
+                dialBtn.removeAttribute('disabled');
+                dialBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                dialBtn.removeAttribute('aria-disabled');
+
                 return;
             }
 
-            if (!ready) {
-                hideLoadingOverlay();
+            if (form.dataset.originateJson === '1') {
+                const phone = getWebphone();
+
+                if (!ready || !phone.canDirectDial()) {
+                    showToast(
+                        'Connect your browser line first — pick your extension, click Connect line in the Phone panel, then try again.',
+                        'error',
+                    );
+                    dialBtn.removeAttribute('disabled');
+                    dialBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                    dialBtn.removeAttribute('aria-disabled');
+
+                    return;
+                }
+
+                await originateViaJson(form, dialBtn);
+
                 return;
             }
 
-            markDialerClickToCallPending();
-            // The generic form-loading hook already marked the first submit as
-            // "in progress". Clear it before re-submitting so the real
-            // originate POST is not blocked by the duplicate-submit guard.
             hideLoadingOverlay();
             form.dataset.webphoneChecked = '1';
             form.requestSubmit();

@@ -359,6 +359,7 @@
 .ghl-inbox-card {
     flex: 1;
     display: flex;
+    flex-direction: column;
     min-height: 0;
     background: var(--ghl-surface);
     border: 1px solid var(--ghl-border);
@@ -367,54 +368,56 @@
     box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
 }
 
-/* Channel nav */
-.ghl-inbox-nav {
-    width: var(--ghl-nav-width);
+.ghl-inbox-card-top {
     flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    padding: 0.625rem 0.5rem;
+    border-bottom: 1px solid var(--ghl-border);
     background: var(--ghl-surface-muted);
-    border-right: 1px solid var(--ghl-border);
-    overflow-y: auto;
-    overflow-x: hidden;
+}
+
+/* Channel nav — horizontal top bar */
+.ghl-inbox-nav {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 0.35rem;
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
 }
 
 .ghl-inbox-nav-item {
-    display: flex;
-    flex-direction: column;
+    display: inline-flex;
+    flex-direction: row;
     align-items: center;
     justify-content: center;
-    gap: 0.3rem;
-    min-height: 3.75rem;
-    width: 100%;
-    padding: 0.5rem 0.35rem;
+    gap: 0.4rem;
+    flex: 0 0 auto;
+    min-height: 2.5rem;
+    padding: 0.45rem 0.75rem;
     border-radius: 0.625rem;
     text-decoration: none;
     color: var(--ghl-muted);
-    font-size: 0.5625rem;
-    font-weight: 800;
+    font-size: 0.6875rem;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.03em;
     position: relative;
     transition:
         background 0.15s,
         color 0.15s;
     box-sizing: border-box;
+    white-space: nowrap;
 }
 
 .ghl-inbox-nav-label {
     display: block;
-    width: 100%;
-    max-width: 100%;
-    text-align: center;
     line-height: 1.2;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    text-align: left;
 }
 
 .ghl-inbox-nav-item:hover {
@@ -433,8 +436,8 @@
 }
 
 .ghl-inbox-nav-svg {
-    width: 1.25rem;
-    height: 1.25rem;
+    width: 1.125rem;
+    height: 1.125rem;
     flex-shrink: 0;
     display: block;
     stroke: #71717a;
@@ -445,19 +448,18 @@
 }
 
 .ghl-inbox-nav-badge {
-    position: absolute;
-    top: 0.2rem;
-    right: 0.15rem;
-    min-width: 1rem;
-    height: 1rem;
-    padding: 0 0.25rem;
+    position: static;
+    min-width: 1.125rem;
+    height: 1.125rem;
+    padding: 0 0.3rem;
     border-radius: 9999px;
     background: #ef4444;
     color: #fff;
-    font-size: 0.5rem;
+    font-size: 0.5625rem;
     font-weight: 800;
-    line-height: 1rem;
+    line-height: 1.125rem;
     text-align: center;
+    margin-left: 0.15rem;
 }
 
 .ghl-inbox-nav-item-active .ghl-inbox-nav-badge {
@@ -466,11 +468,11 @@
 }
 
 .ghl-inbox-nav-spacer {
-    flex: 1;
-    min-height: 0.5rem;
+    display: none;
 }
 
 .ghl-inbox-nav-item-dial {
+    margin-left: auto;
     background: #f0fdf4;
     color: #15803d;
 }
@@ -526,7 +528,9 @@
 .ghl-inbox-list-scroll {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden;
     min-height: 0;
+    min-width: 0;
     overscroll-behavior: contain;
 }
 
@@ -603,6 +607,13 @@
     overflow: hidden;
 }
 
+/* Allow responsive layouts based on the actual conversation column width,
+   not the full viewport width (important when the tools rail is visible). */
+.ghl-inbox-conversation {
+    container-type: inline-size;
+    container-name: comm-conversation;
+}
+
 .ghl-inbox-conversation-scroll {
     flex: 1;
     overflow-y: auto;
@@ -613,8 +624,9 @@
 
 .ghl-inbox-conversation-scroll--center {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
+    padding: 1rem;
 }
 
 .ghl-inbox-panel {
@@ -732,6 +744,7 @@
     text-decoration: none;
     color: inherit;
     transition: background 0.12s;
+    min-width: 0;
 }
 
 .ghl-inbox-row:hover {
@@ -804,8 +817,8 @@
     align-items: flex-end;
     gap: 0.25rem;
     flex-shrink: 0;
-    min-width: 3.5rem;
-    max-width: 5rem;
+    min-width: 3rem;
+    max-width: 4.5rem;
     text-align: right;
 }
 
@@ -813,6 +826,16 @@
     font-size: 0.625rem;
     color: #a1a1aa;
     display: block;
+    white-space: nowrap;
+}
+
+.ghl-inbox-row-meta .ghl-tag {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.5625rem;
+    padding: 0.15rem 0.4rem;
+    white-space: nowrap;
 }
 
 /* Conversation header */
@@ -1209,33 +1232,13 @@
 }
 
 @media (max-width: 1024px) {
-    .ghl-inbox-card {
-        flex-direction: column;
-    }
-
     .ghl-inbox-nav {
-        width: 100%;
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(4.75rem, 1fr));
-        gap: 0.5rem;
-        padding: 0.625rem;
-        border-right: none;
-        border-bottom: 1px solid var(--ghl-border);
-        overflow: visible;
+        padding: 0.45rem 0.625rem;
     }
 
     .ghl-inbox-nav-item {
-        min-width: 0;
-        min-height: 4.25rem;
-        padding: 0.625rem 0.4rem;
-    }
-
-    .ghl-inbox-nav-spacer {
-        display: none;
-    }
-
-    .ghl-inbox-nav-item-dial {
-        margin-left: 0;
+        padding: 0.4rem 0.625rem;
+        min-height: 2.25rem;
     }
 }
 
@@ -1298,19 +1301,12 @@
     }
 
     .ghl-inbox-card {
-        flex-direction: column;
         min-height: calc(100vh - 11rem);
     }
 
-    .ghl-inbox-nav {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 0.4rem;
-        padding: 0.5rem;
-    }
-
     .ghl-inbox-nav-item {
-        min-height: 3.6rem;
-        padding: 0.55rem 0.35rem;
+        padding: 0.4rem 0.55rem;
+        font-size: 0.625rem;
     }
 
     .ghl-inbox-body {
@@ -1350,8 +1346,8 @@
 }
 
 @media (max-width: 520px) {
-    .ghl-inbox-nav {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+    .ghl-inbox-nav-item-dial {
+        margin-left: 0;
     }
 
     .ghl-inbox-row {
@@ -1804,4 +1800,647 @@
     border: 1px solid var(--ghl-border, #e5e7eb);
     border-radius: 0.5rem;
     background: #0f172a;
+}
+
+.ghl-webphone-floating {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 70;
+    width: min(22rem, calc(100vw - 1.5rem));
+    padding: 1.15rem 1.1rem 1rem;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 1.15rem;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    box-shadow: 0 24px 50px rgba(15, 23, 42, 0.14);
+    backdrop-filter: blur(12px);
+    text-align: center;
+}
+
+.ghl-webphone-floating.hidden {
+    display: none !important;
+}
+
+.ghl-webphone-floating[data-state='ringing'] {
+    border-color: rgba(245, 158, 11, 0.45);
+    box-shadow: 0 20px 45px rgba(245, 158, 11, 0.22);
+}
+
+.ghl-webphone-floating[data-state='in-call'] {
+    border-color: rgba(22, 163, 74, 0.35);
+}
+
+.ghl-webphone-floating-head {
+    display: block;
+    margin-top: 0.15rem;
+}
+
+.ghl-call-popup-visual {
+    position: relative;
+    width: 4.25rem;
+    height: 4.25rem;
+    margin: 0 auto 0.85rem;
+}
+
+.ghl-call-popup-visual.hidden {
+    display: none !important;
+}
+
+.ghl-call-popup-ring {
+    position: absolute;
+    inset: 0;
+    border: 2px solid rgba(59, 130, 246, 0.45);
+    border-radius: 50%;
+    animation: ghl-call-ring-pulse 1.9s ease-out infinite;
+}
+
+.ghl-call-popup-ring--delay {
+    animation-delay: 0.95s;
+}
+
+.ghl-call-popup-phone-icon {
+    position: absolute;
+    inset: 0.55rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%);
+    color: #fff;
+    box-shadow: 0 10px 24px rgba(37, 99, 235, 0.32);
+}
+
+.ghl-call-popup-phone-icon svg {
+    width: 1.35rem;
+    height: 1.35rem;
+}
+
+@keyframes ghl-call-ring-pulse {
+    0% {
+        transform: scale(0.72);
+        opacity: 0.85;
+    }
+
+    100% {
+        transform: scale(1.35);
+        opacity: 0;
+    }
+}
+
+.ghl-call-popup-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 0.65rem;
+    padding: 0.2rem 0.65rem;
+    border-radius: 9999px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    background: rgba(59, 130, 246, 0.12);
+    color: #2563eb;
+}
+
+.ghl-call-popup-badge.hidden {
+    display: none !important;
+}
+
+.ghl-call-popup-badge.is-ringing {
+    background: rgba(59, 130, 246, 0.12);
+    color: #2563eb;
+}
+
+.ghl-call-popup-badge.is-connected {
+    background: rgba(22, 163, 74, 0.12);
+    color: #15803d;
+}
+
+.ghl-webphone-floating-title {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.ghl-webphone-floating-subtitle {
+    margin: 0.25rem 0 0;
+    font-size: 0.8rem;
+    line-height: 1.45;
+    color: #475569;
+}
+
+.ghl-webphone-floating-detail {
+    margin: 0.55rem 0 0;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #334155;
+}
+
+.ghl-call-popup-timer-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    padding: 0.55rem 0.75rem;
+    border-radius: 0.75rem;
+    background: rgba(241, 245, 249, 0.95);
+    border: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.ghl-call-popup-timer-row.hidden {
+    display: none !important;
+}
+
+.ghl-call-popup-timer-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.ghl-call-popup-timer-value {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #0f172a;
+    font-variant-numeric: tabular-nums;
+}
+
+.ghl-webphone-floating-timer {
+    flex-shrink: 0;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.ghl-webphone-floating-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.55rem;
+    margin-top: 0.95rem;
+}
+
+.ghl-webphone-floating-actions .ghl-webphone-btn-answer.hidden,
+.ghl-webphone-floating-actions .ghl-webphone-btn-record.hidden,
+.ghl-webphone-floating-actions .ghl-webphone-btn-end-call.hidden {
+    display: none !important;
+}
+
+.ghl-webphone-btn-answer {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    min-height: 2.5rem;
+    padding: 0.55rem 1.15rem;
+    border: 0;
+    border-radius: 9999px;
+    background: linear-gradient(180deg, #22c55e 0%, #16a34a 100%);
+    color: #fff !important;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    box-shadow: 0 10px 24px rgba(22, 163, 74, 0.28);
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+
+.ghl-webphone-btn-answer:hover {
+    filter: brightness(1.05);
+    box-shadow: 0 12px 28px rgba(22, 163, 74, 0.34);
+    transform: translateY(-1px);
+}
+
+.ghl-webphone-btn-answer:active {
+    transform: translateY(0);
+    box-shadow: 0 6px 16px rgba(22, 163, 74, 0.24);
+}
+
+.ghl-webphone-call-card {
+    margin-top: 0.85rem;
+    padding: 0.9rem;
+    border-radius: 0.9rem;
+    border: 1px solid rgba(15, 23, 42, 0.1);
+    background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+}
+
+.ghl-webphone-call-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.ghl-webphone-call-title {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.ghl-webphone-call-subtitle {
+    margin: 0.2rem 0 0;
+    font-size: 0.8rem;
+    color: #64748b;
+}
+
+.ghl-webphone-call-timer {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.ghl-webphone-call-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 0.85rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.ghl-webphone-btn-end-call {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    min-height: 2.5rem;
+    padding: 0.55rem 1.15rem;
+    border: 0;
+    border-radius: 9999px;
+    background: linear-gradient(180deg, #ef4444 0%, #dc2626 100%);
+    color: #fff !important;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    box-shadow: 0 10px 24px rgba(220, 38, 38, 0.28);
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+
+.ghl-webphone-btn-end-call:hover {
+    filter: brightness(1.05);
+    box-shadow: 0 12px 28px rgba(220, 38, 38, 0.34);
+    transform: translateY(-1px);
+}
+
+.ghl-webphone-btn-end-call:active {
+    transform: translateY(0);
+    box-shadow: 0 6px 16px rgba(220, 38, 38, 0.24);
+}
+
+.ghl-webphone-btn-record {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    min-height: 2.5rem;
+    padding: 0.55rem 1rem;
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    border-radius: 9999px;
+    background: #fff;
+    color: #0f172a;
+    font-size: 0.82rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.ghl-webphone-btn-record-dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 9999px;
+    background: #94a3b8;
+    transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ghl-webphone-btn-record.is-recording {
+    border-color: rgba(220, 38, 38, 0.35);
+    background: rgba(254, 242, 242, 0.95);
+    color: #b91c1c;
+}
+
+.ghl-webphone-btn-record.is-recording .ghl-webphone-btn-record-dot {
+    background: #ef4444;
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.45);
+    animation: ghl-webphone-rec-pulse 1.4s ease-out infinite;
+}
+
+@keyframes ghl-webphone-rec-pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.45);
+    }
+
+    70% {
+        box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+    }
+}
+
+.ghl-webphone-floating[data-state='dialing'] {
+    border-color: rgba(59, 130, 246, 0.35);
+    box-shadow: 0 20px 45px rgba(59, 130, 246, 0.16);
+}
+
+@media (max-width: 640px) {
+    .ghl-webphone-floating {
+        right: 0.75rem;
+        bottom: 0.75rem;
+        left: 0.75rem;
+        width: auto;
+        padding: 0.8rem;
+    }
+
+    .ghl-webphone-floating-head {
+        gap: 0.5rem;
+    }
+}
+
+/* Center dialer hub */
+.ghl-dialer-center {
+    width: min(100%, 56rem);
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.ghl-dialer-center-hero {
+    text-align: center;
+    padding: 0.25rem 0.5rem 0;
+}
+
+.ghl-dialer-center-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: 9999px;
+    background: var(--ghl-surface-subtle);
+    border: 1px solid var(--ghl-border);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--ghl-muted);
+    margin-bottom: 0.75rem;
+}
+
+.ghl-dialer-center-title {
+    margin: 0;
+    font-size: clamp(1.35rem, 2.5vw, 1.75rem);
+    font-weight: 800;
+    color: var(--ghl-text);
+    letter-spacing: -0.02em;
+}
+
+.ghl-dialer-center-subtitle {
+    margin: 0.4rem auto 0;
+    max-width: 34rem;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--ghl-muted);
+}
+
+.ghl-dialer-center-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+    gap: 1rem;
+    align-items: start;
+}
+
+.ghl-dialer-center-phone,
+.ghl-dialer-center-keypad {
+    min-width: 0;
+}
+
+.ghl-webphone-section--center {
+    padding: 0;
+}
+
+.ghl-webphone-panel--center {
+    height: 100%;
+}
+
+.ghl-dialer-form--center {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 1rem;
+    border: 1px solid var(--ghl-border);
+    border-radius: 0.875rem;
+    background: var(--ghl-surface);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.ghl-dialer-form--center .ghl-dialer-display {
+    font-size: 1.35rem;
+    font-weight: 700;
+    text-align: center;
+    letter-spacing: 0.04em;
+    padding: 0.85rem 1rem;
+}
+
+.ghl-dialer-form--center .ghl-dialer-keypad {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.5rem;
+}
+
+.ghl-dialer-form--center .ghl-dialer-key {
+    min-height: 3rem;
+    font-size: 1.1rem;
+    border-radius: 0.75rem;
+}
+
+.ghl-dialer-form--center .ghl-dialer-actions {
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: 0.5rem;
+}
+
+.ghl-dialer-form--center .ghl-dialer-call-btn {
+    min-height: 3rem;
+    font-size: 1rem;
+    font-weight: 700;
+    border-radius: 0.75rem;
+}
+
+.ghl-dialer-center-logs,
+.ghl-tools-call-feed {
+    border: 1px solid var(--ghl-border);
+    border-radius: 0.875rem;
+    background: var(--ghl-surface);
+    padding: 0.875rem;
+}
+
+.ghl-dialer-center-logs-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.ghl-dialer-center-logs-title {
+    margin: 0;
+    font-size: 0.8125rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ghl-muted);
+}
+
+.ghl-dialer-center-logs-scroll {
+    overflow-x: auto;
+}
+
+.ghl-dialer-logs-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+}
+
+.ghl-dialer-logs-table th,
+.ghl-dialer-logs-table td {
+    padding: 0.55rem 0.5rem;
+    border-bottom: 1px solid var(--ghl-border);
+    text-align: left;
+    white-space: nowrap;
+}
+
+.ghl-dialer-logs-table th {
+    font-size: 0.6875rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ghl-muted);
+}
+
+.ghl-tag-inbound {
+    background: #ecfdf5;
+    color: #047857;
+}
+
+.ghl-tag-outbound {
+    background: #eff6ff;
+    color: #1d4ed8;
+}
+
+.ghl-tools-call-feed-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    max-height: 18rem;
+    overflow-y: auto;
+}
+
+.ghl-tools-call-feed-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.55rem 0.6rem;
+    border-radius: 0.625rem;
+    border: 1px solid transparent;
+    text-decoration: none;
+    color: inherit;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.ghl-tools-call-feed-row:hover {
+    background: var(--ghl-surface-muted);
+    border-color: var(--ghl-border);
+}
+
+.ghl-tools-call-feed-main {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+}
+
+.ghl-tools-call-feed-dir {
+    font-size: 0.625rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ghl-muted);
+}
+
+.ghl-tools-call-feed-number {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--ghl-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ghl-tools-call-feed-meta {
+    flex-shrink: 0;
+    font-size: 0.6875rem;
+    color: var(--ghl-muted);
+}
+
+@media (max-width: 960px) {
+    .ghl-dialer-center-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .ghl-dialer-form--center .ghl-dialer-actions {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Container-based responsive dialer when side rails squeeze center column */
+@container comm-conversation (max-width: 860px) {
+    .ghl-dialer-center-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .ghl-dialer-form--center .ghl-dialer-actions {
+        grid-template-columns: 1fr;
+    }
+}
+
+@container comm-conversation (max-width: 560px) {
+    .ghl-dialer-form--center {
+        padding: 0.875rem;
+    }
+
+    .ghl-dialer-form--center .ghl-dialer-display {
+        font-size: 1.15rem;
+        padding: 0.75rem 0.75rem;
+    }
+
+    .ghl-dialer-form--center .ghl-dialer-key {
+        min-height: 2.6rem;
+        font-size: 1rem;
+        border-radius: 0.675rem;
+    }
+
+    .ghl-webphone-actions {
+        flex-wrap: wrap;
+    }
+}
+@media (max-width: 768px) {
+    .ghl-inbox-conversation-scroll--center {
+        padding: 0.75rem;
+    }
+
+    .ghl-dialer-center-hero {
+        text-align: left;
+    }
+
+    .ghl-dialer-logs-table th:nth-child(3),
+    .ghl-dialer-logs-table td:nth-child(3),
+    .ghl-dialer-logs-table th:nth-child(5),
+    .ghl-dialer-logs-table td:nth-child(5) {
+        display: none;
+    }
 }

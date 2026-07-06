@@ -34,8 +34,6 @@
         </a>
     @endforeach
 
-    <div class="ghl-inbox-nav-spacer"></div>
-
     <a href="{{ route($routePrefix . 'communications.index', array_merge($baseQuery, ['panel' => 'dialer'])) }}"
         class="ghl-inbox-nav-item ghl-inbox-nav-item-dial {{ ($panel ?? '') === 'dialer' ? 'ghl-inbox-nav-item-active' : '' }}"
         title="Phone dialer">

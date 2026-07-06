@@ -23,7 +23,7 @@ class CommunicationsCallHistoryService
             ->whereBetween('created_at', [$from, $to])
             ->with('user:id,name')
             ->orderByDesc('created_at')
-            ->limit(500)
+            ->limit(100)
             ->get()
             ->map(fn (CommunicationCallLog $row) => $this->toHubLog($row))
             ->all();
@@ -42,6 +42,7 @@ class CommunicationsCallHistoryService
             'morpheus_call_uuid' => $morpheusCallUuid,
             'direction' => 'outbound',
             'from_extension' => $fromExtension,
+            'from_phone' => $this->resolveOutboundCallerId($fromExtension),
             'to_phone' => $destination,
             'status' => 'initiated',
             'started_at' => now(),
@@ -93,13 +94,19 @@ class CommunicationsCallHistoryService
     protected function toHubLog(CommunicationCallLog $row): array
     {
         $agent = $row->user?->name ?? 'Agent';
+        $fromPhone = $row->from_phone ?? $row->from_extension ?? '';
+        $fromLabel = $row->from_extension
+            ? (filled($fromPhone) && strlen(preg_replace('/\D/', '', $fromPhone) ?? '') >= 10
+                ? "ext {$row->from_extension} ({$fromPhone})"
+                : "{$agent} (ext {$row->from_extension})")
+            : $agent;
 
         return [
             'id' => $row->morpheus_call_uuid ?: ('local:'.$row->id),
             'direction' => $row->direction,
-            'from' => $row->from_extension ? "{$agent} (ext {$row->from_extension})" : $agent,
+            'from' => $fromLabel,
             'to' => $row->to_phone ?? '—',
-            'from_phone' => $row->from_phone ?? $row->from_extension ?? '',
+            'from_phone' => $fromPhone,
             'to_phone' => $row->to_phone ?? '',
             'start_time' => ($row->started_at ?? $row->created_at)?->toIso8601String(),
             'result' => $row->disposition ?: ucfirst($row->status),
@@ -131,5 +138,34 @@ class CommunicationsCallHistoryService
             ->all();
 
         return $merged;
+    }
+
+    protected function resolveOutboundCallerId(string $fromExtension): ?string
+    {
+        $options = app(CommunicationsAgentService::class)->extensionDialOptions($fromExtension);
+        $digits = $options['caller_id_number'] ?? null;
+
+        if (! filled($digits)) {
+            $configured = config('integrations.communications.default_outbound_did');
+            $digits = filled($configured)
+                ? preg_replace('/\D/', '', (string) $configured)
+                : null;
+        }
+
+        if (! filled($digits)) {
+            return null;
+        }
+
+        $digits = (string) $digits;
+
+        if (strlen($digits) === 10) {
+            return '+1'.$digits;
+        }
+
+        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+            return '+'.$digits;
+        }
+
+        return $digits;
     }
 }

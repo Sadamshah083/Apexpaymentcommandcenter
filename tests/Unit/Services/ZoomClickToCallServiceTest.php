@@ -69,4 +69,34 @@ class ZoomClickToCallServiceTest extends TestCase
 
         $this->assertSame('https://apexone.morpheus.cx/', $service->portalUrl());
     }
+
+    public function test_webrtc_sip_domain_derives_pbx_local_from_morpheus_host(): void
+    {
+        config([
+            'integrations.morpheus.host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.sip_host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.webrtc_sip_domain' => null,
+        ]);
+
+        $service = new ZoomClickToCallService;
+
+        $this->assertSame('apexone.pbx.local', $service->webrtcSipDomain());
+        $this->assertSame('apexone.morpheus.cx', $service->publicSipHost());
+    }
+
+    public function test_prefers_public_host_when_sip_host_is_local_only(): void
+    {
+        config([
+            'integrations.morpheus.host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.sip_host' => 'apexone.pbx.local',
+        ]);
+
+        $service = new ZoomClickToCallService;
+
+        $this->assertSame('apexone.morpheus.cx', $service->publicSipHost());
+        $this->assertSame(
+            'sip:15551234567@apexone.morpheus.cx;user=phone',
+            $service->sipUrl('(555) 123-4567')
+        );
+    }
 }
