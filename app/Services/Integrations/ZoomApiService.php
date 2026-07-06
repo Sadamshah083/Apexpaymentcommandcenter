@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Http;
  * MorpheusCX Call-Control API client.
  *
  * Base URL: https://{host}/api/v1/call-control
- * Auth    : X-API-Key header (or Bearer token — we always use the header)
+ * Auth    : X-API-Key and Bearer (same Morpheus API key)
  *
  * Sections implemented (all endpoints from the OpenAPI spec):
  *   - Calls        : list, get, originate, click-to-call
@@ -766,6 +766,8 @@ class ZoomApiService
 
             if ($response->successful()) {
                 $json = $response->json() ?? [];
+
+                app(MorpheusCircuitBreaker::class)->recordSuccess();
 
                 \Log::info('Morpheus originate response', [
                     'path' => $path,
@@ -2520,7 +2522,7 @@ class ZoomApiService
 
         return Http::connectTimeout(2)
             ->timeout((int) config('integrations.communications.http_timeout_seconds', 6))
-            ->withHeaders(['X-API-Key' => (string) config('integrations.morpheus.api_key')])
+            ->withHeaders($this->morpheusAuthHeaders())
             ->get($url);
     }
 
@@ -2528,13 +2530,25 @@ class ZoomApiService
     // Private helpers
     // =========================================================================
 
+    private function morpheusAuthHeaders(): array
+    {
+        $apiKey = trim((string) config('integrations.morpheus.api_key'));
+
+        if ($apiKey === '') {
+            return [];
+        }
+
+        return [
+            'X-API-Key' => $apiKey,
+            'Authorization' => 'Bearer '.$apiKey,
+        ];
+    }
+
     private function client(): PendingRequest
     {
         app(MorpheusCircuitBreaker::class)->guard();
 
-        $apiKey = config('integrations.morpheus.api_key');
-
-        return Http::withHeaders(['X-API-Key' => $apiKey])
+        return Http::withHeaders($this->morpheusAuthHeaders())
             ->acceptJson()
             ->connectTimeout(2)
             ->timeout((int) config('integrations.communications.http_timeout_seconds', 6));
@@ -2544,9 +2558,7 @@ class ZoomApiService
     {
         app(MorpheusCircuitBreaker::class)->guard();
 
-        $apiKey = config('integrations.morpheus.api_key');
-
-        return Http::withHeaders(['X-API-Key' => $apiKey])
+        return Http::withHeaders($this->morpheusAuthHeaders())
             ->acceptJson()
             ->connectTimeout(2)
             ->timeout(3);
