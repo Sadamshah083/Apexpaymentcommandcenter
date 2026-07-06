@@ -242,7 +242,7 @@ class CommunicationsAgentService
     public function dialerExtensionsFast(User $user, Workspace $workspace, string $routePrefix): array
     {
         $tier = app(CommunicationsAccessService::class)->tierFor($user, $routePrefix);
-        $default = (string) (config('integrations.communications.default_caller_id') ?: '1001');
+        $default = (string) (config('integrations.communications.default_caller_id') ?: '1020');
 
         if (in_array($tier, ['admin', 'supervisor'], true)) {
             $extNum = $default;
@@ -281,7 +281,7 @@ class CommunicationsAgentService
                 return $formatted;
             }
 
-            $default = (string) (config('integrations.communications.default_caller_id') ?: '1001');
+            $default = (string) (config('integrations.communications.default_caller_id') ?: '1020');
 
             return [$this->formatDialerExtension([
                 'id' => null,

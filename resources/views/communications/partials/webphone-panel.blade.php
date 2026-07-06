@@ -2,6 +2,7 @@
     $routePrefix = $routePrefix ?? (request()->is('admin*') ? 'admin.' : 'portal.');
     $webrtcEnabled = (bool) config('integrations.morpheus.webrtc_enabled', true);
     $defaultExtension = $defaultCallerId ?? config('integrations.communications.default_caller_id');
+    $defaultOutboundDid = config('integrations.communications.default_outbound_did');
     $portalUrl = app(\App\Services\Communications\ZoomClickToCallService::class)->portalUrl();
     $layout = $layout ?? 'sidebar';
 @endphp
@@ -15,6 +16,7 @@
         data-call-status-url="{{ route($routePrefix . 'communications.morpheus.calls.status', ['uuid' => '__UUID__']) }}"
         data-portal-url="{{ $portalUrl !== '#' ? $portalUrl . 'agent/' : 'https://' . config('integrations.morpheus.host') . '/agent/' }}"
         data-default-extension="{{ $defaultExtension }}"
+        data-default-outbound-did="{{ $defaultOutboundDid }}"
         data-csrf="{{ csrf_token() }}">
         <div class="ghl-webphone-panel comm-hub-card {{ $layout === 'center' ? 'ghl-webphone-panel--center' : '' }}">
             <div class="ghl-webphone-header">
@@ -103,7 +105,7 @@
             <div class="ghl-webphone-bridge hidden mt-3" data-webphone-bridge-panel>
                 <p class="text-xs text-slate-500 mb-2">
                     Log in below with your Morpheus extension
-                    (<strong data-webphone-bridge-extension>{{ $defaultExtension ?: '1001' }}</strong> / server password).
+                    (<strong data-webphone-bridge-extension>{{ $defaultExtension ?: config('integrations.communications.default_caller_id', '1020') }}</strong> / server password).
                     Keep it open while dialing if you need the fallback phone.
                 </p>
                 <iframe data-webphone-iframe title="Morpheus phone" class="ghl-webphone-iframe" src="about:blank" allow="microphone *; autoplay *"></iframe>

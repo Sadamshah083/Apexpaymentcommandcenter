@@ -242,7 +242,17 @@ class CommunicationsHubController extends Controller
 
     {
 
-        return view('communications.inbox.index', $this->inbox->build($request, $this->routePrefix()));
+        try {
+
+            return view('communications.inbox.index', $this->inbox->build($request, $this->routePrefix()));
+
+        } catch (\Throwable $e) {
+
+            report($e);
+
+            return view('communications.inbox.index', $this->inbox->buildDegraded($request, $this->routePrefix(), $e));
+
+        }
 
     }
 
@@ -328,9 +338,17 @@ class CommunicationsHubController extends Controller
 
         $nextPageToken = null;
 
+        $prevPageToken = null;
+
         $warnings = [];
 
         $stats = [];
+
+        $perPage = (int) config('integrations.communications.list_page_size', 20);
+
+        $currentOffset = is_numeric($filters['page_token'] ?? null) ? (int) $filters['page_token'] : 0;
+
+        $currentPage = (int) floor($currentOffset / max($perPage, 1)) + 1;
 
 
 
@@ -338,57 +356,19 @@ class CommunicationsHubController extends Controller
 
             try {
 
-                $payload = $this->data->callLogs($filters, 1);
+                if (auth()->check()) {
+                    $data = app(\App\Services\Communications\CommunicationsDataService::class);
+                    $payload = $data->callLogs(array_merge($filters, ['per_page' => $perPage]), 1, true);
+                    $callLogs = $this->filterCallLogs($payload['logs'] ?? [], $filters);
+                    $nextPageToken = $payload['next_page_token'] ?? null;
+                    $prevPageToken = $currentOffset > 0 ? (string) max(0, $currentOffset - $perPage) : null;
 
-                $callLogs = $payload['logs'];
+                    if (filled($payload['warning'] ?? null)) {
+                        $warnings[] = $payload['warning'];
+                    }
 
-
-
-                if (($filters['direction'] ?? '') !== '') {
-
-                    $callLogs = array_values(array_filter(
-
-                        $callLogs,
-
-                        fn ($log) => ($log['direction'] ?? '') === $filters['direction']
-
-                    ));
-
+                    $stats = $data->callStats($filters);
                 }
-
-
-
-                if (($filters['filter'] ?? '') === 'recorded') {
-
-                    $callLogs = array_values(array_filter(
-
-                        $callLogs,
-
-                        fn ($log) => ($log['recording'] ?? '') === 'Yes' || ! empty($log['has_recording_media'])
-
-                    ));
-
-                }
-
-
-
-                if (($filters['filter'] ?? '') === 'missed') {
-
-                    $callLogs = array_values(array_filter(
-
-                        $callLogs,
-
-                        fn ($log) => $this->isMissedCall($log)
-
-                    ));
-
-                }
-
-
-
-                $nextPageToken = $payload['next_page_token'];
-
-                $stats = $this->data->callStatsFromLogs($callLogs);
 
             } catch (\Throwable $e) {
 
@@ -416,6 +396,12 @@ class CommunicationsHubController extends Controller
 
             'nextPageToken' => $nextPageToken,
 
+            'prevPageToken' => $prevPageToken,
+
+            'currentPage' => $currentPage,
+
+            'perPage' => $perPage,
+
             'warnings' => $warnings,
 
             'error' => $error,
@@ -423,6 +409,44 @@ class CommunicationsHubController extends Controller
             'stats' => $stats,
 
         ]);
+
+    }
+
+
+
+    /**
+     * @param  array<int, array<string, mixed>>  $logs
+     * @return array<int, array<string, mixed>>
+     */
+    protected function filterCallLogs(array $logs, array $filters): array
+
+    {
+
+        return collect($logs)
+
+            ->when(filled($filters['direction'] ?? null), fn ($collection) => $collection->where('direction', $filters['direction']))
+
+            ->when(($filters['filter'] ?? '') === 'recorded', fn ($collection) => $collection->filter(
+
+                fn (array $log) => ($log['recording'] ?? '') === 'Yes' || ($log['has_recording_media'] ?? false)
+
+            ))
+
+            ->when(($filters['filter'] ?? '') === 'missed', fn ($collection) => $collection->filter(function (array $log) {
+
+                $result = strtolower((string) ($log['result'] ?? ''));
+
+                return str_contains($result, 'miss')
+
+                    || str_contains($result, 'no answer')
+
+                    || str_contains($result, 'no_answer');
+
+            }))
+
+            ->values()
+
+            ->all();
 
     }
 
@@ -442,7 +466,8 @@ class CommunicationsHubController extends Controller
         $morpheusExtensions = [];
         $recentNumbers = [];
 
-        $prefillNumber = $request->get('number');
+        $prefillNumber = $request->get('number')
+            ?: config('integrations.communications.default_dial_destination');
 
         $routePrefix = $this->routePrefix();
 
@@ -452,19 +477,18 @@ class CommunicationsHubController extends Controller
 
             try {
 
-                $payload = $this->data->phoneUsers($filters);
-
-                $phoneUsers = $payload['users'];
-
-                $warning = $payload['warning'];
-
-                $recentNumbers = $this->data->recentDialNumbers($filters);
-
                 if (auth()->check()) {
                     $workspace = app(\App\Services\Workspace\WorkspaceContextService::class)
                         ->resolveActiveWorkspace(auth()->user());
                     $morpheusExtensions = app(\App\Services\Communications\CommunicationsAgentService::class)
-                        ->dialerExtensionsFor(auth()->user(), $workspace, $routePrefix);
+                        ->dialerExtensionsFast(auth()->user(), $workspace, $routePrefix);
+                    $recentNumbers = collect(
+                        app(\App\Services\Communications\CommunicationsCallHistoryService::class)
+                            ->listForHub($workspace, $filters)
+                    )->flatMap(fn (array $log) => array_filter([
+                        $log['from_phone'] ?? null,
+                        $log['to_phone'] ?? null,
+                    ]))->unique()->take(12)->values()->all();
                 }
 
             } catch (\Throwable $e) {
@@ -763,9 +787,12 @@ class CommunicationsHubController extends Controller
 
         $this->data->bustCache();
         app(MorpheusHubService::class)->bustCache();
+        app(\App\Services\Integrations\MorpheusCircuitBreaker::class)->reset();
 
         $this->zoom->clearAccessTokenCache();
 
+        \Illuminate\Support\Facades\Cache::forget('integrations.morpheus.connection_status');
+        \Illuminate\Support\Facades\Cache::forget('integrations.morpheus.connection_diagnostics');
         \Illuminate\Support\Facades\Cache::forget('zoom.connection.diagnostics');
 
         return redirect()->route($this->routePrefix().'communications.index', ['channel' => 'inbox', 'panel' => 'settings'])

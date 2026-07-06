@@ -59,11 +59,13 @@ class CommunicationsInboxService
     $connection = $this->zoom->isConfigured()
       ? ($panel === 'settings'
         ? $this->zoom->connectionStatus()
-        : Cache::remember(
-          'integrations.morpheus.connection_status',
-          180,
-          fn () => $this->zoom->connectionStatus(),
-        ))
+        : (($channel === 'inbox' && $panel === 'empty') || $channel === 'calls'
+          ? (Cache::get('integrations.morpheus.connection_status') ?? [
+            'connected' => false,
+            'message' => 'Morpheus status updates when telephony is available.',
+            'expires_at' => null,
+          ])
+          : $this->zoom->connectionStatus()))
       : ['connected' => false, 'message' => 'Morpheus CX is not configured.', 'expires_at' => null];
 
     if (! $this->zoom->isConfigured()) {
@@ -121,8 +123,9 @@ class CommunicationsInboxService
           'webhookSecret' => $this->zoom->webhookSecret(),
           'requiredScopes' => $this->zoom->requiredScopes(),
         ],
+        'outboundCalling' => $this->zoom->outboundCallingProfile(),
         'defaultCallerId' => $this->resolveDefaultCallerId(),
-        'prefillNumber' => $request->get('number'),
+        'prefillNumber' => $this->resolvePrefillDialNumber($request),
         'error' => $errors !== [] ? implode(' ', array_unique($errors)) : null,
         'warnings' => [],
         'clickToCall' => $this->clickToCall,
@@ -153,7 +156,7 @@ class CommunicationsInboxService
     $morpheusExtensions = [];
     $morpheusUsers = [];
     $communicationAgents = [];
-    $suggestedExtensionNum = '1001';
+    $suggestedExtensionNum = (string) (config('integrations.communications.default_caller_id') ?: '1020');
     $selectedQueueWaiting = [];
     $selectedConferenceMembers = [];
     $phoneUsers = [];
@@ -175,9 +178,13 @@ class CommunicationsInboxService
 
     if ($this->zoom->isConfigured()) {
       try {
+        $fastDialerShell = $channel === 'inbox' && $panel === 'empty';
+        $morpheusReachable = (bool) ($connection['connected'] ?? false);
         $loadDialerExtras = in_array($channel, ['inbox', 'calls'], true) || $panel === 'dialer';
-        $needsPhoneUsers = in_array($channel, ['inbox', 'calls', 'sms', 'team'], true)
-          || in_array($panel, ['dialer', 'sms'], true);
+        $needsPhoneUsers = ! $fastDialerShell && $channel !== 'calls' && (
+          in_array($channel, ['inbox', 'sms', 'team'], true)
+          || in_array($panel, ['dialer', 'sms'], true)
+        );
 
         if ($needsPhoneUsers) {
           $phonePayload = $this->data->phoneUsers($filters);
@@ -188,8 +195,8 @@ class CommunicationsInboxService
         }
 
         $loadCallSummary = ! in_array($channel, ['inbox', 'calls'], true);
-        $loadVmSummary = ! in_array($channel, ['inbox', 'voicemail'], true);
-        $loadSmsSummary = ! in_array($channel, ['inbox', 'sms'], true);
+        $loadVmSummary = ! $fastDialerShell && ! in_array($channel, ['inbox', 'calls', 'voicemail'], true);
+        $loadSmsSummary = ! $fastDialerShell && ! in_array($channel, ['inbox', 'calls', 'sms'], true);
         $summaryStats = [];
         $summaryVms = [];
         $summarySms = [];
@@ -233,6 +240,32 @@ class CommunicationsInboxService
         $enrichCallRecordings = $channel === 'recordings' || ($filters['filter'] ?? '') === 'recorded';
 
         if (in_array($channel, ['inbox', 'calls'], true)) {
+          if (auth()->check()) {
+            $workspace = $this->workspaceContext->resolveActiveWorkspace(auth()->user());
+            $callLogs = $this->callHistory->listForHub($workspace, $filters);
+            $callStats = $this->data->callStatsFromLogs($callLogs);
+
+            if (! $fastDialerShell && $channel === 'inbox' && $morpheusReachable) {
+              $callPayload = $this->safeDataLoad(
+                fn () => $this->data->callLogs(
+                  $filters,
+                  (int) config('integrations.communications.detail_max_pages', 1),
+                  $enrichCallRecordings,
+                ),
+                ['logs' => [], 'next_page_token' => null, 'warning' => null],
+                $warnings,
+              );
+              if ($callPayload['warning'] ?? null) {
+                $warnings[] = $callPayload['warning'];
+              }
+              $callLogs = $this->filterCallLogs(
+                $this->mergeLocalCallHistory($callPayload['logs'], $filters, $warnings),
+                $filters,
+              );
+              $nextPageToken = $callPayload['next_page_token'];
+              $callStats = $this->data->callStatsFromLogs($callLogs);
+            }
+          } else {
           $callPayload = $this->safeDataLoad(
             fn () => $this->data->callLogs(
               $filters,
@@ -251,6 +284,7 @@ class CommunicationsInboxService
           );
           $nextPageToken = $callPayload['next_page_token'];
           $callStats = $this->data->callStatsFromLogs($callLogs);
+          }
 
           if ($loadDialerExtras) {
             try {
@@ -263,7 +297,7 @@ class CommunicationsInboxService
           $callStats = $summaryStats;
         }
 
-        if ($channel === 'inbox') {
+        if ($channel === 'inbox' && ! $fastDialerShell) {
           $contactPayload = $this->safeDataLoad(
             fn () => $this->contacts->buildIndexPayload($filters, $callLogs, $nextPageToken),
             ['contacts' => [], 'error' => null],
@@ -275,7 +309,7 @@ class CommunicationsInboxService
           }
         }
 
-        if (in_array($channel, ['voicemail', 'inbox'], true)) {
+        if (in_array($channel, ['voicemail', 'inbox'], true) && ! $fastDialerShell) {
           $vmPayload = $this->safeDataLoad(
             fn () => $this->data->voiceMails($filters),
             ['voice_mails' => [], 'warning' => null],
@@ -291,7 +325,7 @@ class CommunicationsInboxService
           $voiceMails = $this->filterVoiceMails($voiceMails, $filters);
         }
 
-        if (in_array($channel, ['sms', 'inbox'], true)) {
+        if (in_array($channel, ['sms', 'inbox'], true) && ! $fastDialerShell) {
           $smsPayload = $this->safeDataLoad(
             fn () => $this->data->smsSessions($filters),
             ['sessions' => [], 'warning' => null],
@@ -356,19 +390,34 @@ class CommunicationsInboxService
         if ($canConfigure && ($channel === 'extensions' || $channel === 'agents')) {
           $morpheusExtensions = $this->safeDataLoad(fn () => $this->morpheusHub->extensions(), [], $warnings);
         } elseif ($loadDialerExtras) {
-          $morpheusExtensions = $this->safeDataLoad(function () use ($routePrefix) {
-            if (! auth()->check()) {
-              return [];
-            }
-            $workspace = app(\App\Services\Workspace\WorkspaceContextService::class)
-              ->resolveActiveWorkspace(auth()->user());
+          $useFastExtensions = $fastDialerShell || $channel === 'calls' || ! $morpheusReachable;
+          $morpheusExtensions = $useFastExtensions
+            ? $this->safeDataLoad(function () use ($routePrefix) {
+              if (! auth()->check()) {
+                return [];
+              }
+              $workspace = app(\App\Services\Workspace\WorkspaceContextService::class)
+                ->resolveActiveWorkspace(auth()->user());
 
-            return app(CommunicationsAgentService::class)->dialerExtensionsFor(
-              auth()->user(),
-              $workspace,
-              $routePrefix,
-            );
-          }, [], $warnings);
+              return app(CommunicationsAgentService::class)->dialerExtensionsFast(
+                auth()->user(),
+                $workspace,
+                $routePrefix,
+              );
+            }, [], $warnings)
+            : $this->safeDataLoad(function () use ($routePrefix) {
+              if (! auth()->check()) {
+                return [];
+              }
+              $workspace = app(\App\Services\Workspace\WorkspaceContextService::class)
+                ->resolveActiveWorkspace(auth()->user());
+
+              return app(CommunicationsAgentService::class)->dialerExtensionsFor(
+                auth()->user(),
+                $workspace,
+                $routePrefix,
+              );
+            }, [], $warnings);
         }
 
         if ($canConfigure && $channel === 'agents' && auth()->check()) {
@@ -381,8 +430,8 @@ class CommunicationsInboxService
               'agents' => $agentService->listForWorkspace($workspace),
               'suggested_extension' => $agentService->suggestExtensionNum(),
             ];
-          }, ['agents' => [], 'suggested_extension' => '1001'], $warnings);
-          $suggestedExtensionNum = $communicationAgents['suggested_extension'] ?? '1001';
+          }, ['agents' => [], 'suggested_extension' => (string) (config('integrations.communications.default_caller_id') ?: '1020')], $warnings);
+          $suggestedExtensionNum = $communicationAgents['suggested_extension'] ?? (string) (config('integrations.communications.default_caller_id') ?: '1020');
           $communicationAgents = $communicationAgents['agents'] ?? [];
         }
 
@@ -417,8 +466,10 @@ class CommunicationsInboxService
           );
         }
 
+        $sidebarChannel = ($fastDialerShell && $callLogs !== []) ? 'calls' : $channel;
+
         $sidebarItems = $this->buildSidebarItems(
-          $channel,
+          $sidebarChannel,
           $contacts,
           $callLogs,
           $voiceMails,
@@ -668,11 +719,99 @@ class CommunicationsInboxService
         'requiredScopes' => $this->zoom->requiredScopes(),
       ],
       'defaultCallerId' => $this->resolveDefaultCallerId(),
-      'prefillNumber' => $request->get('number'),
+      'prefillNumber' => $this->resolvePrefillDialNumber($request),
       'error' => $errors !== [] ? implode(' ', array_unique($errors)) : null,
       'warnings' => array_values(array_unique($warnings)),
       'clickToCall' => $this->clickToCall,
       'channelCounts' => $channelCounts,
+      'hubAccess' => $hubAccess,
+    ];
+  }
+
+  /**
+   * Minimal Communications Hub payload when telephony services fail unexpectedly.
+   *
+   * @return array<string, mixed>
+   */
+  public function buildDegraded(Request $request, string $routePrefix, \Throwable $cause): array
+  {
+    $user = Auth::user();
+    $filters = $this->filters($request);
+    $hubAccess = $this->access->viewMeta($user, $routePrefix);
+    $workspace = $user ? $this->workspaceContext->resolveActiveWorkspace($user) : null;
+    $callLogs = $workspace ? $this->callHistory->listForHub($workspace, $filters) : [];
+    $extensions = ($user && $workspace)
+      ? app(CommunicationsAgentService::class)->dialerExtensionsFast($user, $workspace, $routePrefix)
+      : [];
+    $breakerMessage = app(\App\Services\Integrations\MorpheusCircuitBreaker::class)->unavailableMessage();
+
+    return [
+      'channel' => 'inbox',
+      'panel' => 'empty',
+      'filters' => $filters,
+      'routePrefix' => $routePrefix,
+      'channels' => $this->access->channelsFor($user, $routePrefix),
+      'sidebarItems' => [],
+      'contacts' => [],
+      'callLogs' => $callLogs,
+      'callStats' => $this->data->callStatsFromLogs($callLogs),
+      'voiceMails' => [],
+      'smsSessions' => [],
+      'chatChannels' => [],
+      'recordings' => [],
+      'teamUsers' => [],
+      'teamQueues' => [],
+      'queueWarning' => null,
+      'morpheusQueues' => [],
+      'morpheusConferences' => [],
+      'morpheusLeads' => [],
+      'morpheusCampaigns' => [],
+      'morpheusLists' => [],
+      'morpheusExtensions' => $extensions,
+      'communicationAgents' => [],
+      'suggestedExtensionNum' => (string) (config('integrations.communications.default_caller_id') ?: '1020'),
+      'morpheusUsers' => [],
+      'selectedQueueWaiting' => [],
+      'selectedConferenceMembers' => [],
+      'phoneUsers' => [],
+      'recentNumbers' => [],
+      'nextPageToken' => null,
+      'listPagination' => null,
+      'panelPagination' => null,
+      'selectedContact' => null,
+      'timeline' => [],
+      'contactStats' => [],
+      'smsSession' => null,
+      'smsMessages' => [],
+      'smsMessagesNextPageToken' => null,
+      'selectedThread' => null,
+      'chatMessages' => [],
+      'chatMessagesNextPageToken' => null,
+      'selectedCall' => null,
+      'selectedVoicemail' => null,
+      'selectedRecording' => null,
+      'connection' => [
+        'connected' => false,
+        'message' => $breakerMessage,
+        'expires_at' => null,
+      ],
+      'connectionDiagnostics' => null,
+      'settings' => [
+        'accountId' => $this->zoom->accountId(),
+        'clientId' => $this->zoom->clientId(),
+        'maskedSecret' => $this->zoom->maskedSecret(),
+        'webhookSecret' => $this->zoom->webhookSecret(),
+        'requiredScopes' => $this->zoom->requiredScopes(),
+      ],
+      'defaultCallerId' => $this->resolveDefaultCallerId(),
+      'prefillNumber' => $this->resolvePrefillDialNumber($request),
+      'error' => null,
+      'warnings' => array_values(array_filter([
+        $breakerMessage,
+        config('app.debug') ? $cause->getMessage() : null,
+      ])),
+      'clickToCall' => $this->clickToCall,
+      'channelCounts' => ['inbox' => 0, 'calls' => count($callLogs)],
       'hubAccess' => $hubAccess,
     ];
   }
@@ -1246,5 +1385,17 @@ class CommunicationsInboxService
 
     return app(CommunicationsAgentService::class)->extensionForUser(auth()->user())
       ?? config('integrations.communications.default_caller_id');
+  }
+
+  protected function resolvePrefillDialNumber(Request $request): ?string
+  {
+    $fromRequest = $request->get('number');
+    if (is_string($fromRequest) && trim($fromRequest) !== '') {
+      return trim($fromRequest);
+    }
+
+    $default = trim((string) (config('integrations.communications.default_dial_destination') ?? ''));
+
+    return $default !== '' ? $default : null;
   }
 }

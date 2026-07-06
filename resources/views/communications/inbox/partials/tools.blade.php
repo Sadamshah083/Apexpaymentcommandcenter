@@ -1,21 +1,5 @@
 <aside class="ghl-inbox-tools">
     <div class="ghl-inbox-tools-inner ghl-tools-dialer">
-        @include('communications.partials.webphone-panel', [
-            'routePrefix' => $routePrefix,
-            'defaultCallerId' => $defaultCallerId ?? null,
-        ])
-
-        <section class="ghl-tools-section ghl-tools-section-card">
-            <h3 class="ghl-inbox-rail-title">Quick dial</h3>
-            @include('communications.inbox.partials.rail-dialer-compact', [
-                'routePrefix' => $routePrefix,
-                'phoneUsers' => $phoneUsers ?? [],
-                'morpheusExtensions' => $morpheusExtensions ?? [],
-                'defaultCallerId' => $defaultCallerId ?? null,
-                'prefillNumber' => $prefillNumber ?? null,
-            ])
-        </section>
-
         @if (!empty($callStats))
             <section class="ghl-tools-section ghl-tools-section-card">
                 <h3 class="ghl-inbox-rail-title">Call summary</h3>
@@ -32,6 +16,39 @@
             </section>
         @endif
 
+        @if (!empty($callLogs))
+            <section class="ghl-tools-section ghl-tools-section-card ghl-tools-call-feed">
+                <div class="ghl-dialer-center-logs-head">
+                    <h3 class="ghl-inbox-rail-title mb-0">Recent calls</h3>
+                    <a href="{{ route($routePrefix . 'communications.index', ['channel' => 'calls']) }}"
+                        class="comm-hub-link text-xs">All</a>
+                </div>
+                <div class="ghl-tools-call-feed-list">
+                    @foreach (collect($callLogs)->take(8) as $log)
+                        @php
+                            $callbackPhone = match ($log['direction'] ?? '') {
+                                'inbound' => $log['from_phone'] ?? null,
+                                'outbound' => $log['to_phone'] ?? null,
+                                default => $log['to_phone'] ?? ($log['from_phone'] ?? null),
+                            };
+                        @endphp
+                        <a href="{{ route($routePrefix . 'communications.index', array_merge($baseQuery, ['panel' => 'call', 'call' => $log['id'] ?? null])) }}"
+                            class="ghl-tools-call-feed-row">
+                            <span class="ghl-tools-call-feed-main">
+                                <span class="ghl-tools-call-feed-dir">{{ ucfirst($log['direction'] ?? 'call') }}</span>
+                                <span class="ghl-tools-call-feed-number">
+                                    {{ $callbackPhone ?? ($log['to_phone'] ?? $log['from_phone'] ?? '—') }}
+                                </span>
+                            </span>
+                            <span class="ghl-tools-call-feed-meta">
+                                {{ !empty($log['start_time']) ? \Carbon\Carbon::parse($log['start_time'])->diffForHumans(short: true) : '—' }}
+                            </span>
+                        </a>
+                    @endforeach
+                </div>
+            </section>
+        @endif
+
         @if (!empty($phoneUsers))
             <section class="ghl-tools-section ghl-tools-section-card">
                 <h3 class="ghl-inbox-rail-title">Phone lines</h3>
@@ -40,8 +57,9 @@
                         @foreach ($user['phone_numbers'] as $number)
                             <div class="ghl-team-row ghl-team-row-compact">
                                 <span class="text-xs font-semibold text-zinc-800 truncate">{{ $user['name'] }}</span>
-                                <a href="{{ route($routePrefix . 'communications.index', array_merge($baseQuery, ['panel' => 'dialer', 'number' => $number])) }}"
-                                    class="comm-hub-link text-xs">{{ $number }}</a>
+                                <button type="button" class="comm-hub-link text-xs" data-dial-number="{{ $number }}">
+                                    {{ $number }}
+                                </button>
                             </div>
                         @endforeach
                     @endforeach
@@ -49,7 +67,7 @@
             </section>
         @endif
 
-        <a href="{{ route($routePrefix . 'communications.index', array_merge($baseQuery, ['panel' => 'dialer'])) }}"
-            class="comm-hub-btn comm-hub-btn-secondary w-full text-center comm-hub-btn-sm">Full dialer</a>
+        <a href="{{ route($routePrefix . 'communications.index', ['channel' => 'calls']) }}"
+            class="comm-hub-btn comm-hub-btn-secondary w-full text-center comm-hub-btn-sm">Open call history</a>
     </div>
 </aside>

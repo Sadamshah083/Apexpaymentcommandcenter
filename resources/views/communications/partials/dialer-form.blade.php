@@ -23,6 +23,7 @@
     $endpointHint = $selectedExt['endpoint_hint'] ?? null;
     $sipHost = $clickToCall->publicSipHost();
     $portalUrl = $clickToCall->portalUrl();
+    $defaultOutboundDid = config('integrations.communications.default_outbound_did');
     $layout = $layout ?? 'sidebar';
 @endphp
 
@@ -86,7 +87,8 @@
         @foreach ($extensions as $ext)
             @php $extNum = $ext['extension_num'] ?? ''; @endphp
             @if (filled($extNum))
-                <option value="{{ $extNum }}" @selected((string) $defaultExtension === (string) $extNum)>
+                <option value="{{ $extNum }}" @selected((string) $defaultExtension === (string) $extNum)
+                    data-outbound-did="{{ $ext['outbound_cid_num'] ?? $ext['caller_id_num'] ?? $defaultOutboundDid }}">
                     {{ $ext['caller_id_name'] ?? 'Extension' }} — {{ $extNum }}
                     @if (!empty($ext['caller_id_num']))
                         (DID {{ $ext['caller_id_num'] }})
@@ -97,6 +99,12 @@
             @endif
         @endforeach
     </select>
+
+    <p class="ghl-dialer-outbound-route text-sm text-slate-600 mt-1 mb-2" data-dialer-route-summary>
+        Outbound caller ID:
+        <strong data-dialer-from-did>{{ $defaultOutboundDid ?: 'Not configured' }}</strong>
+        · destination rings as this number on the callee's phone.
+    </p>
 
     <label class="comm-hub-label" for="{{ $numberInputId }}">Destination number</label>
     <input type="tel" id="{{ $numberInputId }}" name="destination"

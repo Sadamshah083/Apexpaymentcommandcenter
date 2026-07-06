@@ -119,6 +119,16 @@ class MorpheusHubController extends Controller
         $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
         $routePrefix = $this->redirectRoutePrefix($request);
 
+        if (! $clickToCall->isValidPstnDestination($destination)) {
+            $destinationError = 'Enter a valid phone number with at least 10 digits (e.g. +12722001232).';
+
+            if ($request->wantsJson()) {
+                return response()->json(['ok' => false, 'error' => $destinationError], 422);
+            }
+
+            return back()->withInput()->with('error', $destinationError);
+        }
+
         if (! $this->agents->userCanDialFrom($user, $workspace, $fromExtension, $routePrefix)) {
             return back()->withInput()->with('error', 'You can only place calls from your assigned extension.');
         }
@@ -208,9 +218,9 @@ class MorpheusHubController extends Controller
                 };
 
                 if ($request->wantsJson()) {
-                    return response()->json($result, ($result['ok'] ?? false) ? 200 : (
-                        ($result['extension_busy'] ?? false) ? 409 : 422
-                    ));
+                    return response()->json(
+                        $this->morpheus->formatOriginateResponse($result, $fromExtension, $destination, $dialOptions)
+                    );
                 }
 
                 $redirect = back()->with('success', $successMessage);
@@ -228,11 +238,10 @@ class MorpheusHubController extends Controller
 
             if ($dialMethod === 'api') {
                 if ($request->wantsJson()) {
-                    return response()->json([
-                        'ok' => false,
-                        'error' => $result['error'] ?? 'Could not place outbound call.',
-                        'attempted' => $result['attempted'] ?? [],
-                    ], 422);
+                    return response()->json(
+                        $this->morpheus->formatOriginateResponse($result, $fromExtension, $destination, $dialOptions),
+                        422
+                    );
                 }
 
                 return back()
@@ -242,15 +251,6 @@ class MorpheusHubController extends Controller
         }
 
         if (($result['extension_busy'] ?? false) === true && in_array($dialMethod, ['auto', 'sip'], true)) {
-            if ($request->wantsJson()) {
-                return response()->json([
-                    'ok' => false,
-                    'extension_busy' => true,
-                    'error' => ($result['error'] ?? 'Your extension is busy.')
-                        .' Hang up the current call (or wait a few seconds) and try again.',
-                ], 409);
-            }
-
             $launched = $this->launchOutboundDial($request, $clickToCall, $destination, $fromExtension, 'sip');
             if ($launched) {
                 $this->logOutboundDial($request, $fromExtension, $destination, $result['call_uuid'] ?? null);
@@ -361,39 +361,62 @@ class MorpheusHubController extends Controller
             return response()->json(['ok' => false, 'error' => 'Morpheus is not configured.'], 503);
         }
 
+        $destination = is_string($request->query('destination')) ? $request->query('destination') : null;
         $snapshot = $this->morpheus->getCall($uuid);
 
         if ($snapshot === null) {
-            return response()->json(['ok' => false, 'error' => 'Call not found.'], 404);
+            return response()->json([
+                'ok' => true,
+                'pending' => true,
+                'live' => true,
+                'state' => 'PENDING',
+                'bridged_to' => null,
+                'billsec' => 0,
+                'answer_time' => null,
+                'hangup_cause' => null,
+                'destination_connected' => $this->morpheus->destinationAnsweredOnCall($uuid, $destination),
+            ]);
         }
 
-        $destination = $request->query('destination');
         $state = strtoupper((string) ($snapshot['state'] ?? $snapshot['status'] ?? ''));
-        $bridgedTo = $snapshot['bridged_to'] ?? null;
+        $bridgedTo = filled($snapshot['bridged_to'] ?? null) ? (string) $snapshot['bridged_to'] : null;
         $live = (bool) ($snapshot['live'] ?? in_array(strtolower((string) ($snapshot['status'] ?? '')), ['active', 'ringing'], true));
-        $billsec = (int) ($snapshot['billsec'] ?? 0);
+        $billsec = (int) ($snapshot['billsec'] ?? $snapshot['duration_sec'] ?? 0);
         $hangup = strtoupper((string) ($snapshot['hangup_cause'] ?? ''));
         $customerFirst = $request->boolean('customer_first');
 
-        // Customer-first: NO_ROUTE_DESTINATION is a browser-bridge issue, not "destination didn't answer".
         if ($customerFirst && $hangup === 'NO_ROUTE_DESTINATION' && $billsec < 1) {
             $hangup = '';
         }
 
-        $destinationConnected = $this->morpheus->destinationAnsweredOnCall(
-            $uuid,
-            is_string($destination) ? $destination : null,
-        );
+        $destinationConnected = $this->morpheus->destinationAnsweredOnCall($uuid, $destination);
+
+        if (! $destinationConnected && filled($bridgedTo)) {
+            $destinationConnected = $this->morpheus->destinationAnsweredOnCall($bridgedTo, $destination);
+        }
+
+        if (! $destinationConnected && $billsec >= 2) {
+            $snapshotDest = preg_replace('/\D/', '', (string) ($snapshot['destination_number'] ?? '')) ?? '';
+            $requestedDest = preg_replace('/\D/', '', (string) $destination) ?? '';
+
+            if (strlen($snapshotDest) >= 10 && ! preg_match('/[a-z]/i', (string) ($snapshot['destination_number'] ?? ''))) {
+                $destinationConnected = $requestedDest === ''
+                    || $snapshotDest === $requestedDest
+                    || str_ends_with($requestedDest, $snapshotDest)
+                    || str_ends_with($snapshotDest, $requestedDest);
+            }
+        }
 
         return response()->json([
             'ok' => true,
             'live' => $live,
             'state' => $state !== '' ? $state : null,
-            'bridged_to' => filled($bridgedTo) ? (string) $bridgedTo : null,
+            'bridged_to' => $bridgedTo,
             'billsec' => $billsec,
-            'answer_time' => $snapshot['answer_time'] ?? null,
+            'answer_time' => $snapshot['answer_time'] ?? $snapshot['answered_at'] ?? null,
             'hangup_cause' => $hangup !== '' ? $hangup : null,
             'destination_connected' => $destinationConnected,
+            'destination_number' => $snapshot['destination_number'] ?? null,
         ]);
     }
 
@@ -851,20 +874,42 @@ class MorpheusHubController extends Controller
     protected function executeCallAction(Request $request, callable $action, string $successMessage)
     {
         if (! $this->morpheus->isConfigured()) {
+            if ($request->wantsJson()) {
+                return response()->json(['ok' => false, 'error' => 'Morpheus CX is not configured.'], 503);
+            }
+
             return back()->with('error', 'Morpheus CX is not configured.');
         }
 
         try {
             $result = $action();
             if (! ($result['ok'] ?? false)) {
+                if ($request->wantsJson()) {
+                    return response()->json([
+                        'ok' => false,
+                        'error' => $result['error'] ?? 'Call action failed.',
+                    ], 422);
+                }
+
                 return back()->with('error', $result['error'] ?? 'Call action failed.');
             }
 
             $this->data->bustCache();
             $this->hub->bustCache();
 
+            if ($request->wantsJson()) {
+                return response()->json(array_merge(['ok' => true, 'message' => $successMessage], $result));
+            }
+
             return $this->redirectBack($request, $successMessage);
         } catch (\Throwable $e) {
+            if ($request->wantsJson()) {
+                return response()->json([
+                    'ok' => false,
+                    'error' => $this->morpheus->humanizeError($e->getMessage()),
+                ], 500);
+            }
+
             return back()->with('error', $this->morpheus->humanizeError($e->getMessage()));
         }
     }

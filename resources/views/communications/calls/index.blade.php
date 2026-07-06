@@ -4,22 +4,9 @@
 
 @section('content')
     @php
-        $hub = app(\App\Services\Communications\MorpheusHubService::class);
-        $morpheusQueues = $morpheusQueues ?? $hub->queues();
-        $morpheusUsers =
-            $morpheusUsers ??
-            collect($hub->users())
-                ->map(
-                    fn($u) => [
-                        'id' => $u['id'] ?? null,
-                        'name' =>
-                            trim(($u['first_name'] ?? '') . ' ' . ($u['last_name'] ?? '')) ?: $u['email'] ?? 'Agent',
-                        'email' => $u['email'] ?? null,
-                    ],
-                )
-                ->values()
-                ->all();
-        $morpheusConferences = $morpheusConferences ?? $hub->conferences();
+        $morpheusQueues = $morpheusQueues ?? [];
+        $morpheusUsers = $morpheusUsers ?? [];
+        $morpheusConferences = $morpheusConferences ?? [];
     @endphp
     <div class="ghl-hub">
         @include('communications.partials.hub-tabs', ['mode' => 'calls', 'routePrefix' => $routePrefix])
@@ -64,8 +51,8 @@
 
         <div class="ghl-calls-toolbar">
             <div>
-                <h2 class="text-lg font-bold text-slate-900">Active calls</h2>
-                <p class="text-sm text-slate-500">{{ count($callLogs) }} live call{{ count($callLogs) === 1 ? '' : 's' }}
+                <h2 class="text-lg font-bold text-slate-900">Call history</h2>
+                <p class="text-sm text-slate-500">{{ count($callLogs) }} call{{ count($callLogs) === 1 ? '' : 's' }} on this page
                     from Morpheus CX</p>
             </div>
             <form method="GET" class="flex flex-wrap gap-2 items-end">
@@ -114,6 +101,9 @@
                             <p class="text-sm text-slate-500 mt-1">
                                 {{ $log['start_time'] ? \Carbon\Carbon::parse($log['start_time'])->format('M j, Y g:i A') : '—' }}
                                 · {{ $log['result'] }} · {{ $log['duration'] }}s
+                                @if (($log['recording'] ?? '') === 'Yes' || !empty($log['has_recording_media']))
+                                    · <span class="text-emerald-600 font-medium">Recorded</span>
+                                @endif
                             </p>
                         </div>
                     </div>
@@ -146,9 +136,11 @@
                                     'routePrefix' => $routePrefix,
                                     'recordingId' => $log['recording_id'],
                                     'callReferenceId' => $log['call_reference_id'] ?? $log['recording_id'],
-                                    'source' => $log['recording_source'] ?? 'phone',
+                                    'source' => $log['recording_source'] ?? 'morpheus',
                                     'hasMedia' => true,
                                 ])
+                            @elseif (($log['recording'] ?? '') === 'Yes')
+                                <span class="text-xs text-emerald-600 font-medium">Recording on file</span>
                             @else
                                 <span class="text-xs text-slate-400">No recording</span>
                             @endif
@@ -156,14 +148,21 @@
                     </div>
                 </article>
             @empty
-                <div class="ghl-empty py-16">No active calls right now.</div>
+                <div class="ghl-empty py-16">No calls found for this date range.</div>
             @endforelse
         </div>
 
-        @if ($nextPageToken ?? null)
-            <div class="mt-4 text-center">
-                <a href="{{ route($routePrefix . 'communications.index', array_merge(request()->query(), ['page_token' => $nextPageToken])) }}"
-                    class="comm-hub-btn comm-hub-btn-secondary">Load more</a>
+        @if (($prevPageToken ?? null) || ($nextPageToken ?? null))
+            <div class="mt-6 flex flex-wrap items-center justify-center gap-3">
+                @if ($prevPageToken ?? null)
+                    <a href="{{ route($routePrefix . 'communications.index', array_merge(request()->query(), ['page_token' => $prevPageToken])) }}"
+                        class="comm-hub-btn comm-hub-btn-secondary">← Previous</a>
+                @endif
+                <span class="text-sm text-slate-500">Page {{ $currentPage ?? 1 }}</span>
+                @if ($nextPageToken ?? null)
+                    <a href="{{ route($routePrefix . 'communications.index', array_merge(request()->query(), ['page_token' => $nextPageToken])) }}"
+                        class="comm-hub-btn comm-hub-btn-secondary">Next →</a>
+                @endif
             </div>
         @endif
     </div>

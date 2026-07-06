@@ -4,12 +4,27 @@ import {
     cancelPendingWebphoneConnect,
     ensureWebphoneReady,
     getWebphone,
-    markDialerClickToCallPending,
 } from './communications-webphone.js';
 const STORAGE_KEY = 'communications.dialer_extension';
 
+function stripCarrierPrefix(value) {
+    const raw = String(value || '').trim();
+    if (raw.includes('#')) {
+        return raw.slice(raw.lastIndexOf('#') + 1).trim();
+    }
+
+    return raw;
+}
+
+function isValidPstnDestination(value) {
+    const normalized = normalizePhone(value);
+    const digits = normalized.replace(/\D/g, '');
+
+    return digits.length >= 10;
+}
+
 function normalizePhone(value) {
-    const digits = String(value || '').replace(/[^\d+]/g, '');
+    const digits = String(stripCarrierPrefix(value)).replace(/[^\d+]/g, '');
     if (!digits) {
         return '';
     }
@@ -31,10 +46,23 @@ function csrfToken() {
     return document.querySelector('meta[name="csrf-token"]')?.content || '';
 }
 
-function isExtensionTarget(destination) {
-    const digits = String(destination || '').replace(/\D/g, '');
+function updateDialerRouteSummary(callerSelect) {
+    const summary = document.querySelector('[data-dialer-from-did]');
+    if (!summary) {
+        return;
+    }
 
-    return digits !== '' && digits.length <= 6;
+    const selected = callerSelect?.selectedOptions?.[0];
+    const raw = selected?.dataset?.outboundDid || '';
+    const digits = String(raw).replace(/\D/g, '');
+
+    if (digits.length >= 10) {
+        summary.textContent = digits.length === 10 ? `+1${digits}` : `+${digits}`;
+
+        return;
+    }
+
+    summary.textContent = raw || 'Not configured';
 }
 
 async function logDirectOutbound(form, destination) {
@@ -63,6 +91,12 @@ async function originateViaWebphone(form, dialBtn) {
 
     if (!destination) {
         showToast('Enter a valid phone number first.', 'error');
+
+        return false;
+    }
+
+    if (!isValidPstnDestination(destination)) {
+        showToast('Enter a full phone number with at least 10 digits (e.g. +12722001232).', 'error');
 
         return false;
     }
@@ -101,17 +135,17 @@ async function originateViaJson(form, dialBtn) {
         return false;
     }
 
-        formData.set('destination', destination);
+    if (!isValidPstnDestination(destination)) {
+        showToast('Enter a full phone number with at least 10 digits (e.g. +12722001232).', 'error');
+
+        return false;
+    }
+
+    formData.set('destination', destination);
     hideLoadingOverlay();
 
     const phone = getWebphone();
-    // Arm auto-answer before Morpheus rings the browser extension (agent-first flow).
     phone.markClickToCallPending();
-
-    if (phone.session && phone.session.state !== 'Terminated') {
-        await phone.hangup().catch(() => {});
-        await new Promise((resolve) => window.setTimeout(resolve, 1500));
-    }
 
     try {
         const response = await fetch(form.action, {
@@ -129,16 +163,8 @@ async function originateViaJson(form, dialBtn) {
 
         if (!response.ok || data.ok === false) {
             const message = data.error || 'Could not place the call. Check your extension and try again.';
+
             showToast(message, 'error');
-
-            return false;
-        }
-
-        if (!data.call_uuid) {
-            showToast(
-                data.error || 'Morpheus did not start a trunk call. Connect your webphone and try again.',
-                'error',
-            );
 
             return false;
         }
@@ -147,8 +173,18 @@ async function originateViaJson(form, dialBtn) {
             phone.setMorpheusCallUuid(data.call_uuid);
         }
 
+        const dialTarget =
+            data.to && String(data.to).length >= 10
+                ? `+${String(data.to).replace(/\D/g, '')}`
+                : destination;
+
         phone.setCustomerFirstOutbound(Boolean(data.customer_first));
-        phone.showClickToCallRinging(destination, { customerFirst: Boolean(data.customer_first) });
+        phone.showClickToCallRinging(dialTarget, { customerFirst: Boolean(data.customer_first) });
+
+        const fromExt = data.from ? String(data.from) : formData.get('from_extension');
+        if (fromExt) {
+            phone.syncSelectedExtension();
+        }
 
         const successMessage =
             data.outcome === 'connected'
@@ -181,7 +217,7 @@ function refreshDialButton(numberInput, callerSelect, dialBtn) {
         return;
     }
 
-    const hasNumber = normalizePhone(numberInput.value) !== '';
+    const hasNumber = isValidPstnDestination(numberInput.value);
     const hasExtension = !callerSelect || callerSelect.value !== '';
 
     if (!hasNumber || !hasExtension) {
@@ -249,8 +285,12 @@ function attachDialerForm(form) {
         callerSelect.addEventListener('change', () => {
             localStorage.setItem(STORAGE_KEY, callerSelect.value || '');
             refreshDialButton(numberInput, callerSelect, dialBtn);
+            getWebphone().syncSelectedExtension();
+            updateDialerRouteSummary(callerSelect);
         });
     }
+
+    updateDialerRouteSummary(callerSelect);
 
     const handleNumberChange = () => refreshDialButton(numberInput, callerSelect, dialBtn);
 
@@ -322,26 +362,13 @@ function attachDialerForm(form) {
             }
 
             if (form.dataset.originateJson === '1') {
-                const destination = normalizePhone(new FormData(form).get('destination'));
                 const phone = getWebphone();
 
-                // Browser SIP INVITE only works for internal extensions. PSTN must use
-                // Morpheus click-to-call so the trunk dials the customer's phone.
-                if (ready && phone.canDirectDial() && isExtensionTarget(destination)) {
-                    await originateViaWebphone(form, dialBtn);
-
-                    return;
-                }
-
-                if (ready) {
-                    await phone.ensureAudioContext().catch(() => {});
-                    markDialerClickToCallPending();
-                } else {
+                if (!ready || !phone.canDirectDial()) {
                     showToast(
-                        'Connect your browser line first — open the Phone panel and click Connect line.',
+                        'Connect your browser line first — pick your extension, click Connect line in the Phone panel, then try again.',
                         'error',
                     );
-                    hideLoadingOverlay();
                     dialBtn.removeAttribute('disabled');
                     dialBtn.classList.remove('opacity-50', 'cursor-not-allowed');
                     dialBtn.removeAttribute('aria-disabled');

@@ -120,6 +120,18 @@ class ZoomClickToCallService
         return $digits !== '' && strlen($digits) <= 6;
     }
 
+    public function isValidPstnDestination(string $phone): bool
+    {
+        $normalized = $this->normalizePhone($phone);
+        if ($normalized === '' || $this->isExtension($normalized)) {
+            return false;
+        }
+
+        $digits = preg_replace('/\D/', '', $normalized) ?? '';
+
+        return strlen($digits) >= 10;
+    }
+
     public function dialUrl(string $phoneNumber, ?string $callerId = null): ?string
     {
         return $this->preferredDialUrl($phoneNumber, $callerId);

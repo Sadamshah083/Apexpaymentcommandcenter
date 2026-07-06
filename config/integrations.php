@@ -12,7 +12,7 @@ return [
         'dial_method' => env('MORPHEUS_DIAL_METHOD', 'auto'),
         'originate_method' => env('MORPHEUS_ORIGINATE_METHOD', 'originate'),
         'originate_customer_first' => (bool) env('MORPHEUS_ORIGINATE_CUSTOMER_FIRST', false),
-        'ring_timeout' => (int) env('MORPHEUS_RING_TIMEOUT', 45),
+        'ring_timeout' => (int) env('MORPHEUS_RING_TIMEOUT', 90),
         'extension_password' => env('MORPHEUS_EXTENSION_PASSWORD'),
         'sip_auth_user' => env('MORPHEUS_SIP_AUTH_USER'),
         'webrtc_sip_domain' => env('MORPHEUS_WEBRTC_SIP_DOMAIN'),

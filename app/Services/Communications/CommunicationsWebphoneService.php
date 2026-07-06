@@ -47,13 +47,14 @@ class CommunicationsWebphoneService
         $publicHost = $this->clickToCall->publicWssHost();
         $wssUrl = $this->resolveWssUrl($publicHost);
         $directWss = "wss://{$publicHost}:7443/ws";
+        $dialOptions = $this->agents->extensionDialOptions($extensionNum);
 
         return [
             'enabled' => true,
             'extension' => $extensionNum,
             'sip_user' => $sipUser,
             'domain' => $sipDomain,
-            'dial_domain' => $publicHost,
+            'dial_domain' => $sipDomain,
             'wss_url' => $wssUrl,
             'wss_url_fallback' => $wssUrl !== $directWss ? $directWss : null,
             'auth_user' => $sipUser,
@@ -62,6 +63,9 @@ class CommunicationsWebphoneService
             'auto_answer_click_to_call' => (bool) config('integrations.morpheus.webphone_auto_answer', true),
             'outbound_prefix' => (string) config('integrations.morpheus.outbound_prefix', ''),
             'sip_params' => (string) config('integrations.morpheus.sip_params', 'user=phone'),
+            'outbound_caller_id' => $dialOptions['caller_id_number'] ?? null,
+            'campaign_id' => $dialOptions['campaign_id'] ?? $this->morpheus->defaultOutboundCampaignId(),
+            'ring_timeout_sec' => (int) config('integrations.morpheus.ring_timeout', 45),
             'stun_servers' => array_values(array_filter(
                 array_map('trim', explode(',', (string) config('integrations.morpheus.stun_servers', 'stun:stun.l.google.com:19302')))
             )),
@@ -88,6 +92,7 @@ class CommunicationsWebphoneService
         $warning = null;
 
         if ($ext !== null && ! empty($ext['id'])) {
+            $campaignId = $this->morpheus->defaultOutboundCampaignId();
             $extResult = $this->morpheus->updateExtension((string) $ext['id'], array_filter([
                 'password' => $password,
                 'is_dialer_agent' => true,
@@ -95,6 +100,7 @@ class CommunicationsWebphoneService
                 'override_campaign_cid' => true,
                 'caller_id_num' => $did,
                 'outbound_cid_num' => $did,
+                'campaign_id' => $campaignId,
             ], fn ($v) => filled($v)));
 
             if (isset($extResult['error']) && ! isset($extResult['id'])) {

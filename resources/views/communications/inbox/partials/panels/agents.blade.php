@@ -1,6 +1,6 @@
 @php
     $agents = $communicationAgents ?? [];
-    $suggestedExt = $suggestedExtensionNum ?? '1001';
+    $suggestedExt = $suggestedExtensionNum ?? config('integrations.communications.default_caller_id', '1020');
     $sipHost = config('integrations.morpheus.sip_host') ?: config('integrations.morpheus.host');
     $provisioned = session('provisioned_agent');
 @endphp
