@@ -3,6 +3,7 @@ import { showToast } from './toast.js';
 import {
     cancelPendingWebphoneConnect,
     ensureWebphoneReady,
+    getWebphone,
     markDialerClickToCallPending,
 } from './communications-webphone.js';
 const STORAGE_KEY = 'communications.dialer_extension';
@@ -24,6 +25,155 @@ function normalizePhone(value) {
     }
 
     return `+${numeric}`;
+}
+
+function csrfToken() {
+    return document.querySelector('meta[name="csrf-token"]')?.content || '';
+}
+
+function isExtensionTarget(destination) {
+    const digits = String(destination || '').replace(/\D/g, '');
+
+    return digits !== '' && digits.length <= 6;
+}
+
+async function logDirectOutbound(form, destination) {
+    const formData = new FormData(form);
+    formData.set('destination', destination);
+    formData.set('webphone_direct', '1');
+
+    try {
+        await fetch(form.action, {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-TOKEN': csrfToken(),
+            },
+            credentials: 'same-origin',
+            body: formData,
+        });
+    } catch {
+        // History logging is best-effort for browser-originated calls.
+    }
+}
+
+async function originateViaWebphone(form, dialBtn) {
+    const destination = normalizePhone(new FormData(form).get('destination'));
+
+    if (!destination) {
+        showToast('Enter a valid phone number first.', 'error');
+
+        return false;
+    }
+
+    hideLoadingOverlay();
+
+    const phone = getWebphone();
+
+    try {
+        await phone.dial(destination);
+        await logDirectOutbound(form, destination);
+        showToast(`Calling ${destination}… waiting for the destination to answer.`, 'success');
+
+        return true;
+    } catch (error) {
+        showToast(error.message || 'Could not place the call from your browser line.', 'error');
+
+        return false;
+    } finally {
+        hideLoadingOverlay();
+        if (dialBtn) {
+            dialBtn.removeAttribute('disabled');
+            dialBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            dialBtn.removeAttribute('aria-disabled');
+        }
+    }
+}
+
+async function originateViaJson(form, dialBtn) {
+    const formData = new FormData(form);
+    const destination = normalizePhone(formData.get('destination'));
+
+    if (!destination) {
+        showToast('Enter a valid phone number first.', 'error');
+
+        return false;
+    }
+
+        formData.set('destination', destination);
+    hideLoadingOverlay();
+
+    const phone = getWebphone();
+    // Arm auto-answer before Morpheus rings the browser extension (agent-first flow).
+    phone.markClickToCallPending();
+
+    if (phone.session && phone.session.state !== 'Terminated') {
+        await phone.hangup().catch(() => {});
+        await new Promise((resolve) => window.setTimeout(resolve, 1500));
+    }
+
+    try {
+        const response = await fetch(form.action, {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-TOKEN': csrfToken(),
+            },
+            credentials: 'same-origin',
+            body: formData,
+        });
+
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok || data.ok === false) {
+            const message = data.error || 'Could not place the call. Check your extension and try again.';
+            showToast(message, 'error');
+
+            return false;
+        }
+
+        if (!data.call_uuid) {
+            showToast(
+                data.error || 'Morpheus did not start a trunk call. Connect your webphone and try again.',
+                'error',
+            );
+
+            return false;
+        }
+
+        if (data.call_uuid) {
+            phone.setMorpheusCallUuid(data.call_uuid);
+        }
+
+        phone.setCustomerFirstOutbound(Boolean(data.customer_first));
+        phone.showClickToCallRinging(destination, { customerFirst: Boolean(data.customer_first) });
+
+        const successMessage =
+            data.outcome === 'connected'
+                ? 'Call connected.'
+                : data.outcome === 'no_answer'
+                  ? 'Call placed but your line did not answer in time.'
+                  : data.customer_first
+                    ? 'Your phone is ringing — answer within 90 seconds. Keep Connect line on.'
+                    : 'Connecting your line… the destination will ring once your browser phone answers.';
+
+        showToast(data.warning || successMessage, data.warning ? 'warning' : 'success');
+
+        return true;
+    } catch (error) {
+        showToast(error.message || 'Could not place the call.', 'error');
+
+        return false;
+    } finally {
+        hideLoadingOverlay();
+        if (dialBtn) {
+            dialBtn.removeAttribute('disabled');
+            dialBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            dialBtn.removeAttribute('aria-disabled');
+        }
+    }
 }
 
 function refreshDialButton(numberInput, callerSelect, dialBtn) {
@@ -144,28 +294,66 @@ function attachDialerForm(form) {
 
         if (document.querySelector('[data-webphone-panel]')) {
             event.preventDefault();
+            hideLoadingOverlay();
+
+            if (form.dataset.dialerConnectPending === '1') {
+                return;
+            }
+
             form.dataset.dialerConnectPending = '1';
             form.dataset.dialerConnectCancelled = '0';
 
-            const ready = await ensureWebphoneReady();
+            dialBtn.setAttribute('disabled', 'disabled');
+            dialBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            dialBtn.setAttribute('aria-disabled', 'true');
+
+            const ready = await ensureWebphoneReady({ silent: true });
             const wasCancelled = form.dataset.dialerConnectCancelled === '1';
             form.dataset.dialerConnectPending = '0';
             form.dataset.dialerConnectCancelled = '0';
 
             if (wasCancelled) {
                 hideLoadingOverlay();
+                dialBtn.removeAttribute('disabled');
+                dialBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                dialBtn.removeAttribute('aria-disabled');
+
                 return;
             }
 
-            if (!ready) {
-                hideLoadingOverlay();
+            if (form.dataset.originateJson === '1') {
+                const destination = normalizePhone(new FormData(form).get('destination'));
+                const phone = getWebphone();
+
+                // Browser SIP INVITE only works for internal extensions. PSTN must use
+                // Morpheus click-to-call so the trunk dials the customer's phone.
+                if (ready && phone.canDirectDial() && isExtensionTarget(destination)) {
+                    await originateViaWebphone(form, dialBtn);
+
+                    return;
+                }
+
+                if (ready) {
+                    await phone.ensureAudioContext().catch(() => {});
+                    markDialerClickToCallPending();
+                } else {
+                    showToast(
+                        'Connect your browser line first — open the Phone panel and click Connect line.',
+                        'error',
+                    );
+                    hideLoadingOverlay();
+                    dialBtn.removeAttribute('disabled');
+                    dialBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                    dialBtn.removeAttribute('aria-disabled');
+
+                    return;
+                }
+
+                await originateViaJson(form, dialBtn);
+
                 return;
             }
 
-            markDialerClickToCallPending();
-            // The generic form-loading hook already marked the first submit as
-            // "in progress". Clear it before re-submitting so the real
-            // originate POST is not blocked by the duplicate-submit guard.
             hideLoadingOverlay();
             form.dataset.webphoneChecked = '1';
             form.requestSubmit();

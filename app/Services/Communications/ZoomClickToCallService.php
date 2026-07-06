@@ -4,6 +4,53 @@ namespace App\Services\Communications;
 
 class ZoomClickToCallService
 {
+    public function publicSipHost(): string
+    {
+        $sipHost = trim((string) config('integrations.morpheus.sip_host', ''));
+        $host = trim((string) config('integrations.morpheus.host', ''));
+
+        if ($sipHost === '') {
+            return $host;
+        }
+
+        if (str_ends_with(strtolower($sipHost), '.local') && $host !== '') {
+            return $host;
+        }
+
+        return $sipHost;
+    }
+
+    /**
+     * SIP realm for WebRTC REGISTER (e.g. apexone.pbx.local). WSS stays on the public Morpheus host.
+     */
+    public function webrtcSipDomain(): string
+    {
+        $configured = trim((string) config('integrations.morpheus.webrtc_sip_domain', ''));
+        if ($configured !== '') {
+            return $configured;
+        }
+
+        $sipHost = trim((string) config('integrations.morpheus.sip_host', ''));
+        if ($sipHost !== '' && str_ends_with(strtolower($sipHost), '.pbx.local')) {
+            return $sipHost;
+        }
+
+        $host = trim((string) config('integrations.morpheus.host', ''));
+        if ($host !== '' && str_contains($host, '.')) {
+            $subdomain = explode('.', $host)[0];
+            if ($subdomain !== '') {
+                return $subdomain.'.pbx.local';
+            }
+        }
+
+        return $this->publicSipHost();
+    }
+
+    public function publicWssHost(): string
+    {
+        return $this->publicSipHost();
+    }
+
     public function normalizePhone(string $phone): string
     {
         $phone = trim($phone);
@@ -34,6 +81,36 @@ class ZoomClickToCallService
         }
 
         return '+'.$numeric;
+    }
+
+    /**
+     * Morpheus contactivity trunk expects tech-prefixed dial strings (e.g. 482983#12722001232).
+     * Extensions (<=6 digits) are never prefixed.
+     */
+    public function formatOriginateDestination(string $phone): string
+    {
+        $phone = trim($phone);
+
+        if (preg_match('/^\d+#\d+$/', preg_replace('/[^\d#]/', '', $phone) ?? '')) {
+            return preg_replace('/[^\d#]/', '', $phone) ?? '';
+        }
+
+        if (str_contains($phone, '#')) {
+            $phone = trim(substr($phone, strrpos($phone, '#') + 1));
+        }
+
+        $digits = preg_replace('/\D/', '', $phone) ?? '';
+
+        if ($digits === '' || strlen($digits) <= 6) {
+            return $digits;
+        }
+
+        $techPrefix = trim((string) config('integrations.morpheus.outbound_prefix', ''));
+        if ($techPrefix === '') {
+            return $digits;
+        }
+
+        return rtrim($techPrefix, '#').'#'.$digits;
     }
 
     public function isExtension(string $phone): bool
@@ -75,7 +152,7 @@ class ZoomClickToCallService
 
     public function sipUrl(string $phoneNumber, ?string $fromExtension = null): ?string
     {
-        $host = (string) (config('integrations.morpheus.sip_host') ?: config('integrations.morpheus.host'));
+        $host = $this->publicSipHost();
         if ($host === '') {
             return null;
         }

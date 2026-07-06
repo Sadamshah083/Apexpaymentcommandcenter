@@ -16,11 +16,12 @@
         fn ($ext) => (string) ($ext['extension_num'] ?? '') === (string) $defaultExtension,
     );
     $endpointOnline = (bool) ($selectedExt['endpoint_online'] ?? true);
-    $sipHost = config('integrations.morpheus.sip_host') ?: config('integrations.morpheus.host');
-    $portalUrl = app(\App\Services\Communications\ZoomClickToCallService::class)->portalUrl();
+    $clickToCall = app(\App\Services\Communications\ZoomClickToCallService::class);
+    $sipHost = $clickToCall->publicSipHost();
+    $portalUrl = $clickToCall->portalUrl();
 @endphp
 
-@if (!$endpointOnline && $extensions !== [])
+@if (!$endpointOnline && $extensions !== [] && !(bool) config('integrations.morpheus.webrtc_enabled', true))
     <div class="comm-hub-alert comm-hub-alert-warning mb-2 text-xs">
         <p class="font-semibold">Phone not online</p>
         <p class="mt-1">Register SIP to <code>{{ $sipHost }}</code> or
@@ -34,12 +35,7 @@
 @endif
 
 <form method="POST" action="{{ route($routePrefix . 'communications.morpheus.calls.originate') }}"
-    class="ghl-dialer-originate-form ghl-dialer-compact"
-    data-form-loading
-    data-loading-cancelable="1"
-    data-loading-title="Placing call"
-    data-loading-message="Ringing your extension via Morpheus CX…"
-    data-loading-button-text="Calling…">
+    class="ghl-dialer-originate-form ghl-dialer-compact" data-fallback-sip="1" data-originate-json="1">
     @csrf
     <input type="hidden" name="fallback" value="sip">
 

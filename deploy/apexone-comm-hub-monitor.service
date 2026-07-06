@@ -1,0 +1,15 @@
+[Unit]
+Description=ApexOne Communications Hub health monitor
+After=network.target php8.3-fpm.service nginx.service
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/apexone
+ExecStart=/usr/bin/php /var/www/apexone/scripts/comm_hub_monitor.php
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Communications Hub monitor every minute
+Requires=apexone-comm-hub-monitor.service
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=60s
+AccuracySec=15s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
