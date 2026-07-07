@@ -679,7 +679,7 @@ class ApexWebphone {
                 this.morpheusCallUuid = data.bridged_to;
             }
 
-            if (data.destination_connected || (Number(data.billsec) >= 2 && data.live === false)) {
+            if (data.destination_connected) {
                 this.markDestinationConnected();
 
                 return;
@@ -708,16 +708,10 @@ class ApexWebphone {
 
                 this.stopDestinationPoll();
 
-                if (billsec >= 3) {
-                    this.markDestinationConnected();
-
-                    return;
-                }
-
                 const causeLabel = cause.replace(/_/g, ' ').toLowerCase();
                 const message = this.customerFirstOutbound
                     ? 'Call ended before connecting. Keep Connect line on and try again.'
-                    : `Destination leg ended (${causeLabel}). If the phone never rang, check Morpheus trunk routing.`;
+                    : `Destination leg ended (${causeLabel}). If your phone never rang, stay on Connect line and try again.`;
 
                 showToast(message, 'warning');
             }
@@ -751,14 +745,14 @@ class ApexWebphone {
 
         this.updateCallCard({
             title: 'Call live',
-            subtitle: 'Destination answered — two-way audio is active.',
+            subtitle: 'Your phone answered — two-way audio is active.',
             detail: this.currentCallPeer ? `To: ${this.currentCallPeer}` : '',
             visible: true,
             timer: this.ui?.floatingTimer?.textContent || '00:00',
         });
         this.updateFloatingPopup({
             title: 'Call live',
-            subtitle: 'Destination answered — two-way audio is active.',
+            subtitle: 'Your phone answered — two-way audio is active.',
             detail: this.currentCallPeer ? `To: ${this.currentCallPeer}` : '',
             visible: true,
             timer: this.ui?.floatingTimer?.textContent || '00:00',
@@ -1357,6 +1351,7 @@ class ApexWebphone {
             contactParams: {
                 transport: 'ws',
             },
+            contactName: String(this.config.extension || sipUser || ''),
             authorizationUsername: this.config.auth_user,
             authorizationPassword: this.config.password,
             displayName: this.sanitizeDisplayName(this.config),
@@ -1369,6 +1364,9 @@ class ApexWebphone {
 
         this.userAgent.delegate = {
             onInvite: (invitation) => this.handleInvite(invitation),
+            onNotify: (notification) => {
+                notification.accept().catch(() => {});
+            },
         };
 
         await this.userAgent.start();
@@ -1581,7 +1579,7 @@ class ApexWebphone {
 
         this.session = invitation;
         const caller = invitation.remoteIdentity?.uri?.user || 'Unknown';
-        const isOutboundLeg = this.pendingClickToCall;
+        const isOutboundLeg = this.pendingClickToCall || this.clickToCallActive;
 
         if (isOutboundLeg) {
             this.setCallContext('outbound', this.currentCallPeer || caller);
@@ -1858,24 +1856,9 @@ class ApexWebphone {
             return;
         }
 
-        const maybeMarkConnected = () => {
-            if (
-                this.awaitingDestinationBridge &&
-                this.currentCallDirection === 'outbound' &&
-                session.state === SessionState.Established
-            ) {
-                window.setTimeout(() => {
-                    if (this.awaitingDestinationBridge && session.state === SessionState.Established) {
-                        this.markDestinationConnected();
-                    }
-                }, 1200);
-            }
-        };
-
         pc.ontrack = (event) => {
             remoteAudio.srcObject = event.streams[0];
             remoteAudio.play().catch(() => {});
-            maybeMarkConnected();
         };
 
         const stream = new MediaStream();
@@ -1887,7 +1870,6 @@ class ApexWebphone {
         if (stream.getTracks().length > 0) {
             remoteAudio.srcObject = stream;
             remoteAudio.play().catch(() => {});
-            maybeMarkConnected();
         }
     }
 

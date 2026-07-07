@@ -224,9 +224,14 @@ class ZoomApiService
         }
 
         $billsec = (int) ($snapshot['billsec'] ?? $snapshot['duration_sec'] ?? 0);
-        if ($billsec >= 2 && $destDigits !== '') {
+        if ($billsec >= 5 && $destDigits !== '') {
             foreach (['destination_number', 'callee_number', 'phone_number', 'destination', 'to'] as $field) {
-                $digits = $this->normalizePhoneDigits($snapshot[$field] ?? null);
+                $raw = (string) ($snapshot[$field] ?? '');
+                if (MorpheusSipIdentity::isSipContactHash($raw)) {
+                    continue;
+                }
+
+                $digits = $this->normalizePhoneDigits($raw);
                 if ($digits !== '' && ($digits === $destDigits || str_ends_with($destDigits, $digits) || str_ends_with($digits, $destDigits))) {
                     return true;
                 }

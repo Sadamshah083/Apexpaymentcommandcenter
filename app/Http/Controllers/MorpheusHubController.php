@@ -10,6 +10,7 @@ use App\Services\Communications\CommunicationsDataService;
 use App\Services\Communications\MorpheusHubService;
 use App\Services\Integrations\ZoomApiService;
 use App\Services\Workspace\WorkspaceContextService;
+use App\Support\MorpheusSipIdentity;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -402,11 +403,16 @@ class MorpheusHubController extends Controller
             $destinationConnected = $this->morpheus->destinationAnsweredOnCall($bridgedTo, $destination);
         }
 
-        if (! $destinationConnected && $billsec >= 2) {
+        if (! $destinationConnected && $billsec >= 5) {
             $snapshotDest = preg_replace('/\D/', '', (string) ($snapshot['destination_number'] ?? '')) ?? '';
             $requestedDest = preg_replace('/\D/', '', (string) $destination) ?? '';
+            $rawDest = (string) ($snapshot['destination_number'] ?? '');
 
-            if (strlen($snapshotDest) >= 10 && ! preg_match('/[a-z]/i', (string) ($snapshot['destination_number'] ?? ''))) {
+            if (
+                strlen($snapshotDest) >= 10
+                && ! MorpheusSipIdentity::isSipContactHash($rawDest)
+                && ! preg_match('/[a-z]/i', $rawDest)
+            ) {
                 $destinationConnected = $requestedDest === ''
                     || $snapshotDest === $requestedDest
                     || str_ends_with($requestedDest, $snapshotDest)
