@@ -1468,6 +1468,7 @@ class ApexWebphone {
             const digits = String(callerId).replace(/\D/g, '');
             if (digits) {
                 headers.push(`P-Asserted-Identity: <sip:${digits}@${domain}>`);
+                headers.push(`Remote-Party-ID: <sip:${digits}@${domain}>;party=calling;privacy=off;screen=no`);
             }
         }
 

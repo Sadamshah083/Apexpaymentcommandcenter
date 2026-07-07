@@ -90,6 +90,20 @@ async function logDirectOutbound(form, destination) {
 }
 
 async function originateViaWebphone(form, dialBtn) {
+    if (dialInFlight) {
+        showToast('A call is already being placed. Please wait.', 'warning');
+
+        return false;
+    }
+
+    const sinceLastDial = Date.now() - lastDialAt;
+    if (sinceLastDial < DIAL_COOLDOWN_MS) {
+        const waitSec = Math.ceil((DIAL_COOLDOWN_MS - sinceLastDial) / 1000);
+        showToast(`Wait ${waitSec}s before placing another call on this line.`, 'warning');
+
+        return false;
+    }
+
     const destination = normalizePhone(new FormData(form).get('destination'));
 
     if (!destination) {
@@ -107,11 +121,13 @@ async function originateViaWebphone(form, dialBtn) {
     hideLoadingOverlay();
 
     const phone = getWebphone();
+    dialInFlight = true;
+    lastDialAt = Date.now();
 
     try {
         await phone.dial(destination);
         await logDirectOutbound(form, destination);
-        showToast(`Calling ${destination}… waiting for the destination to answer.`, 'success');
+        showToast(`Calling ${destination} from your browser line — the destination phone will ring.`, 'success');
 
         return true;
     } catch (error) {
@@ -119,6 +135,7 @@ async function originateViaWebphone(form, dialBtn) {
 
         return false;
     } finally {
+        dialInFlight = false;
         hideLoadingOverlay();
         if (dialBtn) {
             dialBtn.removeAttribute('disabled');
@@ -402,6 +419,18 @@ function attachDialerForm(form) {
                     dialBtn.removeAttribute('aria-disabled');
 
                     return;
+                }
+
+                const dialMode = phone.config?.dial_mode || 'sip';
+                const preferSip = dialMode !== 'api' && form.dataset.dialViaSip !== '0';
+
+                if (preferSip) {
+                    const sipOk = await originateViaWebphone(form, dialBtn);
+                    if (sipOk) {
+                        return;
+                    }
+
+                    showToast('SIP dial failed — retrying via server originate…', 'warning');
                 }
 
                 await originateViaJson(form, dialBtn);

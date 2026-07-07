@@ -65,12 +65,13 @@
 
 @if ($layout === 'center')
     <x-communications.molecules.alert variant="info" class="mb-4">
-        After your line shows <strong>Registered</strong>, enter a number and press <strong>Call</strong>. Your browser may ring first — answer to connect the outbound leg.
+        Connect your line, then press <strong>Call</strong>. Your browser places the call over SIP (like a softphone) — the destination phone rings directly.
     </x-communications.molecules.alert>
 @endif
 
 <form method="POST" action="{{ route($routePrefix . 'communications.morpheus.calls.originate') }}"
-    class="ghl-dialer-originate-form {{ ($layout ?? '') === 'center' ? 'ghl-dialer-form--center ghl-dialer-form--enterprise' : '' }}" data-fallback-sip="1" data-originate-json="1">
+    class="ghl-dialer-originate-form {{ ($layout ?? '') === 'center' ? 'ghl-dialer-form--center ghl-dialer-form--enterprise' : '' }}"
+    data-fallback-sip="1" data-originate-json="1" data-dial-via-sip="1">
     @csrf
     <input type="hidden" name="fallback" value="sip">
 
