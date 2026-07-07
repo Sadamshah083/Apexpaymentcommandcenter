@@ -22,4 +22,11 @@ class MorpheusSipIdentityTest extends TestCase
     {
         $this->assertSame('Jane Agent', MorpheusSipIdentity::displayName('Jane Agent', null));
     }
+
+    public function test_sip_contact_hash_detection(): void
+    {
+        $this->assertTrue(MorpheusSipIdentity::isSipContactHash('2c7sd3fg'));
+        $this->assertTrue(MorpheusSipIdentity::isSipContactHash('dv7kdt12'));
+        $this->assertFalse(MorpheusSipIdentity::isSipContactHash('12722001232'));
+    }
 }

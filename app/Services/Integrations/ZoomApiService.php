@@ -2,6 +2,7 @@
 
 namespace App\Services\Integrations;
 
+use App\Support\MorpheusSipIdentity;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -439,6 +440,21 @@ class ZoomApiService
         }
 
         $this->clearExtensionForOutboundDial($fromExtension, kickSip: false);
+        usleep(1_500_000);
+
+        if ($this->extensionHasLiveCalls($fromExtension)) {
+            $this->clearExtensionForOutboundDial($fromExtension, kickSip: true);
+            sleep(3);
+
+            if ($this->extensionHasLiveCalls($fromExtension)) {
+                return [
+                    'ok' => false,
+                    'extension_busy' => true,
+                    'error' => "Extension {$fromExtension} is still busy. Wait 10–15 seconds, click Connect line, then try again.",
+                    'attempted' => ['pre-check-busy'],
+                ];
+            }
+        }
 
         $this->ensureManualOutboundCampaign();
         $extra = $this->originatePayloadExtras($options);
@@ -548,6 +564,23 @@ class ZoomApiService
                 'attempted' => $attempted,
                 'line_reset' => $lineReset,
             ];
+        }
+
+        if ($callUuid !== '') {
+            $routingIssue = $this->detectMisroutedDestination($callUuid, $dialDestination);
+            if ($routingIssue !== null) {
+                $this->hangup($callUuid);
+
+                return [
+                    'ok' => false,
+                    'routing_error' => true,
+                    'extension_busy' => str_contains(strtolower($routingIssue), 'busy'),
+                    'error' => $routingIssue,
+                    'call_uuid' => $callUuid,
+                    'attempted' => $attempted,
+                    'line_reset' => $lineReset,
+                ];
+            }
         }
 
         return array_merge($response, [
@@ -839,14 +872,66 @@ class ZoomApiService
      */
     protected function originatePayloadExtras(array $options = []): array
     {
+        $callerIdNumber = $this->normalizeOriginateCallerId($options['caller_id_number'] ?? null);
+        $callerIdName = MorpheusSipIdentity::displayName($options['caller_id_name'] ?? null, $callerIdNumber);
+
         return array_filter([
-            'caller_id_number' => $this->normalizeOriginateCallerId($options['caller_id_number'] ?? null),
-            'caller_id_name' => $options['caller_id_name'] ?? null,
+            'caller_id_number' => $callerIdNumber,
+            'caller_id_name' => $callerIdName !== '' ? $callerIdName : null,
             'timeout_sec' => $options['timeout_sec'] ?? null,
             // Required by Morpheus click-to-call / originate APIs.
             'campaign_id' => $options['campaign_id'] ?? $this->defaultOutboundCampaignId(),
             'lead_id' => $options['lead_id'] ?? null,
         ], fn ($value) => $value !== null && $value !== '');
+    }
+
+    public function extensionHasLiveCalls(string $extension): bool
+    {
+        $normalized = preg_replace('/\D/', '', $extension) ?: $extension;
+
+        foreach ($this->listActiveCalls() as $call) {
+            if ($this->activeCallTouchesExtension($call, $normalized)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Detect Morpheus routing to a SIP contact hash instead of the PSTN destination.
+     */
+    protected function detectMisroutedDestination(string $callUuid, string $expectedDestination): ?string
+    {
+        $expectedDigits = preg_replace('/\D/', '', $expectedDestination) ?? '';
+        if ($expectedDigits === '') {
+            return null;
+        }
+
+        for ($i = 0; $i < 4; $i++) {
+            usleep(750_000);
+            $snap = $this->quickGetCall($callUuid) ?? [];
+            $dest = (string) ($snap['destination_number'] ?? '');
+            $cause = strtoupper((string) ($snap['hangup_cause'] ?? ''));
+
+            if ($dest !== '' && MorpheusSipIdentity::isSipContactHash($dest)) {
+                if (in_array($cause, ['USER_BUSY', 'CALL_REJECTED'], true)) {
+                    return "Extension is busy — Morpheus tried to dial your browser contact ({$dest}) instead of the customer. Wait 10–15 seconds and try again.";
+                }
+
+                return "Morpheus misrouted the call to SIP contact {$dest} instead of {$expectedDigits}. Reconnect your line and try again.";
+            }
+
+            if ($dest !== '' && str_ends_with(preg_replace('/\D/', '', $dest) ?? '', substr($expectedDigits, -10))) {
+                return null;
+            }
+
+            if (in_array($cause, ['USER_BUSY', 'CALL_REJECTED'], true) && ($snap['billsec'] ?? 0) === 0) {
+                return 'Extension is busy on Morpheus. Wait 10–15 seconds, click Connect line, then dial again.';
+            }
+        }
+
+        return null;
     }
 
     /**

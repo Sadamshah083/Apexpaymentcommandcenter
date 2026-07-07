@@ -6,6 +6,9 @@ import {
     getWebphone,
 } from './communications-webphone.js';
 const STORAGE_KEY = 'communications.dialer_extension';
+const DIAL_COOLDOWN_MS = 12000;
+let lastDialAt = 0;
+let dialInFlight = false;
 
 function stripCarrierPrefix(value) {
     const raw = String(value || '').trim();
@@ -126,6 +129,20 @@ async function originateViaWebphone(form, dialBtn) {
 }
 
 async function originateViaJson(form, dialBtn) {
+    if (dialInFlight) {
+        showToast('A call is already being placed. Please wait.', 'warning');
+
+        return false;
+    }
+
+    const sinceLastDial = Date.now() - lastDialAt;
+    if (sinceLastDial < DIAL_COOLDOWN_MS) {
+        const waitSec = Math.ceil((DIAL_COOLDOWN_MS - sinceLastDial) / 1000);
+        showToast(`Wait ${waitSec}s before placing another call on this line.`, 'warning');
+
+        return false;
+    }
+
     const formData = new FormData(form);
     const destination = normalizePhone(formData.get('destination'));
 
@@ -146,6 +163,8 @@ async function originateViaJson(form, dialBtn) {
 
     const phone = getWebphone();
     phone.markClickToCallPending();
+    dialInFlight = true;
+    lastDialAt = Date.now();
 
     try {
         const response = await fetch(form.action, {
@@ -211,6 +230,7 @@ async function originateViaJson(form, dialBtn) {
 
         return false;
     } finally {
+        dialInFlight = false;
         hideLoadingOverlay();
         if (dialBtn) {
             dialBtn.removeAttribute('disabled');

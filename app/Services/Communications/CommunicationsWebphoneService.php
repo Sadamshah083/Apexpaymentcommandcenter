@@ -96,13 +96,16 @@ class CommunicationsWebphoneService
 
         if ($ext !== null && ! empty($ext['id'])) {
             $campaignId = $this->morpheus->defaultOutboundCampaignId();
+            $cidName = $did ? MorpheusSipIdentity::displayName(null, $did) : '';
             $extResult = $this->morpheus->updateExtension((string) $ext['id'], array_filter([
                 'password' => $password,
                 'is_dialer_agent' => true,
                 'status' => 'active',
                 'override_campaign_cid' => true,
                 'caller_id_num' => $did,
+                'caller_id_name' => $cidName !== '' ? $cidName : $did,
                 'outbound_cid_num' => $did,
+                'outbound_cid_name' => $cidName !== '' ? $cidName : $did,
                 'campaign_id' => $campaignId,
             ], fn ($v) => filled($v)));
 

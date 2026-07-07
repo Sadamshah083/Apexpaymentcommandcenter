@@ -1002,6 +1002,24 @@ class MorpheusHubController extends Controller
         }
 
         $this->callHistory->logOutboundDial($workspace, $user, $fromExtension, $destination, $morpheusCallUuid);
+
+        if (filled($morpheusCallUuid)) {
+            $logId = \App\Models\CommunicationCallLog::query()
+                ->where('workspace_id', $workspace->id)
+                ->where('morpheus_call_uuid', $morpheusCallUuid)
+                ->latest('id')
+                ->value('id');
+
+            if ($logId) {
+                dispatch(function () use ($logId): void {
+                    $log = \App\Models\CommunicationCallLog::find($logId);
+                    if ($log) {
+                        app(\App\Services\Communications\CommunicationsCallHistoryService::class)->syncFromCdr($log);
+                    }
+                })->afterResponse();
+            }
+        }
+
         $this->data->bustCache();
     }
 

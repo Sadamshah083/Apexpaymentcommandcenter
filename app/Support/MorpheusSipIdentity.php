@@ -36,4 +36,18 @@ final class MorpheusSipIdentity
             $value,
         );
     }
+
+    /**
+     * Morpheus sometimes dials a browser SIP contact hash instead of PSTN (e.g. 2c7sd3fg).
+     */
+    public static function isSipContactHash(string $value): bool
+    {
+        $value = strtolower(trim($value));
+
+        if ($value === '' || ctype_digit($value)) {
+            return false;
+        }
+
+        return strlen($value) <= 12 && (bool) preg_match('/^[a-z0-9]+$/', $value);
+    }
 }

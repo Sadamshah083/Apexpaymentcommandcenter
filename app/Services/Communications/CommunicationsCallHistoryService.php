@@ -50,6 +50,62 @@ class CommunicationsCallHistoryService
         ]);
     }
 
+    /**
+     * Poll Morpheus CDR and update local call history after the dial completes.
+     */
+    public function syncFromCdr(CommunicationCallLog $log): void
+    {
+        if (! filled($log->morpheus_call_uuid)) {
+            return;
+        }
+
+        $api = app(\App\Services\Integrations\ZoomApiService::class);
+        $snap = null;
+
+        for ($i = 0; $i < 8; $i++) {
+            if ($i > 0) {
+                sleep(5);
+            }
+
+            $snap = $api->getCall((string) $log->morpheus_call_uuid);
+            if (! is_array($snap) || $snap === []) {
+                continue;
+            }
+
+            if ($snap['live'] ?? false) {
+                continue;
+            }
+
+            break;
+        }
+
+        if (! is_array($snap) || $snap === []) {
+            return;
+        }
+
+        $cause = strtoupper((string) ($snap['hangup_cause'] ?? ''));
+        $billsec = (int) ($snap['billsec'] ?? 0);
+        $dest = (string) ($snap['destination_number'] ?? '');
+
+        $status = match (true) {
+            in_array($cause, ['USER_BUSY', 'CALL_REJECTED'], true) => 'busy',
+            $billsec > 0 => 'completed',
+            in_array($cause, ['NO_USER_RESPONSE', 'NO_ANSWER', 'ORIGINATOR_CANCEL'], true) => 'no_answer',
+            default => 'completed',
+        };
+
+        $log->update([
+            'status' => $status,
+            'duration_sec' => $billsec > 0 ? $billsec : null,
+            'ended_at' => now(),
+            'meta' => array_merge($log->meta ?? [], [
+                'cdr_destination' => $dest,
+                'hangup_cause' => $cause,
+                'cdr_synced_at' => now()->toIso8601String(),
+            ]),
+        ]);
+    }
+
     public function recordDisposition(
         Workspace $workspace,
         string $uuid,
