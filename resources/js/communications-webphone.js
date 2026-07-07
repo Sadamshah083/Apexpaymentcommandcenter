@@ -857,6 +857,8 @@ class ApexWebphone {
             return;
         }
 
+        config.display_name = this.sanitizeDisplayName(config);
+
         if (this.ui.domain) {
             this.ui.domain.textContent = config.domain || '—';
         }
@@ -1204,6 +1206,36 @@ class ApexWebphone {
         }
     }
 
+    sanitizeDisplayName(config) {
+        const callerId = String(config?.outbound_caller_id || '').replace(/\D/g, '');
+        if (callerId) {
+            return callerId;
+        }
+
+        const raw = String(config?.display_name || '').trim();
+        if (raw === '' || /^(admin|setter|closer)_(super|ops|tl|ag)_[a-z0-9]{3}$/i.test(raw)) {
+            return '';
+        }
+
+        if (/[<>"\\;]/.test(raw)) {
+            return '';
+        }
+
+        return raw;
+    }
+
+    wssUrlPriority(url) {
+        if (/morpheus\.cx:7443/i.test(url)) {
+            return 0;
+        }
+
+        if (/morpheus-ws/i.test(url)) {
+            return 2;
+        }
+
+        return 1;
+    }
+
     normalizeWssUrl(url) {
         if (!url) {
             return null;
@@ -1246,7 +1278,7 @@ class ApexWebphone {
             });
         });
 
-        return unique;
+        return unique.sort((a, b) => this.wssUrlPriority(a) - this.wssUrlPriority(b));
     }
 
     async _connect(extension, attempt) {
@@ -1257,6 +1289,7 @@ class ApexWebphone {
         this.config = await this.prepareConfig(extension);
         this.throwIfConnectCancelled(attempt);
         this.currentExtension = extension;
+        this.config.display_name = this.sanitizeDisplayName(this.config);
         this.applyConfigMeta(this.config);
         localStorage.setItem(STORAGE_KEY, extension);
 
@@ -1326,7 +1359,7 @@ class ApexWebphone {
             },
             authorizationUsername: this.config.auth_user,
             authorizationPassword: this.config.password,
-            displayName: this.config.display_name || '',
+            displayName: this.sanitizeDisplayName(this.config),
             sessionDescriptionHandlerFactoryOptions: {
                 peerConnectionConfiguration: {
                     iceServers,
