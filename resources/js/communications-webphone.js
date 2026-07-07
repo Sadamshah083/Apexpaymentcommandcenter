@@ -1365,7 +1365,12 @@ class ApexWebphone {
         this.userAgent.delegate = {
             onInvite: (invitation) => this.handleInvite(invitation),
             onNotify: (notification) => {
-                notification.accept().catch(() => {});
+                // Morpheus sends NOTIFY for call/dialog state. Always ACK 200 — do not 481.
+                try {
+                    notification.accept({ statusCode: 200, reasonPhrase: 'OK' });
+                } catch {
+                    notification.incomingNotifyRequest?.accept?.({ statusCode: 200, reasonPhrase: 'OK' });
+                }
             },
         };
 
