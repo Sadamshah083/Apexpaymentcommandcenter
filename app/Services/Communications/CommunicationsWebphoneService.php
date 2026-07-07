@@ -7,6 +7,7 @@ use App\Models\Workspace;
 use App\Services\Communications\MorpheusHubService;
 use App\Services\Communications\ZoomClickToCallService;
 use App\Services\Integrations\ZoomApiService;
+use App\Support\MorpheusSipIdentity;
 
 class CommunicationsWebphoneService
 {
@@ -45,9 +46,11 @@ class CommunicationsWebphoneService
         $sipUser = $this->sipAuthUser($extensionNum);
         $sipDomain = $this->clickToCall->webrtcSipDomain();
         $publicHost = $this->clickToCall->publicWssHost();
-        $wssUrl = $this->resolveWssUrl($publicHost);
-        $directWss = "wss://{$publicHost}:7443/ws";
         $dialOptions = $this->agents->extensionDialOptions($extensionNum);
+        $callerIdNumber = $dialOptions['caller_id_number'] ?? null;
+        $directWss = "wss://{$publicHost}:7443/";
+        $proxyWss = $this->proxyWssUrl($publicHost);
+        $wssUrl = $this->resolveWssUrl($publicHost, $directWss);
 
         return [
             'enabled' => true,
@@ -56,10 +59,10 @@ class CommunicationsWebphoneService
             'domain' => $sipDomain,
             'dial_domain' => $sipDomain,
             'wss_url' => $wssUrl,
-            'wss_url_fallback' => $wssUrl !== $directWss ? $directWss : null,
+            'wss_url_fallback' => $this->wssFallback($wssUrl, $directWss, $proxyWss),
             'auth_user' => $sipUser,
             'password' => $password,
-            'display_name' => $user->name,
+            'display_name' => MorpheusSipIdentity::displayName($user->name, $callerIdNumber),
             'auto_answer_click_to_call' => (bool) config('integrations.morpheus.webphone_auto_answer', true),
             'outbound_prefix' => (string) config('integrations.morpheus.outbound_prefix', ''),
             'sip_params' => (string) config('integrations.morpheus.sip_params', 'user=phone'),
@@ -196,23 +199,39 @@ class CommunicationsWebphoneService
         return $digits !== '' ? $digits : null;
     }
 
-    protected function resolveWssUrl(string $publicHost): string
+    protected function resolveWssUrl(string $publicHost, string $directWss): string
     {
         $configured = trim((string) config('integrations.morpheus.sip_wss_url', ''));
         if ($configured !== '') {
-            return str_contains($configured, '/ws')
-                ? $configured
-                : rtrim($configured, '/').'/ws';
+            return rtrim($configured, '/').'/';
         }
 
-        $appUrl = rtrim((string) config('app.url'), '/');
-        if ($appUrl !== '' && str_starts_with($appUrl, 'https://')) {
-            $host = parse_url($appUrl, PHP_URL_HOST);
-            if (is_string($host) && $host !== '' && $host !== $publicHost) {
-                return 'wss://'.$host.'/morpheus-ws/ws';
+        return $directWss;
+    }
+
+    protected function wssFallback(string $primary, string $directWss, ?string $proxyWss): ?string
+    {
+        foreach ([$directWss, $proxyWss] as $candidate) {
+            if (is_string($candidate) && $candidate !== '' && $candidate !== $primary) {
+                return $candidate;
             }
         }
 
-        return "wss://{$publicHost}:7443/ws";
+        return null;
+    }
+
+    protected function proxyWssUrl(string $publicHost): ?string
+    {
+        $appUrl = rtrim((string) config('app.url'), '/');
+        if ($appUrl === '' || ! str_starts_with($appUrl, 'https://')) {
+            return null;
+        }
+
+        $host = parse_url($appUrl, PHP_URL_HOST);
+        if (! is_string($host) || $host === '' || $host === $publicHost) {
+            return null;
+        }
+
+        return 'wss://'.$host.'/morpheus-ws/ws';
     }
 }

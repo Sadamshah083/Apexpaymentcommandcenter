@@ -1209,17 +1209,41 @@ class ApexWebphone {
             return null;
         }
 
-        return url.includes('/ws') ? url : `${String(url).replace(/\/$/, '')}/ws`;
+        return String(url).trim();
+    }
+
+    expandWssCandidates(url) {
+        const normalized = this.normalizeWssUrl(url);
+        if (!normalized) {
+            return [];
+        }
+
+        const candidates = [normalized];
+        if (normalized.endsWith('/ws')) {
+            const root = normalized.replace(/\/ws\/?$/, '/');
+            if (!candidates.includes(root)) {
+                candidates.push(root);
+            }
+        } else {
+            const withWs = `${normalized.replace(/\/?$/, '')}/ws`;
+            if (!candidates.includes(withWs)) {
+                candidates.push(withWs);
+            }
+        }
+
+        return candidates;
     }
 
     wssCandidates(config) {
-        const urls = [config?.wss_url, config?.wss_url_fallback].map((url) => this.normalizeWssUrl(url));
+        const urls = [config?.wss_url, config?.wss_url_fallback];
         const unique = [];
 
         urls.forEach((url) => {
-            if (url && !unique.includes(url)) {
-                unique.push(url);
-            }
+            this.expandWssCandidates(url).forEach((candidate) => {
+                if (candidate && !unique.includes(candidate)) {
+                    unique.push(candidate);
+                }
+            });
         });
 
         return unique;
@@ -1300,11 +1324,9 @@ class ApexWebphone {
             contactParams: {
                 transport: 'ws',
             },
-            reconnectionAttempts: 3,
-            reconnectionDelay: 2,
             authorizationUsername: this.config.auth_user,
             authorizationPassword: this.config.password,
-            displayName: this.config.display_name || extension,
+            displayName: this.config.display_name || '',
             sessionDescriptionHandlerFactoryOptions: {
                 peerConnectionConfiguration: {
                     iceServers,

@@ -5,6 +5,7 @@ namespace App\Services\Communications;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Services\Integrations\ZoomApiService;
+use App\Support\MorpheusSipIdentity;
 use Illuminate\Support\Str;
 
 class CommunicationsAgentService
@@ -351,11 +352,15 @@ class CommunicationsAgentService
         if (! filled($callerIdNum)) {
             $callerIdNum = $this->defaultOutboundDid();
         }
-        $callerIdName = $ext['outbound_cid_name'] ?? $ext['caller_id_name'] ?? null;
+        $normalizedCallerId = $this->morpheus->normalizeOriginateCallerId($callerIdNum);
+        $callerIdName = MorpheusSipIdentity::displayName(
+            $ext['outbound_cid_name'] ?? $ext['caller_id_name'] ?? null,
+            $normalizedCallerId,
+        );
 
         return array_filter([
-            'caller_id_number' => $this->morpheus->normalizeOriginateCallerId($callerIdNum),
-            'caller_id_name' => $callerIdName,
+            'caller_id_number' => $normalizedCallerId,
+            'caller_id_name' => $callerIdName !== '' ? $callerIdName : null,
             'campaign_id' => $this->morpheus->defaultOutboundCampaignId(),
         ], fn ($v) => filled($v));
     }
