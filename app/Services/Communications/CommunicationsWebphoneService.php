@@ -48,9 +48,7 @@ class CommunicationsWebphoneService
         $publicHost = $this->clickToCall->publicWssHost();
         $dialOptions = $this->agents->extensionDialOptions($extensionNum);
         $callerIdNumber = $dialOptions['caller_id_number'] ?? null;
-        $directWss = "wss://{$publicHost}:7443/";
-        $proxyWss = $this->proxyWssUrl($publicHost);
-        $wssUrl = $this->resolveWssUrl($publicHost, $directWss);
+        $wssUrl = $this->resolveWssUrl($publicHost);
 
         return [
             'enabled' => true,
@@ -59,10 +57,10 @@ class CommunicationsWebphoneService
             'domain' => $sipDomain,
             'dial_domain' => $sipDomain,
             'wss_url' => $wssUrl,
-            'wss_url_fallback' => $this->wssFallback($wssUrl, $directWss, $proxyWss),
+            'wss_url_fallback' => null,
             'auth_user' => $sipUser,
             'password' => $password,
-            'display_name' => MorpheusSipIdentity::displayName($user->name, $callerIdNumber),
+            'display_name' => MorpheusSipIdentity::displayName(null, $callerIdNumber),
             'auto_answer_click_to_call' => (bool) config('integrations.morpheus.webphone_auto_answer', true),
             'outbound_prefix' => (string) config('integrations.morpheus.outbound_prefix', ''),
             'sip_params' => (string) config('integrations.morpheus.sip_params', 'user=phone'),
@@ -103,6 +101,8 @@ class CommunicationsWebphoneService
                 'override_campaign_cid' => true,
                 'caller_id_num' => $did,
                 'outbound_cid_num' => $did,
+                'caller_id_name' => $did,
+                'outbound_cid_name' => $did,
                 'campaign_id' => $campaignId,
             ], fn ($v) => filled($v)));
 
@@ -199,39 +199,14 @@ class CommunicationsWebphoneService
         return $digits !== '' ? $digits : null;
     }
 
-    protected function resolveWssUrl(string $publicHost, string $directWss): string
+    protected function resolveWssUrl(string $publicHost): string
     {
         $configured = trim((string) config('integrations.morpheus.sip_wss_url', ''));
         if ($configured !== '') {
             return rtrim($configured, '/').'/';
         }
 
-        return $directWss;
-    }
-
-    protected function wssFallback(string $primary, string $directWss, ?string $proxyWss): ?string
-    {
-        foreach ([$directWss, $proxyWss] as $candidate) {
-            if (is_string($candidate) && $candidate !== '' && $candidate !== $primary) {
-                return $candidate;
-            }
-        }
-
-        return null;
-    }
-
-    protected function proxyWssUrl(string $publicHost): ?string
-    {
-        $appUrl = rtrim((string) config('app.url'), '/');
-        if ($appUrl === '' || ! str_starts_with($appUrl, 'https://')) {
-            return null;
-        }
-
-        $host = parse_url($appUrl, PHP_URL_HOST);
-        if (! is_string($host) || $host === '' || $host === $publicHost) {
-            return null;
-        }
-
-        return 'wss://'.$host.'/morpheus-ws/ws';
+        // Morpheus agent portal uses direct WSS on :7443 — required for INVITE/BYE call events.
+        return "wss://{$publicHost}:7443/";
     }
 }

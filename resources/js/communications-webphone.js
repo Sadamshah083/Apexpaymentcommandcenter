@@ -1241,7 +1241,13 @@ class ApexWebphone {
             return null;
         }
 
-        return String(url).trim();
+        const normalized = String(url).trim();
+
+        if (/^wss:\/\/[^/]+:7443\/?$/i.test(normalized)) {
+            return normalized.endsWith('/') ? normalized : `${normalized}/`;
+        }
+
+        return normalized;
     }
 
     expandWssCandidates(url) {
@@ -1250,13 +1256,17 @@ class ApexWebphone {
             return [];
         }
 
+        if (/^wss:\/\/[^/]+:7443\/?$/i.test(normalized)) {
+            return [normalized];
+        }
+
         const candidates = [normalized];
         if (normalized.endsWith('/ws')) {
             const root = normalized.replace(/\/ws\/?$/, '/');
             if (!candidates.includes(root)) {
                 candidates.push(root);
             }
-        } else {
+        } else if (normalized.includes('/morpheus-ws/')) {
             const withWs = `${normalized.replace(/\/?$/, '')}/ws`;
             if (!candidates.includes(withWs)) {
                 candidates.push(withWs);
