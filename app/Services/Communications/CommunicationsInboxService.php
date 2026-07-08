@@ -97,6 +97,7 @@ class CommunicationsInboxService
         'morpheusLists' => [],
         'morpheusExtensions' => [],
         'morpheusUsers' => [],
+        'activeCalls' => [],
         'selectedQueueWaiting' => [],
         'selectedConferenceMembers' => [],
         'phoneUsers' => [],
@@ -155,6 +156,7 @@ class CommunicationsInboxService
     $morpheusLists = [];
     $morpheusExtensions = [];
     $morpheusUsers = [];
+    $activeCalls = [];
     $communicationAgents = [];
     $suggestedExtensionNum = (string) (config('integrations.communications.default_caller_id') ?: '1020');
     $selectedQueueWaiting = [];
@@ -243,6 +245,10 @@ class CommunicationsInboxService
           if (auth()->check()) {
             $workspace = $this->workspaceContext->resolveActiveWorkspace(auth()->user());
             $callLogs = $this->callHistory->listForHub($workspace, $filters);
+            // Apply direction/missed/recorded filters to local history too
+            if ($channel === 'calls') {
+              $callLogs = $this->filterCallLogs($callLogs, $filters);
+            }
             $callStats = $this->data->callStatsFromLogs($callLogs);
 
             if (! $fastDialerShell && $channel === 'inbox' && $morpheusReachable) {
@@ -292,6 +298,12 @@ class CommunicationsInboxService
             } catch (\Throwable $e) {
               $warnings[] = $this->zoom->humanizeError($e->getMessage());
             }
+
+            $activeCalls = $this->safeDataLoad(
+              fn () => $this->morpheusHub->activeCalls(),
+              [],
+              $warnings,
+            );
           }
         } elseif ($callStats === []) {
           $callStats = $summaryStats;
@@ -688,6 +700,7 @@ class CommunicationsInboxService
       'communicationAgents' => $communicationAgents,
       'suggestedExtensionNum' => $suggestedExtensionNum,
       'morpheusUsers' => $morpheusUsers,
+      'activeCalls' => $activeCalls,
       'selectedQueueWaiting' => $selectedQueueWaiting,
       'selectedConferenceMembers' => $selectedConferenceMembers,
       'phoneUsers' => $phoneUsers,
@@ -771,6 +784,7 @@ class CommunicationsInboxService
       'communicationAgents' => [],
       'suggestedExtensionNum' => (string) (config('integrations.communications.default_caller_id') ?: '1020'),
       'morpheusUsers' => [],
+      'activeCalls' => [],
       'selectedQueueWaiting' => [],
       'selectedConferenceMembers' => [],
       'phoneUsers' => [],

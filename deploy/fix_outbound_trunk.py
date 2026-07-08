@@ -18,12 +18,15 @@ FILES = [
     "config/integrations.php",
     "resources/js/communications-webphone.js",
     "resources/js/communications-dialer.js",
+    "resources/css/communications-inbox.css",
+    "resources/views/communications/partials/webphone-panel.blade.php",
+    "resources/views/communications/partials/webphone-floating-popup.blade.php",
 ]
 
 ENV = {
     "MORPHEUS_OUTBOUND_PREFIX": "",
     "MORPHEUS_RING_TIMEOUT": "120",
-    "MORPHEUS_ORIGINATE_METHOD": "originate",
+    "MORPHEUS_ORIGINATE_METHOD": "click-to-call",
     "MORPHEUS_ORIGINATE_CUSTOMER_FIRST": "false",
 }
 

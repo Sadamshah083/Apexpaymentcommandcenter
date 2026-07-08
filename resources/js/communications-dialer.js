@@ -70,19 +70,23 @@ function updateDialerRouteSummary(callerSelect) {
 
 async function logDirectOutbound(form, destination) {
     const formData = new FormData(form);
-    formData.set('destination', destination);
-    formData.set('webphone_direct', '1');
+    const fromExtension = formData.get('from_extension');
 
     try {
         await fetch(form.action, {
             method: 'POST',
             headers: {
                 Accept: 'application/json',
+                'Content-Type': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest',
                 'X-CSRF-TOKEN': csrfToken(),
             },
             credentials: 'same-origin',
-            body: formData,
+            body: JSON.stringify({
+                destination,
+                from_extension: fromExtension,
+                webphone_direct: true,
+            }),
         });
     } catch {
         // History logging is best-effort for browser-originated calls.
@@ -179,7 +183,28 @@ async function originateViaJson(form, dialBtn) {
     hideLoadingOverlay();
 
     const phone = getWebphone();
+    phone.setCustomerFirstOutbound(false);
+    phone.setCallContext('outbound', destination);
+    phone.clickToCallActive = true;
+    phone.awaitingDestinationBridge = true;
     phone.markClickToCallPending();
+
+    try {
+        await phone.assertTransportForOriginate();
+    } catch (error) {
+        showToast(error?.message || 'Connect your Phone line (WebSocket) before calling.', 'error');
+        phone.clickToCallActive = false;
+        phone.awaitingDestinationBridge = false;
+        if (dialBtn) {
+            dialBtn.removeAttribute('disabled');
+            dialBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            dialBtn.removeAttribute('aria-disabled');
+        }
+
+        return false;
+    }
+
+    formData.set('webphone_transport_connected', '1');
     dialInFlight = true;
     lastDialAt = Date.now();
 
@@ -203,6 +228,8 @@ async function originateViaJson(form, dialBtn) {
                 : (data.error || 'Could not place the call. Check your extension and try again.');
 
             showToast(message, 'error');
+            phone.clickToCallActive = false;
+            phone.awaitingDestinationBridge = false;
 
             return false;
         }
@@ -243,6 +270,8 @@ async function originateViaJson(form, dialBtn) {
 
         return true;
     } catch (error) {
+        phone.clickToCallActive = false;
+        phone.awaitingDestinationBridge = false;
         showToast(error.message || 'Could not place the call.', 'error');
 
         return false;
@@ -407,6 +436,7 @@ function attachDialerForm(form) {
             }
 
             if (form.dataset.originateJson === '1') {
+                const destination = normalizePhone(new FormData(form).get('destination'));
                 const phone = getWebphone();
 
                 if (!ready || !phone.canDirectDial()) {
@@ -421,8 +451,22 @@ function attachDialerForm(form) {
                     return;
                 }
 
-                const dialMode = phone.config?.dial_mode || 'sip';
-                const preferSip = dialMode !== 'api' && form.dataset.dialViaSip !== '0';
+                // PSTN must use Morpheus click-to-call API (applies trunk routing + tech prefix).
+                // Browser INVITE to sip:number@apexone.morpheus.cx returns 404 NO_ROUTE_DESTINATION.
+                if (isValidPstnDestination(destination)) {
+                    await originateViaJson(form, dialBtn);
+
+                    return;
+                }
+
+                const dialMode = phone.config?.dial_mode || 'api';
+                const preferSip = dialMode === 'sip' && form.dataset.dialViaSip !== '0';
+
+                if (dialMode === 'api') {
+                    await originateViaJson(form, dialBtn);
+
+                    return;
+                }
 
                 if (preferSip) {
                     const sipOk = await originateViaWebphone(form, dialBtn);
@@ -430,7 +474,13 @@ function attachDialerForm(form) {
                         return;
                     }
 
-                    showToast('SIP dial failed — retrying via server originate…', 'warning');
+                    const rejectDetail = phone.lastInviteReject || 'INVITE rejected';
+                    showToast(
+                        `Browser SIP dial failed (${rejectDetail}). Open DevTools → Network → Socket → wss://apexone.morpheus.cx:7443 and check the INVITE response. Server click-to-call cannot ring ext ${phone.currentExtension || 'your line'} while Connect line is active.`,
+                        'error',
+                    );
+
+                    return;
                 }
 
                 await originateViaJson(form, dialBtn);

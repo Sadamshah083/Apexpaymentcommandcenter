@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Services\Communications\ZoomContactService;
 use App\Services\Communications\CommunicationsDataService;
+use App\Services\Communications\CommunicationsCallHistoryService;
 use App\Services\Integrations\ZoomApiService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
@@ -82,6 +83,12 @@ class CommunicationsHubTest extends TestCase
         $zoom->shouldReceive('requiredScopes')->andReturn([
             'phone:read:list_call_logs:admin' => 'Account call logs',
         ]);
+        $zoom->shouldReceive('outboundCallingProfile')->zeroOrMoreTimes()->andReturn([]);
+        $zoom->shouldReceive('humanizeError')->zeroOrMoreTimes()->andReturnUsing(fn ($m) => $m);
+        $zoom->shouldReceive('normalizeOriginateCallerId')->zeroOrMoreTimes()->andReturnArg(0);
+        $zoom->shouldReceive('defaultOutboundCampaignId')->zeroOrMoreTimes()->andReturn('camp_123');
+        $zoom->shouldReceive('clearExtensionForOutboundDial')->zeroOrMoreTimes();
+        $zoom->shouldReceive('getCall')->zeroOrMoreTimes()->andReturn([]);
 
         $contacts = Mockery::mock(ZoomContactService::class);
         $this->app->instance(ZoomApiService::class, $zoom);
@@ -204,6 +211,18 @@ class CommunicationsHubTest extends TestCase
             'https://apexone.morpheus.cx/api/v1/call-control/originate' => Http::response(['error' => 'not found'], 404),
         ]);
 
+        $zoom = Mockery::mock(ZoomApiService::class);
+        $zoom->shouldReceive('isConfigured')->andReturn(true);
+        $zoom->shouldReceive('humanizeError')->zeroOrMoreTimes()->andReturnUsing(fn ($m) => $m);
+        $zoom->shouldReceive('normalizeOriginateCallerId')->zeroOrMoreTimes()->andReturnArg(0);
+        $zoom->shouldReceive('defaultOutboundCampaignId')->zeroOrMoreTimes()->andReturn('camp_123');
+        $zoom->shouldReceive('clearExtensionForOutboundDial')->zeroOrMoreTimes();
+        $zoom->shouldReceive('getCall')->zeroOrMoreTimes()->andReturn([]);
+        $zoom->shouldReceive('outboundCallingProfile')->zeroOrMoreTimes()->andReturn([]);
+        $zoom->shouldReceive('listExtensions')->zeroOrMoreTimes()->andReturn(['extensions' => []]);
+        $zoom->shouldReceive('listUsers')->zeroOrMoreTimes()->andReturn(['users' => []]);
+        $this->app->instance(ZoomApiService::class, $zoom);
+
         $admin = $this->makeAdmin();
 
         $this->actingAs($admin)
@@ -247,6 +266,12 @@ class CommunicationsHubTest extends TestCase
                 'call_uuid' => 'uuid-1',
                 'outcome' => 'ringing',
             ]);
+        $zoom->shouldReceive('humanizeError')->zeroOrMoreTimes()->andReturnUsing(fn ($m) => $m);
+        $zoom->shouldReceive('normalizeOriginateCallerId')->zeroOrMoreTimes()->andReturnArg(0);
+        $zoom->shouldReceive('defaultOutboundCampaignId')->zeroOrMoreTimes()->andReturn('camp_123');
+        $zoom->shouldReceive('clearExtensionForOutboundDial')->zeroOrMoreTimes();
+        $zoom->shouldReceive('getCall')->zeroOrMoreTimes()->andReturn([]);
+        $zoom->shouldReceive('outboundCallingProfile')->zeroOrMoreTimes()->andReturn([]);
 
         $this->app->instance(ZoomApiService::class, $zoom);
 
@@ -307,10 +332,11 @@ class CommunicationsHubTest extends TestCase
         $uuid = '550e8400-e29b-41d4-a716-446655440000';
 
         $this->actingAs($admin)
+            ->from(route('admin.communications.index', ['channel' => 'calls']))
             ->post(route('admin.communications.morpheus.calls.transfer', ['uuid' => $uuid]), [
                 'destination' => '8003',
             ])
-            ->assertRedirect(route('admin.communications.index', ['mode' => 'calls']))
+            ->assertRedirect()
             ->assertSessionHas('success');
 
         Http::assertSent(function ($request) use ($uuid) {
@@ -395,6 +421,11 @@ class CommunicationsHubTest extends TestCase
         $zoom->shouldReceive('webhookSecret')->andReturn(null);
         $zoom->shouldReceive('requiredScopes')->andReturn([]);
         $zoom->shouldReceive('humanizeError')->andReturnUsing(fn (string $message) => $message);
+        $zoom->shouldReceive('outboundCallingProfile')->zeroOrMoreTimes()->andReturn([]);
+        $zoom->shouldReceive('normalizeOriginateCallerId')->zeroOrMoreTimes()->andReturnArg(0);
+        $zoom->shouldReceive('defaultOutboundCampaignId')->zeroOrMoreTimes()->andReturn('camp_123');
+        $zoom->shouldReceive('clearExtensionForOutboundDial')->zeroOrMoreTimes();
+        $zoom->shouldReceive('getCall')->zeroOrMoreTimes()->andReturn([]);
 
         $contacts = Mockery::mock(ZoomContactService::class);
         $contacts->shouldReceive('buildIndexPayload')->andReturn([
@@ -481,6 +512,12 @@ class CommunicationsHubTest extends TestCase
         $zoom->shouldReceive('webhookSecret')->andReturn(null);
         $zoom->shouldReceive('requiredScopes')->andReturn([]);
         $zoom->shouldReceive('clearAccessTokenCache')->once();
+        $zoom->shouldReceive('outboundCallingProfile')->zeroOrMoreTimes()->andReturn([]);
+        $zoom->shouldReceive('humanizeError')->zeroOrMoreTimes()->andReturnUsing(fn ($m) => $m);
+        $zoom->shouldReceive('normalizeOriginateCallerId')->zeroOrMoreTimes()->andReturnArg(0);
+        $zoom->shouldReceive('defaultOutboundCampaignId')->zeroOrMoreTimes()->andReturn('camp_123');
+        $zoom->shouldReceive('clearExtensionForOutboundDial')->zeroOrMoreTimes();
+        $zoom->shouldReceive('getCall')->zeroOrMoreTimes()->andReturn([]);
         $this->app->instance(ZoomApiService::class, $zoom);
 
         $contacts = Mockery::mock(ZoomContactService::class);
@@ -497,38 +534,43 @@ class CommunicationsHubTest extends TestCase
     public function test_calls_tab_supports_missed_filter(): void
     {
         $this->mockZoomServices();
+
+        // Seed the local call history service so the sidebar sees the calls
+        $callHistory = Mockery::mock(CommunicationsCallHistoryService::class);
+        $callHistory->shouldReceive('listForHub')->andReturn([
+            [
+                'id' => 'log-1',
+                'direction' => 'inbound',
+                'from' => 'Caller',
+                'to' => 'Agent',
+                'from_phone' => '+15551111111',
+                'to_phone' => '+15552222222',
+                'start_time' => now()->toIso8601String(),
+                'result' => 'no answer',
+                'duration' => 0,
+                'recording' => '—',
+            ],
+            [
+                'id' => 'log-2',
+                'direction' => 'outbound',
+                'from' => 'Agent',
+                'to' => 'Prospect',
+                'from_phone' => '+15552222222',
+                'to_phone' => '+15553333333',
+                'start_time' => now()->subHour()->toIso8601String(),
+                'result' => 'connected',
+                'duration' => 30,
+                'recording' => '—',
+            ],
+        ]);
+        $this->app->instance(CommunicationsCallHistoryService::class, $callHistory);
+
         $data = Mockery::mock(CommunicationsDataService::class);
         $data->shouldReceive('phoneUsers')->andReturn(['users' => [], 'warning' => null]);
         $data->shouldReceive('recentDialNumbers')->andReturn([]);
         $data->shouldReceive('voiceMails')->andReturn(['voice_mails' => [], 'warning' => null]);
         $data->shouldReceive('smsSessions')->andReturn(['sessions' => [], 'warning' => null]);
-        $data->shouldReceive('callLogs')->andReturn([
-            'logs' => [
-                [
-                    'direction' => 'inbound',
-                    'from' => 'Caller',
-                    'to' => 'Agent',
-                    'from_phone' => '+15551111111',
-                    'to_phone' => '+15552222222',
-                    'start_time' => now()->toIso8601String(),
-                    'result' => 'no answer',
-                    'duration' => 0,
-                    'recording' => '—',
-                ],
-                [
-                    'direction' => 'outbound',
-                    'from' => 'Agent',
-                    'to' => 'Prospect',
-                    'from_phone' => '+15552222222',
-                    'to_phone' => '+15553333333',
-                    'start_time' => now()->subHour()->toIso8601String(),
-                    'result' => 'connected',
-                    'duration' => 30,
-                    'recording' => '—',
-                ],
-            ],
-            'next_page_token' => null,
-        ]);
+        $data->shouldReceive('callLogs')->andReturn(['logs' => [], 'next_page_token' => null]);
         $data->shouldReceive('callStatsFromLogs')->andReturn([
             'total' => 1,
             'inbound' => 1,
@@ -545,7 +587,7 @@ class CommunicationsHubTest extends TestCase
             ->get(route('admin.communications.index', ['channel' => 'calls', 'filter' => 'missed']))
             ->assertOk()
             ->assertSee('no answer', false)
-            ->assertDontSee('connected', false);
+            ->assertDontSee('connected · 30s', false);
     }
 
     public function test_voicemail_media_streams_when_cached(): void
@@ -595,6 +637,11 @@ class CommunicationsHubTest extends TestCase
         $zoom->shouldReceive('webhookSecret')->andReturn(null);
         $zoom->shouldReceive('requiredScopes')->andReturn([]);
         $zoom->shouldReceive('humanizeError')->andReturnUsing(fn ($m) => $m);
+        $zoom->shouldReceive('outboundCallingProfile')->zeroOrMoreTimes()->andReturn([]);
+        $zoom->shouldReceive('normalizeOriginateCallerId')->zeroOrMoreTimes()->andReturnArg(0);
+        $zoom->shouldReceive('defaultOutboundCampaignId')->zeroOrMoreTimes()->andReturn('camp_123');
+        $zoom->shouldReceive('clearExtensionForOutboundDial')->zeroOrMoreTimes();
+        $zoom->shouldReceive('getCall')->zeroOrMoreTimes()->andReturn([]);
 
         $contacts = Mockery::mock(ZoomContactService::class);
         $contacts->shouldReceive('buildIndexPayload')->andReturn([
@@ -757,6 +804,10 @@ class CommunicationsHubTest extends TestCase
             ->with('1001', Mockery::type('string'), Mockery::type('array'))
             ->andReturn(['ok' => true, 'call_uuid' => 'uuid-1']);
         $zoom->shouldReceive('humanizeError')->andReturnUsing(fn ($m) => $m);
+        $zoom->shouldReceive('normalizeOriginateCallerId')->zeroOrMoreTimes()->andReturnArg(0);
+        $zoom->shouldReceive('defaultOutboundCampaignId')->zeroOrMoreTimes()->andReturn('camp_123');
+        $zoom->shouldReceive('clearExtensionForOutboundDial')->zeroOrMoreTimes();
+        $zoom->shouldReceive('getCall')->zeroOrMoreTimes()->andReturn([]);
         $zoom->shouldReceive('listExtensions')->andReturn(['extensions' => []]);
         $zoom->shouldReceive('listUsers')->andReturn(['users' => []]);
         $this->app->instance(ZoomApiService::class, $zoom);

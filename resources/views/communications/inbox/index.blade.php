@@ -26,7 +26,17 @@
             'chat_channel' => request('chat_channel'),
             'chat_contact' => request('chat_contact'),
         ]);
-        $isWidePanel = in_array($panel ?? '', ['settings', 'dialer'], true);
+        // Dialer uses full width (no list/tools) so Line + Dial + Recent fit one viewport.
+        $isDialerView = ($panel ?? '') === 'dialer'
+            || (
+                ($channel ?? '') === 'inbox'
+                && blank($panel)
+                && blank(request('contact'))
+                && blank(request('call'))
+                && blank(request('session'))
+                && blank(request('sms'))
+            );
+        $isWidePanel = ($panel ?? '') === 'settings' || $isDialerView;
         $channelLabel = $channels[$channel]['label'] ?? 'Inbox';
     @endphp
 

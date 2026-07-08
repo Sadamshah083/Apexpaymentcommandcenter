@@ -36,6 +36,7 @@ for line in pathlib.Path("__APP__/.env").read_text().splitlines():
 PASSWORD = env.get("MORPHEUS_EXTENSION_PASSWORD", "")
 USER = "1020"
 DOMAIN = env.get("MORPHEUS_WEBRTC_SIP_DOMAIN", "apexone.pbx.local")
+DIAL_DOMAIN = env.get("MORPHEUS_SIP_HOST") or env.get("MORPHEUS_HOST", "apexone.morpheus.cx")
 HOST = env.get("MORPHEUS_HOST", "apexone.morpheus.cx")
 PORT = 7443
 DEST = "12722001232"
@@ -220,8 +221,8 @@ def drain_notify(sock, seconds=3):
 def sip_invite(sock):
     call_id = "wss-full-invite"
     branch = "z9hG4bKinv1"
-    target = f"sip:{DEST}@{DOMAIN}"
-    pai = f"<sip:{DID}@{DOMAIN}>"
+    target = f"sip:{DEST}@{DIAL_DOMAIN};user=phone"
+    pai = f"<sip:{DID}@{DIAL_DOMAIN}>"
     invite = (
         f"INVITE {target} SIP/2.0\r\n"
         f"Via: SIP/2.0/WSS {HOST};branch={branch}\r\n"

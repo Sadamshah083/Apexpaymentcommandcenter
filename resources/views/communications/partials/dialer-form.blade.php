@@ -63,51 +63,48 @@
     </x-communications.molecules.alert>
 @endif
 
-@if ($layout === 'center')
-    <x-communications.molecules.alert variant="info" class="mb-4">
-        Connect your line, then press <strong>Call</strong>. Your browser places the call over SIP (like a softphone) — the destination phone rings directly.
-    </x-communications.molecules.alert>
-@endif
-
 <form method="POST" action="{{ route($routePrefix . 'communications.morpheus.calls.originate') }}"
-    class="ghl-dialer-originate-form {{ ($layout ?? '') === 'center' ? 'ghl-dialer-form--center ghl-dialer-form--enterprise' : '' }}"
+    class="ghl-dialer-originate-form {{ ($layout ?? '') === 'center' ? 'ghl-dialer-form--center ghl-dialer-form--enterprise ghl-dialer-form--compact' : '' }}"
     data-fallback-sip="1" data-originate-json="1" data-dial-via-sip="1">
     @csrf
     <input type="hidden" name="fallback" value="sip">
 
-    <label class="ch-label" for="{{ $callerSelectId }}">Your extension</label>
-    <select id="{{ $callerSelectId }}" name="from_extension" class="ch-input ghl-dialer-field mb-3" required
-        @disabled($extensions === [])>
-        <option value="" disabled @selected($defaultExtension === null || $defaultExtension === '')>Select your extension
-        </option>
-        @foreach ($extensions as $ext)
-            @php $extNum = $ext['extension_num'] ?? ''; @endphp
-            @if (filled($extNum))
-                <option value="{{ $extNum }}" @selected((string) $defaultExtension === (string) $extNum)
-                    data-outbound-did="{{ $ext['outbound_cid_num'] ?? $ext['caller_id_num'] ?? $defaultOutboundDid }}">
-                    {{ $ext['caller_id_name'] ?? 'Extension' }} — {{ $extNum }}
-                    @if (!empty($ext['caller_id_num']))
-                        (DID {{ $ext['caller_id_num'] }})
-                    @else
-                        (no DID yet)
-                    @endif
+    <div class="ghl-dialer-form-row">
+        <div class="ghl-dialer-form-col">
+            <label class="ch-label" for="{{ $callerSelectId }}">Extension</label>
+            <select id="{{ $callerSelectId }}" name="from_extension" class="ch-input ghl-dialer-field" required
+                @disabled($extensions === [])>
+                <option value="" disabled @selected($defaultExtension === null || $defaultExtension === '')>Select extension
                 </option>
-            @endif
-        @endforeach
-    </select>
+                @foreach ($extensions as $ext)
+                    @php $extNum = $ext['extension_num'] ?? ''; @endphp
+                    @if (filled($extNum))
+                        <option value="{{ $extNum }}" @selected((string) $defaultExtension === (string) $extNum)
+                            data-outbound-did="{{ $ext['outbound_cid_num'] ?? $ext['caller_id_num'] ?? $defaultOutboundDid }}">
+                            {{ $extNum }}
+                            @if (!empty($ext['caller_id_num']))
+                                · {{ $ext['caller_id_num'] }}
+                            @endif
+                        </option>
+                    @endif
+                @endforeach
+            </select>
+        </div>
+        <div class="ghl-dialer-form-col ghl-dialer-form-col--grow">
+            <label class="ch-label" for="{{ $numberInputId }}">Number</label>
+            <input type="tel" id="{{ $numberInputId }}" name="destination"
+                class="ch-input ghl-dialer-display ghl-dialer-field" placeholder="+1 555 123 4567"
+                value="{{ $prefillNumber ?? '' }}" required autocomplete="tel" @disabled($extensions === [])>
+        </div>
+    </div>
 
-    <p class="ghl-dialer-outbound-route text-sm text-slate-600 mt-1 mb-2" data-dialer-route-summary>
-        Outbound caller ID:
-        <strong data-dialer-from-did>{{ $defaultOutboundDid ?: 'Not configured' }}</strong>
-        · destination rings as this number on the callee's phone.
+    <p class="ghl-dialer-outbound-route {{ ($layout ?? '') === 'center' ? 'ghl-dialer-outbound-route--compact' : '' }}"
+        data-dialer-route-summary>
+        CID <strong data-dialer-from-did>{{ $defaultOutboundDid ?: 'Not set' }}</strong>
     </p>
 
-    <label class="ch-label" for="{{ $numberInputId }}">Destination number</label>
-    <input type="tel" id="{{ $numberInputId }}" name="destination"
-        class="ch-input ghl-dialer-display ghl-dialer-field mb-3" placeholder="+1 555 123 4567"
-        value="{{ $prefillNumber ?? '' }}" required autocomplete="tel" @disabled($extensions === [])>
-
-    <div class="ghl-dialer-keypad mb-4" id="{{ $keypadRootId }}">
+    <div class="ghl-dialer-keypad {{ ($layout ?? '') === 'center' ? 'ghl-dialer-keypad--compact' : 'mb-4' }}"
+        id="{{ $keypadRootId }}">
         @foreach (['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'] as $key)
             <button type="button" class="ghl-dialer-key" data-dial-key="{{ $key }}">{{ $key }}</button>
         @endforeach

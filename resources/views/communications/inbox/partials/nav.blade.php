@@ -24,7 +24,7 @@
             };
         @endphp
         <a href="{{ route($routePrefix . 'communications.index', $navQuery) }}"
-            class="ghl-inbox-nav-item {{ $channel === $channelKey && !in_array($panel ?? '', ['settings', 'dialer']) ? 'ghl-inbox-nav-item-active' : '' }}"
+            class="ghl-inbox-nav-item {{ $channel === $channelKey && !in_array($panel ?? '', ['settings', 'dialer']) && !(($channelKey === 'inbox') && blank($panel) && blank(request('contact')) && blank(request('call')) && blank(request('session'))) ? 'ghl-inbox-nav-item-active' : '' }}"
             title="{{ $meta['label'] }}">
             @include('communications.inbox.partials.nav-icon', ['icon' => $meta['icon']])
             <span class="ghl-inbox-nav-label">{{ $navLabel }}</span>
@@ -34,8 +34,18 @@
         </a>
     @endforeach
 
-    <a href="{{ route($routePrefix . 'communications.index', array_merge($baseQuery, ['panel' => 'dialer'])) }}"
-        class="ghl-inbox-nav-item ghl-inbox-nav-item-dial {{ ($panel ?? '') === 'dialer' ? 'ghl-inbox-nav-item-active' : '' }}"
+    @php
+        $dialerNavActive = ($panel ?? '') === 'dialer'
+            || (
+                ($channel ?? '') === 'inbox'
+                && blank($panel)
+                && blank(request('contact'))
+                && blank(request('call'))
+                && blank(request('session'))
+            );
+    @endphp
+    <a href="{{ route($routePrefix . 'communications.index', array_merge($baseQuery, ['panel' => 'dialer', 'channel' => 'inbox'])) }}"
+        class="ghl-inbox-nav-item ghl-inbox-nav-item-dial {{ $dialerNavActive ? 'ghl-inbox-nav-item-active' : '' }}"
         title="Phone dialer">
         @include('communications.inbox.partials.nav-icon', ['icon' => 'dial'])
         <span class="ghl-inbox-nav-label">Phone</span>

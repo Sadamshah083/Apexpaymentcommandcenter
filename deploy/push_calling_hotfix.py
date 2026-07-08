@@ -19,17 +19,20 @@ FILES = [
     "app/Services/Communications/CommunicationsAgentService.php",
     "app/Services/Communications/CommunicationsInboxService.php",
     "app/Services/Communications/CommunicationsCallHistoryService.php",
+    "app/Services/Communications/CommunicationsInboxService.php",
     "app/Services/Communications/MorpheusHubService.php",
     "app/Services/Communications/CommunicationsWebphoneService.php",
     "app/Services/Communications/ZoomClickToCallService.php",
     "app/Services/Integrations/MorpheusCircuitBreaker.php",
     "app/Services/Integrations/ZoomApiService.php",
+    "app/Support/MorpheusSipIdentity.php",
     "app/Services/Communications/CommunicationsDataService.php",
     "app/Http/Controllers/CommunicationsHubController.php",
     "config/integrations.php",
     "routes/morpheus-communications.php",
     "resources/js/app.js",
     "resources/css/communications-inbox.css",
+    "resources/css/comm-hub-atomic.css",
     "resources/js/communications-dialer.js",
     "resources/js/communications-webphone.js",
     "resources/views/communications/calls/index.blade.php",
@@ -39,13 +42,13 @@ FILES = [
     "resources/views/communications/inbox/partials/main.blade.php",
     "resources/views/communications/inbox/partials/tools.blade.php",
     "resources/views/communications/inbox/partials/panels/dialer.blade.php",
-    "resources/views/communications/inbox/partials/rail-dialer-compact.blade.php",
     "resources/views/communications/partials/center-dialer-hub.blade.php",
     "resources/views/communications/partials/dialer-form.blade.php",
     "resources/views/communications/inbox/partials/panels/settings.blade.php",
     "resources/views/communications/inbox/partials/panels/agents.blade.php",
     "resources/views/communications/partials/webphone-panel.blade.php",
     "resources/views/communications/partials/webphone-floating-popup.blade.php",
+    "resources/views/components/communications/molecules/workflow-stepper.blade.php",
     "deploy/nginx-apexone.conf",
 ]
 
@@ -102,6 +105,16 @@ def main() -> int:
         f"grep -q '^MORPHEUS_WEBPHONE_AUTO_ANSWER=' {REMOTE_APP}/.env "
         f"&& sed -i 's/^MORPHEUS_WEBPHONE_AUTO_ANSWER=.*/MORPHEUS_WEBPHONE_AUTO_ANSWER=true/' {REMOTE_APP}/.env "
         f"|| echo 'MORPHEUS_WEBPHONE_AUTO_ANSWER=true' >> {REMOTE_APP}/.env",
+        f"grep -q '^MORPHEUS_RING_TIMEOUT=' {REMOTE_APP}/.env "
+        f"&& sed -i 's/^MORPHEUS_RING_TIMEOUT=.*/MORPHEUS_RING_TIMEOUT=90/' {REMOTE_APP}/.env "
+        f"|| echo 'MORPHEUS_RING_TIMEOUT=90' >> {REMOTE_APP}/.env",
+        f"grep -q '^MORPHEUS_WEBPHONE_DIAL_MODE=' {REMOTE_APP}/.env "
+        f"&& sed -i 's/^MORPHEUS_WEBPHONE_DIAL_MODE=.*/MORPHEUS_WEBPHONE_DIAL_MODE=api/' {REMOTE_APP}/.env "
+        f"|| echo 'MORPHEUS_WEBPHONE_DIAL_MODE=api' >> {REMOTE_APP}/.env",
+        f"grep -q '^MORPHEUS_DIAL_METHOD=' {REMOTE_APP}/.env "
+        f"&& sed -i 's/^MORPHEUS_DIAL_METHOD=.*/MORPHEUS_DIAL_METHOD=api/' {REMOTE_APP}/.env "
+        f"|| echo 'MORPHEUS_DIAL_METHOD=api' >> {REMOTE_APP}/.env",
+        f"sed -i '/^MORPHEUS_BUSY_EXTENSIONS=/d' {REMOTE_APP}/.env",
     ])
 
     _, stdout, _ = ssh.exec_command("curl -fsS https://crm.apexonepayments.com/up")

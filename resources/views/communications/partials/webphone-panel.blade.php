@@ -36,6 +36,7 @@
             </div>
             @endunless
 
+            @unless ($isCenter)
             <x-communications.molecules.stat-grid
                 class="ghl-webphone-summary"
                 :items="[
@@ -46,15 +47,28 @@
             <p class="text-xs text-slate-500 mb-3 mt-1" data-webphone-transport-wrap>
                 Transport: <strong data-webphone-transport>{{ config('integrations.morpheus.sip_wss_url') ?: 'Auto WSS' }}</strong>
             </p>
+            @else
+            <p class="sr-only" data-webphone-transport-wrap>
+                Transport: <strong data-webphone-transport>{{ config('integrations.morpheus.sip_wss_url') ?: 'Auto WSS' }}</strong>
+            </p>
+            @endunless
 
-            <div class="ghl-webphone-stage-row">
+            <div class="ghl-webphone-stage-row {{ $isCenter ? 'ghl-webphone-stage-row--compact' : '' }}">
                 <span class="ghl-webphone-stage" data-webphone-stage data-state="offline">Idle</span>
-                <span class="ghl-webphone-stage-note" data-webphone-stage-note>Waiting to connect your line.</span>
+                @unless ($isCenter)
+                    <span class="ghl-webphone-stage-note" data-webphone-stage-note>Waiting to connect your line.</span>
+                @else
+                    <span class="sr-only" data-webphone-stage-note>Waiting to connect your line.</span>
+                @endunless
             </div>
 
+            @unless ($isCenter)
             <p class="ghl-webphone-hint text-xs text-slate-500 mt-1 mb-0" data-webphone-hint>
                 Click <strong>Connect line</strong> and allow microphone access when prompted.
             </p>
+            @else
+            <p class="sr-only" data-webphone-hint>Click Connect line and allow microphone access when prompted.</p>
+            @endunless
 
             <div class="ghl-webphone-call-card hidden" data-webphone-call-card>
                 <div class="ghl-webphone-call-card-head">

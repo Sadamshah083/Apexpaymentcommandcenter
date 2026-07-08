@@ -418,7 +418,9 @@ class CommunicationsAgentService
         }
 
         $webrtcEnabled = (bool) config('integrations.morpheus.webrtc_enabled', true);
-        $endpointOnline = filled($lastLogin) || $webrtcEnabled;
+        // With WebRTC, Morpheus last_login alone is unreliable — dialer uses
+        // webphone_transport_connected (browser WSS REGISTER) as the real gate.
+        $endpointOnline = filled($lastLogin) && ! $webrtcEnabled;
         $sipHost = (string) (config('integrations.morpheus.sip_host') ?: config('integrations.morpheus.host'));
         $portalUrl = app(\App\Services\Communications\ZoomClickToCallService::class)->portalUrl();
 

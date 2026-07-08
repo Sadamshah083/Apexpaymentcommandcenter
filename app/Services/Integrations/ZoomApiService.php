@@ -2,6 +2,7 @@
 
 namespace App\Services\Integrations;
 
+use App\Services\Communications\MorpheusCallEventService;
 use App\Support\MorpheusSipIdentity;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Cache;
@@ -223,18 +224,56 @@ class ZoomApiService
             }
         }
 
-        $billsec = (int) ($snapshot['billsec'] ?? $snapshot['duration_sec'] ?? 0);
-        if ($billsec >= 5 && $destDigits !== '') {
-            foreach (['destination_number', 'callee_number', 'phone_number', 'destination', 'to'] as $field) {
-                $raw = (string) ($snapshot[$field] ?? '');
-                if (MorpheusSipIdentity::isSipContactHash($raw)) {
-                    continue;
-                }
+        if ($this->snapshotShowsDestinationAnswered($snapshot, $destDigits)) {
+            return true;
+        }
 
-                $digits = $this->normalizePhoneDigits($raw);
-                if ($digits !== '' && ($digits === $destDigits || str_ends_with($destDigits, $digits) || str_ends_with($digits, $destDigits))) {
-                    return true;
-                }
+        $cdr = $this->findRecentCdrByUuid($uuid);
+
+        return is_array($cdr) && $this->snapshotShowsDestinationAnswered($cdr, $destDigits);
+    }
+
+    /**
+     * @param  array<string, mixed>  $snapshot
+     */
+    protected function snapshotShowsDestinationAnswered(array $snapshot, string $destDigits): bool
+    {
+        $billsec = (int) ($snapshot['billsec'] ?? $snapshot['duration_sec'] ?? 0);
+        $outcome = strtolower((string) ($snapshot['call_outcome'] ?? ''));
+        $state = strtoupper((string) ($snapshot['state'] ?? $snapshot['status'] ?? ''));
+        $hasAnswerTime = filled($snapshot['answer_time'] ?? $snapshot['answered_at'] ?? null);
+        $answeredState = in_array($state, ['ACTIVE', 'ANSWERED', 'CONNECTED', 'BRIDGED'], true)
+            || in_array(strtolower((string) ($snapshot['status'] ?? '')), ['active', 'answered', 'connected', 'bridged'], true);
+
+        foreach (['destination_number', 'callee_number', 'phone_number', 'destination', 'to'] as $field) {
+            $raw = (string) ($snapshot[$field] ?? '');
+            if (MorpheusSipIdentity::isSipContactHash($raw)) {
+                continue;
+            }
+
+            $digits = $this->normalizePhoneDigits($raw);
+            if ($digits === '' || strlen($digits) < 10) {
+                continue;
+            }
+
+            if ($destDigits !== '' && $digits !== $destDigits && ! str_ends_with($destDigits, $digits) && ! str_ends_with($digits, $destDigits)) {
+                continue;
+            }
+
+            if (preg_match('/[a-z]/i', $raw)) {
+                continue;
+            }
+
+            if ($hasAnswerTime && $billsec >= 1) {
+                return true;
+            }
+
+            if ($answeredState && $billsec >= 2) {
+                return true;
+            }
+
+            if ($billsec >= 1 && in_array($outcome, ['connected', 'answered', 'short'], true)) {
+                return true;
             }
         }
 
@@ -404,6 +443,357 @@ class ZoomApiService
     }
 
     /**
+     * JSON payload for Communications Hub call-status polling.
+     *
+     * @return array<string, mixed>
+     */
+    public function hubCallStatus(string $uuid, ?string $destination = null, bool $customerFirst = false): array
+    {
+        $uuid = trim($uuid);
+        $webhookOverlay = app(MorpheusCallEventService::class)->hubStatusOverlay($uuid, $destination);
+        if (($webhookOverlay['destination_connected'] ?? false) === true) {
+            return array_merge([
+                'ok' => true,
+                'pending' => false,
+                'live' => $webhookOverlay['live'] ?? true,
+                'outcome' => 'connected',
+            ], $webhookOverlay);
+        }
+
+        $snapshot = $this->resolveCallSnapshot($uuid);
+        $activeCount = count($this->listActiveCalls());
+
+        if ($snapshot !== null) {
+            $state = strtoupper((string) ($snapshot['state'] ?? $snapshot['status'] ?? ''));
+            $bridgedTo = filled($snapshot['bridged_to'] ?? null) ? (string) $snapshot['bridged_to'] : null;
+            $live = (bool) ($snapshot['live'] ?? in_array(strtolower((string) ($snapshot['status'] ?? '')), ['active', 'ringing'], true));
+            $billsec = (int) ($snapshot['billsec'] ?? $snapshot['duration_sec'] ?? 0);
+            $hangup = strtoupper((string) ($snapshot['hangup_cause'] ?? ''));
+            $sipCode = (int) ($snapshot['sip_code'] ?? $snapshot['sip_response_code'] ?? $snapshot['response_code'] ?? 0);
+
+            if ($customerFirst && $hangup === 'NO_ROUTE_DESTINATION' && $billsec < 1) {
+                $hangup = '';
+            }
+
+            $destinationConnected = $this->destinationAnsweredOnCall($uuid, $destination);
+
+            if (! $destinationConnected && filled($bridgedTo)) {
+                $destinationConnected = $this->destinationAnsweredOnCall($bridgedTo, $destination);
+            }
+
+            if (! $destinationConnected && $sipCode === 200) {
+                $snapshotDest = preg_replace('/\D/', '', (string) ($snapshot['destination_number'] ?? '')) ?? '';
+                $requestedDest = preg_replace('/\D/', '', (string) $destination) ?? '';
+                if (strlen($snapshotDest) >= 10 && ($requestedDest === '' || $snapshotDest === $requestedDest || str_ends_with($requestedDest, $snapshotDest) || str_ends_with($snapshotDest, $requestedDest))) {
+                    $destinationConnected = true;
+                }
+            }
+
+            if (! $destinationConnected && $billsec >= 1) {
+                $snapshotDest = preg_replace('/\D/', '', (string) ($snapshot['destination_number'] ?? '')) ?? '';
+                $requestedDest = preg_replace('/\D/', '', (string) $destination) ?? '';
+                $hasAnswerTime = filled($snapshot['answer_time'] ?? $snapshot['answered_at'] ?? null);
+                $answeredState = in_array($state, ['ACTIVE', 'ANSWERED', 'CONNECTED', 'BRIDGED'], true)
+                    || in_array(strtolower((string) ($snapshot['status'] ?? '')), ['active', 'answered', 'connected', 'bridged'], true);
+
+                if (
+                    strlen($snapshotDest) >= 10
+                    && ! preg_match('/[a-z]/i', (string) ($snapshot['destination_number'] ?? ''))
+                    && ($hasAnswerTime || $answeredState || $billsec >= 2)
+                    && ($requestedDest === ''
+                        || $snapshotDest === $requestedDest
+                        || str_ends_with($requestedDest, $snapshotDest)
+                        || str_ends_with($snapshotDest, $requestedDest))
+                ) {
+                    $destinationConnected = true;
+                }
+            }
+
+            if (! $destinationConnected) {
+                $snapshotExtension = $this->normalizePhoneDigits(
+                    (string) ($snapshot['extension'] ?? $snapshot['extension_num'] ?? $snapshot['from'] ?? '')
+                );
+                $activeBridge = $this->findAnsweredDestinationActiveCall($destination, $snapshotExtension);
+                if ($activeBridge !== null) {
+                    $destinationConnected = true;
+                    $bridgedTo = (string) ($activeBridge['uuid'] ?? $activeBridge['call_uuid'] ?? $bridgedTo);
+                    $state = strtoupper((string) ($activeBridge['state'] ?? $activeBridge['status'] ?? $state));
+                    $billsec = max($billsec, (int) ($activeBridge['billsec'] ?? $activeBridge['duration_sec'] ?? 0));
+                }
+            }
+
+            if (! $destinationConnected && $live) {
+                $cdrAnalysis = $this->analyzeClickToCallCdrLegs($this->findCdrLegsByUuid($uuid), $destination);
+                if (($cdrAnalysis['destination_connected'] ?? false) === true) {
+                    $destinationConnected = true;
+                    $billsec = max($billsec, (int) ($cdrAnalysis['billsec'] ?? 0));
+                    if (filled($cdrAnalysis['state'] ?? null)) {
+                        $state = (string) $cdrAnalysis['state'];
+                    }
+                }
+            }
+
+            $agentConnected = $live && (
+                in_array(strtolower((string) ($snapshot['status'] ?? '')), ['active', 'ringing', 'answered'], true)
+                || in_array($state, ['ACTIVE', 'RINGING', 'EARLY', 'ANSWERED'], true)
+                || $billsec > 0
+            );
+
+            return array_filter([
+                'ok' => true,
+                'pending' => false,
+                'live' => $live,
+                'state' => $state !== '' ? $state : null,
+                'bridged_to' => $bridgedTo,
+                'billsec' => $billsec,
+                'sip_code' => $sipCode > 0 ? $sipCode : null,
+                'answer_time' => $snapshot['answer_time'] ?? $snapshot['answered_at'] ?? null,
+                'hangup_cause' => $hangup !== '' ? $hangup : null,
+                'destination_connected' => $destinationConnected,
+                'destination_answered' => $destinationConnected,
+                'agent_connected' => $agentConnected,
+                'outcome' => $destinationConnected
+                    ? 'connected'
+                    : ($agentConnected ? 'ringing' : ($hangup !== '' ? 'ended' : 'initiated')),
+                'destination_number' => $snapshot['destination_number'] ?? null,
+                'to' => $this->normalizeOriginateDestination((string) $destination),
+                'morpheus_active_calls' => $activeCount,
+                'source' => $snapshot['source'] ?? 'live',
+            ], fn ($value) => $value !== null);
+        }
+
+        $cdrAnalysis = $this->analyzeClickToCallCdrLegs($this->findCdrLegsByUuid($uuid), $destination);
+        if ($cdrAnalysis !== null) {
+            return array_merge([
+                'ok' => true,
+                'pending' => false,
+                'morpheus_active_calls' => $activeCount,
+            ], $cdrAnalysis);
+        }
+
+        return [
+            'ok' => true,
+            'pending' => true,
+            'live' => true,
+            'state' => 'PENDING',
+            'bridged_to' => null,
+            'billsec' => 0,
+            'answer_time' => null,
+            'hangup_cause' => null,
+            'destination_connected' => false,
+            'destination_answered' => false,
+            'morpheus_active_calls' => $activeCount,
+            'hint' => 'Morpheus GET /calls returned '.$activeCount.' active call(s). This is normal during click-to-call — keep Connect line on Registered; your browser must answer before the destination rings.',
+        ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $legs
+     * @return array<string, mixed>|null
+     */
+    protected function analyzeClickToCallCdrLegs(array $legs, ?string $destination): ?array
+    {
+        if ($legs === []) {
+            return null;
+        }
+
+        $destDigits = $this->normalizePhoneDigits($destination);
+        $agentLeg = null;
+        $pstnLeg = null;
+
+        foreach ($legs as $row) {
+            $dest = trim((string) ($row['destination_number'] ?? ''));
+            $destNum = preg_replace('/\D/', '', $dest) ?? '';
+            $isPstn = strlen($destNum) >= 10 && ! preg_match('/[a-z]/i', $dest);
+
+            if ($isPstn && ($destDigits === '' || $destNum === $destDigits || str_ends_with($destDigits, $destNum) || str_ends_with($destNum, $destDigits))) {
+                if ($pstnLeg === null || (int) ($row['billsec'] ?? 0) > (int) ($pstnLeg['billsec'] ?? 0)) {
+                    $pstnLeg = $row;
+                }
+
+                continue;
+            }
+
+            if (preg_match('/[a-z]/i', $dest) || ($destNum !== '' && strlen($destNum) < 10)) {
+                $agentLeg = $row;
+            }
+        }
+
+        if ($pstnLeg !== null) {
+            $billsec = (int) ($pstnLeg['billsec'] ?? 0);
+            $hangup = strtoupper((string) ($pstnLeg['hangup_cause'] ?? ''));
+            $outcome = strtolower((string) ($pstnLeg['call_outcome'] ?? ''));
+            $connected = $billsec >= 1;
+            $dest = (string) ($pstnLeg['destination_number'] ?? '');
+            $routingFailed = in_array($hangup, [
+                'NORMAL_TEMPORARY_FAILURE',
+                'UNALLOCATED_NUMBER',
+                'NO_ROUTE_DESTINATION',
+                'INVALID_NUMBER_FORMAT',
+            ], true) || str_contains($dest, '#');
+
+            return array_filter([
+                'live' => $connected && $hangup === '',
+                'state' => $connected ? 'CONNECTED' : ($routingFailed ? 'ROUTING_FAILED' : strtoupper((string) ($pstnLeg['call_outcome'] ?? 'COMPLETED'))),
+                'billsec' => $billsec,
+                'hangup_cause' => $hangup !== '' ? $hangup : null,
+                'destination_connected' => $connected,
+                'destination_number' => $pstnLeg['destination_number'] ?? null,
+                'routing_error' => $routingFailed && ! $connected,
+                'hint' => $routingFailed && ! $connected
+                    ? 'Morpheus could not route this number. Use Call (click-to-call) with Connect line Registered — do not dial the PSTN number directly from the browser.'
+                    : null,
+                'source' => 'cdr',
+            ], fn ($value) => $value !== null);
+        }
+
+        if ($agentLeg !== null) {
+            $hangup = strtoupper((string) ($agentLeg['hangup_cause'] ?? ''));
+            $outcome = strtolower((string) ($agentLeg['call_outcome'] ?? ''));
+            $billsec = (int) ($agentLeg['billsec'] ?? 0);
+
+            if (in_array($hangup, ['USER_BUSY', 'CALL_REJECTED'], true)) {
+                return [
+                    'live' => false,
+                    'state' => 'USER_BUSY',
+                    'billsec' => $billsec,
+                    'hangup_cause' => $hangup,
+                    'destination_connected' => false,
+                    'extension_not_answered' => true,
+                    'extension_busy' => true,
+                    'hint' => 'Your extension line is busy on Morpheus (another tab, portal phone, or stale registration). Disconnect other phones, click Connect line, wait for Registered, then call again.',
+                    'source' => 'cdr',
+                ];
+            }
+
+            if ($hangup === 'NO_ANSWER' || $outcome === 'no_answer' || ($billsec < 1 && $hangup !== '')) {
+                return [
+                    'live' => false,
+                    'state' => 'NO_ANSWER',
+                    'billsec' => $billsec,
+                    'hangup_cause' => $hangup !== '' ? $hangup : 'NO_ANSWER',
+                    'destination_connected' => false,
+                    'extension_not_answered' => true,
+                    'hint' => 'Your browser extension did not answer the Morpheus ring. Click Connect line, wait for Registered, then dial again.',
+                    'source' => 'cdr',
+                ];
+            }
+        }
+
+        $primary = $this->pickPrimaryCdrLeg($legs);
+        if ($primary === null) {
+            return null;
+        }
+
+        $normalized = $this->normalizeCdrSnapshot($primary);
+
+        return array_filter([
+            'live' => (bool) ($normalized['live'] ?? false),
+            'state' => strtoupper((string) ($normalized['status'] ?? 'PENDING')),
+            'billsec' => (int) ($normalized['billsec'] ?? 0),
+            'hangup_cause' => $normalized['hangup_cause'] ?? null,
+            'destination_connected' => $this->destinationAnsweredOnCall((string) ($normalized['uuid'] ?? ''), $destination),
+            'destination_number' => $normalized['destination_number'] ?? null,
+            'source' => 'cdr',
+        ], fn ($value) => $value !== null);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    protected function findAnsweredDestinationActiveCall(?string $destination, string $extensionDigits = ''): ?array
+    {
+        $destinationDigits = $this->normalizePhoneDigits($destination);
+        if ($destinationDigits === '') {
+            return null;
+        }
+
+        foreach ($this->listActiveCalls() as $call) {
+            if (! is_array($call) || ! $this->activeCallTouchesDestination($call, $destinationDigits)) {
+                continue;
+            }
+
+            $state = strtoupper((string) ($call['state'] ?? $call['status'] ?? ''));
+            $billsec = (int) ($call['billsec'] ?? $call['duration_sec'] ?? 0);
+            $answered = filled($call['answer_time'] ?? $call['answered_at'] ?? null)
+                || $billsec >= 1
+                || in_array($state, ['ANSWERED', 'CONNECTED', 'BRIDGED', 'ACTIVE'], true);
+
+            if ($answered) {
+                return $call;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $call
+     */
+    protected function activeCallTouchesDestination(array $call, string $destinationNum): bool
+    {
+        if ($destinationNum === '') {
+            return true;
+        }
+
+        $target = $this->normalizePhoneDigits($destinationNum);
+        if ($target === '') {
+            return false;
+        }
+
+        foreach ([
+            'destination_number', 'destination', 'to', 'callee', 'caller',
+            'caller_id_number', 'from', 'other_leg_destination',
+        ] as $field) {
+            $value = $this->normalizePhoneDigits((string) ($call[$field] ?? ''));
+            if ($value === '') {
+                continue;
+            }
+
+            if ($value === $target || str_ends_with($value, $target) || str_ends_with($target, $value)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    protected function findCdrLegsByUuid(string $callUuid): array
+    {
+        $matches = [];
+
+        try {
+            foreach ([
+                ['limit' => 100, 'search' => $callUuid],
+                ['limit' => 100],
+            ] as $params) {
+                $response = $this->pollClient()->get($this->url('/cdr'), $params);
+                if (! $response->successful()) {
+                    continue;
+                }
+
+                foreach ($response->json('cdr') ?? [] as $row) {
+                    if (! is_array($row) || ! $this->callRowMatchesUuid($row, $callUuid)) {
+                        continue;
+                    }
+
+                    $matches[] = $row;
+                }
+
+                if ($matches !== []) {
+                    break;
+                }
+            }
+        } catch (\Throwable) {
+        }
+
+        return $matches;
+    }
+
+    /**
      * Click-to-call: rings extension first, then connects destination.
      *
      * @return array{ok: bool, call_uuid?: string, error?: string, action?: string}
@@ -448,8 +838,8 @@ class ZoomApiService
         usleep(1_500_000);
 
         if ($this->extensionHasLiveCalls($fromExtension)) {
-            $this->clearExtensionForOutboundDial($fromExtension, kickSip: true);
-            sleep(3);
+            $this->clearExtensionForOutboundDial($fromExtension, kickSip: false);
+            sleep(2);
 
             if ($this->extensionHasLiveCalls($fromExtension)) {
                 return [
@@ -472,7 +862,8 @@ class ZoomApiService
         $lineReset = false;
 
         $place = function () use ($customerFirst, $isPstn, $method, $fromExtension, $dialDestination, $timeout, $extra, &$attempted): array {
-            if ($customerFirst && $isPstn && $method !== 'click-to-call') {
+            // Ring the customer's PSTN line first, then bridge the agent extension (browser).
+            if ($customerFirst && $isPstn) {
                 $response = $this->postOriginate('/calls/originate', array_merge([
                     'from' => $dialDestination,
                     'to' => $this->customerFirstBridgeExtension($fromExtension),
@@ -506,21 +897,27 @@ class ZoomApiService
 
         $response = $place();
 
-        if (($response['ok'] ?? false) && filled($response['call_uuid'] ?? null)) {
+        // Click-to-call delivers the agent leg via SIP INVITE to the browser. Polling for
+        // immediate USER_BUSY and hangup/retry disconnects the webphone mid-call.
+        $skipBusyProbe = $method === 'click-to-call';
+
+        if (($response['ok'] ?? false) && filled($response['call_uuid'] ?? null) && ! $skipBusyProbe) {
             $uuid = (string) $response['call_uuid'];
             $busy = false;
+            $sawLive = false;
 
-            for ($i = 0; $i < 3; $i++) {
+            for ($i = 0; $i < 8; $i++) {
                 usleep(1_000_000);
                 $snap = $this->quickGetCall($uuid) ?? [];
                 $cause = strtoupper((string) ($snap['hangup_cause'] ?? ''));
                 $live = (bool) ($snap['live'] ?? false);
 
                 if ($live) {
+                    $sawLive = true;
                     break;
                 }
 
-                if (in_array($cause, ['USER_BUSY', 'CALL_REJECTED'], true)) {
+                if (in_array($cause, ['USER_BUSY', 'CALL_REJECTED'], true) && $i >= 5 && ! $sawLive) {
                     $busy = true;
                     break;
                 }
@@ -528,9 +925,9 @@ class ZoomApiService
 
             if ($busy) {
                 $this->hangup($uuid);
-                $this->clearExtensionForOutboundDial($fromExtension, kickSip: true);
-                $lineReset = true;
-                sleep(2);
+                $this->clearExtensionForOutboundDial($fromExtension, kickSip: false);
+                $lineReset = false;
+                sleep(3);
                 $response = $place();
                 $attempted[] = 'retry-after-busy';
 
@@ -559,7 +956,7 @@ class ZoomApiService
         }
 
         $callUuid = (string) ($response['call_uuid'] ?? '');
-        if ($callUuid !== '' && ! $this->verifyOriginateStarted($callUuid)) {
+        if ($callUuid !== '' && ! $skipBusyProbe && ! $this->verifyOriginateStarted($callUuid)) {
             return [
                 'ok' => false,
                 'routing_error' => true,
@@ -816,7 +1213,7 @@ class ZoomApiService
         $dropTimeout = (int) ($campaign['drop_timeout'] ?? 5);
         $needsPatch = ($campaign['dial_mode'] ?? '') !== 'manual'
             || $ringTimeout < 90
-            || $dropTimeout < 45;
+            || $dropTimeout < 90;
 
         if (! $needsPatch) {
             return;
@@ -827,7 +1224,7 @@ class ZoomApiService
             'status' => 'active',
             'require_disposition' => false,
             'ring_timeout' => 90,
-            'drop_timeout' => 45,
+            'drop_timeout' => 90,
         ]);
     }
 
@@ -905,11 +1302,19 @@ class ZoomApiService
 
     /**
      * Detect Morpheus routing to a SIP contact hash instead of the PSTN destination.
+     *
+     * Click-to-call often reports the browser SIP contact on the A-leg CDR before the PSTN
+     * B-leg is created — that is expected, not a misroute.
      */
     protected function detectMisroutedDestination(string $callUuid, string $expectedDestination): ?string
     {
         $expectedDigits = preg_replace('/\D/', '', $expectedDestination) ?? '';
         if ($expectedDigits === '') {
+            return null;
+        }
+
+        $method = strtolower((string) config('integrations.morpheus.originate_method', 'originate'));
+        if ($method === 'click-to-call') {
             return null;
         }
 
@@ -921,7 +1326,7 @@ class ZoomApiService
 
             if ($dest !== '' && MorpheusSipIdentity::isSipContactHash($dest)) {
                 if (in_array($cause, ['USER_BUSY', 'CALL_REJECTED'], true)) {
-                    return "Extension is busy — Morpheus tried to dial your browser contact ({$dest}) instead of the customer. Wait 10–15 seconds and try again.";
+                    return "Extension is busy — Morpheus could not reach your line ({$dest}). Wait 10–15 seconds and try again.";
                 }
 
                 return "Morpheus misrouted the call to SIP contact {$dest} instead of {$expectedDigits}. Reconnect your line and try again.";

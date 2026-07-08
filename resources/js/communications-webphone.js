@@ -28,6 +28,21 @@ function selectedExtension() {
     return panel?.dataset.defaultExtension || localStorage.getItem(STORAGE_KEY) || '';
 }
 
+function ensureDefaultExtensionSelected() {
+    const select = document.querySelector('[name="from_extension"]');
+    if (!select || select.value) {
+        return select?.value || selectedExtension();
+    }
+
+    const first = Array.from(select.options).find((option) => option.value && !option.disabled);
+    if (first) {
+        select.value = first.value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    return select.value || selectedExtension();
+}
+
 function csrfToken() {
     return document.querySelector('meta[name="csrf-token"]')?.content || '';
 }
@@ -123,14 +138,25 @@ class ApexWebphone {
         this.currentCallDirection = null;
         this.currentCallPeer = '';
         this.morpheusCallUuid = null;
+        this.pstnPollUuid = null;
         this.recordingActive = false;
         this.clickToCallActive = false;
         this.awaitingDestinationBridge = false;
         this.destinationPollTimer = null;
         this.directDialActive = false;
+        this.sawOutboundRinging = false;
+        this.outboundTerminateDetail = '';
+        this.suppressTerminateToast = false;
+        this.outboundDialInProgress = false;
         this.customerFirstOutbound = false;
         this.outboundDialStartedAt = 0;
         this.callOnHold = false;
+        this._lastPollSnapshot = '';
+        this._lastSeenPstnBillsec = 0;
+        this._remoteAnswerWatcher = null;
+        this._remoteAnswerAnalyser = null;
+        this._remoteAnswerSource = null;
+        this._voiceEnergyFrames = 0;
     }
 
     bindPanel(panel) {
@@ -385,6 +411,150 @@ class ApexWebphone {
         this.ringbackInterval = null;
     }
 
+    stopAllLocalRingers() {
+        this.stopRingtone();
+        this.stopRingback();
+    }
+
+    peerDigits(value) {
+        return String(value || '').replace(/\D/g, '');
+    }
+
+    destinationMatchesPeer(data) {
+        const peerDigits = this.peerDigits(this.currentCallPeer);
+        const snapDigits = this.peerDigits(data?.destination_number || data?.to || '');
+
+        if (peerDigits.length < 10 || snapDigits.length < 10) {
+            return false;
+        }
+
+        return snapDigits === peerDigits
+            || snapDigits.endsWith(peerDigits)
+            || peerDigits.endsWith(snapDigits);
+    }
+
+    applyRemoteCallStatus(data, { source = 'poll' } = {}) {
+        if (!data || data.ok === false) {
+            return false;
+        }
+
+        if (data.bridged_to && data.bridged_to !== this.morpheusCallUuid) {
+            this.morpheusCallUuid = String(data.bridged_to);
+        }
+
+        const billsec = Number(data.billsec ?? 0);
+        const destMatches = this.destinationMatchesPeer(data);
+        const answeredState = ['CONNECTED', 'ANSWERED', 'BRIDGED', 'ACTIVE'].includes(String(data.state || '').toUpperCase());
+        const hasAnswerTime = Boolean(data.answer_time);
+
+        if (billsec > this._lastSeenPstnBillsec) {
+            this._lastSeenPstnBillsec = billsec;
+        }
+
+        const destinationConnected =
+            data.destination_connected === true
+            || data.destination_answered === true
+            || data.outcome === 'connected'
+            || (answeredState && destMatches)
+            || (data.live && destMatches && hasAnswerTime && billsec >= 1)
+            || (data.live && destMatches && billsec >= 2 && !data.hangup_cause)
+            || (data.live && destMatches && this._lastSeenPstnBillsec >= 2 && !data.hangup_cause);
+
+        if (destinationConnected) {
+            this.markDestinationConnected({ source });
+
+            return true;
+        }
+
+        return false;
+    }
+
+    stopRemoteAnswerWatcher() {
+        if (this._remoteAnswerWatcher) {
+            window.clearInterval(this._remoteAnswerWatcher);
+            this._remoteAnswerWatcher = null;
+        }
+
+        if (this._remoteAnswerSource) {
+            try {
+                this._remoteAnswerSource.disconnect();
+            } catch {
+                // ignore
+            }
+            this._remoteAnswerSource = null;
+        }
+
+        this._remoteAnswerAnalyser = null;
+        this._voiceEnergyFrames = 0;
+    }
+
+    startRemoteAnswerWatcher(session) {
+        if (!this.awaitingDestinationBridge || this._remoteAnswerWatcher) {
+            return;
+        }
+
+        const pc = session?.sessionDescriptionHandler?.peerConnection;
+        const remoteAudio = this.ui?.remoteAudio;
+        if (!pc || !remoteAudio) {
+            return;
+        }
+
+        const startedAt = Date.now();
+        this._voiceEnergyFrames = 0;
+
+        this._remoteAnswerWatcher = window.setInterval(async () => {
+            if (!this.awaitingDestinationBridge) {
+                this.stopRemoteAnswerWatcher();
+
+                return;
+            }
+
+            if (Date.now() - startedAt < 5000) {
+                return;
+            }
+
+            try {
+                const context = await this.ensureAudioContext();
+                if (!context) {
+                    return;
+                }
+
+                const stream = remoteAudio.srcObject;
+                if (!(stream instanceof MediaStream) || stream.getAudioTracks().length === 0) {
+                    return;
+                }
+
+                if (!this._remoteAnswerAnalyser) {
+                    this._remoteAnswerSource = context.createMediaStreamSource(stream);
+                    this._remoteAnswerAnalyser = context.createAnalyser();
+                    this._remoteAnswerAnalyser.fftSize = 512;
+                    this._remoteAnswerSource.connect(this._remoteAnswerAnalyser);
+                }
+
+                const bins = new Uint8Array(this._remoteAnswerAnalyser.frequencyBinCount);
+                this._remoteAnswerAnalyser.getByteTimeDomainData(bins);
+                let sum = 0;
+                for (let i = 0; i < bins.length; i += 1) {
+                    const centered = (bins[i] - 128) / 128;
+                    sum += centered * centered;
+                }
+                const rms = Math.sqrt(sum / bins.length);
+
+                if (rms > 0.035) {
+                    this._voiceEnergyFrames += 1;
+                    if (this._voiceEnergyFrames >= 6) {
+                        this.markDestinationConnected({ source: 'remote-audio' });
+                        this.stopRemoteAnswerWatcher();
+                    }
+                } else {
+                    this._voiceEnergyFrames = 0;
+                }
+            } catch {
+                // Keep polling fallback active.
+            }
+        }, 250);
+    }
+
     toggleRecording() {
         this.recordingActive = !this.recordingActive;
         this.updateRecordingUi();
@@ -480,6 +650,120 @@ class ApexWebphone {
 
     setMorpheusCallUuid(uuid) {
         this.morpheusCallUuid = uuid ? String(uuid) : null;
+        if (uuid) {
+            this.pstnPollUuid = String(uuid);
+            if (this.awaitingDestinationBridge && !this.destinationPollTimer) {
+                this.startDestinationPoll();
+            }
+        }
+    }
+
+    async showPstnLegFailedToast(uuid, peer) {
+        const template = this.callStatusUrlTemplate();
+        let hangupHint = '';
+
+        if (uuid && template) {
+            try {
+                const url = new URL(template.replace('__UUID__', encodeURIComponent(uuid)), window.location.origin);
+                if (peer) {
+                    url.searchParams.set('destination', peer);
+                }
+                const response = await fetch(url.toString(), {
+                    headers: {
+                        Accept: 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    credentials: 'same-origin',
+                });
+                const data = await response.json().catch(() => ({}));
+                if (response.ok && data.ok !== false) {
+                    const billsec = Number(data.billsec ?? 0);
+                    const cause = String(data.hangup_cause || '');
+                    if (billsec > 0 && billsec < 15) {
+                        hangupHint = ` (PSTN leg ${billsec}s`;
+                        if (cause) {
+                            hangupHint += `, ${cause.replace(/_/g, ' ').toLowerCase()}`;
+                        }
+                        hangupHint += ')';
+                    } else if (cause) {
+                        hangupHint = ` (${cause.replace(/_/g, ' ').toLowerCase()})`;
+                    }
+                }
+            } catch {
+                // Toast still shown without CDR detail.
+            }
+        }
+
+        const target = peer || 'the destination';
+        showToast(
+            `Morpheus disconnected before ${target} answered${hangupHint}. Stay on Connect line (Registered) and try Call again.`,
+            'warning',
+        );
+    }
+
+    async finalizeClickToCallAfterBye(uuid, peer) {
+        this.session = null;
+        if (this.ui?.remoteAudio) {
+            this.ui.remoteAudio.srcObject = null;
+        }
+
+        const deadline = Date.now() + 45_000;
+        let connected = false;
+
+        while (Date.now() < deadline && uuid) {
+            const template = this.callStatusUrlTemplate();
+            if (!template) {
+                break;
+            }
+
+            try {
+                const url = new URL(template.replace('__UUID__', encodeURIComponent(uuid)), window.location.origin);
+                if (peer) {
+                    url.searchParams.set('destination', peer);
+                }
+                const response = await fetch(url.toString(), {
+                    headers: {
+                        Accept: 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    credentials: 'same-origin',
+                });
+                const data = await response.json().catch(() => ({}));
+
+                if (response.ok && data.ok !== false) {
+                    if (this.applyRemoteCallStatus(data, { source: 'post-bye-poll' })) {
+                        connected = true;
+                        break;
+                    }
+
+                    if (data.live && Number(data.billsec ?? 0) >= 1 && !this.destinationMatchesPeer(data)) {
+                        const ringingCopy = peer
+                            ? `Your cell ${peer} is ringing — check your phone now.`
+                            : 'Destination is ringing — check your phone now.';
+                        this.updateCallCard({
+                            title: 'Outgoing call',
+                            subtitle: ringingCopy,
+                            detail: this.buildCallRouteDetail(peer),
+                            visible: true,
+                        });
+                    }
+
+                    if (!data.live && data.hangup_cause) {
+                        break;
+                    }
+                }
+            } catch {
+                // Keep polling.
+            }
+
+            await new Promise((resolve) => window.setTimeout(resolve, 1200));
+        }
+
+        if (!connected) {
+            await this.showPstnLegFailedToast(uuid, peer);
+        }
+
+        this.clearSession();
     }
 
     buildCallRouteDetail(destination) {
@@ -679,10 +963,33 @@ class ApexWebphone {
                 this.morpheusCallUuid = data.bridged_to;
             }
 
-            if (data.destination_connected) {
-                this.markDestinationConnected();
-
+            if (this.applyRemoteCallStatus(data, { source: 'poll' })) {
                 return;
+            }
+
+            if (data.live && Number(data.billsec ?? 0) >= 1 && this.awaitingDestinationBridge && !this.destinationMatchesPeer(data)) {
+                const ringingCopy = this.currentCallPeer
+                    ? `Your cell ${this.currentCallPeer} is ringing — check your phone now.`
+                    : 'Destination is ringing — check your phone now.';
+                this.updateCallCard({
+                    title: 'Outgoing call',
+                    subtitle: ringingCopy,
+                    detail: this.buildCallRouteDetail(this.currentCallPeer),
+                    visible: true,
+                });
+                this.updateFloatingPopup({
+                    title: 'Outgoing call',
+                    subtitle: ringingCopy,
+                    detail: this.buildCallRouteDetail(this.currentCallPeer),
+                    visible: true,
+                    statusLabel: 'Ringing',
+                    showRingingVisual: true,
+                    showConnectedTimer: false,
+                    showAnswer: false,
+                    showHangup: true,
+                    showRecord: true,
+                    state: 'dialing',
+                });
             }
 
             if (!data.live && data.hangup_cause) {
@@ -699,9 +1006,9 @@ class ApexWebphone {
 
                 if (
                     this.clickToCallActive
-                    && billsec < 3
+                    && billsec < 15
                     && elapsed < 120_000
-                    && (this.customerFirstOutbound || transientCauses.includes(cause))
+                    && (this.customerFirstOutbound || transientCauses.includes(cause) || cause === 'NORMAL_CLEARING')
                 ) {
                     return;
                 }
@@ -728,7 +1035,13 @@ class ApexWebphone {
         }, 1200);
     }
 
-    markDestinationConnected() {
+    markDestinationConnected({ source = 'poll' } = {}) {
+        if (!this.awaitingDestinationBridge && this.state === 'in-call') {
+            this.stopAllLocalRingers();
+
+            return;
+        }
+
         if (!this.awaitingDestinationBridge) {
             return;
         }
@@ -736,8 +1049,13 @@ class ApexWebphone {
         this.awaitingDestinationBridge = false;
         this.clickToCallActive = false;
         this.stopDestinationPoll();
-        this.stopRingback();
+        this.stopRemoteAnswerWatcher();
+        this.stopAllLocalRingers();
         // Keep morpheusCallUuid for hold/transfer/hangup until the user ends the call.
+
+        if (this.session) {
+            this.attachRemoteAudio(this.session);
+        }
 
         if (!this.callStartedAt) {
             this.startCallTimer();
@@ -745,14 +1063,14 @@ class ApexWebphone {
 
         this.updateCallCard({
             title: 'Call live',
-            subtitle: 'Your phone answered — two-way audio is active.',
+            subtitle: 'Destination answered — two-way audio is active.',
             detail: this.currentCallPeer ? `To: ${this.currentCallPeer}` : '',
             visible: true,
             timer: this.ui?.floatingTimer?.textContent || '00:00',
         });
         this.updateFloatingPopup({
             title: 'Call live',
-            subtitle: 'Your phone answered — two-way audio is active.',
+            subtitle: 'Destination answered — two-way audio is active.',
             detail: this.currentCallPeer ? `To: ${this.currentCallPeer}` : '',
             visible: true,
             timer: this.ui?.floatingTimer?.textContent || '00:00',
@@ -816,6 +1134,58 @@ class ApexWebphone {
             this.registerer?.state === RegistererState.Registered &&
             !this.isBridgeMode()
         );
+    }
+
+    isTransportConnected() {
+        const state = this.userAgent?.transport?.state;
+        if (typeof state === 'string') {
+            return state.toLowerCase() === 'connected';
+        }
+
+        return !!(this.userAgent?.transport?.isConnected?.() ?? this.canDirectDial());
+    }
+
+    configuredWssUrl() {
+        return (
+            this.activeWssUrl ||
+            this.config?.wss_url ||
+            this.panel?.dataset?.wssUrl ||
+            ''
+        );
+    }
+
+    async ensureLiveTransport(extension) {
+        if (this.canDirectDial() && this.isTransportConnected()) {
+            return true;
+        }
+
+        const normalized = String(extension || selectedExtension() || this.currentExtension || '').replace(/\D/g, '');
+        if (!normalized) {
+            throw new Error('Select your extension before calling.');
+        }
+
+        await this.connect(normalized);
+
+        return this.canDirectDial() && this.isTransportConnected();
+    }
+
+    async assertTransportForOriginate() {
+        ensureDefaultExtensionSelected();
+        const extension = selectedExtension();
+        if (!extension) {
+            throw new Error('Select your extension before calling.');
+        }
+
+        await this.ensureLiveTransport(extension);
+
+        if (!this.canDirectDial() || !this.isTransportConnected()) {
+            const wssUrl = this.configuredWssUrl() || 'wss://apexone.morpheus.cx:7443/';
+            throw new Error(
+                `Phone WebSocket is not connected. Click Connect line and wait for Registered on ${wssUrl}.`,
+            );
+        }
+
+        return true;
     }
 
     setCallContext(direction, peer = '') {
@@ -1306,6 +1676,7 @@ class ApexWebphone {
 
                 try {
                     await this._connectWithTransport(extension, attempt, wssUrl);
+                    this.activeWssUrl = wssUrl;
                     if (this.ui?.transport) {
                         this.ui.transport.textContent = wssUrl;
                     }
@@ -1365,11 +1736,30 @@ class ApexWebphone {
         this.userAgent.delegate = {
             onInvite: (invitation) => this.handleInvite(invitation),
             onNotify: (notification) => {
-                // Morpheus sends NOTIFY for call/dialog state. Always ACK 200 — do not 481.
+                // Morpheus sends NOTIFY (voicemail-summary, dialog). Must ACK 200 — 481 breaks call setup.
+                const accept = () => {
+                    if (typeof notification?.accept === 'function') {
+                        notification.accept({ statusCode: 200, reasonPhrase: 'OK' });
+                        return true;
+                    }
+                    const req = notification?.incomingNotifyRequest ?? notification?.request;
+                    if (typeof req?.accept === 'function') {
+                        req.accept({ statusCode: 200, reasonPhrase: 'OK' });
+                        return true;
+                    }
+                    return false;
+                };
                 try {
-                    notification.accept({ statusCode: 200, reasonPhrase: 'OK' });
+                    accept();
                 } catch {
-                    notification.incomingNotifyRequest?.accept?.({ statusCode: 200, reasonPhrase: 'OK' });
+                    // SIP.js may auto-handle on next tick.
+                    window.setTimeout(() => {
+                        try {
+                            accept();
+                        } catch {
+                            // Ignore — non-fatal.
+                        }
+                    }, 0);
                 }
             },
         };
@@ -1461,19 +1851,19 @@ class ApexWebphone {
 
     buildInviteExtraHeaders() {
         const headers = [];
-        const domain = this.config?.dial_domain || this.config?.domain;
+        const registerDomain = this.config?.domain;
         const extension = this.config?.extension || this.currentExtension;
         const callerId = this.config?.outbound_caller_id;
 
-        if (domain && extension) {
-            headers.push(`P-Preferred-Identity: <sip:${extension}@${domain}>`);
+        if (registerDomain && extension) {
+            headers.push(`P-Preferred-Identity: <sip:${extension}@${registerDomain}>`);
         }
 
-        if (domain && callerId) {
+        if (registerDomain && callerId) {
             const digits = String(callerId).replace(/\D/g, '');
             if (digits) {
-                headers.push(`P-Asserted-Identity: <sip:${digits}@${domain}>`);
-                headers.push(`Remote-Party-ID: <sip:${digits}@${domain}>;party=calling;privacy=off;screen=no`);
+                headers.push(`P-Asserted-Identity: <sip:${digits}@${registerDomain}>`);
+                headers.push(`Remote-Party-ID: <sip:${digits}@${registerDomain}>;party=calling;privacy=off;screen=no`);
             }
         }
 
@@ -1485,22 +1875,84 @@ class ApexWebphone {
         return headers;
     }
 
+    waitForOutboundInviteProgress(inviter, timeoutSec = 12) {
+        return new Promise((resolve, reject) => {
+            let settled = false;
+
+            const finish = (fn, value) => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                clearTimeout(timer);
+                inviter.stateChange.removeListener(onState);
+            };
+
+            const onState = (state) => {
+                if (state === SessionState.Established) {
+                    finish(resolve, 'answered');
+                } else if (state === SessionState.Terminated) {
+                    const detail =
+                        this.lastInviteReject ||
+                        this.outboundTerminateDetail ||
+                        (this.sawOutboundRinging ? 'no answer' : 'before ringing');
+                    finish(reject, new Error(detail));
+                }
+            };
+
+            if (inviter.state === SessionState.Established) {
+                resolve('answered');
+
+                return;
+            }
+
+            if (inviter.state === SessionState.Terminated) {
+                reject(
+                    new Error(
+                        this.lastInviteReject || this.outboundTerminateDetail || 'Call ended before ringing.',
+                    ),
+                );
+
+                return;
+            }
+
+            const timer = setTimeout(() => {
+                if (this.sawOutboundRinging) {
+                    finish(resolve, 'ringing');
+                } else {
+                    finish(
+                        reject,
+                        new Error(
+                            this.lastInviteReject ||
+                                'No ringing response from Morpheus yet — check Socket tab INVITE.',
+                        ),
+                    );
+                }
+            }, timeoutSec * 1000);
+
+            inviter.stateChange.addListener(onState);
+        });
+    }
+
     buildTargetUri(destination) {
         const normalized = normalizeDialTarget(destination);
         if (!normalized || !this.config) {
             return null;
         }
 
+        const prefix = this.config.outbound_prefix || '';
+        let dialString = `${prefix}${normalized}`;
+        if (!isExtensionTarget(dialString)) {
+            dialString = dialString.replace(/^\+/, '');
+        }
         const host = this.config.dial_domain || this.config.domain;
         if (!host) {
             return null;
         }
 
-        const prefix = this.config.outbound_prefix || '';
-        const dialString = `${prefix}${normalized}`;
         const sipTarget = isExtensionTarget(dialString)
             ? `sip:${dialString}@${host}`
-            : `sip:${dialString.replace(/^\+/, '')}@${host}${
+            : `sip:${dialString}@${host}${
                   this.config.sip_params ? `;${this.config.sip_params}` : ''
               }`;
 
@@ -1534,6 +1986,10 @@ class ApexWebphone {
         this.clickToCallActive = false;
         this.awaitingDestinationBridge = false;
         this.directDialActive = true;
+        this.sawOutboundRinging = false;
+        this.outboundTerminateDetail = '';
+        this.suppressTerminateToast = false;
+        this.lastInviteReject = '';
         this.setCallContext('outbound', normalized);
         this.recordingActive = true;
         this.updateRecordingUi();
@@ -1559,8 +2015,35 @@ class ApexWebphone {
         });
         this.setState('dialing');
 
+        const targetHost = this.config.dial_domain || this.config.domain;
+        const dialPreview = `sip:${String(normalized).replace(/^\+/, '')}@${targetHost}`;
+
+        this.outboundDialInProgress = true;
+
         try {
             await inviter.invite({
+                requestDelegate: {
+                    onTrying: () => {
+                        this.outboundTerminateDetail = '';
+                    },
+                    onProgress: (response) => {
+                        const code = response?.message?.statusCode || 0;
+                        if (code === 180 || code === 183) {
+                            this.sawOutboundRinging = true;
+                            this.outboundTerminateDetail = '';
+                        }
+                    },
+                    onReject: (response) => {
+                        const code = response?.message?.statusCode || 0;
+                        const reason = response?.message?.reasonPhrase || 'rejected';
+                        const q850 = String(response?.message?.getHeader?.('Reason') || '');
+                        const routeHint = q850.includes('NO_ROUTE_DESTINATION')
+                            ? ' — use click-to-call API, not browser PSTN INVITE'
+                            : '';
+                        this.lastInviteReject = `${code} ${reason}${routeHint}`.trim();
+                        this.outboundTerminateDetail = this.lastInviteReject;
+                    },
+                },
                 requestOptions: {
                     extraHeaders: this.buildInviteExtraHeaders(),
                 },
@@ -1568,19 +2051,42 @@ class ApexWebphone {
                     constraints: { audio: true, video: false },
                 },
             });
-            showToast(`Calling ${normalized}… ringing until the destination answers.`, 'success');
+
+            await this.waitForOutboundInviteProgress(
+                inviter,
+                Math.min(15, this.config?.ring_timeout_sec || 12),
+            );
+
+            showToast(`Calling ${normalized}… destination is ringing.`, 'success');
+
             return true;
         } catch (error) {
+            this.suppressTerminateToast = true;
             this.stopRingback();
             hideLoadingOverlay();
             this.clearSession();
-            throw error instanceof Error ? error : new Error('Could not place the call.');
+
+            const detail = error instanceof Error ? error.message : 'Could not place the call.';
+            const hint = detail.includes('ringing') || detail.includes('407') || detail.includes('403')
+                ? ` (${dialPreview})`
+                : '';
+
+            throw new Error(`${detail}${hint}`);
+        } finally {
+            this.outboundDialInProgress = false;
         }
     }
 
     handleInvite(invitation) {
-        if (this.directDialActive) {
+        if (this.directDialActive && !this.pendingClickToCall && !this.clickToCallActive) {
+            invitation.reject({ statusCode: 486, reasonPhrase: 'Busy Here' }).catch(() => {});
+
             return;
+        }
+
+        if (this.directDialActive) {
+            this.directDialActive = false;
+            this.stopRingback();
         }
 
         this.session = invitation;
@@ -1755,21 +2261,21 @@ class ApexWebphone {
 
                 if (isClickToCallOutbound) {
                     this.awaitingDestinationBridge = true;
-                    this.startRingback();
+                    this._lastSeenPstnBillsec = 0;
+                    this.stopAllLocalRingers();
                     const routeDetail = this.buildCallRouteDetail(this.currentCallPeer);
+                    const cellRingCopy = this.currentCallPeer
+                        ? `Your line is connected — ringing ${this.currentCallPeer} now. Stay on this tab.`
+                        : 'Your line is connected — ringing the destination now. Stay on this tab.';
                     this.updateCallCard({
-                        title: 'Outgoing call',
-                        subtitle: this.currentCallPeer
-                            ? `Dialing ${this.currentCallPeer}… connected to Morpheus trunk.`
-                            : 'Ringing destination… waiting for answer.',
+                        title: 'Ringing destination',
+                        subtitle: cellRingCopy,
                         detail: routeDetail,
                         visible: true,
                     });
                     this.updateFloatingPopup({
-                        title: 'Outgoing call',
-                        subtitle: this.currentCallPeer
-                            ? `Dialing ${this.currentCallPeer}… destination sees your outbound caller ID.`
-                            : 'Ringing destination… waiting for answer.',
+                        title: 'Ringing destination',
+                        subtitle: cellRingCopy,
                         detail: routeDetail,
                         visible: true,
                         statusLabel: 'Ringing',
@@ -1783,6 +2289,7 @@ class ApexWebphone {
                     this.setState('dialing');
                     this.startDestinationPoll();
                     this.attachRemoteAudio(session);
+                    this.startRemoteAnswerWatcher(session);
 
                     return;
                 }
@@ -1829,13 +2336,27 @@ class ApexWebphone {
                 const wasOutboundRinging =
                     this.currentCallDirection === 'outbound' &&
                     (this.state === 'dialing' || this.awaitingDestinationBridge);
+                const statusUuid = this.morpheusCallUuid || this.pstnPollUuid;
+                const peer = this.currentCallPeer || '';
+                const stillRegistered = this.registerer?.state === RegistererState.Registered;
+                const clickToCallDrop =
+                    wasOutboundRinging &&
+                    !this.directDialActive &&
+                    stillRegistered &&
+                    this.clickToCallActive &&
+                    statusUuid;
 
                 this.stopRingback();
 
-                if (wasOutboundRinging && !this.directDialActive) {
-                    const peer = this.currentCallPeer || '';
+                if (clickToCallDrop) {
+                    // Morpheus may still be dialing PSTN after agent-leg BYE — poll before toasting.
+                    void this.finalizeClickToCallAfterBye(statusUuid, peer);
+                } else if (wasOutboundRinging && !this.directDialActive) {
                     const digits = peer.replace(/\D/g, '');
-                    if (digits.length >= 10) {
+
+                    if (stillRegistered && this.clickToCallActive && digits.length >= 10) {
+                        void this.showPstnLegFailedToast(statusUuid, peer);
+                    } else if (digits.length >= 10) {
                         showToast(
                             `Your browser line disconnected before ${peer} answered. Stay on Connect line and try again.`,
                             'warning',
@@ -1843,28 +2364,52 @@ class ApexWebphone {
                     } else {
                         showToast('Call ended before the destination answered.', 'warning');
                     }
+                    this.clearSession();
                 } else if (wasOutboundRinging && this.directDialActive) {
-                    showToast(
-                        'Call ended before the destination answered. Check the number and Morpheus outbound routing.',
-                        'warning',
-                    );
+                    if (this.suppressTerminateToast || this.outboundDialInProgress) {
+                        this.suppressTerminateToast = false;
+                    } else {
+                        const rejectDetail = this.lastInviteReject || this.outboundTerminateDetail;
+                        const detailSuffix = rejectDetail ? ` (${rejectDetail})` : '';
+                        const message = this.sawOutboundRinging
+                            ? `Destination did not answer${detailSuffix}.`
+                            : `Call ended before the destination answered${detailSuffix}. Check Socket tab for INVITE response.`;
+                        showToast(message, 'warning');
+                    }
                 }
 
-                this.clearSession();
+                if (!clickToCallDrop) {
+                    this.clearSession();
+                }
             }
         });
     }
 
     attachRemoteAudio(session) {
         const remoteAudio = this.ui?.remoteAudio;
-        const pc = session.sessionDescriptionHandler?.peerConnection;
+        const pc = session?.sessionDescriptionHandler?.peerConnection;
         if (!remoteAudio || !pc) {
             return;
         }
 
-        pc.ontrack = (event) => {
-            remoteAudio.srcObject = event.streams[0];
+        const bindStream = (stream) => {
+            if (!stream) {
+                return;
+            }
+
+            remoteAudio.srcObject = stream;
+            remoteAudio.muted = false;
+            remoteAudio.autoplay = true;
             remoteAudio.play().catch(() => {});
+        };
+
+        pc.ontrack = (event) => {
+            const stream = event.streams?.[0] || new MediaStream([event.track]);
+            bindStream(stream);
+            this.stopAllLocalRingers();
+            if (this.awaitingDestinationBridge) {
+                this.startRemoteAnswerWatcher(session);
+            }
         };
 
         const stream = new MediaStream();
@@ -1874,8 +2419,11 @@ class ApexWebphone {
             }
         });
         if (stream.getTracks().length > 0) {
-            remoteAudio.srcObject = stream;
-            remoteAudio.play().catch(() => {});
+            bindStream(stream);
+            this.stopAllLocalRingers();
+            if (this.awaitingDestinationBridge) {
+                this.startRemoteAnswerWatcher(session);
+            }
         }
     }
 
@@ -1939,8 +2487,8 @@ class ApexWebphone {
 
     clearSession() {
         this.session = null;
-        this.stopRingtone();
-        this.stopRingback();
+        this.stopAllLocalRingers();
+        this.stopRemoteAnswerWatcher();
         this.stopDestinationPoll();
         hideLoadingOverlay();
         this.stopCallTimer();
@@ -1948,9 +2496,11 @@ class ApexWebphone {
         this.updateRecordingUi();
         this.setCallContext(null, '');
         this.morpheusCallUuid = null;
+        this.pstnPollUuid = null;
         this.pendingClickToCall = false;
         this.clickToCallActive = false;
         this.awaitingDestinationBridge = false;
+        this._lastSeenPstnBillsec = 0;
         this.directDialActive = false;
         this.callOnHold = false;
         this.updateHoldUi();

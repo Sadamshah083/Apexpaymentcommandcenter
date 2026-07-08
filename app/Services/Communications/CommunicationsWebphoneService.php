@@ -45,7 +45,8 @@ class CommunicationsWebphoneService
 
         $sipUser = $this->sipAuthUser($extensionNum);
         $sipDomain = $this->clickToCall->webrtcSipDomain();
-        $publicHost = $this->clickToCall->publicWssHost();
+        $dialDomain = $this->clickToCall->publicSipHost();
+        $publicHost = $dialDomain;
         $dialOptions = $this->agents->extensionDialOptions($extensionNum);
         $callerIdNumber = $dialOptions['caller_id_number'] ?? null;
         $directWss = "wss://{$publicHost}:7443/";
@@ -57,7 +58,7 @@ class CommunicationsWebphoneService
             'extension' => $extensionNum,
             'sip_user' => $sipUser,
             'domain' => $sipDomain,
-            'dial_domain' => $sipDomain,
+            'dial_domain' => $dialDomain,
             'wss_url' => $wssUrl,
             'wss_url_fallback' => $this->wssFallback($wssUrl, $directWss, $proxyWss),
             'auth_user' => $sipUser,

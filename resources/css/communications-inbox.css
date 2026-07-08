@@ -2201,6 +2201,22 @@
     gap: 1rem;
 }
 
+.ghl-dialer-center.ch-dial-workspace--compact {
+    width: min(100%, 78rem);
+    gap: 0.75rem;
+}
+
+.ghl-inbox-body-wide .ghl-inbox-conversation-scroll--center {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 10.5rem);
+}
+
+.ghl-inbox-body-wide .ch-dial-workspace--compact {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
 .ghl-dialer-center-hero {
     text-align: center;
     padding: 0.25rem 0.5rem 0;
