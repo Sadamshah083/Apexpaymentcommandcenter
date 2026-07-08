@@ -141,7 +141,7 @@ async function originateViaJson(form, dialBtn) {
         }
 
         const fromExtension = data.from ? String(data.from) : formData.get('from_extension');
-        if (fromExtension) {
+        if (fromExtension && !phone.isTransportConnected?.()) {
             await phone.ensureLiveTransport(String(fromExtension)).catch(() => {});
         }
 

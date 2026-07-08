@@ -20,7 +20,6 @@
         <a href="{{ route($routePrefix . 'communications.index', ['channel' => 'inbox', 'panel' => 'dialer']) }}"
             class="ghl-inbox-nav-item ghl-inbox-nav-item-dial {{ ($panel ?? '') === 'dialer' ? 'ghl-inbox-nav-item-active' : '' }}"
             title="Phone dialer">
-            @include('communications.inbox.partials.nav-icon', ['icon' => 'dial'])
             <span class="ghl-inbox-nav-label">Phone</span>
         </a>
     </nav>
@@ -38,7 +37,6 @@
 
         <details class="ghl-inbox-nav-more">
             <summary class="ghl-inbox-nav-more-toggle" aria-label="More channels">
-                @include('communications.inbox.partials.nav-icon', ['icon' => 'more'])
                 <span class="ghl-inbox-nav-label">More</span>
             </summary>
             <nav class="ghl-inbox-nav ghl-inbox-nav-secondary ghl-inbox-nav-secondary-menu" aria-label="More channels">

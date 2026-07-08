@@ -17,7 +17,6 @@
 <a href="{{ route($routePrefix . 'communications.index', $navQuery) }}"
     class="ghl-inbox-nav-item {{ $isActive ? 'ghl-inbox-nav-item-active' : '' }}"
     title="{{ $meta['label'] }}">
-    @include('communications.inbox.partials.nav-icon', ['icon' => $meta['icon']])
     <span class="ghl-inbox-nav-label">{{ $meta['label'] }}</span>
     @if ($badge)
         <span class="ghl-inbox-nav-badge">{{ $badge > 99 ? '99+' : $badge }}</span>

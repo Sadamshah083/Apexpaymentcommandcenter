@@ -183,12 +183,15 @@ class ApexWebphone {
         this.currentCallDirection = null;
         this.currentCallPeer = '';
         this.morpheusCallUuid = null;
+        this.bridgedCallUuid = null;
+        this.trackedCallUuids = new Set();
         this.recordingActive = false;
         this.clickToCallActive = false;
         this.awaitingDestinationBridge = false;
         this.awaitingAgentLegAnswer = false;
         this.destinationPollTimer = null;
         this.directDialActive = false;
+        this.userInitiatedHangup = false;
         this.customerFirstOutbound = false;
         this.outboundDialStartedAt = 0;
         this.callOnHold = false;
@@ -708,7 +711,17 @@ class ApexWebphone {
     }
 
     setMorpheusCallUuid(uuid) {
-        this.morpheusCallUuid = uuid ? String(uuid) : null;
+        const id = uuid ? String(uuid) : null;
+        this.morpheusCallUuid = id;
+        if (id) {
+            this.trackedCallUuids.add(id);
+        }
+    }
+
+    trackCallUuid(uuid) {
+        if (uuid) {
+            this.trackedCallUuids.add(String(uuid));
+        }
     }
 
     buildCallRouteDetail(destination) {
@@ -777,6 +790,7 @@ class ApexWebphone {
         this.setState('dialing');
         this.markClickToCallPending();
         this.startDestinationPoll();
+        this.startCallTimer({ allowDuringBridge: true });
     }
 
     hangupUrlTemplate() {
@@ -909,7 +923,7 @@ class ApexWebphone {
         try {
             const keepPolling = await this.pollDestinationOnce();
             if (keepPolling && this._destinationPollActive && this.awaitingDestinationBridge) {
-                this.scheduleDestinationPoll(800);
+                this.scheduleDestinationPoll(500);
             }
         } finally {
             this.destinationPollInFlight = false;
@@ -971,7 +985,8 @@ class ApexWebphone {
             }
 
             if (data.bridged_to && data.bridged_to !== uuid) {
-                this.morpheusCallUuid = data.bridged_to;
+                this.bridgedCallUuid = String(data.bridged_to);
+                this.trackCallUuid(data.bridged_to);
             }
 
             if (data.extension_busy || data.extension_not_answered) {
@@ -1132,7 +1147,7 @@ class ApexWebphone {
         this.attachRemoteAudio(this.session);
 
         if (!this.callStartedAt) {
-            this.startCallTimer();
+            this.startCallTimer({ allowDuringBridge: true });
         }
 
         this.updateCallCard({
@@ -1169,14 +1184,16 @@ class ApexWebphone {
 
     async hangupMorpheusCall(uuid) {
         const template = this.hangupUrlTemplate();
-        if (!template || !uuid) {
+        const relatedUuids = Array.from(this.trackedCallUuids);
+        const pathUuid = relatedUuids[0] || uuid;
+        if (!template || !pathUuid) {
             return;
         }
 
-        const url = template.replace('__UUID__', encodeURIComponent(uuid));
+        const url = template.replace('__UUID__', encodeURIComponent(pathUuid));
 
         try {
-            await fetch(url, {
+            const response = await fetch(url, {
                 method: 'POST',
                 headers: {
                     Accept: 'application/json',
@@ -1185,10 +1202,30 @@ class ApexWebphone {
                     'X-CSRF-TOKEN': csrfToken(),
                 },
                 credentials: 'same-origin',
-                body: JSON.stringify({}),
+                body: JSON.stringify({
+                    from_extension: selectedExtension() || this.currentExtension || '',
+                    destination: this.currentCallPeer || '',
+                    originate_uuid: pathUuid,
+                    related_uuids: relatedUuids.length ? relatedUuids : [pathUuid],
+                    bridged_uuid: this.bridgedCallUuid || null,
+                }),
             });
-        } catch {
-            // SIP hangup may already have ended the call leg.
+
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok && data.ok !== true) {
+                this.logPhone('warn', 'Morpheus hangup API returned non-OK', {
+                    status: response.status,
+                    pathUuid,
+                    relatedUuids,
+                    data,
+                });
+            }
+        } catch (error) {
+            this.logPhone('warn', 'Morpheus hangup API request failed', {
+                pathUuid,
+                relatedUuids,
+                error: error instanceof Error ? error.message : String(error),
+            });
         }
     }
 
@@ -1339,8 +1376,12 @@ class ApexWebphone {
         this.ui.floatingTransfer?.classList.toggle('hidden', !showTransfer);
     }
 
-    startCallTimer() {
-        if (this.awaitingDestinationBridge) {
+    startCallTimer({ allowDuringBridge = false, restart = false } = {}) {
+        if (this.awaitingDestinationBridge && !allowDuringBridge) {
+            return;
+        }
+
+        if (this.callStartedAt && !restart) {
             return;
         }
 
@@ -2317,6 +2358,7 @@ class ApexWebphone {
                     });
                     this.setState('dialing');
                     this.startDestinationPoll();
+                    this.startCallTimer({ allowDuringBridge: true });
                     this.logPhone('info', 'Agent leg established — waiting for destination answer', {
                         peer: this.currentCallPeer,
                         uuid: this.morpheusCallUuid,
@@ -2379,7 +2421,7 @@ class ApexWebphone {
                 this.stopRingback();
                 this.awaitingAgentLegAnswer = false;
 
-                if (wasOutboundRinging && !this.directDialActive) {
+                if (wasOutboundRinging && !this.directDialActive && !this.userInitiatedHangup) {
                     const peer = this.currentCallPeer || '';
                     const digits = peer.replace(/\D/g, '');
                     if (this.clickToCallActive || this.awaitingDestinationBridge) {
@@ -2400,6 +2442,14 @@ class ApexWebphone {
                         'Direct SIP dial failed. Use the Call button (Morpheus click-to-call) with Connect line Registered.',
                         'warning',
                     );
+                }
+
+                if (this.morpheusCallUuid && !this.userInitiatedHangup) {
+                    void this.hangupMorpheusCall(this.morpheusCallUuid).finally(() => {
+                        this.clearSession();
+                    });
+
+                    return;
                 }
 
                 this.clearSession();
@@ -2480,35 +2530,52 @@ class ApexWebphone {
 
     async hangup(reason = 'unknown') {
         const morpheusUuid = this.morpheusCallUuid;
+        const relatedUuids = Array.from(this.trackedCallUuids);
+
+        this.userInitiatedHangup = true;
 
         this.logPhone('info', 'Hangup requested', {
             reason,
             morpheusCallUuid: morpheusUuid,
+            bridgedCallUuid: this.bridgedCallUuid,
+            relatedUuids,
             sessionState: this.session?.state ?? null,
             awaitingDestinationBridge: this.awaitingDestinationBridge,
             peer: this.currentCallPeer,
         });
 
-        if (this.session) {
-            const state = this.session.state;
-            if (state === SessionState.Initial || state === SessionState.Establishing) {
-                if (this.session instanceof Inviter) {
-                    await this.session.cancel();
-                } else {
-                    await this.session.reject();
-                }
-            } else {
-                await this.session.bye();
-            }
-        }
+        this.stopDestinationPoll();
+        this.stopAllLocalRingers();
 
         if (morpheusUuid) {
             await this.hangupMorpheusCall(morpheusUuid);
         }
 
-        this.morpheusCallUuid = null;
-        this.pendingClickToCall = false;
-        this.clearSession();
+        try {
+            if (this.session) {
+                const state = this.session.state;
+                if (state === SessionState.Initial || state === SessionState.Establishing) {
+                    if (this.session instanceof Inviter) {
+                        await this.session.cancel();
+                    } else {
+                        await this.session.reject();
+                    }
+                } else if (state !== SessionState.Terminating && state !== SessionState.Terminated) {
+                    await this.session.bye();
+                }
+            }
+        } catch (error) {
+            this.logPhone('warn', 'Local SIP hangup failed after Morpheus hangup', {
+                reason,
+                error: error instanceof Error ? error.message : String(error),
+                morpheusCallUuid: morpheusUuid,
+            });
+        } finally {
+            this.morpheusCallUuid = null;
+            this.pendingClickToCall = false;
+            this.userInitiatedHangup = false;
+            this.clearSession();
+        }
     }
 
     clearSession() {
@@ -2521,6 +2588,8 @@ class ApexWebphone {
         this.updateRecordingUi();
         this.setCallContext(null, '');
         this.morpheusCallUuid = null;
+        this.bridgedCallUuid = null;
+        this.trackedCallUuids.clear();
         this.pendingClickToCall = false;
         this.clickToCallActive = false;
         this.awaitingDestinationBridge = false;

@@ -16,7 +16,7 @@ class MarketerPortalMiddleware
     public function handle(Request $request, Closure $next)
     {
         if (! Auth::check()) {
-            return redirect()->route('portal.login');
+            return redirect()->guest(route('portal.login'));
         }
 
         $user = Auth::user();

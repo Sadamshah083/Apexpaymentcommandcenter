@@ -199,9 +199,7 @@ class MorpheusHubController extends Controller
 
             $this->webphone->prepareExtension($user, $workspace, $fromExtension, $routePrefix);
 
-            if ($request->boolean('webphone_transport_connected')) {
-                $this->morpheus->clearExtensionForOutboundDial($fromExtension, kickSip: true);
-            }
+            $dialOptions['preserve_webphone_registration'] = $request->boolean('webphone_transport_connected');
 
             $result = $this->morpheus->originateCall($fromExtension, $destination, $dialOptions);
 
@@ -364,7 +362,37 @@ class MorpheusHubController extends Controller
 
     public function hangupCall(Request $request, string $uuid)
     {
-        return $this->executeCallAction($request, fn () => $this->morpheus->hangup($uuid), 'Call ended.');
+        $fromExtension = $request->input('from_extension');
+        $destination = $request->input('destination');
+        $relatedUuids = $request->input('related_uuids', []);
+        $originateUuid = $request->input('originate_uuid');
+        $bridgedUuid = $request->input('bridged_uuid');
+
+        $uuids = is_array($relatedUuids) ? $relatedUuids : [];
+        if (is_string($originateUuid) && trim($originateUuid) !== '') {
+            $uuids[] = $originateUuid;
+        }
+        if (is_string($bridgedUuid) && trim($bridgedUuid) !== '') {
+            $uuids[] = $bridgedUuid;
+        }
+
+        return $this->executeCallAction(
+            $request,
+            function () use ($uuid, $fromExtension, $destination, $uuids) {
+                try {
+                    return $this->morpheus->hangupWithContext(
+                        $uuid,
+                        is_string($fromExtension) ? $fromExtension : null,
+                        is_string($destination) ? $destination : null,
+                        $uuids,
+                    );
+                } catch (\Throwable) {
+                    // Never fail hangup endpoint because of contextual cleanup logic.
+                    return $this->morpheus->hangup($uuid);
+                }
+            },
+            'Call ended.'
+        );
     }
 
     public function callStatus(Request $request, string $uuid)

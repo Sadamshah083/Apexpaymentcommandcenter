@@ -223,7 +223,7 @@ class ZoomApiService
         }
 
         $billsec = (int) ($snapshot['billsec'] ?? $snapshot['duration_sec'] ?? 0);
-        if ($destDigits !== '' && $billsec >= 2) {
+        if ($destDigits !== '' && $billsec >= 1) {
             foreach (['destination_number', 'callee_number', 'phone_number', 'destination', 'to'] as $field) {
                 $digits = $this->normalizePhoneDigits($snapshot[$field] ?? null);
                 if ($digits === '') {
@@ -234,7 +234,7 @@ class ZoomApiService
                     $answered = filled($snapshot['answer_time'] ?? $snapshot['answered_at'] ?? null)
                         || in_array(strtolower((string) ($snapshot['call_outcome'] ?? '')), ['connected', 'short'], true);
 
-                    if ($answered || $billsec >= 5) {
+                    if ($answered || $billsec >= 1) {
                         return true;
                     }
                 }
@@ -536,7 +536,7 @@ class ZoomApiService
         if ($pstnLeg !== null) {
             $billsec = (int) ($pstnLeg['billsec'] ?? 0);
             $hangup = strtoupper((string) ($pstnLeg['hangup_cause'] ?? ''));
-            $connected = $billsec >= 2;
+            $connected = $billsec >= 1;
             $dest = (string) ($pstnLeg['destination_number'] ?? '');
             $routingFailed = in_array($hangup, [
                 'NORMAL_TEMPORARY_FAILURE',
@@ -732,6 +732,7 @@ class ZoomApiService
 
         $this->ensureManualOutboundCampaign();
         $extra = $this->originatePayloadExtras($options);
+        $preserveWebphone = (bool) ($options['preserve_webphone_registration'] ?? false);
 
         $timeout = $this->originateRingTimeout();
         $attempted = [];
@@ -740,10 +741,12 @@ class ZoomApiService
         $isPstn = strlen($dialDestination) > 6;
         $lineReset = false;
 
-        $place = function () use ($customerFirst, $isPstn, $method, $fromExtension, $dialDestination, $timeout, $extra, &$attempted): array {
+        $place = function (?string $overrideDestination = null) use ($customerFirst, $isPstn, $method, $fromExtension, $dialDestination, $timeout, $extra, &$attempted): array {
+            $effectiveDestination = $overrideDestination ?: $dialDestination;
+
             if ($customerFirst && $isPstn && $method !== 'click-to-call') {
                 $response = $this->postOriginate('/calls/originate', array_merge([
-                    'from' => $dialDestination,
+                    'from' => $effectiveDestination,
                     'to' => $this->customerFirstBridgeExtension($fromExtension),
                     'timeout_sec' => $timeout,
                 ], $extra));
@@ -755,7 +758,7 @@ class ZoomApiService
             if ($method === 'click-to-call') {
                 $response = $this->postOriginate('/click-to-call', array_merge([
                     'extension' => $fromExtension,
-                    'destination' => $dialDestination,
+                    'destination' => $effectiveDestination,
                     'timeout_sec' => $timeout,
                 ], $extra));
                 $attempted[] = 'POST /click-to-call';
@@ -765,7 +768,7 @@ class ZoomApiService
 
             $response = $this->postOriginate('/calls/originate', array_merge([
                 'from' => $fromExtension,
-                'to' => $dialDestination,
+                'to' => $effectiveDestination,
                 'timeout_sec' => $timeout,
             ], $extra));
             $attempted[] = 'POST /calls/originate';
@@ -775,12 +778,30 @@ class ZoomApiService
 
         $response = $place();
 
+        // Some US trunks route 10D while others require 11D (1+NPA-NXX-XXXX).
+        // Retry once with alternate US format when the first originate fails.
+        if (! ($response['ok'] ?? false) && $isPstn) {
+            $alternateDestination = null;
+            if (strlen($dialDestination) === 11 && str_starts_with($dialDestination, '1')) {
+                $alternateDestination = substr($dialDestination, 1);
+            } elseif (strlen($dialDestination) === 10) {
+                $alternateDestination = '1'.$dialDestination;
+            }
+
+            if ($alternateDestination && $alternateDestination !== $dialDestination) {
+                $response = $place($alternateDestination);
+                $attempted[] = 'retry-us-destination-format';
+            }
+        }
+
         if (($response['ok'] ?? false) && filled($response['call_uuid'] ?? null)) {
             $uuid = (string) $response['call_uuid'];
             $busy = false;
+            $pollAttempts = $preserveWebphone ? 2 : 3;
+            $pollDelayUs = $preserveWebphone ? 400_000 : 1_000_000;
 
-            for ($i = 0; $i < 3; $i++) {
-                usleep(1_000_000);
+            for ($i = 0; $i < $pollAttempts; $i++) {
+                usleep($pollDelayUs);
                 $snap = $this->quickGetCall($uuid) ?? [];
                 $cause = strtoupper((string) ($snap['hangup_cause'] ?? ''));
                 $live = (bool) ($snap['live'] ?? false);
@@ -797,14 +818,18 @@ class ZoomApiService
 
             if ($busy) {
                 $this->hangup($uuid);
-                $this->clearExtensionForOutboundDial($fromExtension, kickSip: true);
-                $lineReset = true;
-                sleep(2);
+                $this->clearExtensionForOutboundDial($fromExtension, kickSip: ! $preserveWebphone);
+                $lineReset = ! $preserveWebphone;
+                if (! $preserveWebphone) {
+                    sleep(2);
+                } else {
+                    usleep(500_000);
+                }
                 $response = $place();
                 $attempted[] = 'retry-after-busy';
 
                 if (($response['ok'] ?? false) && filled($response['call_uuid'] ?? null)) {
-                    usleep(1_500_000);
+                    usleep($preserveWebphone ? 500_000 : 1_500_000);
                     $retrySnap = $this->quickGetCall((string) $response['call_uuid']) ?? [];
                     $retryCause = strtoupper((string) ($retrySnap['hangup_cause'] ?? ''));
                     if (in_array($retryCause, ['USER_BUSY', 'CALL_REJECTED'], true)) {
@@ -828,7 +853,7 @@ class ZoomApiService
         }
 
         $callUuid = (string) ($response['call_uuid'] ?? '');
-        if ($callUuid !== '' && ! $this->verifyOriginateStarted($callUuid)) {
+        if ($callUuid !== '' && ! $this->verifyOriginateStarted($callUuid, $preserveWebphone)) {
             return [
                 'ok' => false,
                 'routing_error' => true,
@@ -979,6 +1004,37 @@ class ZoomApiService
     }
 
     /**
+     * @param  array<string, mixed>  $call
+     */
+    protected function activeCallTouchesDestination(array $call, string $destinationNum): bool
+    {
+        if ($destinationNum === '') {
+            return true;
+        }
+
+        $target = $this->normalizePhoneDigits($destinationNum);
+        if ($target === '') {
+            return false;
+        }
+
+        foreach ([
+            'destination_number', 'destination', 'to', 'callee', 'caller',
+            'caller_id_number', 'from', 'other_leg_destination',
+        ] as $field) {
+            $value = $this->normalizePhoneDigits((string) ($call[$field] ?? ''));
+            if ($value === '') {
+                continue;
+            }
+
+            if ($value === $target || str_ends_with($value, $target) || str_ends_with($target, $value)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Zombie calls on an extension block new outbound with SIP 486 USER_BUSY.
      *
      * @return array<int, string>
@@ -1021,10 +1077,13 @@ class ZoomApiService
     /**
      * Morpheus sometimes returns HTTP 200 + call_uuid while FreeSWITCH never creates the call.
      */
-    protected function verifyOriginateStarted(string $uuid): bool
+    protected function verifyOriginateStarted(string $uuid, bool $fast = false): bool
     {
-        for ($i = 0; $i < 5; $i++) {
-            usleep(600_000);
+        $attempts = $fast ? 2 : 5;
+        $delayUs = $fast ? 250_000 : 600_000;
+
+        for ($i = 0; $i < $attempts; $i++) {
+            usleep($delayUs);
 
             if ($this->quickGetCall($uuid) !== null) {
                 return true;
@@ -1442,6 +1501,108 @@ class ZoomApiService
         }
 
         return $result;
+    }
+
+    /**
+     * Hang up the requested UUID and any related live legs for the same outbound attempt.
+     *
+     * @param  array<int, string>  $relatedUuids
+     * @return array{ok: bool, action?: string, hungup?: array<int, string>, error?: string, already_ended?: bool}
+     */
+    public function hangupWithContext(
+        string $uuid,
+        ?string $fromExtension = null,
+        ?string $destination = null,
+        array $relatedUuids = [],
+    ): array {
+        $uuid = trim($uuid);
+        if ($uuid === '') {
+            return ['ok' => false, 'error' => 'Missing call uuid.'];
+        }
+
+        $targets = array_values(array_unique(array_filter(array_merge(
+            [$uuid],
+            array_map(static fn ($id) => trim((string) $id), $relatedUuids),
+        ), static fn (string $id) => $id !== '')));
+
+        $hungup = [];
+        $lastError = null;
+        $onlyAlreadyEnded = $targets !== [];
+
+        foreach ($targets as $targetUuid) {
+            $result = $this->hangup($targetUuid);
+            if ($result['ok'] ?? false) {
+                $hungup[] = $targetUuid;
+                $onlyAlreadyEnded = false;
+                continue;
+            }
+
+            $error = (string) ($result['error'] ?? '');
+            $lastError = $error !== '' ? $error : $lastError;
+            if (! $this->isCallAlreadyEndedError($error)) {
+                $onlyAlreadyEnded = false;
+            }
+        }
+
+        $extensionDigits = preg_replace('/\D/', '', (string) $fromExtension) ?: '';
+        $destinationDigits = preg_replace('/\D/', '', (string) $destination) ?: '';
+        try {
+            foreach ($this->listActiveCalls() as $call) {
+                if (! is_array($call)) {
+                    continue;
+                }
+
+                $relatedByUuid = collect($targets)->contains(
+                    fn (string $target) => $this->callRowMatchesUuid($call, $target)
+                );
+                $matchesExtension = $extensionDigits !== ''
+                    && $this->activeCallTouchesExtension($call, $extensionDigits);
+                $matchesDestination = $destinationDigits !== ''
+                    && $this->activeCallTouchesDestination($call, $destinationDigits);
+
+                $relatedByContext = match (true) {
+                    $extensionDigits !== '' && $destinationDigits !== '' => $matchesExtension || $matchesDestination,
+                    $extensionDigits !== '' => $matchesExtension,
+                    $destinationDigits !== '' => $matchesDestination,
+                    default => false,
+                };
+
+                if (! $relatedByUuid && ! $relatedByContext) {
+                    continue;
+                }
+
+                $candidateUuid = (string) ($call['uuid'] ?? $call['call_uuid'] ?? '');
+                if ($candidateUuid === '' || in_array($candidateUuid, $hungup, true)) {
+                    continue;
+                }
+
+                try {
+                    $result = $this->hangup($candidateUuid);
+                    if ($result['ok'] ?? false) {
+                        $hungup[] = $candidateUuid;
+                        $onlyAlreadyEnded = false;
+                    }
+                } catch (\Throwable) {
+                    // Keep primary hangup successful even if related-leg cleanup fails.
+                }
+            }
+        } catch (\Throwable) {
+            // Keep primary hangup successful even if active-call lookup fails.
+        }
+
+        if ($hungup !== []) {
+            return [
+                'ok' => true,
+                'action' => 'hangup',
+                'hungup' => array_values(array_unique($hungup)),
+            ];
+        }
+
+        if ($onlyAlreadyEnded) {
+            return ['ok' => true, 'action' => 'hangup', 'already_ended' => true, 'hungup' => []];
+        }
+
+        return ['ok' => false, 'error' => $lastError ?: 'Call action failed.'];
     }
 
     /**

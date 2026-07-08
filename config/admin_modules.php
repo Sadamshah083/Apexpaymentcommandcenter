@@ -111,6 +111,10 @@ return [
             'description' => 'Calls, dialer, recordings, voicemails, and Morpheus telephony',
             'section' => 'Communications',
             'default_route' => 'admin.communications.index',
+            'default_route_params' => [
+                'channel' => 'inbox',
+                'panel' => 'dialer',
+            ],
             'always_available' => true,
             'routes' => [
                 'admin.communications.*',

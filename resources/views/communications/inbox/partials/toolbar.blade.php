@@ -1,6 +1,14 @@
 @php
     $roleLabel = $hubAccess['roleLabel'] ?? 'User';
     $isDialerPanel = ($panel ?? '') === 'dialer';
+    $channelChips = [];
+    foreach (($channels ?? []) as $key => $meta) {
+        $channelChips[] = [
+            'key' => (string) $key,
+            'label' => (string) ($meta['label'] ?? ucfirst((string) $key)),
+        ];
+    }
+    $channelChips[] = ['key' => 'phone', 'label' => 'Phone'];
 @endphp
 
 <header class="ghl-inbox-toolbar ch-hub-toolbar-enterprise {{ $isDialerPanel ? 'ch-hub-toolbar--dialer' : '' }}">
@@ -13,15 +21,18 @@
                 </p>
             </div>
         </div>
+        <div class="ghl-inbox-toolbar-channels" aria-label="Available channels">
+            @foreach ($channelChips as $chip)
+                @php
+                    $isActiveChip = $chip['key'] === 'phone' ? $isDialerPanel : ($chip['key'] === ($channel ?? ''));
+                @endphp
+                <span class="ghl-inbox-toolbar-chip {{ $isActiveChip ? 'is-active' : '' }}">{{ $chip['label'] }}</span>
+            @endforeach
+        </div>
     @else
         <div class="ghl-inbox-toolbar-top">
             <div class="ghl-inbox-toolbar-brand">
                 <div class="ghl-inbox-toolbar-brand-row">
-                    <span class="ghl-inbox-toolbar-mark" aria-hidden="true">
-                        @include('communications.inbox.partials.nav-icon', [
-                            'icon' => $channels[$channel]['icon'] ?? 'inbox',
-                        ])
-                    </span>
                     <div>
                         <h1 class="ghl-inbox-toolbar-heading">Communications Hub</h1>
                         <p class="ghl-inbox-toolbar-sub">
@@ -121,6 +132,14 @@
                     </a>
                 @endif
             </div>
+        </div>
+        <div class="ghl-inbox-toolbar-channels" aria-label="Available channels">
+            @foreach ($channelChips as $chip)
+                @php
+                    $isActiveChip = $chip['key'] === 'phone' ? (($panel ?? '') === 'dialer') : ($chip['key'] === ($channel ?? ''));
+                @endphp
+                <span class="ghl-inbox-toolbar-chip {{ $isActiveChip ? 'is-active' : '' }}">{{ $chip['label'] }}</span>
+            @endforeach
         </div>
     @endif
 </header>
