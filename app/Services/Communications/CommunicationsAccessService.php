@@ -7,6 +7,16 @@ use Illuminate\Http\Request;
 
 class CommunicationsAccessService
 {
+    /** Channels shown first in the hub nav (remaining channels appear under “More” on small screens). */
+    public const PRIMARY_NAV_CHANNELS = [
+        'inbox',
+        'calls',
+        'sms',
+        'voicemail',
+        'recordings',
+        'chat',
+    ];
+
     /** Core agent operations: dial, inbox, call history, media. */
     public const AGENT_CHANNELS = [
         'inbox',

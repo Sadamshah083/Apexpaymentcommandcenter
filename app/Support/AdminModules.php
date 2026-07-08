@@ -60,15 +60,34 @@ class AdminModules
 
     public static function defaultRouteForUser(\App\Models\User $user, ?int $workspaceId = null): ?string
     {
+        return self::defaultLandingForUser($user, $workspaceId)['route'] ?? null;
+    }
+
+    /**
+     * @return array{route: string, params: array<string, mixed>}
+     */
+    public static function defaultLandingForUser(\App\Models\User $user, ?int $workspaceId = null): array
+    {
         $workspaceId = $workspaceId ?: $user->current_workspace_id;
 
         foreach (self::all() as $key => $module) {
             if ($user->canAccessAdminModule($key, $workspaceId)) {
-                return $module['default_route'] ?? null;
+                return [
+                    'route' => $module['default_route'] ?? 'admin.dashboard',
+                    'params' => $module['default_route_params'] ?? [],
+                ];
             }
         }
 
-        return null;
+        return ['route' => 'admin.dashboard', 'params' => []];
+    }
+
+    public static function communicationsDialerParams(): array
+    {
+        return [
+            'channel' => 'inbox',
+            'panel' => 'dialer',
+        ];
     }
 
     /**

@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\User;
 use App\Models\Workspace;
+use App\Support\AdminModules;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
@@ -19,7 +21,7 @@ class WorkspaceAuthController extends Controller
             if ($user->isAdminOfAnyWorkspace()) {
                 $user->ensureAdminPortalWorkspace();
 
-                return redirect()->route('admin.dashboard');
+                return $this->redirectAfterAdminLogin($user);
             }
         }
 
@@ -46,7 +48,7 @@ class WorkspaceAuthController extends Controller
                 ]);
             }
 
-            return redirect()->route('admin.dashboard')->with('success', 'Logged into Admin Portal.');
+            return $this->redirectAfterAdminLogin($user)->with('success', 'Logged into Admin Portal.');
         }
 
         return back()->withErrors([
@@ -57,7 +59,7 @@ class WorkspaceAuthController extends Controller
     public function showRegister()
     {
         if (Auth::check()) {
-            return redirect()->route('admin.dashboard');
+            return $this->redirectAfterAdminLogin(Auth::user());
         }
         return view('auth.register');
     }
@@ -99,7 +101,26 @@ class WorkspaceAuthController extends Controller
 
         Auth::login($user);
 
-        return redirect()->route('admin.dashboard')->with('success', 'Workspace and admin account created.');
+        return $this->redirectAfterAdminLogin($user)->with('success', 'Workspace and admin account created.');
+    }
+
+    protected function redirectAfterAdminLogin(User $user): RedirectResponse
+    {
+        if ($user->canAccessAdminModule('communications', $user->current_workspace_id)) {
+            $defaultUrl = route('admin.communications.index', AdminModules::communicationsDialerParams());
+        } else {
+            $landing = AdminModules::defaultLandingForUser($user);
+            $defaultUrl = route($landing['route'], $landing['params']);
+        }
+
+        return redirect()->intended($defaultUrl);
+    }
+
+    protected function redirectAfterPortalLogin(User $user): RedirectResponse
+    {
+        return redirect()->intended(
+            route('portal.communications.index', AdminModules::communicationsDialerParams())
+        );
     }
 
     public function adminLogout(Request $request)
@@ -115,7 +136,7 @@ class WorkspaceAuthController extends Controller
     public function showPortalLogin()
     {
         if (Auth::check()) {
-            return redirect()->route('portal.dashboard');
+            return $this->redirectAfterPortalLogin(Auth::user());
         }
         return view('auth.login_portal');
     }
@@ -146,7 +167,7 @@ class WorkspaceAuthController extends Controller
             $user->update(['current_workspace_id' => $activeWorkspace->id]);
 
             if ($user->canAccessPortal($activeWorkspace->id)) {
-                return redirect()->route('portal.dashboard')->with('success', 'Signed in to '.config('app.name').'.');
+                return $this->redirectAfterPortalLogin($user)->with('success', 'Signed in to '.config('app.name').'.');
             }
 
             Auth::logout();

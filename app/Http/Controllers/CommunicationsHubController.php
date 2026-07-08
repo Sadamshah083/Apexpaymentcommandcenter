@@ -18,6 +18,7 @@ use App\Services\Communications\ZoomClickToCallService;
 
 use App\Services\Integrations\ZoomApiService;
 
+use App\Support\AdminModules;
 use Illuminate\Http\Request;
 
 use Illuminate\Support\Facades\Response;
@@ -46,7 +47,46 @@ class CommunicationsHubController extends Controller
 
     public function index(Request $request)
     {
+        if ($redirect = $this->dialerLandingRedirect($request)) {
+            return $redirect;
+        }
+
         return $this->inboxView($request);
+    }
+
+    protected function dialerLandingRedirect(Request $request): ?\Illuminate\Http\RedirectResponse
+    {
+        if ($request->get('panel') === 'dialer' && ($request->get('channel') ?: 'inbox') === 'inbox') {
+            return null;
+        }
+
+        if (
+            $request->has('panel')
+            || $request->filled('mode')
+            || $request->filled('contact')
+            || $request->filled('call')
+            || $request->filled('session')
+            || $request->filled('voicemail')
+            || $request->filled('recording')
+            || $request->filled('chat_owner')
+        ) {
+            return null;
+        }
+
+        $channel = (string) $request->get('channel', 'inbox');
+        if ($channel !== '' && $channel !== 'inbox') {
+            return null;
+        }
+
+        return redirect()->route($this->routePrefix().'communications.index', array_merge(
+            AdminModules::communicationsDialerParams(),
+            array_filter([
+                'number' => $request->get('number'),
+                'search' => $request->get('search'),
+                'from' => $request->get('from'),
+                'to' => $request->get('to'),
+            ], fn ($value) => filled($value)),
+        ));
     }
 
 

@@ -31,6 +31,44 @@ function initPageTransitions() {
     });
 }
 
+function initHorizontalWheelScroll() {
+    const selectors = ['.ghl-inbox-nav', '.ghl-inbox-toolbar-channels'];
+    const strips = document.querySelectorAll(selectors.join(','));
+
+    strips.forEach((strip) => {
+        if (!(strip instanceof HTMLElement) || strip.dataset.wheelScrollBound === '1') {
+            return;
+        }
+
+        strip.dataset.wheelScrollBound = '1';
+        strip.addEventListener('wheel', (event) => {
+            if (!strip.matches(':hover')) {
+                return;
+            }
+
+            const delta = Math.abs(event.deltaY) > Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+            if (!delta) {
+                return;
+            }
+
+            const maxScrollLeft = strip.scrollWidth - strip.clientWidth;
+            if (maxScrollLeft <= 0) {
+                return;
+            }
+
+            const nextLeft = strip.scrollLeft + delta;
+            const canScrollFurther = (delta < 0 && strip.scrollLeft > 0)
+                || (delta > 0 && strip.scrollLeft < maxScrollLeft);
+            if (!canScrollFurther) {
+                return;
+            }
+
+            event.preventDefault();
+            strip.scrollLeft = nextLeft;
+        }, { passive: false });
+    });
+}
+
 async function bootCommunicationsFeatures() {
     const needsDialer = Boolean(document.querySelector('.ghl-dialer-originate-form'));
     const needsWebphone = Boolean(document.querySelector('[data-webphone-panel]'));
@@ -68,6 +106,7 @@ function boot() {
     initMemberManagement();
     initWorkspaceAdmin();
     initPortalDashboard();
+    initHorizontalWheelScroll();
     void bootCommunicationsFeatures();
 }
 
@@ -87,11 +126,15 @@ document.addEventListener('turbo:load', () => {
     initMemberManagement();
     initWorkspaceAdmin();
     initPortalDashboard();
+    initHorizontalWheelScroll();
     void bootCommunicationsFeatures();
 });
 document.addEventListener('turbo:before-cache', () => {
     teardownWorkspaceSync();
     teardownPortalDashboard();
+    import('./communications-webphone.js').then((webphoneModule) => {
+        webphoneModule.teardownWebphoneForTurbo?.();
+    }).catch(() => {});
     import('./communications-dialer.js').then((dialerModule) => {
         dialerModule.resetDialerButtonsForCache();
     }).catch(() => {});

@@ -51,6 +51,30 @@ class ZoomClickToCallService
         return $this->publicSipHost();
     }
 
+    /**
+     * Direct Morpheus WebSocket for browser SIP (REGISTER + INVITE/BYE).
+     * Must match the Morpheus agent portal: wss://apexone.morpheus.cx:7443/ with subprotocol sip.
+     */
+    public function defaultSipWssUrl(): string
+    {
+        return 'wss://apexone.morpheus.cx:7443/';
+    }
+
+    public function resolveSipWssUrl(): string
+    {
+        $configured = trim((string) config('integrations.morpheus.sip_wss_url', ''));
+        if ($configured !== '') {
+            return rtrim($configured, '/').'/';
+        }
+
+        $host = $this->publicWssHost();
+        if ($host !== '') {
+            return "wss://{$host}:7443/";
+        }
+
+        return $this->defaultSipWssUrl();
+    }
+
     public function normalizePhone(string $phone): string
     {
         $phone = trim($phone);

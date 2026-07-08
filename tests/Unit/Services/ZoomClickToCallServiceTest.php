@@ -99,4 +99,22 @@ class ZoomClickToCallServiceTest extends TestCase
             $service->sipUrl('(555) 123-4567')
         );
     }
+
+    public function test_resolve_sip_wss_url_uses_direct_morpheus_port_7443(): void
+    {
+        config(['integrations.morpheus.sip_wss_url' => null]);
+
+        $service = new ZoomClickToCallService;
+
+        $this->assertSame('wss://apexone.morpheus.cx:7443/', $service->resolveSipWssUrl());
+    }
+
+    public function test_resolve_sip_wss_url_honors_env_override(): void
+    {
+        config(['integrations.morpheus.sip_wss_url' => 'wss://apexone.morpheus.cx:7443']);
+
+        $service = new ZoomClickToCallService;
+
+        $this->assertSame('wss://apexone.morpheus.cx:7443/', $service->resolveSipWssUrl());
+    }
 }

@@ -321,6 +321,90 @@ class ZoomApiServiceTest extends TestCase
         $this->assertSame(12, $snapshot['billsec']);
     }
 
+    public function test_hub_call_status_returns_pending_with_hint_when_live_api_empty(): void
+    {
+        config([
+            'integrations.morpheus.host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.api_key' => 'test-key',
+        ]);
+
+        Http::fake([
+            'https://apexone.morpheus.cx/api/v1/call-control/calls/pending-uuid' => Http::response([], 404),
+            'https://apexone.morpheus.cx/api/v1/call-control/calls' => Http::response(['calls' => []], 200),
+            'https://apexone.morpheus.cx/api/v1/call-control/cdr*' => Http::response(['cdr' => []], 200),
+        ]);
+
+        $status = (new ZoomApiService)->hubCallStatus('pending-uuid', '+12722001232');
+
+        $this->assertTrue($status['pending']);
+        $this->assertFalse($status['destination_connected']);
+        $this->assertSame(0, $status['morpheus_active_calls']);
+        $this->assertArrayHasKey('hint', $status);
+    }
+
+    public function test_hub_call_status_detects_extension_not_answered_from_cdr(): void
+    {
+        config([
+            'integrations.morpheus.host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.api_key' => 'test-key',
+        ]);
+
+        Http::fake([
+            'https://apexone.morpheus.cx/api/v1/call-control/calls/agent-miss' => Http::response([], 404),
+            'https://apexone.morpheus.cx/api/v1/call-control/calls' => Http::response(['calls' => []], 200),
+            'https://apexone.morpheus.cx/api/v1/call-control/cdr*' => Http::response([
+                'cdr' => [[
+                    'call_uuid' => 'agent-miss',
+                    'destination_number' => 'n6qiqk02',
+                    'billsec' => 0,
+                    'hangup_cause' => 'NO_ANSWER',
+                    'call_outcome' => 'no_answer',
+                ]],
+            ], 200),
+        ]);
+
+        $status = (new ZoomApiService)->hubCallStatus('agent-miss', '+12722001232');
+
+        $this->assertFalse($status['pending']);
+        $this->assertTrue($status['extension_not_answered']);
+        $this->assertSame('NO_ANSWER', $status['hangup_cause']);
+    }
+
+    public function test_hub_call_status_marks_short_pstn_answer_from_cdr_when_live_api_omits_answer_time(): void
+    {
+        config([
+            'integrations.morpheus.host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.api_key' => 'test-key',
+        ]);
+
+        Http::fake([
+            'https://apexone.morpheus.cx/api/v1/call-control/calls/short-pstn' => Http::response([
+                'call_uuid' => 'short-pstn',
+                'destination_number' => '12722001232',
+                'billsec' => 6,
+                'hangup_cause' => 'NORMAL_CLEARING',
+                'live' => false,
+                'status' => 'completed',
+            ], 200),
+            'https://apexone.morpheus.cx/api/v1/call-control/calls' => Http::response(['calls' => []], 200),
+            'https://apexone.morpheus.cx/api/v1/call-control/cdr*' => Http::response([
+                'cdr' => [[
+                    'call_uuid' => 'short-pstn',
+                    'destination_number' => '12722001232',
+                    'answer_time' => '2026-07-07T22:34:53Z',
+                    'billsec' => 6,
+                    'hangup_cause' => 'NORMAL_CLEARING',
+                    'call_outcome' => 'short',
+                ]],
+            ], 200),
+        ]);
+
+        $status = (new ZoomApiService)->hubCallStatus('short-pstn', '+12722001232');
+
+        $this->assertTrue($status['destination_connected']);
+        $this->assertSame('connected', $status['outcome']);
+    }
+
     public function test_originate_call_strips_carrier_prefix_from_destination(): void
     {
         config([
