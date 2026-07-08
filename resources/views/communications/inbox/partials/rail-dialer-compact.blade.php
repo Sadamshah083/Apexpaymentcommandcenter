@@ -35,9 +35,8 @@
 @endif
 
 <form method="POST" action="{{ route($routePrefix . 'communications.morpheus.calls.originate') }}"
-    class="ghl-dialer-originate-form ghl-dialer-compact" data-fallback-sip="1" data-originate-json="1">
+    class="ghl-dialer-originate-form ghl-dialer-compact" data-originate-json="1">
     @csrf
-    <input type="hidden" name="fallback" value="sip">
 
     <label class="comm-hub-label" for="dial-caller-id-rail">From</label>
     <select id="dial-caller-id-rail" name="from_extension" class="comm-hub-input comm-hub-input-sm ghl-dialer-field"

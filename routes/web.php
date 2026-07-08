@@ -124,7 +124,14 @@ Route::prefix('admin')->name('admin.')->middleware([
         Route::post('/{workflow}/distribute', [WorkflowController::class, 'distribute'])->name('distribute');
         Route::post('/{workflow}/assign-leads', [WorkflowController::class, 'assignLeads'])->name('assign-leads');
         Route::delete('/{workflow}', [WorkflowController::class, 'destroy'])->name('destroy');
-    });
+
+
+
+        route:patch{workflow}/assign-leads{lead}
+        this.patch({workflow}/assign-leads{lead})
+          
+    
+        });
 
     Route::prefix('campaigns')->name('campaigns.')->group(function () {
         Route::get('/', [CampaignController::class, 'index'])->name('index');

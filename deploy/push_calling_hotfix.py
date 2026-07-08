@@ -18,12 +18,14 @@ FILES = [
     "app/Http/Controllers/MorpheusHubController.php",
     "app/Services/Communications/CommunicationsAgentService.php",
     "app/Services/Communications/CommunicationsInboxService.php",
+    "app/Services/Communications/CommunicationsAccessService.php",
     "app/Services/Communications/CommunicationsCallHistoryService.php",
     "app/Services/Communications/MorpheusHubService.php",
     "app/Services/Communications/CommunicationsWebphoneService.php",
     "app/Services/Communications/ZoomClickToCallService.php",
     "app/Services/Integrations/MorpheusCircuitBreaker.php",
     "app/Services/Integrations/ZoomApiService.php",
+    "app/Support/MorpheusSipIdentity.php",
     "app/Services/Communications/CommunicationsDataService.php",
     "app/Http/Controllers/CommunicationsHubController.php",
     "config/integrations.php",
@@ -36,6 +38,9 @@ FILES = [
     "resources/views/communications/dialer/index.blade.php",
     "resources/views/communications/inbox/index.blade.php",
     "resources/views/communications/inbox/partials/nav.blade.php",
+    "resources/views/communications/inbox/partials/nav-item.blade.php",
+    "resources/views/communications/inbox/partials/nav-icon.blade.php",
+    "resources/views/communications/inbox/partials/toolbar.blade.php",
     "resources/views/communications/inbox/partials/main.blade.php",
     "resources/views/communications/inbox/partials/tools.blade.php",
     "resources/views/communications/inbox/partials/panels/dialer.blade.php",
@@ -102,6 +107,9 @@ def main() -> int:
         f"grep -q '^MORPHEUS_WEBPHONE_AUTO_ANSWER=' {REMOTE_APP}/.env "
         f"&& sed -i 's/^MORPHEUS_WEBPHONE_AUTO_ANSWER=.*/MORPHEUS_WEBPHONE_AUTO_ANSWER=true/' {REMOTE_APP}/.env "
         f"|| echo 'MORPHEUS_WEBPHONE_AUTO_ANSWER=true' >> {REMOTE_APP}/.env",
+        f"grep -q '^MORPHEUS_SARAPHONE_ENABLED=' {REMOTE_APP}/.env "
+        f"&& sed -i 's/^MORPHEUS_SARAPHONE_ENABLED=.*/MORPHEUS_SARAPHONE_ENABLED=false/' {REMOTE_APP}/.env "
+        f"|| echo 'MORPHEUS_SARAPHONE_ENABLED=false' >> {REMOTE_APP}/.env",
     ])
 
     _, stdout, _ = ssh.exec_command("curl -fsS https://crm.apexonepayments.com/up")

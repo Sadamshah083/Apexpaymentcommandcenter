@@ -104,12 +104,20 @@ class MorpheusHubController extends Controller
         $validated = $request->validate([
             'destination' => ['required', 'string', 'max:32'],
             'from_extension' => ['required', 'string', 'max:32'],
-            'fallback' => ['nullable', 'in:sip,tel,none'],
-            'webphone_direct' => ['nullable', 'boolean'],
         ]);
 
         if (! $this->morpheus->isConfigured()) {
             return back()->with('error', 'Morpheus CX is not configured.');
+        }
+
+        if ($request->boolean('webphone_direct') || $request->has('campaign_id') || $request->has('caller_id_number')) {
+            $message = 'Outbound calls must use the server click-to-call API. Send only destination and from_extension.';
+
+            if ($request->wantsJson()) {
+                return response()->json(['ok' => false, 'error' => $message], 422);
+            }
+
+            return back()->withInput()->with('error', $message);
         }
 
         $clickToCall = app(\App\Services\Communications\ZoomClickToCallService::class);
@@ -118,6 +126,8 @@ class MorpheusHubController extends Controller
         $user = Auth::user();
         $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
         $routePrefix = $this->redirectRoutePrefix($request);
+        $dialMethod = (string) config('integrations.morpheus.dial_method', 'api');
+        $apiOnly = $dialMethod === 'api';
 
         if (! $clickToCall->isValidPstnDestination($destination)) {
             $destinationError = 'Enter a valid phone number with at least 10 digits (e.g. +12722001232).';
@@ -133,20 +143,6 @@ class MorpheusHubController extends Controller
             return back()->withInput()->with('error', 'You can only place calls from your assigned extension.');
         }
 
-        if ($request->boolean('webphone_direct')) {
-            $this->logOutboundDial($request, $fromExtension, $destination);
-
-            if ($request->wantsJson()) {
-                return response()->json([
-                    'ok' => true,
-                    'mode' => 'webrtc_direct',
-                    'outcome' => 'ringing',
-                ]);
-            }
-
-            return back()->with('success', 'Outbound call started from your browser line.');
-        }
-
         $dialOptions = $this->agents->extensionDialOptions($fromExtension);
 
         if (! filled($dialOptions['campaign_id'] ?? null)) {
@@ -160,8 +156,6 @@ class MorpheusHubController extends Controller
         }
 
         $missingDid = ! $this->agents->extensionHasOutboundDid($fromExtension);
-        $fallback = $validated['fallback'] ?? 'sip';
-        $dialMethod = (string) config('integrations.morpheus.dial_method', 'auto');
         $result = ['ok' => false, 'error' => 'Could not place outbound call.'];
         $didWarning = $missingDid
             ? 'Outbound DID is not set on this extension yet — assign a caller ID in Phone Agents before calling customers.'
@@ -169,7 +163,7 @@ class MorpheusHubController extends Controller
 
         $endpointOnline = $this->agents->extensionEndpointOnline($fromExtension);
 
-        if (! $endpointOnline && $dialMethod === 'sip') {
+        if (! $endpointOnline && $dialMethod === 'sip' && ! $apiOnly) {
             $launched = $this->launchOutboundDial($request, $clickToCall, $destination, $fromExtension, 'sip');
             if ($launched) {
                 $this->logOutboundDial($request, $fromExtension, $destination);
@@ -186,7 +180,16 @@ class MorpheusHubController extends Controller
         }
 
         if (in_array($dialMethod, ['api', 'auto'], true)) {
-            if ($request->wantsJson() && ! $endpointOnline) {
+            if ($request->wantsJson() && $apiOnly && ! $request->boolean('webphone_transport_connected')) {
+                return response()->json([
+                    'ok' => false,
+                    'extension_offline' => true,
+                    'webphone_required' => true,
+                    'error' => $this->agents->extensionOfflineDialMessage($fromExtension),
+                ], 422);
+            }
+
+            if ($request->wantsJson() && ! $apiOnly && ! $endpointOnline) {
                 return response()->json([
                     'ok' => false,
                     'extension_offline' => true,
@@ -194,8 +197,10 @@ class MorpheusHubController extends Controller
                 ], 422);
             }
 
-            if ($endpointOnline) {
-                $this->webphone->prepareExtension($user, $workspace, $fromExtension, $routePrefix);
+            $this->webphone->prepareExtension($user, $workspace, $fromExtension, $routePrefix);
+
+            if ($request->boolean('webphone_transport_connected')) {
+                $this->morpheus->clearExtensionForOutboundDial($fromExtension, kickSip: true);
             }
 
             $result = $this->morpheus->originateCall($fromExtension, $destination, $dialOptions);
@@ -257,7 +262,7 @@ class MorpheusHubController extends Controller
             }
         }
 
-        if (($result['extension_busy'] ?? false) === true && in_array($dialMethod, ['auto', 'sip'], true)) {
+        if (($result['extension_busy'] ?? false) === true && in_array($dialMethod, ['auto', 'sip'], true) && ! $apiOnly) {
             $launched = $this->launchOutboundDial($request, $clickToCall, $destination, $fromExtension, 'sip');
             if ($launched) {
                 $this->logOutboundDial($request, $fromExtension, $destination, $result['call_uuid'] ?? null);
@@ -273,7 +278,7 @@ class MorpheusHubController extends Controller
             }
         }
 
-        if (($result['extension_offline'] ?? false) === true && in_array($dialMethod, ['auto', 'sip'], true)) {
+        if (($result['extension_offline'] ?? false) === true && in_array($dialMethod, ['auto', 'sip'], true) && ! $apiOnly) {
             $launched = $this->launchOutboundDial($request, $clickToCall, $destination, $fromExtension, 'sip');
             if ($launched) {
                 $this->logOutboundDial($request, $fromExtension, $destination, $result['call_uuid'] ?? null);
@@ -300,7 +305,7 @@ class MorpheusHubController extends Controller
                 ->with('error', $result['error'] ?? 'Extension is not online.');
         }
 
-        if ($dialMethod === 'sip') {
+        if ($dialMethod === 'sip' && ! $apiOnly) {
             $response = $this->launchOutboundDial($request, $clickToCall, $destination, $fromExtension, 'sip')
                 ?? $this->launchOutboundDial($request, $clickToCall, $destination, $fromExtension, 'tel')
                 ?? back()->withInput()->with('error', 'Could not build a dial URL for this number.');
@@ -310,7 +315,7 @@ class MorpheusHubController extends Controller
             return $response;
         }
 
-        if ($dialMethod === 'tel') {
+        if ($dialMethod === 'tel' && ! $apiOnly) {
             $response = $this->launchOutboundDial($request, $clickToCall, $destination, $fromExtension, 'tel')
                 ?? back()->withInput()->with('error', 'Could not build a tel: link for this number.');
 
@@ -319,7 +324,7 @@ class MorpheusHubController extends Controller
             return $response;
         }
 
-        if ($fallback === 'sip') {
+        if (! $apiOnly && $request->input('fallback') === 'sip') {
             $launched = $this->launchOutboundDial($request, $clickToCall, $destination, $fromExtension, 'sip');
             if ($launched) {
                 $this->logOutboundDial($request, $fromExtension, $destination);
@@ -328,7 +333,7 @@ class MorpheusHubController extends Controller
             }
         }
 
-        if ($fallback === 'tel') {
+        if (! $apiOnly && $request->input('fallback') === 'tel') {
             $launched = $this->launchOutboundDial($request, $clickToCall, $destination, $fromExtension, 'tel');
             if ($launched) {
                 $this->logOutboundDial($request, $fromExtension, $destination);
@@ -369,62 +374,19 @@ class MorpheusHubController extends Controller
         }
 
         $destination = is_string($request->query('destination')) ? $request->query('destination') : null;
-        $snapshot = $this->morpheus->getCall($uuid);
 
-        if ($snapshot === null) {
+        try {
+            return response()->json(
+                $this->morpheus->hubCallStatus($uuid, $destination, $request->boolean('customer_first'))
+            );
+        } catch (\Throwable $e) {
+            report($e);
+
             return response()->json([
-                'ok' => true,
-                'pending' => true,
-                'live' => true,
-                'state' => 'PENDING',
-                'bridged_to' => null,
-                'billsec' => 0,
-                'answer_time' => null,
-                'hangup_cause' => null,
-                'destination_connected' => $this->morpheus->destinationAnsweredOnCall($uuid, $destination),
-            ]);
+                'ok' => false,
+                'error' => 'Could not load call status.',
+            ], 500);
         }
-
-        $state = strtoupper((string) ($snapshot['state'] ?? $snapshot['status'] ?? ''));
-        $bridgedTo = filled($snapshot['bridged_to'] ?? null) ? (string) $snapshot['bridged_to'] : null;
-        $live = (bool) ($snapshot['live'] ?? in_array(strtolower((string) ($snapshot['status'] ?? '')), ['active', 'ringing'], true));
-        $billsec = (int) ($snapshot['billsec'] ?? $snapshot['duration_sec'] ?? 0);
-        $hangup = strtoupper((string) ($snapshot['hangup_cause'] ?? ''));
-        $customerFirst = $request->boolean('customer_first');
-
-        if ($customerFirst && $hangup === 'NO_ROUTE_DESTINATION' && $billsec < 1) {
-            $hangup = '';
-        }
-
-        $destinationConnected = $this->morpheus->destinationAnsweredOnCall($uuid, $destination);
-
-        if (! $destinationConnected && filled($bridgedTo)) {
-            $destinationConnected = $this->morpheus->destinationAnsweredOnCall($bridgedTo, $destination);
-        }
-
-        if (! $destinationConnected && $billsec >= 2) {
-            $snapshotDest = preg_replace('/\D/', '', (string) ($snapshot['destination_number'] ?? '')) ?? '';
-            $requestedDest = preg_replace('/\D/', '', (string) $destination) ?? '';
-
-            if (strlen($snapshotDest) >= 10 && ! preg_match('/[a-z]/i', (string) ($snapshot['destination_number'] ?? ''))) {
-                $destinationConnected = $requestedDest === ''
-                    || $snapshotDest === $requestedDest
-                    || str_ends_with($requestedDest, $snapshotDest)
-                    || str_ends_with($snapshotDest, $requestedDest);
-            }
-        }
-
-        return response()->json([
-            'ok' => true,
-            'live' => $live,
-            'state' => $state !== '' ? $state : null,
-            'bridged_to' => $bridgedTo,
-            'billsec' => $billsec,
-            'answer_time' => $snapshot['answer_time'] ?? $snapshot['answered_at'] ?? null,
-            'hangup_cause' => $hangup !== '' ? $hangup : null,
-            'destination_connected' => $destinationConnected,
-            'destination_number' => $snapshot['destination_number'] ?? null,
-        ]);
     }
 
     public function holdCall(Request $request, string $uuid)

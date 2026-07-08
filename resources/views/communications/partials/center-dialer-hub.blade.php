@@ -5,17 +5,6 @@
 @endphp
 
 <div class="ch-dial-workspace ghl-dialer-center {{ $compact ? 'ghl-dialer-center--compact' : '' }}">
-    <header class="ch-dial-workspace__hero">
-        <x-communications.atoms.badge variant="offline" class="ghl-dialer-center-badge" data-dial-hero-badge>
-            <span class="ch-status-dot" data-webphone-dot></span>
-            <span data-webphone-status-text>Offline</span>
-        </x-communications.atoms.badge>
-        <h2 class="ch-dial-workspace__title">Outbound dialer</h2>
-        <p class="ghl-dialer-center-subtitle">
-            Three steps: connect your browser line, enter a number, then talk. Calls route through your Morpheus campaign trunk.
-        </p>
-    </header>
-
     <x-communications.molecules.workflow-stepper
         :steps="[
             ['title' => 'Connect line', 'desc' => 'Register your browser phone with Morpheus (once per session).', 'state' => 'is-active'],

@@ -2,6 +2,9 @@
     $agents = $communicationAgents ?? [];
     $suggestedExt = $suggestedExtensionNum ?? config('integrations.communications.default_caller_id', '1020');
     $sipHost = config('integrations.morpheus.sip_host') ?: config('integrations.morpheus.host');
+    $registerHost = app(\App\Services\Communications\ZoomClickToCallService::class)->publicSipHost();
+    $sipDomain = app(\App\Services\Communications\ZoomClickToCallService::class)->webrtcSipDomain();
+    $wssUrl = config('integrations.morpheus.sip_wss_url') ?: ('wss://' . config('integrations.morpheus.host', 'apexone.morpheus.cx') . ':7443/');
     $provisioned = session('provisioned_agent');
 @endphp
 
@@ -11,11 +14,72 @@
         <p>Extension: <strong>{{ $provisioned['extension_num'] }}</strong></p>
         <p>SIP password: <strong>{{ $provisioned['sip_password'] }}</strong> <span class="text-xs text-slate-500">(copy
                 now — not shown again)</span></p>
-        <p class="text-xs mt-2">Softphone: register to <code>{{ $sipHost }}</code> with username
-            <code>{{ $provisioned['extension_num'] }}</code>
+        <p class="text-xs mt-2">Softphone: register to <code>{{ $registerHost }}:5060</code> (UDP) with username
+            <code>{{ $provisioned['extension_num'] }}</code> · SIP domain <code>{{ $sipDomain }}</code>
         </p>
     </div>
 @endif
+
+<div class="ghl-card mb-6">
+    <h3 class="ghl-card-title">Zoiper / softphone settings</h3>
+    <p class="text-sm text-slate-500 mb-3">Use these values in Zoiper 5 (Manual SIP account). Ports were verified live on
+        <code>{{ $registerHost }}</code>.</p>
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm border border-slate-200 rounded-lg overflow-hidden">
+            <thead class="bg-slate-50 text-left">
+                <tr>
+                    <th class="py-2 px-3 font-semibold text-zinc-700">Setting</th>
+                    <th class="py-2 px-3 font-semibold text-zinc-700">Value</th>
+                    <th class="py-2 px-3 font-semibold text-zinc-700">Notes</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+                <tr>
+                    <td class="py-2 px-3 font-medium">Host / Domain</td>
+                    <td class="py-2 px-3 font-mono text-xs">{{ $registerHost }}:5060</td>
+                    <td class="py-2 px-3 text-xs text-slate-500">Include <strong>:5060</strong> in Zoiper domain field</td>
+                </tr>
+                <tr>
+                    <td class="py-2 px-3 font-medium">Transport</td>
+                    <td class="py-2 px-3 font-mono text-xs">UDP</td>
+                    <td class="py-2 px-3 text-xs text-slate-500">UDP 5060 is open; TCP/TLS 5060–5061 are not exposed</td>
+                </tr>
+                <tr>
+                    <td class="py-2 px-3 font-medium">SIP domain (realm)</td>
+                    <td class="py-2 px-3 font-mono text-xs">{{ $sipDomain }}</td>
+                    <td class="py-2 px-3 text-xs text-slate-500">Auth / outbound identity realm</td>
+                </tr>
+                <tr>
+                    <td class="py-2 px-3 font-medium">Username</td>
+                    <td class="py-2 px-3 font-mono text-xs">Your extension (e.g. {{ $suggestedExt }})</td>
+                    <td class="py-2 px-3 text-xs text-slate-500">Digits only — from Phone agents table below</td>
+                </tr>
+                <tr>
+                    <td class="py-2 px-3 font-medium">Auth username</td>
+                    <td class="py-2 px-3 font-mono text-xs">Same as extension</td>
+                    <td class="py-2 px-3 text-xs text-slate-500">Leave outbound proxy empty unless Morpheus support specifies one</td>
+                </tr>
+                <tr>
+                    <td class="py-2 px-3 font-medium">Password</td>
+                    <td class="py-2 px-3 font-mono text-xs">SIP password</td>
+                    <td class="py-2 px-3 text-xs text-slate-500">Set when provisioning the phone line (shown once)</td>
+                </tr>
+                <tr>
+                    <td class="py-2 px-3 font-medium">DTMF</td>
+                    <td class="py-2 px-3 font-mono text-xs">RFC 2833</td>
+                    <td class="py-2 px-3 text-xs text-slate-500">Standard for Morpheus / FreeSWITCH</td>
+                </tr>
+                <tr>
+                    <td class="py-2 px-3 font-medium">Browser webphone (WSS)</td>
+                    <td class="py-2 px-3 font-mono text-xs break-all">{{ $wssUrl }}</td>
+                    <td class="py-2 px-3 text-xs text-slate-500">Port <strong>7443</strong> — use CRM webphone, not Zoiper desktop</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <p class="text-xs text-slate-500 mt-3">Firewall: allow outbound <strong>UDP 5060</strong> (signaling) and
+        <strong>UDP 10000–20000</strong> (audio). Only one device may register per extension at a time.</p>
+</div>
 
 @if ($hubAccess['canConfigure'] ?? false)
 <div class="ghl-card mb-6">

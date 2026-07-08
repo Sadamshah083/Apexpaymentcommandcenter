@@ -45,10 +45,9 @@ class CommunicationsWebphoneService
 
         $sipUser = $this->sipAuthUser($extensionNum);
         $sipDomain = $this->clickToCall->webrtcSipDomain();
-        $publicHost = $this->clickToCall->publicWssHost();
         $dialOptions = $this->agents->extensionDialOptions($extensionNum);
         $callerIdNumber = $dialOptions['caller_id_number'] ?? null;
-        $wssUrl = $this->resolveWssUrl($publicHost);
+        $wssUrl = $this->clickToCall->resolveSipWssUrl();
 
         return [
             'enabled' => true,
@@ -60,12 +59,22 @@ class CommunicationsWebphoneService
             'wss_url_fallback' => null,
             'auth_user' => $sipUser,
             'password' => $password,
-            'display_name' => MorpheusSipIdentity::displayName(null, $callerIdNumber),
+            'display_name' => MorpheusSipIdentity::displayName(
+                $dialOptions['caller_id_name'] ?? null,
+                $callerIdNumber,
+            ),
             'auto_answer_click_to_call' => (bool) config('integrations.morpheus.webphone_auto_answer', true),
-            'outbound_prefix' => (string) config('integrations.morpheus.outbound_prefix', ''),
+            'wss_console_debug' => (bool) config('integrations.morpheus.webphone_wss_console_debug', true),
+            'dial_method' => (string) config('integrations.morpheus.dial_method', 'api'),
+            'outbound_prefix' => strtolower((string) config('integrations.morpheus.dial_method', 'api')) === 'api'
+                ? ''
+                : (string) config('integrations.morpheus.outbound_prefix', ''),
             'sip_params' => (string) config('integrations.morpheus.sip_params', 'user=phone'),
             'outbound_caller_id' => $dialOptions['caller_id_number'] ?? null,
-            'campaign_id' => $dialOptions['campaign_id'] ?? $this->morpheus->defaultOutboundCampaignId(),
+            'caller_id_name' => MorpheusSipIdentity::displayName(
+                $dialOptions['caller_id_name'] ?? null,
+                $callerIdNumber,
+            ),
             'ring_timeout_sec' => (int) config('integrations.morpheus.ring_timeout', 45),
             'stun_servers' => array_values(array_filter(
                 array_map('trim', explode(',', (string) config('integrations.morpheus.stun_servers', 'stun:stun.l.google.com:19302')))
@@ -89,22 +98,42 @@ class CommunicationsWebphoneService
 
         $normalized = preg_replace('/\D/', '', $extensionNum) ?: $extensionNum;
         $ext = $this->resolveExtension($user, $workspace, $normalized);
-        $did = $this->configuredOutboundDidDigits();
         $warning = null;
 
         if ($ext !== null && ! empty($ext['id'])) {
             $campaignId = $this->morpheus->defaultOutboundCampaignId();
-            $extResult = $this->morpheus->updateExtension((string) $ext['id'], array_filter([
+            $existingDid = preg_replace(
+                '/\D/',
+                '',
+                (string) ($ext['outbound_cid_num'] ?? $ext['caller_id_num'] ?? ''),
+            ) ?: null;
+            if ($existingDid === null || $existingDid === '') {
+                $existingDid = $this->configuredOutboundDidDigits();
+            }
+
+            $patch = [
                 'password' => $password,
                 'is_dialer_agent' => true,
                 'status' => 'active',
                 'override_campaign_cid' => true,
-                'caller_id_num' => $did,
-                'outbound_cid_num' => $did,
-                'caller_id_name' => $did,
-                'outbound_cid_name' => $did,
                 'campaign_id' => $campaignId,
-            ], fn ($v) => filled($v)));
+            ];
+
+            if (filled($existingDid)) {
+                $cnam = MorpheusSipIdentity::displayName(
+                    $ext['caller_id_name'] ?? $ext['outbound_cid_name'] ?? null,
+                    $existingDid,
+                );
+                $patch['caller_id_num'] = $existingDid;
+                $patch['outbound_cid_num'] = $existingDid;
+                $patch['caller_id_name'] = $cnam;
+                $patch['outbound_cid_name'] = $cnam;
+            }
+
+            $extResult = $this->morpheus->updateExtension((string) $ext['id'], array_filter(
+                $patch,
+                fn ($v) => filled($v),
+            ));
 
             if (isset($extResult['error']) && ! isset($extResult['id'])) {
                 $warning = (string) $extResult['error'];
@@ -197,16 +226,5 @@ class CommunicationsWebphoneService
         $digits = preg_replace('/\D/', '', $raw);
 
         return $digits !== '' ? $digits : null;
-    }
-
-    protected function resolveWssUrl(string $publicHost): string
-    {
-        $configured = trim((string) config('integrations.morpheus.sip_wss_url', ''));
-        if ($configured !== '') {
-            return rtrim($configured, '/').'/';
-        }
-
-        // Morpheus agent portal uses direct WSS on :7443 — required for INVITE/BYE call events.
-        return "wss://{$publicHost}:7443/";
     }
 }

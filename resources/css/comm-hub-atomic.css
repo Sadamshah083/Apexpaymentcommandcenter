@@ -427,6 +427,27 @@
     font-size: var(--ch-font-sm);
 }
 
+.ch-hub-toolbar--dialer {
+    padding: var(--ch-space-4) var(--ch-space-5) var(--ch-space-5);
+    margin-bottom: 0;
+}
+
+.ghl-inbox-toolbar-top--dialer {
+    display: block;
+}
+
+.ghl-inbox-toolbar-brand--dialer {
+    max-width: 52rem;
+}
+
+.ghl-inbox-toolbar-sub--dialer {
+    margin: 0.5rem 0 0;
+    color: var(--ch-text-muted, #64748b);
+    font-size: 0.9375rem;
+    line-height: 1.55;
+    max-width: 44rem;
+}
+
 .ghl-webphone-panel--enterprise .ghl-webphone-control-help {
     display: none;
 }

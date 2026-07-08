@@ -720,9 +720,9 @@ function syncWorkflowTableBody(tbody, workflows, showBase) {
     if (tbody && !syncModeIsStatic(tbody)) {
         tbody.querySelectorAll('tr[data-workflow-id]').forEach((row) => {
             const wf = byId.get(String(row.dataset.workflowId));
-            if (!wf) {
-                return;
-            }
+        if (!wf) {
+            return;
+        }
 
             if (syncMode === 'cells' || syncMode === 'patch') {
                 patchWorkflowRowCells(row, wf, showBase, campaignBase);
@@ -1119,11 +1119,11 @@ export function initWorkspaceSync() {
     initAjaxActivityForms();
 
     function buildSyncUrl(base) {
-        const params = new URLSearchParams();
-        if (version) params.set('v', version);
-        params.set('cursor', String(cursor));
-        if (workflowId) params.set('workflow_id', workflowId);
-        if (leadId) params.set('lead_id', leadId);
+            const params = new URLSearchParams();
+            if (version) params.set('v', version);
+            params.set('cursor', String(cursor));
+            if (workflowId) params.set('workflow_id', workflowId);
+            if (leadId) params.set('lead_id', leadId);
         if (syncLite) {
             params.set('scope', 'lite');
         } else if (syncScope) {
@@ -1138,30 +1138,30 @@ export function initWorkspaceSync() {
     }
 
     function applySyncPayload(data) {
-        updateSyncIndicator('live');
+            updateSyncIndicator('live');
 
-        if (typeof data.cursor === 'number' && data.cursor >= cursor) {
-            cursor = data.cursor;
-            saveStoredCursor(workspaceId, cursor);
-        }
-
-        if (Array.isArray(data.events) && data.events.length > 0) {
-            if (hasSyncedOnce) {
-                notifySyncEvents(data.events, workspaceId, seenEventIds, leadShowBase, workflowShowBase);
-            } else {
-                markEventsSeen(workspaceId, data.events, seenEventIds);
+            if (typeof data.cursor === 'number' && data.cursor >= cursor) {
+                cursor = data.cursor;
+                saveStoredCursor(workspaceId, cursor);
             }
-        }
 
-        if (!data.changed) {
+            if (Array.isArray(data.events) && data.events.length > 0) {
+                if (hasSyncedOnce) {
+                    notifySyncEvents(data.events, workspaceId, seenEventIds, leadShowBase, workflowShowBase);
+                } else {
+                    markEventsSeen(workspaceId, data.events, seenEventIds);
+                }
+            }
+
+            if (!data.changed) {
+                hasSyncedOnce = true;
+                sessionStorage.setItem(readyStorageKey(workspaceId), '1');
+                return;
+            }
+
+            version = data.version;
             hasSyncedOnce = true;
             sessionStorage.setItem(readyStorageKey(workspaceId), '1');
-            return;
-        }
-
-        version = data.version;
-        hasSyncedOnce = true;
-        sessionStorage.setItem(readyStorageKey(workspaceId), '1');
 
         if (leadsBody && Array.isArray(data.leads) && syncScope !== 'list' && data.leads.length > 0) {
             const campaignBase = leadsBody.dataset.campaignShowBase || workflowsList?.dataset?.campaignShowBase || '';
@@ -1178,29 +1178,29 @@ export function initWorkspaceSync() {
 
         if (portalLeadsBody && Array.isArray(data.leads) && data.leads.length > 0 && !portalSyncContext) {
             patchPortalLeadRows(portalLeadsBody, data.leads);
-        }
+            }
 
-        if (pipelineLeadsBody && Array.isArray(data.leads)) {
-            syncTableBody(pipelineLeadsBody, data.leads, renderPipelineLeadRow, [leadShowBase, csrfToken()]);
-            reapplyPipelineLeadFilter();
-        }
+            if (pipelineLeadsBody && Array.isArray(data.leads)) {
+                syncTableBody(pipelineLeadsBody, data.leads, renderPipelineLeadRow, [leadShowBase, csrfToken()]);
+                reapplyPipelineLeadFilter();
+            }
 
         if (aePipelineBody && Array.isArray(data.leads) && !portalSyncContext) {
-            const aeLeads = data.leads.filter((lead) => AE_PIPELINE_STAGES.has(lead.stage));
-            syncTableBody(aePipelineBody, aeLeads, renderAePipelineRow, [leadShowBase]);
-        }
+                const aeLeads = data.leads.filter((lead) => AE_PIPELINE_STAGES.has(lead.stage));
+                syncTableBody(aePipelineBody, aeLeads, renderAePipelineRow, [leadShowBase]);
+            }
 
         if (workflowsList && Array.isArray(data.workflows) && workflowsList?.dataset.adminWorkflowsTable === '1') {
             syncWorkflowTableBody(workflowsList, data.workflows, workflowShowBase);
-        }
-
-        if (teamList && Array.isArray(data.team)) {
-            if (teamList.dataset.adminTeam === '1' || teamList.dataset.staticTeam === '1') {
-                updateMemberRows(teamList, data.team);
-            } else {
-                smoothHtmlUpdate(teamList, renderTeam(data.team));
             }
-        }
+
+            if (teamList && Array.isArray(data.team)) {
+                if (teamList.dataset.adminTeam === '1' || teamList.dataset.staticTeam === '1') {
+                    updateMemberRows(teamList, data.team);
+                } else {
+                    smoothHtmlUpdate(teamList, renderTeam(data.team));
+                }
+            }
 
         if (syncLite) {
             applyToolkitSync(data?.toolkit);
@@ -1210,21 +1210,21 @@ export function initWorkspaceSync() {
             applyToolkitSync(data?.toolkit);
         }
 
-        if (workflowId && Array.isArray(data.workflows) && data.workflows.length > 0) {
-            const wf = data.workflows[0];
-            smoothHtmlUpdate(workflowStatus, renderWorkflowStatusPill(wf.status));
+            if (workflowId && Array.isArray(data.workflows) && data.workflows.length > 0) {
+                const wf = data.workflows[0];
+                smoothHtmlUpdate(workflowStatus, renderWorkflowStatusPill(wf.status));
             smoothTextUpdate(workflowProgress, String(wf.attempted_leads ?? wf.enriched_leads ?? 0));
-            smoothTextUpdate(workflowAssigned, String(wf.assigned_leads ?? 0));
-            smoothTextUpdate(workflowPendingReview, String(wf.pending_verification ?? 0));
-            smoothTextUpdate(workflowPendingReview2, String(wf.pending_verification ?? 0));
-            smoothWidthUpdate(workflowProgressBar, wf.completion_pct ?? 0);
-            if (workflowProgressLabel) {
-                smoothTextUpdate(workflowProgressLabel, formatWorkflowProgressLabel(wf));
+                smoothTextUpdate(workflowAssigned, String(wf.assigned_leads ?? 0));
+                smoothTextUpdate(workflowPendingReview, String(wf.pending_verification ?? 0));
+                smoothTextUpdate(workflowPendingReview2, String(wf.pending_verification ?? 0));
+                smoothWidthUpdate(workflowProgressBar, wf.completion_pct ?? 0);
+                if (workflowProgressLabel) {
+                    smoothTextUpdate(workflowProgressLabel, formatWorkflowProgressLabel(wf));
+                }
+                updatePipelineProgress(wf);
             }
-            updatePipelineProgress(wf);
-        }
 
-        document.dispatchEvent(new CustomEvent('workspace:sync', { detail: data }));
+            document.dispatchEvent(new CustomEvent('workspace:sync', { detail: data }));
     }
 
     function scheduleReconnect(ms = 1500) {
@@ -1236,8 +1236,8 @@ export function initWorkspaceSync() {
 
     function schedulePoll(delayMs) {
         if (syncPollAborted) {
-            return;
-        }
+                return;
+            }
         if (syncPollTimer) {
             window.clearTimeout(syncPollTimer);
         }
@@ -1270,7 +1270,7 @@ export function initWorkspaceSync() {
                 const data = await response.json();
                 applySyncPayload(data);
             } else {
-                updateSyncIndicator('paused');
+            updateSyncIndicator('paused');
             }
         } catch (error) {
             if (!syncPollAborted) {
@@ -1342,7 +1342,7 @@ export function initWorkspaceSync() {
         }
         if (syncLite || usePoll) {
             if (!syncPollTimer && !syncPollAborted) {
-                schedulePoll(0);
+            schedulePoll(0);
             }
             return;
         }

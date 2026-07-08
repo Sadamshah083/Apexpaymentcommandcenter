@@ -24,6 +24,8 @@ FILES = [
     "resources/views/communications/inbox/index.blade.php",
     "resources/views/communications/inbox/partials/empty.blade.php",
     "resources/views/communications/inbox/partials/nav.blade.php",
+    "resources/views/communications/inbox/partials/nav-item.blade.php",
+    "resources/views/communications/inbox/partials/nav-icon.blade.php",
     "resources/views/communications/inbox/partials/toolbar.blade.php",
     "resources/views/communications/partials/center-dialer-hub.blade.php",
     "resources/views/communications/partials/dialer-form.blade.php",

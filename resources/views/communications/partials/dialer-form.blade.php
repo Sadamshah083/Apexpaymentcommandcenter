@@ -30,14 +30,14 @@
 @unless ($layout === 'center')
 <div class="ghl-dialer-outbound-help">
     <p class="ghl-dialer-help-title">Outbound calling via Morpheus CX</p>
-    <p class="ghl-dialer-help-desc">Outbound calls dial the destination directly from your connected browser line.
-        Click <strong>Connect line</strong> in the Phone panel first, then enter a number and press
-        <strong>Call</strong>. The destination phone rings — you do not need to answer on your side.</p>
+    <p class="ghl-dialer-help-desc">Click <strong>Connect line</strong> in the Phone panel and wait for
+        <strong>Registered</strong>, then enter a number and press <strong>Call</strong>. Morpheus rings your browser
+        first — when your line connects, the destination phone rings with your outbound caller ID.</p>
     <ol class="ghl-dialer-help-steps">
         <li>Admin provisions your phone line in <strong>Phone Agents</strong></li>
         <li>Assign your outbound DID as <strong>Caller ID number</strong> when Morpheus delivers it</li>
         <li>Click <strong>Connect line</strong> in the Phone panel (SIP realm <code>{{ $sipHost }}</code>)</li>
-        <li>Enter a number and call — the destination rings until they answer</li>
+        <li>Wait for <strong>Registered</strong>, then call — your browser answers first, then the destination rings</li>
     </ol>
     @if ($portalUrl !== '#')
         <a href="{{ $portalUrl }}" target="_blank" rel="noopener" class="ghl-dialer-help-link">Open Morpheus agent
@@ -63,16 +63,9 @@
     </x-communications.molecules.alert>
 @endif
 
-@if ($layout === 'center')
-    <x-communications.molecules.alert variant="info" class="mb-4">
-        After your line shows <strong>Registered</strong>, enter a number and press <strong>Call</strong>. Your browser may ring first — answer to connect the outbound leg.
-    </x-communications.molecules.alert>
-@endif
-
 <form method="POST" action="{{ route($routePrefix . 'communications.morpheus.calls.originate') }}"
-    class="ghl-dialer-originate-form {{ ($layout ?? '') === 'center' ? 'ghl-dialer-form--center ghl-dialer-form--enterprise' : '' }}" data-fallback-sip="1" data-originate-json="1">
+    class="ghl-dialer-originate-form {{ ($layout ?? '') === 'center' ? 'ghl-dialer-form--center ghl-dialer-form--enterprise' : '' }}" data-originate-json="1">
     @csrf
-    <input type="hidden" name="fallback" value="sip">
 
     <label class="ch-label" for="{{ $callerSelectId }}">Your extension</label>
     <select id="{{ $callerSelectId }}" name="from_extension" class="ch-input ghl-dialer-field mb-3" required

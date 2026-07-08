@@ -92,6 +92,9 @@ document.addEventListener('turbo:load', () => {
 document.addEventListener('turbo:before-cache', () => {
     teardownWorkspaceSync();
     teardownPortalDashboard();
+    import('./communications-webphone.js').then((webphoneModule) => {
+        webphoneModule.teardownWebphoneForTurbo?.();
+    }).catch(() => {});
     import('./communications-dialer.js').then((dialerModule) => {
         dialerModule.resetDialerButtonsForCache();
     }).catch(() => {});

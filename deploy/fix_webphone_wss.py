@@ -21,15 +21,14 @@ $ref = new ReflectionClass($svc);
 $wss = $ref->getMethod('resolveWssUrl');
 $wss->setAccessible(true);
 $host = app(App\Services\Communications\ZoomClickToCallService::class)->publicWssHost();
-$display = $ref->getMethod('resolveSipDisplayName');
-$display->setAccessible(true);
 $agents = app(App\Services\Communications\CommunicationsAgentService::class);
 $dial = $agents->extensionDialOptions('1020');
+$displayName = App\Support\MorpheusSipIdentity::displayName(null, $dial['caller_id_number'] ?? null);
 echo json_encode([
     'morpheus_host' => config('integrations.morpheus.host'),
     'sip_wss_url' => config('integrations.morpheus.sip_wss_url'),
     'resolved_wss' => $wss->invoke($svc, $host),
-    'display_name_1020' => $display->invoke($svc, $dial),
+    'display_name_1020' => $displayName,
     'outbound_caller_id_1020' => $dial['caller_id_number'] ?? null,
     'dial_method' => config('integrations.morpheus.dial_method'),
 ], JSON_PRETTY_PRINT);

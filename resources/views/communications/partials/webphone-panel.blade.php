@@ -4,6 +4,7 @@
     $defaultExtension = $defaultCallerId ?? config('integrations.communications.default_caller_id');
     $defaultOutboundDid = config('integrations.communications.default_outbound_did');
     $portalUrl = app(\App\Services\Communications\ZoomClickToCallService::class)->portalUrl();
+    $wssUrl = app(\App\Services\Communications\ZoomClickToCallService::class)->resolveSipWssUrl();
     $layout = $layout ?? 'sidebar';
     $isCenter = $layout === 'center';
 @endphp
@@ -18,9 +19,11 @@
         data-unhold-url="{{ route($routePrefix . 'communications.morpheus.calls.unhold', ['uuid' => '__UUID__']) }}"
         data-transfer-url="{{ route($routePrefix . 'communications.morpheus.calls.transfer', ['uuid' => '__UUID__']) }}"
         data-call-status-url="{{ route($routePrefix . 'communications.morpheus.calls.status', ['uuid' => '__UUID__']) }}"
+        data-originate-url="{{ route($routePrefix . 'communications.morpheus.calls.originate') }}"
         data-portal-url="{{ $portalUrl !== '#' ? $portalUrl . 'agent/' : 'https://' . config('integrations.morpheus.host') . '/agent/' }}"
         data-default-extension="{{ $defaultExtension }}"
         data-default-outbound-did="{{ $defaultOutboundDid }}"
+        data-wss-url="{{ $wssUrl }}"
         data-csrf="{{ csrf_token() }}">
         <div class="ghl-webphone-panel comm-hub-card {{ $isCenter ? 'ghl-webphone-panel--center ghl-webphone-panel--enterprise' : '' }}">
             @unless ($isCenter)
@@ -43,8 +46,12 @@
                     ['label' => 'SIP realm', 'value' => config('integrations.morpheus.sip_host') ?: config('integrations.morpheus.host')],
                 ]"
             />
-            <p class="text-xs text-slate-500 mb-3 mt-1" data-webphone-transport-wrap>
-                Transport: <strong data-webphone-transport>{{ config('integrations.morpheus.sip_wss_url') ?: 'Auto WSS' }}</strong>
+            <p class="text-xs text-slate-500 mb-1 mt-1" data-webphone-transport-wrap>
+                WebSocket: <strong data-webphone-transport>{{ $wssUrl }}</strong>
+            </p>
+            <p class="text-xs text-slate-500 mb-3" data-webphone-wss-status aria-live="polite">
+                WSS status: <strong data-webphone-wss-status-text>Not connected</strong>
+                <span class="text-slate-400">· DevTools → Network → WS filter</span>
             </p>
 
             <div class="ghl-webphone-stage-row">
@@ -53,7 +60,8 @@
             </div>
 
             <p class="ghl-webphone-hint text-xs text-slate-500 mt-1 mb-0" data-webphone-hint>
-                Click <strong>Connect line</strong> and allow microphone access when prompted.
+                Click <strong>Connect line</strong> (opens WebSocket to Morpheus), then press <strong>Call</strong> in the dialer.
+                Calls use the originate API and auto-answer on your browser line.
             </p>
 
             <div class="ghl-webphone-call-card hidden" data-webphone-call-card>
@@ -94,9 +102,9 @@
 
             @unless ($isCenter)
             <ul class="ghl-webphone-control-help text-xs text-slate-500 mt-2 mb-0 list-disc pl-4 space-y-1">
-                <li><strong>Connect line</strong> — registers your browser phone with Morpheus (do this once per session).</li>
-                <li><strong>Answer call</strong> — picks up when Morpheus rings your line for outbound or inbound calls.</li>
-                <li><strong>Hang up</strong> — declines a ringing call or ends an active call.</li>
+                <li><strong>Connect line</strong> — WebSocket to Morpheus (<code>wss://…:7443</code>) registers your browser phone.</li>
+                <li><strong>Call</strong> in the dialer — POST to originate API; Morpheus rings your line, then dials the destination.</li>
+                <li><strong>Caller ID</strong> — shows as <strong>ApexOne Payments</strong> with your extension DID (reduces spam flags).</li>
             </ul>
 
             <div class="ghl-webphone-helper">

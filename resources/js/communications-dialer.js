@@ -65,66 +65,6 @@ function updateDialerRouteSummary(callerSelect) {
     summary.textContent = raw || 'Not configured';
 }
 
-async function logDirectOutbound(form, destination) {
-    const formData = new FormData(form);
-    formData.set('destination', destination);
-    formData.set('webphone_direct', '1');
-
-    try {
-        await fetch(form.action, {
-            method: 'POST',
-            headers: {
-                Accept: 'application/json',
-                'X-Requested-With': 'XMLHttpRequest',
-                'X-CSRF-TOKEN': csrfToken(),
-            },
-            credentials: 'same-origin',
-            body: formData,
-        });
-    } catch {
-        // History logging is best-effort for browser-originated calls.
-    }
-}
-
-async function originateViaWebphone(form, dialBtn) {
-    const destination = normalizePhone(new FormData(form).get('destination'));
-
-    if (!destination) {
-        showToast('Enter a valid phone number first.', 'error');
-
-        return false;
-    }
-
-    if (!isValidPstnDestination(destination)) {
-        showToast('Enter a full phone number with at least 10 digits (e.g. +12722001232).', 'error');
-
-        return false;
-    }
-
-    hideLoadingOverlay();
-
-    const phone = getWebphone();
-
-    try {
-        await phone.dial(destination);
-        await logDirectOutbound(form, destination);
-        showToast(`Calling ${destination}… waiting for the destination to answer.`, 'success');
-
-        return true;
-    } catch (error) {
-        showToast(error.message || 'Could not place the call from your browser line.', 'error');
-
-        return false;
-    } finally {
-        hideLoadingOverlay();
-        if (dialBtn) {
-            dialBtn.removeAttribute('disabled');
-            dialBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-            dialBtn.removeAttribute('aria-disabled');
-        }
-    }
-}
-
 async function originateViaJson(form, dialBtn) {
     const formData = new FormData(form);
     const destination = normalizePhone(formData.get('destination'));
@@ -145,7 +85,32 @@ async function originateViaJson(form, dialBtn) {
     hideLoadingOverlay();
 
     const phone = getWebphone();
+    phone.setCallContext('outbound', destination);
     phone.markClickToCallPending();
+
+    const panel = document.querySelector('[data-webphone-panel]');
+    const wssUrl = panel?.dataset.wssUrl || phone.configuredWssUrl?.() || '';
+
+    try {
+        await phone.assertTransportForOriginate();
+    } catch (error) {
+        showToast(error?.message || 'Connect your Phone line (WebSocket) before calling.', 'error');
+        dialBtn.removeAttribute('disabled');
+        dialBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        dialBtn.removeAttribute('aria-disabled');
+
+        return false;
+    }
+
+    phone.logPhone?.('info', 'Placing click-to-call via originate API', {
+        destination,
+        wssUrl,
+        originateUrl: form.action,
+        transportConnected: phone.isTransportConnected?.() ?? false,
+        wssLive: panel?.dataset.wssLive === '1',
+    });
+
+    formData.set('webphone_transport_connected', '1');
 
     try {
         const response = await fetch(form.action, {
@@ -173,6 +138,11 @@ async function originateViaJson(form, dialBtn) {
 
         if (data.call_uuid) {
             phone.setMorpheusCallUuid(data.call_uuid);
+        }
+
+        const fromExtension = data.from ? String(data.from) : formData.get('from_extension');
+        if (fromExtension) {
+            await phone.ensureLiveTransport(String(fromExtension)).catch(() => {});
         }
 
         if (data.line_reset) {
@@ -355,7 +325,7 @@ function attachDialerForm(form) {
             dialBtn.classList.add('opacity-50', 'cursor-not-allowed');
             dialBtn.setAttribute('aria-disabled', 'true');
 
-            const ready = await ensureWebphoneReady({ silent: true });
+            const ready = await ensureWebphoneReady({ silent: false });
             const wasCancelled = form.dataset.dialerConnectCancelled === '1';
             form.dataset.dialerConnectPending = '0';
             form.dataset.dialerConnectCancelled = '0';
@@ -374,7 +344,7 @@ function attachDialerForm(form) {
 
                 if (!ready || !phone.canDirectDial()) {
                     showToast(
-                        'Connect your browser line first — pick your extension, click Connect line in the Phone panel, then try again.',
+                        'Phone line not connected — wait for Registered (WebSocket), allow microphone, then try Call again.',
                         'error',
                     );
                     dialBtn.removeAttribute('disabled');

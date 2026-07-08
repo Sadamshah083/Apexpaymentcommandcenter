@@ -1,4 +1,11 @@
 <aside class="ghl-inbox-tools">
+    <details class="ghl-inbox-tools-collapsible" open>
+        <summary class="ghl-inbox-tools-summary">
+            <span>Quick tools</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <polyline points="6 9 12 15 18 9" />
+            </svg>
+        </summary>
     <div class="ghl-inbox-tools-inner ghl-tools-dialer">
         @if (!empty($callStats))
             <section class="ghl-tools-section ghl-tools-section-card">
@@ -70,4 +77,5 @@
         <a href="{{ route($routePrefix . 'communications.index', ['channel' => 'calls']) }}"
             class="comm-hub-btn comm-hub-btn-secondary w-full text-center comm-hub-btn-sm">Open call history</a>
     </div>
+    </details>
 </aside>

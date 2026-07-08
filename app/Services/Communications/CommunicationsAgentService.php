@@ -418,7 +418,8 @@ class CommunicationsAgentService
         }
 
         $webrtcEnabled = (bool) config('integrations.morpheus.webrtc_enabled', true);
-        $endpointOnline = filled($lastLogin) || $webrtcEnabled;
+        // Browser webphone registers over WSS in the client — never assume online from webrtc_enabled alone.
+        $endpointOnline = filled($lastLogin) && ! $webrtcEnabled;
         $sipHost = (string) (config('integrations.morpheus.sip_host') ?: config('integrations.morpheus.host'));
         $portalUrl = app(\App\Services\Communications\ZoomClickToCallService::class)->portalUrl();
 

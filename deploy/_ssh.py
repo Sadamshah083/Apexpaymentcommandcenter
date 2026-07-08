@@ -51,7 +51,11 @@ text = path.read_text()
 updates = {values!r}
 for key, val in updates.items():
     pattern = re.compile(r'^' + re.escape(key) + r'=.*$', re.M)
-    line = key + '=' + val
+    if re.search(r'[\\s#=\"\\']', val):
+        escaped = val.replace('\\\\', '\\\\\\\\').replace('"', '\\\\"')
+        line = key + '="' + escaped + '"'
+    else:
+        line = key + '=' + val
     text = pattern.sub(line, text) if pattern.search(text) else text.rstrip() + '\\n' + line + '\\n'
 path.write_text(text)
 """
