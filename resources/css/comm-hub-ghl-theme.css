@@ -2386,21 +2386,27 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
     height: auto !important;
     min-height: 0 !important;
     max-height: none !important;
+    grid-template-rows: auto !important;
     align-items: start !important;
 }
 
 .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='logs'] .ghl-dialer-center-logs--full {
     height: auto !important;
-    flex: 0 1 auto !important;
+    flex: 0 0 auto !important;
     align-self: stretch;
-    max-height: min(70dvh, calc(100dvh - 9.5rem));
+    max-height: min(72dvh, calc(100dvh - 8.5rem));
 }
 
 .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='logs'] .ghl-dialer-center-logs__scroll {
-    flex: 0 1 auto;
+    flex: 0 0 auto;
     height: auto;
-    max-height: min(65dvh, calc(100dvh - 10.5rem));
-    padding-bottom: 0.15rem;
+    max-height: min(68dvh, calc(100dvh - 9.5rem));
+    padding-bottom: 0 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='logs'] .ghl-dialer-recent-list--full {
+    flex: 0 0 auto;
+    max-height: none !important;
 }
 
 .ghl-comm-phone-mode .ghl-inbox-conversation-scroll--center:has(.ghl-dialer-center[data-phone-view='logs']) {
@@ -2410,6 +2416,21 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
     overflow: visible !important;
     padding-bottom: 0 !important;
     justify-content: flex-start !important;
+}
+
+.ghl-comm-phone-mode.ghl-inbox:has(.ghl-dialer-center[data-phone-view='logs']) {
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0 !important;
+}
+
+.ghl-comm-phone-mode .ghl-inbox-card:has(.ghl-dialer-center[data-phone-view='logs']),
+.ghl-comm-phone-mode .ghl-inbox-body-wide:has(.ghl-dialer-center[data-phone-view='logs']),
+.ghl-comm-phone-mode .ghl-inbox-conversation:has(.ghl-dialer-center[data-phone-view='logs']) {
+    flex: 0 0 auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
 }
 
 .ghl-comm-phone-mode .ch-dial-workspace__grid--phone-split {
@@ -3193,6 +3214,12 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
     .ghl-comm-phone-mode.ghl-inbox {
         height: 100vh;
         max-height: 100vh;
+    }
+
+    .ghl-comm-phone-mode.ghl-inbox:has(.ghl-dialer-center[data-phone-view='logs']) {
+        height: auto !important;
+        max-height: none !important;
+        min-height: 0 !important;
     }
 
     .ghl-comm-phone-mode .ghl-inbox-card:has(.ghl-dialer-center[data-phone-view='logs']),
