@@ -14,9 +14,17 @@ use App\Services\Communications\ZoomContactService;
 
 use App\Services\Communications\CommunicationsInboxService;
 
+use App\Services\Communications\CommunicationsCallHistoryService;
+
+use App\Services\Communications\CommunicationsCallRecordingService;
+
+use App\Services\Communications\CommunicationsPhoneNotesService;
+
 use App\Services\Communications\ZoomClickToCallService;
 
 use App\Services\Integrations\ZoomApiService;
+
+use App\Services\Workspace\WorkspaceContextService;
 
 use App\Support\AdminModules;
 use Illuminate\Http\Request;
@@ -41,6 +49,12 @@ class CommunicationsHubController extends Controller
 
         protected CommunicationsInboxService $inbox,
 
+        protected CommunicationsPhoneNotesService $phoneNotes,
+
+        protected CommunicationsCallHistoryService $callHistory,
+
+        protected WorkspaceContextService $workspaceContext,
+
     ) {}
 
 
@@ -54,39 +68,244 @@ class CommunicationsHubController extends Controller
         return $this->inboxView($request);
     }
 
+    public function dialerCallLogs(Request $request)
+    {
+        $filters = $this->inbox->dialerCallLogFilters($this->filters($request));
+        $offset = max(0, (int) $request->query('offset', 0));
+        $perPage = min(50, max(1, (int) $request->query(
+            'per_page',
+            config('integrations.communications.list_page_size', 20),
+        )));
+
+        if (! auth()->check()) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        try {
+            $payload = $this->inbox->paginateDialerCallLogs(
+                $filters,
+                $offset,
+                $perPage,
+                $this->routePrefix(),
+                $this->zoom->isConfigured(),
+            );
+
+            return response()->json($payload);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => $this->zoom->humanizeError($e->getMessage()),
+                'logs' => [],
+                'next_offset' => $offset,
+                'has_more' => false,
+            ], 500);
+        }
+    }
+
+    public function dialerPhoneNoteShow(Request $request)
+    {
+        if (! auth()->check()) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        $phone = trim((string) $request->query('phone', ''));
+        if ($phone === '') {
+            return response()->json(['message' => 'Phone is required.'], 422);
+        }
+
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(auth()->user());
+        if (! $workspace) {
+            return response()->json(['message' => 'Workspace not found.'], 404);
+        }
+
+        $callLogRef = trim((string) $request->query('call_log_ref', ''));
+
+        return response()->json([
+            'phone' => $phone,
+            'phone_note' => $this->phoneNotes->bodyForPhone($workspace, $phone),
+            'call_note' => $this->callHistory->callNoteForRef($workspace, $callLogRef),
+            'call_log_ref' => $callLogRef !== '' ? $callLogRef : null,
+        ]);
+    }
+
+    public function dialerPhoneNoteSave(Request $request)
+    {
+        if (! auth()->check()) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        $validated = $request->validate([
+            'phone' => ['required', 'string', 'max:32'],
+            'body' => ['nullable', 'string', 'max:5000'],
+        ]);
+
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(auth()->user());
+        if (! $workspace) {
+            return response()->json(['message' => 'Workspace not found.'], 404);
+        }
+
+        try {
+            $note = $this->phoneNotes->upsertForPhone(
+                $workspace,
+                auth()->user(),
+                $validated['phone'],
+                $validated['body'] ?? null,
+            );
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        CommunicationsInboxService::bumpDialerLogsCacheVersion();
+
+        return response()->json([
+            'phone' => $validated['phone'],
+            'phone_note' => (string) ($note->body ?? ''),
+            'saved_at' => $note->updated_at?->toIso8601String(),
+        ]);
+    }
+
+    public function dialerCallNoteSave(Request $request)
+    {
+        if (! auth()->check()) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        $validated = $request->validate([
+            'call_log_ref' => ['nullable', 'string', 'max:128'],
+            'call_uuid' => ['nullable', 'string', 'max:128'],
+            'phone' => ['nullable', 'string', 'max:32'],
+            'note' => ['nullable', 'string', 'max:5000'],
+            'save_phone_note' => ['nullable', 'boolean'],
+        ]);
+
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(auth()->user());
+        if (! $workspace) {
+            return response()->json(['message' => 'Workspace not found.'], 404);
+        }
+
+        $user = auth()->user();
+        $note = $validated['note'] ?? null;
+        $log = null;
+
+        if (filled($validated['call_log_ref'] ?? null)) {
+            $log = $this->callHistory->updateCallNote($workspace, (string) $validated['call_log_ref'], $note, $user);
+        } elseif (filled($validated['call_uuid'] ?? null)) {
+            $log = $this->callHistory->updateCallNoteByUuid($workspace, (string) $validated['call_uuid'], $note, $user);
+        }
+
+        if (filled($validated['phone'] ?? null) && ($validated['save_phone_note'] ?? false)) {
+            try {
+                $this->phoneNotes->upsertForPhone($workspace, $user, (string) $validated['phone'], $note);
+            } catch (\InvalidArgumentException) {
+                // Phone-level note is optional when saving call note.
+            }
+        }
+
+        if (! $log && ! filled($validated['phone'] ?? null)) {
+            return response()->json(['message' => 'Call reference or phone is required.'], 422);
+        }
+
+        CommunicationsInboxService::bumpDialerLogsCacheVersion();
+
+        return response()->json([
+            'call_log_ref' => $log?->morpheus_call_uuid ?: ($log ? 'local:'.$log->id : ($validated['call_log_ref'] ?? null)),
+            'call_note' => (string) ($log?->note ?? $note ?? ''),
+            'phone_note' => filled($validated['phone'] ?? null)
+                ? $this->phoneNotes->bodyForPhone($workspace, (string) $validated['phone'])
+                : null,
+            'saved' => true,
+        ]);
+    }
+
+    public function dialerSyncCallRecording(Request $request)
+    {
+        if (! auth()->check()) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        $validated = $request->validate([
+            'call_log_ref' => ['nullable', 'string', 'max:128'],
+            'call_uuid' => ['nullable', 'string', 'max:128'],
+        ]);
+
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(auth()->user());
+        if (! $workspace) {
+            return response()->json(['message' => 'Workspace not found.'], 404);
+        }
+
+        $ref = (string) ($validated['call_log_ref'] ?? $validated['call_uuid'] ?? '');
+        if ($ref === '') {
+            return response()->json(['message' => 'Call reference is required.'], 422);
+        }
+
+        $log = $this->callHistory->resolveCallLog($workspace, $ref);
+        $recordingService = app(CommunicationsCallRecordingService::class);
+
+        if ($log) {
+            $log = $recordingService->resolveAndPersist($log);
+            $recording = $recordingService->recordingFieldsForHubLog($log);
+        } else {
+            $fileId = $this->zoom->findRecordingFileIdForCall($ref);
+            $recording = [
+                'has_recording_media' => filled($fileId),
+                'recording_id' => $fileId,
+                'recording_source' => 'morpheus',
+                'call_reference_id' => $ref,
+                'recording_status' => filled($fileId)
+                    ? CommunicationsCallRecordingService::STATUS_READY
+                    : CommunicationsCallRecordingService::STATUS_UNAVAILABLE,
+            ];
+        }
+
+        CommunicationsInboxService::bumpDialerLogsCacheVersion();
+        $routePrefix = $this->routePrefix();
+        $hasRecording = (bool) ($recording['has_recording_media'] ?? false);
+        $callRef = (string) ($recording['call_reference_id'] ?? $ref);
+
+        return response()->json([
+            'recording_status' => $recording['recording_status'] ?? 'none',
+            'has_recording' => $hasRecording,
+            'recording_id' => $recording['recording_id'] ?? null,
+            'play_url' => $hasRecording
+                ? route($routePrefix.'communications.zoom.recordings.media', [
+                    'recordingId' => $recording['recording_id'],
+                    'source' => $recording['recording_source'] ?? 'morpheus',
+                    'action' => 'play',
+                    'call_ref' => $callRef,
+                ])
+                : null,
+            'download_url' => $hasRecording
+                ? route($routePrefix.'communications.zoom.recordings.media', [
+                    'recordingId' => $recording['recording_id'],
+                    'source' => $recording['recording_source'] ?? 'morpheus',
+                    'action' => 'download',
+                    'call_ref' => $callRef,
+                ])
+                : null,
+        ]);
+    }
+
     protected function dialerLandingRedirect(Request $request): ?\Illuminate\Http\RedirectResponse
     {
-        if ($request->get('panel') === 'dialer' && ($request->get('channel') ?: 'inbox') === 'inbox') {
+        if ($request->get('panel') !== 'dialer') {
             return null;
         }
 
-        if (
-            $request->has('panel')
-            || $request->filled('mode')
-            || $request->filled('contact')
-            || $request->filled('call')
-            || $request->filled('session')
-            || $request->filled('voicemail')
-            || $request->filled('recording')
-            || $request->filled('chat_owner')
-        ) {
+        if (! $request->filled('from') && ! $request->filled('to')) {
             return null;
         }
 
-        $channel = (string) $request->get('channel', 'inbox');
-        if ($channel !== '' && $channel !== 'inbox') {
-            return null;
-        }
-
-        return redirect()->route($this->routePrefix().'communications.index', array_merge(
-            AdminModules::communicationsDialerParams(),
-            array_filter([
-                'number' => $request->get('number'),
-                'search' => $request->get('search'),
-                'from' => $request->get('from'),
-                'to' => $request->get('to'),
-            ], fn ($value) => filled($value)),
-        ));
+        return redirect()->route($this->routePrefix().'communications.index', array_filter([
+            'channel' => $request->get('channel', 'inbox'),
+            'panel' => 'dialer',
+            'contact' => $request->get('contact'),
+            'session' => $request->get('session'),
+            'search' => $request->get('search'),
+            'filter' => $request->get('filter'),
+            'direction' => $request->get('direction'),
+            'status' => $request->get('status'),
+        ]));
     }
 
 
@@ -506,8 +725,7 @@ class CommunicationsHubController extends Controller
         $morpheusExtensions = [];
         $recentNumbers = [];
 
-        $prefillNumber = $request->get('number')
-            ?: config('integrations.communications.default_dial_destination');
+        $prefillNumber = $request->get('number');
 
         $routePrefix = $this->routePrefix();
 

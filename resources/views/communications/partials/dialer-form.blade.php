@@ -22,12 +22,15 @@
     $endpointOnline = (bool) ($selectedExt['endpoint_online'] ?? true);
     $endpointHint = $selectedExt['endpoint_hint'] ?? null;
     $sipHost = $clickToCall->publicSipHost();
-    $portalUrl = $clickToCall->portalUrl();
     $defaultOutboundDid = config('integrations.communications.default_outbound_did');
     $layout = $layout ?? 'sidebar';
+    $isCompactDial = in_array($layout, ['center', 'right-rail'], true);
+    $hideExtension = (bool) ($hideExtension ?? false);
+    $formId = $formId ?? ($isCompactDial ? ($callerSelectId . '-form') : null);
+    $dialValue = filled($prefillNumber ?? null) ? $prefillNumber : '';
 @endphp
 
-@unless ($layout === 'center')
+@unless ($layout === 'center' || $layout === 'right-rail')
 <div class="ghl-dialer-outbound-help">
     <p class="ghl-dialer-help-title">Outbound calling via Morpheus CX</p>
     <p class="ghl-dialer-help-desc">Outbound calls dial the destination directly from your connected browser line.
@@ -54,7 +57,7 @@
     <x-communications.molecules.alert variant="warning" class="ghl-dialer-alert mb-4" title="Outbound DID not configured">
         Your extension is ready, but no caller ID number is set. Once Morpheus delivers your DIDs, an admin must add the number under Phone Agents → Edit → Caller ID number.
     </x-communications.molecules.alert>
-@elseif (!$endpointOnline && $layout !== 'center')
+@elseif (!$endpointOnline && !$isCompactDial)
     <x-communications.molecules.alert variant="warning" class="mb-4" title="Your phone line is not online">
         {{ $endpointHint ?? 'Register a SIP softphone or sign in to the Morpheus web phone before placing calls.' }}
         @if ($portalUrl !== '#')
@@ -64,57 +67,198 @@
 @endif
 
 <form method="POST" action="{{ route($routePrefix . 'communications.morpheus.calls.originate') }}"
-    class="ghl-dialer-originate-form {{ ($layout ?? '') === 'center' ? 'ghl-dialer-form--center ghl-dialer-form--enterprise ghl-dialer-form--compact' : '' }}"
+    @if ($formId) id="{{ $formId }}" @endif
+    class="ghl-dialer-originate-form {{ $isCompactDial ? 'ghl-dialer-form--center ghl-dialer-form--enterprise ghl-dialer-form--compact ghl-dialer-form--phone' : '' }} {{ ($layout ?? '') === 'right-rail' ? 'ghl-dialer-form--right-rail' : '' }}"
     data-fallback-sip="1" data-originate-json="1" data-dial-via-sip="1">
     @csrf
     <input type="hidden" name="fallback" value="sip">
 
-    <div class="ghl-dialer-form-row">
-        <div class="ghl-dialer-form-col">
-            <label class="ch-label" for="{{ $callerSelectId }}">Extension</label>
-            <select id="{{ $callerSelectId }}" name="from_extension" class="ch-input ghl-dialer-field" required
-                @disabled($extensions === [])>
-                <option value="" disabled @selected($defaultExtension === null || $defaultExtension === '')>Select extension
-                </option>
-                @foreach ($extensions as $ext)
-                    @php $extNum = $ext['extension_num'] ?? ''; @endphp
-                    @if (filled($extNum))
-                        <option value="{{ $extNum }}" @selected((string) $defaultExtension === (string) $extNum)
-                            data-outbound-did="{{ $ext['outbound_cid_num'] ?? $ext['caller_id_num'] ?? $defaultOutboundDid }}">
-                            {{ $extNum }}
-                            @if (!empty($ext['caller_id_num']))
-                                · {{ $ext['caller_id_num'] }}
-                            @endif
-                        </option>
-                    @endif
-                @endforeach
-            </select>
-        </div>
-        <div class="ghl-dialer-form-col ghl-dialer-form-col--grow">
-            <label class="ch-label" for="{{ $numberInputId }}">Number</label>
-            <input type="tel" id="{{ $numberInputId }}" name="destination"
-                class="ch-input ghl-dialer-display ghl-dialer-field" placeholder="+1 555 123 4567"
-                value="{{ $prefillNumber ?? '' }}" required autocomplete="tel" @disabled($extensions === [])>
-        </div>
-    </div>
-
-    <p class="ghl-dialer-outbound-route {{ ($layout ?? '') === 'center' ? 'ghl-dialer-outbound-route--compact' : '' }}"
-        data-dialer-route-summary>
-        CID <strong data-dialer-from-did>{{ $defaultOutboundDid ?: 'Not set' }}</strong>
-    </p>
-
-    <div class="ghl-dialer-keypad {{ ($layout ?? '') === 'center' ? 'ghl-dialer-keypad--compact' : 'mb-4' }}"
-        id="{{ $keypadRootId }}">
-        @foreach (['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'] as $key)
-            <button type="button" class="ghl-dialer-key" data-dial-key="{{ $key }}">{{ $key }}</button>
-        @endforeach
-    </div>
-
-    <div class="ghl-dialer-actions">
-        @if ($backspaceId)
-            <button type="button" id="{{ $backspaceId }}" class="ch-btn ch-btn--secondary" data-dial-backspace>Delete</button>
+    @if ($isCompactDial)
+        @if ($hideExtension)
+            <input type="hidden" name="from_extension" value="{{ $defaultExtension }}" data-dial-extension-sync>
+        @else
+            <div class="ghl-dialer-ext-inline">
+                @include('communications.partials.dialer-extension-field', [
+                    'routePrefix' => $routePrefix,
+                    'morpheusExtensions' => $morpheusExtensions ?? [],
+                    'phoneUsers' => $phoneUsers ?? [],
+                    'defaultCallerId' => $defaultCallerId ?? null,
+                    'callerSelectId' => $callerSelectId,
+                    'formId' => $formId,
+                ])
+            </div>
         @endif
-        <button type="submit" id="{{ $dialBtnId }}" class="ch-btn ch-btn--call ghl-dialer-call-btn"
-            @disabled($extensions === [])>{{ ($layout ?? '') === 'center' ? 'Call' : 'Call with Morpheus CX' }}</button>
-    </div>
+
+        <div class="ghl-dialer-active-screen hidden" data-dialer-active-screen aria-hidden="true">
+            <div class="ghl-dialer-active-screen__hero">
+                <p class="ghl-dialer-active-screen__number" data-dialer-active-peer></p>
+                <p class="ghl-dialer-active-screen__status" data-dialer-active-status>Ringing</p>
+                <p class="ghl-dialer-active-screen__timer hidden" data-dialer-active-timer>00:00</p>
+            </div>
+            <div class="ghl-dialer-active-screen__tools">
+                <button type="button" class="ghl-dialer-active-screen__tool" data-dialer-active-notes-toggle
+                    title="Call notes">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                        <line x1="16" y1="13" x2="8" y2="13" />
+                        <line x1="16" y1="17" x2="8" y2="17" />
+                    </svg>
+                    <span>Notes</span>
+                </button>
+                <button type="button" class="ghl-dialer-active-screen__tool hidden" data-dialer-call-hold
+                    title="Place caller on hold">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" />
+                    </svg>
+                    <span>Hold</span>
+                </button>
+                <button type="button" class="ghl-dialer-active-screen__tool hidden" data-dialer-call-transfer
+                    title="Transfer this call">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" />
+                        <polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" />
+                    </svg>
+                    <span>Transfer</span>
+                </button>
+                <button type="button" class="ghl-dialer-active-screen__tool hidden" data-dialer-call-record
+                    title="Toggle call recording indicator">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="3" fill="currentColor" />
+                    </svg>
+                    <span data-dialer-call-record-label>Record</span>
+                </button>
+            </div>
+            <div class="ghl-dialer-active-notes hidden" data-dialer-active-notes>
+                <textarea class="ghl-dialer-active-notes-input" data-dialer-active-notes-input rows="4"
+                    placeholder="Notes during this call…" maxlength="5000"></textarea>
+                <div class="ghl-dialer-active-notes-actions">
+                    <span class="ghl-dialer-active-notes-status" data-dialer-active-notes-status aria-live="polite"></span>
+                    <button type="button" class="ch-btn ch-btn--secondary ch-btn--sm" data-dialer-active-notes-save>Save</button>
+                </div>
+            </div>
+            <div class="ghl-dialer-active-screen__footer">
+                <button type="button" class="ghl-dialer-active-screen__end" data-dialer-call-hangup
+                    aria-label="End call" title="End call">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path
+                            d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <div class="ghl-dialer-phone-stage" data-dialer-phone-stage>
+            <div class="ghl-dialer-phone-frame">
+            <div class="ghl-dialer-number-wrap">
+                <div class="ghl-dialer-input-shell" data-dialer-input-shell>
+                    <input type="tel" id="{{ $numberInputId }}" name="destination"
+                        class="ghl-dialer-display ghl-dialer-display--center ghl-dialer-field" placeholder="Enter the number"
+                        value="{{ $dialValue }}" required autocomplete="tel" inputmode="tel" @disabled($extensions === [])>
+                    <div class="ghl-dialer-call-layer hidden" data-dialer-call-layer data-state="idle" aria-live="polite"
+                        aria-atomic="true">
+                        <div class="ghl-dialer-call-layer__inner">
+                            <span class="ghl-dialer-call-layer__badge" data-dialer-call-badge>Ringing</span>
+                            <span class="ghl-dialer-call-layer__peer" data-dialer-call-peer></span>
+                            <span class="ghl-dialer-call-layer__timer hidden" data-dialer-call-timer>00:00</span>
+                        </div>
+                    </div>
+                </div>
+                <p class="ghl-dialer-outbound-route ghl-dialer-outbound-route--compact" data-dialer-route-summary>
+                    CID <strong data-dialer-from-did>{{ $defaultOutboundDid ?: 'Not set' }}</strong>
+                </p>
+                <div class="ghl-dialer-call-actions hidden" data-dialer-call-actions>
+                    <button type="button" class="ghl-webphone-btn-answer hidden" data-dialer-call-answer
+                        title="Answer the incoming call on your browser line">Answer</button>
+                    <button type="button" class="ghl-webphone-btn-hold hidden" data-dialer-call-hold
+                        title="Place caller on hold">Hold</button>
+                    <button type="button" class="ghl-webphone-btn-transfer hidden" data-dialer-call-transfer
+                        title="Transfer this call">Transfer</button>
+                    <button type="button" class="ghl-webphone-btn-record hidden" data-dialer-call-record
+                        title="Toggle call recording indicator">
+                        <span class="ghl-webphone-btn-record-dot" aria-hidden="true"></span>
+                        <span data-dialer-call-record-label>Record</span>
+                    </button>
+                    <button type="button" class="ghl-webphone-btn-end-call hidden" data-dialer-call-hangup
+                        title="End this call">End call</button>
+                </div>
+            </div>
+
+            <div class="ghl-dialer-keypad ghl-dialer-keypad--compact ghl-dialer-keypad--round ghl-dialer-keypad--with-actions" id="{{ $keypadRootId }}">
+                @foreach (['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'] as $key)
+                    <button type="button" class="ghl-dialer-key ghl-dialer-key--round" data-dial-key="{{ $key }}">{{ $key }}</button>
+                @endforeach
+                @if ($backspaceId)
+                    <button type="button" id="{{ $backspaceId }}"
+                        class="ghl-dialer-backspace-btn ghl-dialer-keypad__action ghl-dialer-keypad__action--delete is-hidden"
+                        data-dial-backspace aria-label="Delete last digit" title="Delete">
+                        <svg class="ghl-dialer-backspace-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"></path>
+                            <line x1="18" y1="9" x2="12" y2="15"></line>
+                            <line x1="12" y1="9" x2="18" y2="15"></line>
+                        </svg>
+                    </button>
+                @endif
+                <button type="submit" id="{{ $dialBtnId }}"
+                    class="ghl-dialer-call-icon-btn ghl-dialer-keypad__action ghl-dialer-keypad__action--call"
+                    @disabled($extensions === []) aria-label="Place call" title="Call">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path
+                            d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                    </svg>
+                </button>
+            </div>
+            </div>
+        </div>
+    @else
+        <div class="ghl-dialer-form-row">
+            <div class="ghl-dialer-form-col">
+                <label class="ch-label" for="{{ $callerSelectId }}">Extension</label>
+                <select id="{{ $callerSelectId }}" name="from_extension" class="ch-input ghl-dialer-field" required
+                    @disabled($extensions === [])>
+                    <option value="" disabled @selected($defaultExtension === null || $defaultExtension === '')>Select extension
+                    </option>
+                    @foreach ($extensions as $ext)
+                        @php $extNum = $ext['extension_num'] ?? ''; @endphp
+                        @if (filled($extNum))
+                            <option value="{{ $extNum }}" @selected((string) $defaultExtension === (string) $extNum)
+                                data-outbound-did="{{ $ext['outbound_cid_num'] ?? $ext['caller_id_num'] ?? $defaultOutboundDid }}">
+                                {{ $extNum }}
+                                @if (!empty($ext['caller_id_num']))
+                                    · {{ $ext['caller_id_num'] }}
+                                @endif
+                            </option>
+                        @endif
+                    @endforeach
+                </select>
+            </div>
+            <div class="ghl-dialer-form-col ghl-dialer-form-col--grow">
+                <label class="ch-label" for="{{ $numberInputId }}">Number</label>
+                <input type="tel" id="{{ $numberInputId }}" name="destination"
+                    class="ch-input ghl-dialer-display ghl-dialer-field" placeholder="Enter the number"
+                    value="{{ $dialValue }}" required autocomplete="tel" @disabled($extensions === [])>
+            </div>
+        </div>
+
+        <p class="ghl-dialer-outbound-route" data-dialer-route-summary>
+            CID <strong data-dialer-from-did>{{ $defaultOutboundDid ?: 'Not set' }}</strong>
+        </p>
+
+        <div class="ghl-dialer-keypad mb-4" id="{{ $keypadRootId }}">
+            @foreach (['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'] as $key)
+                <button type="button" class="ghl-dialer-key" data-dial-key="{{ $key }}">{{ $key }}</button>
+            @endforeach
+        </div>
+
+        <div class="ghl-dialer-actions">
+            @if ($backspaceId)
+                <button type="button" id="{{ $backspaceId }}" class="ch-btn ch-btn--secondary" data-dial-backspace>Delete</button>
+            @endif
+            <button type="submit" id="{{ $dialBtnId }}" class="ch-btn ch-btn--call ghl-dialer-call-btn"
+                @disabled($extensions === [])>Call with Morpheus CX</button>
+        </div>
+    @endif
 </form>

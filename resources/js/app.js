@@ -78,18 +78,21 @@ async function bootCommunicationsFeatures() {
         return;
     }
 
-    if (needsDialer) {
-        const dialerModule = await import('./communications-dialer.js');
+    const [dialerModule, webphoneModule, workflowModule] = await Promise.all([
+        needsDialer ? import('./communications-dialer.js') : Promise.resolve(null),
+        needsWebphone ? import('./communications-webphone.js') : Promise.resolve(null),
+        needsWorkflow ? import('./comm-hub-workflow.js') : Promise.resolve(null),
+    ]);
+
+    if (dialerModule) {
         dialerModule.bootCommunicationsDialer();
     }
 
-    if (needsWebphone) {
-        const webphoneModule = await import('./communications-webphone.js');
+    if (webphoneModule) {
         webphoneModule.bootCommunicationsWebphone();
     }
 
-    if (document.querySelector('[data-comm-workflow]')) {
-        const workflowModule = await import('./comm-hub-workflow.js');
+    if (workflowModule) {
         workflowModule.initCommHubWorkflow();
     }
 }
@@ -137,5 +140,8 @@ document.addEventListener('turbo:before-cache', () => {
     }).catch(() => {});
     import('./communications-dialer.js').then((dialerModule) => {
         dialerModule.resetDialerButtonsForCache();
+    }).catch(() => {});
+    import('./communications-phone-notes.js').then((notesModule) => {
+        notesModule.teardownPhoneNotesForTurbo?.();
     }).catch(() => {});
 });

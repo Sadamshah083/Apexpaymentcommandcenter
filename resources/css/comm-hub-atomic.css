@@ -527,12 +527,23 @@
     margin: 0.35rem 0 0.5rem;
 }
 
-.ghl-dialer-recent-list {
+.ghl-dialer-recent-list:not(.ghl-dialer-recent-list--full) {
     display: flex;
     flex-direction: column;
     gap: 0.4rem;
     max-height: min(28rem, calc(100vh - 14rem));
     overflow: auto;
+}
+
+.ghl-dialer-recent-list--full {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .ghl-dialer-recent-row {

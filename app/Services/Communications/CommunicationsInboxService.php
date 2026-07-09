@@ -2,6 +2,7 @@
 
 namespace App\Services\Communications;
 
+use App\Models\Workspace;
 use App\Services\Integrations\ZoomApiService;
 use App\Services\Workspace\WorkspaceContextService;
 use App\Support\SimplePaginator;
@@ -37,6 +38,7 @@ class CommunicationsInboxService
     protected CommunicationsCallHistoryService $callHistory,
     protected WorkspaceContextService $workspaceContext,
     protected CommunicationsAccessService $access,
+    protected CommunicationsPhoneNotesService $phoneNotes,
   ) {}
 
   /**
@@ -239,7 +241,9 @@ class CommunicationsInboxService
           }
         }
 
-        $enrichCallRecordings = $channel === 'recordings' || ($filters['filter'] ?? '') === 'recorded';
+        $enrichCallRecordings = $channel === 'recordings'
+          || ($filters['filter'] ?? '') === 'recorded'
+          || $panel === 'dialer';
 
         if (in_array($channel, ['inbox', 'calls'], true)) {
           if (auth()->check()) {
@@ -674,6 +678,21 @@ class CommunicationsInboxService
       }
     }
 
+    $dialerCallLogsHasMore = false;
+
+    if ($panel === 'dialer') {
+      try {
+        $callLogs = $this->resolveDialerCallLogs($filters, (bool) ($connection['connected'] ?? false));
+        $callLogs = $this->data->enrichCallLogsWithRecordings($callLogs, $filters);
+        if ($workspace) {
+          $callLogs = $this->enrichDialerCallLogsWithNotes($workspace, $callLogs);
+        }
+        $dialerCallLogsHasMore = count($callLogs) > (int) config('integrations.communications.list_page_size', 20);
+      } catch (\Throwable $e) {
+        $warnings[] = $this->zoom->humanizeError($e->getMessage());
+      }
+    }
+
     return [
       'channel' => $channel,
       'panel' => $panel,
@@ -738,6 +757,7 @@ class CommunicationsInboxService
       'clickToCall' => $this->clickToCall,
       'channelCounts' => $channelCounts,
       'hubAccess' => $hubAccess,
+      'dialerCallLogsHasMore' => $dialerCallLogsHasMore,
     ];
   }
 
@@ -1408,8 +1428,283 @@ class CommunicationsInboxService
       return trim($fromRequest);
     }
 
-    $default = trim((string) (config('integrations.communications.default_dial_destination') ?? ''));
+    return null;
+  }
 
-    return $default !== '' ? $default : null;
+  /**
+   * Dialer call logs ignore URL date filters and use a fixed lookback window.
+   *
+   * @param  array<string, mixed>  $filters
+   * @return array<string, mixed>
+   */
+  public function dialerCallLogFilters(array $filters): array
+  {
+    $days = (int) config('integrations.communications.dialer_log_days', 90);
+
+    return array_merge($filters, [
+      'from' => now()->subDays($days)->toDateString(),
+      'to' => now()->toDateString(),
+    ]);
+  }
+
+  /**
+   * @return array<int, array<string, mixed>>
+   */
+  public function resolveDialerCallLogs(array $filters, bool $mergeRemote = true): array
+  {
+    $filters = $this->dialerCallLogFilters($filters);
+
+    $user = Auth::user();
+    if (! $user) {
+      return [];
+    }
+
+    $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
+    if (! $workspace) {
+      return [];
+    }
+
+    $logs = $this->callHistory->listForHub($workspace, $filters);
+
+    if (! $mergeRemote || ! $this->zoom->isConfigured()) {
+      return $this->filterCallLogs($logs, $filters);
+    }
+
+    $remote = [];
+    $pageToken = null;
+    $pages = 0;
+
+    do {
+      try {
+        $payload = $this->data->callLogs(
+          array_merge($filters, ['page_token' => $pageToken]),
+          1,
+          false,
+        );
+      } catch (\Throwable) {
+        break;
+      }
+
+      foreach ($payload['logs'] ?? [] as $row) {
+        $remote[] = $row;
+      }
+
+      $pageToken = $payload['next_page_token'] ?? null;
+      $pages++;
+    } while ($pageToken && $pages < 3);
+
+    return $this->filterCallLogs(
+      $this->callHistory->mergeLiveAndHistory($remote, $logs),
+      $filters,
+    );
+  }
+
+  /**
+   * @return array{logs: array<int, array<string, mixed>>, next_offset: int, has_more: bool}
+   */
+  public function paginateDialerCallLogs(
+    array $filters,
+    int $offset,
+    int $limit,
+    string $routePrefix,
+    bool $mergeRemote = true,
+  ): array {
+    $userId = Auth::id() ?? 0;
+    $version = (int) Cache::get('dialer_logs_ver.'.$userId, 0);
+    $cacheKey = 'dialer_logs.v2.'.$userId.'.'.$version.'.'.md5(json_encode([
+      $filters['from'] ?? null,
+      $filters['to'] ?? null,
+      $filters['direction'] ?? null,
+      $filters['filter'] ?? null,
+      $mergeRemote,
+    ]));
+
+    $all = Cache::remember(
+      $cacheKey,
+      30,
+      fn () => $this->resolveDialerCallLogs($filters, $mergeRemote),
+    );
+
+    $enriched = $this->data->enrichCallLogsWithRecordings($all, $filters);
+    $slice = array_slice($enriched, $offset, $limit);
+    $nextOffset = $offset + count($slice);
+
+    $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+    $phoneBodies = $workspace
+      ? $this->phoneNotes->mapBodiesForPhones(
+        $workspace,
+        collect($slice)
+          ->map(function (array $log) {
+            return match ($log['direction'] ?? '') {
+              'inbound' => (string) ($log['from_phone'] ?? ''),
+              'outbound' => (string) ($log['to_phone'] ?? ''),
+              default => (string) ($log['to_phone'] ?? ($log['from_phone'] ?? '')),
+            };
+          })
+          ->filter()
+          ->all(),
+      )
+      : [];
+
+    return [
+      'logs' => array_map(
+        fn (array $log) => $this->formatDialerCallLogForApi($log, $routePrefix, $phoneBodies),
+        $slice,
+      ),
+      'next_offset' => $nextOffset,
+      'has_more' => $nextOffset < count($enriched),
+    ];
+  }
+
+  public static function bumpDialerLogsCacheVersion(?int $userId = null): void
+  {
+    $userId = $userId ?? Auth::id();
+    if (! $userId) {
+      return;
+    }
+
+    $key = 'dialer_logs_ver.'.$userId;
+    Cache::put($key, ((int) Cache::get($key, 0)) + 1, 86400);
+  }
+
+  /**
+   * @param  array<int, array<string, mixed>>  $logs
+   * @return array<int, array<string, mixed>>
+   */
+  public function enrichDialerCallLogsWithNotes(Workspace $workspace, array $logs): array
+  {
+    $phones = collect($logs)
+      ->map(function (array $log) {
+        return match ($log['direction'] ?? '') {
+          'inbound' => (string) ($log['from_phone'] ?? ''),
+          'outbound' => (string) ($log['to_phone'] ?? ''),
+          default => (string) ($log['to_phone'] ?? ($log['from_phone'] ?? '')),
+        };
+      })
+      ->filter()
+      ->all();
+
+    $phoneBodies = $this->phoneNotes->mapBodiesForPhones($workspace, $phones);
+
+    return array_map(function (array $log) use ($phoneBodies) {
+      $callbackPhone = match ($log['direction'] ?? '') {
+        'inbound' => $log['from_phone'] ?? null,
+        'outbound' => $log['to_phone'] ?? null,
+        default => $log['to_phone'] ?? ($log['from_phone'] ?? null),
+      };
+      $phoneKey = $this->phoneNotes->normalizePhoneKey($callbackPhone);
+      $phoneNote = $phoneKey ? trim((string) ($phoneBodies[$phoneKey] ?? '')) : '';
+      $callNote = trim((string) ($log['note'] ?? data_get($log, 'raw.note') ?? ''));
+
+      $log['phone_note'] = $phoneNote;
+      $log['call_note'] = $callNote;
+      $log['has_notes'] = $callNote !== '';
+
+      return $log;
+    }, $logs);
+  }
+
+  /**
+   * @param  array<string, mixed>  $log
+   * @param  array<string, string>  $phoneBodies
+   * @return array<string, mixed>
+   */
+  public function formatDialerCallLogForApi(array $log, string $routePrefix, array $phoneBodies = []): array
+  {
+    $callbackPhone = match ($log['direction'] ?? '') {
+      'inbound' => $log['from_phone'] ?? null,
+      'outbound' => $log['to_phone'] ?? null,
+      default => $log['to_phone'] ?? ($log['from_phone'] ?? null),
+    };
+
+    $logExtension = $log['from_extension']
+      ?? data_get($log, 'raw.from_extension')
+      ?? null;
+
+    if (! $logExtension && ! empty($log['from']) && preg_match('/ext\s+(\d+)/i', (string) $log['from'], $matches)) {
+      $logExtension = $matches[1];
+    }
+
+    $hasRecording = ! empty($log['has_recording_media']) && ! empty($log['recording_id']);
+    $recordingStatus = (string) ($log['recording_status'] ?? ($hasRecording ? 'ready' : 'none'));
+    $recordingSource = $log['recording_source'] ?? 'morpheus';
+    $callRef = $log['call_reference_id'] ?? $log['id'] ?? '';
+    $playUrl = $hasRecording
+      ? route($routePrefix.'communications.zoom.recordings.media', [
+        'recordingId' => $log['recording_id'],
+        'source' => $recordingSource,
+        'action' => 'play',
+        'call_ref' => $callRef,
+      ])
+      : '';
+    $downloadUrl = $hasRecording
+      ? route($routePrefix.'communications.zoom.recordings.media', [
+        'recordingId' => $log['recording_id'],
+        'source' => $recordingSource,
+        'action' => 'download',
+        'call_ref' => $callRef,
+      ])
+      : '';
+
+    $startTime = $log['start_time'] ?? null;
+    $durationSeconds = (int) (
+      $log['duration']
+      ?? data_get($log, 'raw.billsec')
+      ?? data_get($log, 'raw.duration_sec')
+      ?? data_get($log, 'raw.duration')
+      ?? 0
+    );
+
+    $callNote = trim((string) ($log['note'] ?? data_get($log, 'raw.note') ?? ''));
+    $callLogRef = (string) ($log['id'] ?? '');
+    $localCallLogId = null;
+    if (str_starts_with($callLogRef, 'local:')) {
+      $localCallLogId = (int) substr($callLogRef, 6);
+    }
+
+    $phoneKey = $this->phoneNotes->normalizePhoneKey($callbackPhone);
+    $phoneNote = $phoneKey ? trim((string) ($phoneBodies[$phoneKey] ?? '')) : '';
+
+    return [
+      'id' => $log['id'] ?? null,
+      'call_log_ref' => $callLogRef !== '' ? $callLogRef : null,
+      'local_call_log_id' => $localCallLogId,
+      'direction' => $log['direction'] ?? 'call',
+      'extension' => $logExtension,
+      'phone' => $callbackPhone,
+      'result' => $log['result'] ?? '—',
+      'duration_seconds' => $durationSeconds,
+      'duration_label' => self::formatDialerCallDuration($durationSeconds),
+      'time_ago' => filled($startTime) ? \Carbon\Carbon::parse($startTime)->diffForHumans(short: true) : '—',
+      'time_label' => filled($startTime) ? \Carbon\Carbon::parse($startTime)->format('M j, Y g:i A') : '—',
+      'has_recording' => $hasRecording,
+      'recording_status' => $recordingStatus,
+      'play_url' => $playUrl,
+      'download_url' => $downloadUrl,
+      'call_note' => $callNote,
+      'phone_note' => $phoneNote,
+      'has_notes' => $callNote !== '',
+    ];
+  }
+
+  public static function formatDialerCallDuration(int $seconds): string
+  {
+    if ($seconds <= 0) {
+      return '0s';
+    }
+
+    $hours = intdiv($seconds, 3600);
+    $minutes = intdiv($seconds % 3600, 60);
+    $remaining = $seconds % 60;
+
+    if ($hours > 0) {
+      return sprintf('%dh %dm %ds', $hours, $minutes, $remaining);
+    }
+
+    if ($minutes > 0) {
+      return sprintf('%dm %ds', $minutes, $remaining);
+    }
+
+    return sprintf('%ds', $remaining);
   }
 }

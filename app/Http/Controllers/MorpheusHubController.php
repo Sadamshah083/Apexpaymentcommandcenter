@@ -387,7 +387,64 @@ class MorpheusHubController extends Controller
 
     public function hangupCall(Request $request, string $uuid)
     {
-        return $this->executeCallAction($request, fn () => $this->morpheus->hangup($uuid), 'Call ended.');
+        $fromExtension = $request->input('from_extension');
+        $destination = $request->input('destination');
+        $originateUuid = trim((string) ($request->input('originate_uuid') ?: $uuid));
+        $relatedUuids = $request->input('related_uuids', []);
+        $bridgedUuid = trim((string) ($request->input('bridged_uuid') ?? ''));
+
+        if (! is_array($relatedUuids)) {
+            $relatedUuids = [];
+        }
+
+        if ($bridgedUuid !== '') {
+            $relatedUuids[] = $bridgedUuid;
+        }
+
+        \Illuminate\Support\Facades\Log::info('Comm hub hangup requested', [
+            'path_uuid' => $uuid,
+            'originate_uuid' => $originateUuid,
+            'from_extension' => $fromExtension,
+            'destination' => $destination,
+            'related_uuids' => $relatedUuids,
+        ]);
+
+        return $this->executeCallAction(
+            $request,
+            function () use ($originateUuid, $uuid, $fromExtension, $destination, $relatedUuids) {
+                $result = $this->morpheus->hangupWithContext(
+                    $originateUuid !== '' ? $originateUuid : $uuid,
+                    is_string($fromExtension) ? $fromExtension : null,
+                    is_string($destination) ? $destination : null,
+                    array_map(static fn ($id) => (string) $id, $relatedUuids),
+                );
+
+                if ($result['ok'] ?? false) {
+                    $endedUuid = $originateUuid !== '' ? $originateUuid : $uuid;
+                    $this->callEvents->markCallEnded($endedUuid, 'NORMAL_CLEARING');
+                }
+
+                return $result;
+            },
+            'Call ended.'
+        );
+    }
+
+    public function releaseExtensionCalls(Request $request)
+    {
+        $validated = $request->validate([
+            'from_extension' => ['required', 'string', 'max:32'],
+            'destination' => ['nullable', 'string', 'max:64'],
+        ]);
+
+        return $this->executeCallAction(
+            $request,
+            fn () => $this->morpheus->releaseExtensionCallsWithDestination(
+                $validated['from_extension'],
+                $validated['destination'] ?? null,
+            ),
+            'Active calls released for extension.'
+        );
     }
 
     public function callStatus(Request $request, string $uuid)
@@ -398,9 +455,147 @@ class MorpheusHubController extends Controller
 
         $destination = is_string($request->query('destination')) ? $request->query('destination') : null;
 
-        return response()->json(
-            $this->morpheus->hubCallStatus($uuid, $destination, $request->boolean('customer_first'))
-        );
+        try {
+            $status = $this->morpheus->hubCallStatus($uuid, $destination, $request->boolean('customer_first'));
+            $overlay = $this->callEvents->hubStatusOverlay($uuid, $destination);
+            if ($overlay !== []) {
+                if (($overlay['call_ended'] ?? false) === true) {
+                    $status = array_merge($status, $overlay, [
+                        'live' => false,
+                        'call_ended' => true,
+                        'outcome' => 'ended',
+                    ]);
+                } elseif (($overlay['destination_connected'] ?? false) === true && ($overlay['live'] ?? true) !== false) {
+                    $status = array_merge($status, $overlay, ['outcome' => 'connected']);
+                } else {
+                    $status = array_merge($status, $overlay);
+                }
+            }
+
+            return response()->json($status);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'ok' => false,
+                'error' => 'Could not load call status.',
+            ], 500);
+        }
+    }
+
+    public function webhookHealth()
+    {
+        return response()->json([
+            'ok' => true,
+            'endpoint' => 'morpheus-call-webhook',
+            'method' => 'POST',
+            'url' => url('/webhooks/morpheus/calls'),
+            'message' => 'Morpheus call events must be sent via POST. GET confirms this endpoint is reachable.',
+        ]);
+    }
+
+    public function receiveCallWebhook(Request $request)
+    {
+        if (! $this->morpheus->isConfigured()) {
+            return response()->json(['ok' => false, 'error' => 'Morpheus is not configured.'], 503);
+        }
+
+        if (! $this->callEvents->verifySignature($request)) {
+            \Illuminate\Support\Facades\Log::warning('Morpheus webhook rejected — invalid signature', [
+                'ip' => $request->ip(),
+            ]);
+
+            return response()->json(['ok' => false, 'error' => 'Invalid webhook signature.'], 401);
+        }
+
+        $payload = $request->json()->all();
+        if ($payload === []) {
+            $payload = $request->all();
+        }
+
+        $state = $this->callEvents->ingestWebhook(is_array($payload) ? $payload : []);
+
+        \Illuminate\Support\Facades\Log::info('Morpheus webhook received', [
+            'event' => $state['event'] ?? null,
+            'uuid' => $state['uuid'] ?? null,
+            'destination_answered' => (bool) ($state['destination_answered'] ?? false),
+            'call_ended' => ($state['live'] ?? true) === false,
+            'hangup_cause' => $state['hangup_cause'] ?? null,
+        ]);
+
+        return response()->json([
+            'ok' => true,
+            'received' => true,
+            'destination_answered' => (bool) ($state['destination_answered'] ?? false),
+            'call_ended' => ($state['live'] ?? true) === false,
+            'uuid' => $state['uuid'] ?? null,
+        ]);
+    }
+
+    public function streamCallEvents(Request $request, string $uuid)
+    {
+        if (! $this->morpheus->isConfigured()) {
+            return response()->json(['ok' => false, 'error' => 'Morpheus is not configured.'], 503);
+        }
+
+        $destination = is_string($request->query('destination')) ? $request->query('destination') : null;
+        $request->session()->save();
+
+        return response()->stream(function () use ($uuid, $destination) {
+            if (function_exists('set_time_limit')) {
+                @set_time_limit(0);
+            }
+
+            $lastFingerprint = '';
+            $idleTicks = 0;
+            $maxTicks = 900;
+
+            while (! connection_aborted() && $idleTicks < $maxTicks) {
+                try {
+                    $apiStatus = $this->morpheus->hubCallStatus($uuid, $destination, false);
+                    $overlay = $this->callEvents->hubStatusOverlay($uuid, $destination);
+                    $status = array_merge($apiStatus, $overlay);
+                } catch (\Throwable) {
+                    $status = ['ok' => false];
+                }
+
+                $fingerprint = json_encode([
+                    'destination_connected' => $status['destination_connected'] ?? false,
+                    'call_ended' => $status['call_ended'] ?? false,
+                    'live' => $status['live'] ?? null,
+                    'outcome' => $status['outcome'] ?? null,
+                    'hangup_cause' => $status['hangup_cause'] ?? null,
+                    'billsec' => $status['billsec'] ?? null,
+                ]);
+
+                if ($fingerprint !== $lastFingerprint) {
+                    $lastFingerprint = $fingerprint;
+                    echo 'data: '.json_encode([
+                        'ok' => true,
+                        'uuid' => $uuid,
+                        ...$status,
+                    ], JSON_THROW_ON_ERROR)."\n\n";
+                    if (function_exists('ob_flush')) {
+                        @ob_flush();
+                    }
+                    flush();
+                    $idleTicks = 0;
+                } else {
+                    $idleTicks++;
+                }
+
+                if (($status['call_ended'] ?? false) === true || (($status['live'] ?? true) === false && filled($status['hangup_cause'] ?? null))) {
+                    break;
+                }
+
+                usleep(300_000);
+            }
+        }, 200, [
+            'Content-Type' => 'text/event-stream',
+            'Cache-Control' => 'no-cache, no-transform',
+            'Connection' => 'keep-alive',
+            'X-Accel-Buffering' => 'no',
+        ]);
     }
 
     public function holdCall(Request $request, string $uuid)
@@ -877,8 +1072,14 @@ class MorpheusHubController extends Controller
                 return back()->with('error', $result['error'] ?? 'Call action failed.');
             }
 
-            $this->data->bustCache();
-            $this->hub->bustCache();
+            try {
+                $this->data->bustCache();
+                $this->hub->bustCache();
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('Cache bust after call action failed', [
+                    'error' => $e->getMessage(),
+                ]);
+            }
 
             if ($request->wantsJson()) {
                 return response()->json(array_merge(['ok' => true, 'message' => $successMessage], $result));

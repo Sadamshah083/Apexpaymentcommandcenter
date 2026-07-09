@@ -6,6 +6,8 @@
         'defaultCallerId' => $defaultCallerId ?? null,
         'prefillNumber' => $prefillNumber ?? null,
         'callLogs' => $callLogs ?? [],
+        'dialerCallLogsHasMore' => $dialerCallLogsHasMore ?? false,
+        'filters' => $filters ?? [],
         'clickToCall' => $clickToCall ?? null,
     ])
 </div>

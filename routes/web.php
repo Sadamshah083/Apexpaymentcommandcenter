@@ -17,7 +17,14 @@ use App\Http\Controllers\WorkspaceMemberController;
 use App\Http\Controllers\WorkspaceSyncController;
 use App\Http\Controllers\ServerMonitoringController;
 use App\Http\Controllers\AdminDashboardController;
+use App\Http\Controllers\MorpheusHubController;
 use Illuminate\Support\Facades\Route;
+
+// Morpheus Event Push — public, no session auth (configure this URL in Morpheus admin)
+Route::get('/webhooks/morpheus/calls', [MorpheusHubController::class, 'webhookHealth'])
+    ->name('webhooks.morpheus.calls.health');
+Route::post('/webhooks/morpheus/calls', [MorpheusHubController::class, 'receiveCallWebhook'])
+    ->name('webhooks.morpheus.calls');
 
 // Redirect root to portal login
 Route::get('/', function () {
@@ -124,14 +131,7 @@ Route::prefix('admin')->name('admin.')->middleware([
         Route::post('/{workflow}/distribute', [WorkflowController::class, 'distribute'])->name('distribute');
         Route::post('/{workflow}/assign-leads', [WorkflowController::class, 'assignLeads'])->name('assign-leads');
         Route::delete('/{workflow}', [WorkflowController::class, 'destroy'])->name('destroy');
-
-
-
-        route:patch{workflow}/assign-leads{lead}
-        this.patch({workflow}/assign-leads{lead})
-          
-    
-        });
+    });
 
     Route::prefix('campaigns')->name('campaigns.')->group(function () {
         Route::get('/', [CampaignController::class, 'index'])->name('index');
@@ -185,6 +185,11 @@ Route::prefix('admin')->name('admin.')->middleware([
         $registerMorpheusHub = require __DIR__.'/morpheus-communications.php';
 
         Route::get('/', [CommunicationsHubController::class, 'index'])->name('index');
+        Route::get('/dialer/call-logs', [CommunicationsHubController::class, 'dialerCallLogs'])->name('dialer.call-logs');
+        Route::get('/dialer/notes', [CommunicationsHubController::class, 'dialerPhoneNoteShow'])->name('dialer.notes.show');
+        Route::put('/dialer/notes/phone', [CommunicationsHubController::class, 'dialerPhoneNoteSave'])->name('dialer.notes.phone.save');
+        Route::put('/dialer/notes/call', [CommunicationsHubController::class, 'dialerCallNoteSave'])->name('dialer.notes.call.save');
+        Route::post('/dialer/call-logs/recording/sync', [CommunicationsHubController::class, 'dialerSyncCallRecording'])->name('dialer.recording.sync');
         Route::get('/contacts/{contactKey}', [CommunicationsHubController::class, 'showContact'])->name('contacts.show')->where('contactKey', '.*');
         Route::get('/zoom/export/logs', [CommunicationsHubController::class, 'exportLogs'])->name('zoom.export.logs');
         Route::get('/zoom/recordings/{recordingId}/media', [CommunicationsHubController::class, 'recordingMedia'])->name('zoom.recordings.media');
@@ -262,6 +267,11 @@ Route::prefix('portal')->name('portal.')->middleware([\App\Http\Middleware\Marke
         $registerMorpheusHub = require __DIR__.'/morpheus-communications.php';
 
         Route::get('/', [CommunicationsHubController::class, 'index'])->name('index');
+        Route::get('/dialer/call-logs', [CommunicationsHubController::class, 'dialerCallLogs'])->name('dialer.call-logs');
+        Route::get('/dialer/notes', [CommunicationsHubController::class, 'dialerPhoneNoteShow'])->name('dialer.notes.show');
+        Route::put('/dialer/notes/phone', [CommunicationsHubController::class, 'dialerPhoneNoteSave'])->name('dialer.notes.phone.save');
+        Route::put('/dialer/notes/call', [CommunicationsHubController::class, 'dialerCallNoteSave'])->name('dialer.notes.call.save');
+        Route::post('/dialer/call-logs/recording/sync', [CommunicationsHubController::class, 'dialerSyncCallRecording'])->name('dialer.recording.sync');
         Route::get('/contacts/{contactKey}', [CommunicationsHubController::class, 'showContact'])->name('contacts.show')->where('contactKey', '.*');
         Route::get('/zoom/export/logs', [CommunicationsHubController::class, 'exportLogs'])->name('zoom.export.logs');
         Route::get('/zoom/recordings/{recordingId}/media', [CommunicationsHubController::class, 'recordingMedia'])->name('zoom.recordings.media');

@@ -29,9 +29,12 @@
             </aside>
 
             <section class="ghl-dialer-panel">
-                @include('communications.partials.webphone-panel', [
+                @include('communications.partials.global-line-picker', [
                     'routePrefix' => $routePrefix,
+                    'morpheusExtensions' => $morpheusExtensions ?? [],
+                    'phoneUsers' => $phoneUsers ?? [],
                     'defaultCallerId' => $defaultCallerId ?? null,
+                    'placement' => 'panel',
                 ])
                 @include('communications.partials.dialer-form', [
                     'routePrefix' => $routePrefix,
@@ -49,6 +52,4 @@
             </section>
         </div>
     </div>
-
-    @include('communications.partials.webphone-floating-popup')
 @endsection

@@ -42,13 +42,31 @@ function getContainer() {
     return container;
 }
 
+const COMM_TOAST_DURATION = {
+    success: 3200,
+    error: 4500,
+    warning: 4000,
+    info: 3500,
+};
+
+export function showCommToast(message, type = 'info', options = {}) {
+    const toastType = TOAST_TITLES[type] ? type : 'info';
+
+    return showToast(message, toastType, {
+        duration: options.duration ?? COMM_TOAST_DURATION[toastType] ?? 3500,
+        title: options.title ?? (toastType === 'info' ? 'Phone' : undefined),
+        compact: true,
+        ...options,
+    });
+}
+
 export function showToast(message, type = 'success', options = {}) {
     const container = getContainer();
     const toastType = TOAST_TITLES[type] ? type : 'info';
     const duration = options.duration ?? TOAST_DURATION[toastType] ?? 5000;
 
     const toast = document.createElement('div');
-    toast.className = `app-toast app-toast-${toastType}`;
+    toast.className = `app-toast app-toast-${toastType}${options.compact ? ' app-toast--compact' : ''}`;
     toast.setAttribute('role', 'alert');
 
     const icon = document.createElement('div');

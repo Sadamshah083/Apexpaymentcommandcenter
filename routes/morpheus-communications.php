@@ -11,6 +11,9 @@ return function (): void {
         // Agent + admin: live call operations (dial, hold, transfer, disposition, etc.)
         Route::prefix('calls')->name('calls.')->group(function () {
             Route::post('/originate', [MorpheusHubController::class, 'originateCall'])->name('originate');
+            Route::post('/release-extension', [MorpheusHubController::class, 'releaseExtensionCalls'])->name('release-extension');
+            Route::post('/webhook', [MorpheusHubController::class, 'receiveCallWebhook'])->name('webhook');
+            Route::get('/{uuid}/events', [MorpheusHubController::class, 'streamCallEvents'])->name('events');
             Route::get('/{uuid}', [MorpheusHubController::class, 'callStatus'])->name('status');
             Route::post('/{uuid}/transfer', [MorpheusHubController::class, 'transferCall'])->name('transfer');
             Route::post('/{uuid}/hangup', [MorpheusHubController::class, 'hangupCall'])->name('hangup');

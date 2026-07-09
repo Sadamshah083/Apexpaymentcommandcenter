@@ -26,6 +26,8 @@ return [
         'platform_api_key' => env('MORPHEUS_PLATFORM_API_KEY'),
         'default_campaign_id' => env('MORPHEUS_DEFAULT_CAMPAIGN_ID'),
         'circuit_breaker_seconds' => (int) env('MORPHEUS_CIRCUIT_BREAKER_SECONDS', 120),
+        'webhook_secret' => env('MORPHEUS_WEBHOOK_SECRET'),
+        'webhook_path' => env('MORPHEUS_WEBHOOK_PATH', '/webhooks/morpheus/calls'),
     ],
 
     'communications' => [

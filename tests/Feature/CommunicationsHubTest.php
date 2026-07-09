@@ -491,6 +491,34 @@ class CommunicationsHubTest extends TestCase
             ->assertSee('New SMS message');
     }
 
+    public function test_dialer_call_logs_api_returns_paginated_json(): void
+    {
+        $zoom = Mockery::mock(ZoomApiService::class);
+        $zoom->shouldReceive('isConfigured')->andReturn(false);
+        $this->app->instance(ZoomApiService::class, $zoom);
+
+        $admin = $this->makeAdmin();
+
+        for ($i = 0; $i < 25; $i++) {
+            \App\Models\CommunicationCallLog::create([
+                'workspace_id' => $admin->current_workspace_id,
+                'user_id' => $admin->id,
+                'direction' => 'outbound',
+                'from_extension' => '1020',
+                'to_phone' => '+1555000'.str_pad((string) $i, 4, '0', STR_PAD_LEFT),
+                'status' => 'completed',
+                'started_at' => now()->subMinutes($i),
+            ]);
+        }
+
+        $this->actingAs($admin)
+            ->getJson(route('admin.communications.dialer.call-logs', ['offset' => 0, 'per_page' => 10]))
+            ->assertOk()
+            ->assertJsonStructure(['logs', 'next_offset', 'has_more'])
+            ->assertJsonPath('has_more', true)
+            ->assertJsonCount(10, 'logs');
+    }
+
     public function test_admin_can_refresh_communications_cache(): void
     {
         $this->mockZoomServices();

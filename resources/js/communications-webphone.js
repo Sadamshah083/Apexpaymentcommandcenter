@@ -1,6 +1,6 @@
 import { Inviter, Registerer, RegistererState, SessionState, UserAgent } from 'sip.js';
 import { hideLoadingOverlay } from './form-loading.js';
-import { showToast } from './toast.js';
+import { showToast, showCommToast } from './toast.js';
 
 const STORAGE_KEY = 'communications.webphone_extension';
 
@@ -15,6 +15,30 @@ function formatDuration(totalSeconds) {
         .padStart(2, '0');
 
     return `${minutes}:${seconds}`;
+}
+
+function humanCallEndMessage(cause, { outbound = false } = {}) {
+    const normalized = String(cause || '')
+        .replace(/_/g, ' ')
+        .trim()
+        .toUpperCase();
+
+    const map = {
+        NO_ANSWER: 'No one answered the call.',
+        USER_BUSY: 'The line is busy right now.',
+        CALL_REJECTED: 'The call was declined.',
+        NO_USER_RESPONSE: 'No response from the destination.',
+        UNALLOCATED_NUMBER: 'That number could not be reached.',
+        NO_ROUTE_DESTINATION: 'That number could not be routed.',
+        ORIGINATOR_CANCEL: outbound ? 'Call canceled before connecting.' : 'The caller hung up.',
+        NORMAL_CLEARING: 'Call ended.',
+    };
+
+    return map[normalized] || (normalized ? `Call ended (${normalized.toLowerCase()}).` : 'Call ended.');
+}
+
+function isPhoneDialerMode() {
+    return Boolean(document.querySelector('.ghl-comm-phone-mode'));
 }
 
 function selectedExtension() {
@@ -129,6 +153,7 @@ class ApexWebphone {
         this.lastError = '';
         this.callStartedAt = null;
         this.callTimer = null;
+        this.timerPhase = null;
         this.connectAttempt = 0;
         this.cancelledConnectAttempt = 0;
         this.audioContext = null;
@@ -138,11 +163,15 @@ class ApexWebphone {
         this.currentCallDirection = null;
         this.currentCallPeer = '';
         this.morpheusCallUuid = null;
+        this.originateCallUuid = null;
         this.pstnPollUuid = null;
         this.recordingActive = false;
         this.clickToCallActive = false;
         this.awaitingDestinationBridge = false;
         this.destinationPollTimer = null;
+        this._callMonitorActive = false;
+        this.remoteHangupHandled = false;
+        this.callEventsSource = null;
         this.directDialActive = false;
         this.sawOutboundRinging = false;
         this.outboundTerminateDetail = '';
@@ -154,9 +183,15 @@ class ApexWebphone {
         this._lastPollSnapshot = '';
         this._lastSeenPstnBillsec = 0;
         this._remoteAnswerWatcher = null;
+        this._liveTrackWatcher = null;
         this._remoteAnswerAnalyser = null;
         this._remoteAnswerSource = null;
         this._voiceEnergyFrames = 0;
+        this.trackedCallUuids = new Set();
+        this.bridgedCallUuid = null;
+        this.hangupInFlight = false;
+        this.userInitiatedHangup = false;
+        this.lastDialedDestination = '';
     }
 
     bindPanel(panel) {
@@ -182,35 +217,26 @@ class ApexWebphone {
             callTimer: panel.querySelector('[data-webphone-call-timer]'),
             connectBtn: panel.querySelector('[data-webphone-connect]'),
             disconnectBtn: panel.querySelector('[data-webphone-disconnect]'),
+            disconnectBtns: panel.querySelectorAll('[data-webphone-disconnect]'),
             answerBtn: panel.querySelector('[data-webphone-answer]'),
+            answerBtns: panel.querySelectorAll('[data-webphone-answer]'),
             hangupBtn: panel.querySelector('[data-webphone-hangup]'),
+            hangupBtns: panel.querySelectorAll('[data-webphone-hangup]'),
             bridgeBtn: panel.querySelector('[data-webphone-bridge]'),
+            bridgeBtns: panel.querySelectorAll('[data-webphone-bridge]'),
             bridgePanel: panel.querySelector('[data-webphone-bridge-panel]'),
             bridgeExtension: panel.querySelector('[data-webphone-bridge-extension]'),
             iframe: panel.querySelector('[data-webphone-iframe]'),
             remoteAudio: panel.querySelector('[data-webphone-remote]'),
-            floatingPopup: document.querySelector('[data-webphone-floating]'),
-            floatingTitle: document.querySelector('[data-webphone-floating-title]'),
-            floatingSubtitle: document.querySelector('[data-webphone-floating-subtitle]'),
-            floatingDetail: document.querySelector('[data-webphone-floating-detail]'),
-            floatingBadge: document.querySelector('[data-webphone-floating-badge]'),
-            floatingVisual: document.querySelector('[data-webphone-floating-visual]'),
-            floatingTimerRow: document.querySelector('[data-webphone-floating-timer-row]'),
-            floatingTimerLabel: document.querySelector('[data-webphone-floating-timer-label]'),
-            floatingTimer: document.querySelector('[data-webphone-floating-timer]'),
-            floatingAnswer: document.querySelector('[data-webphone-floating-answer]'),
-            floatingHangup: document.querySelector('[data-webphone-floating-hangup]'),
-            floatingRecord: document.querySelector('[data-webphone-floating-record]'),
-            floatingRecordLabel: document.querySelector('[data-webphone-floating-record-label]'),
             callControls: panel.querySelector('[data-webphone-call-controls]'),
             recordBtn: panel.querySelector('[data-webphone-record]'),
             recordLabel: panel.querySelector('[data-webphone-record-label]'),
             endCallBtn: panel.querySelector('[data-webphone-end-call]'),
             holdBtn: panel.querySelector('[data-webphone-hold]'),
             transferBtn: panel.querySelector('[data-webphone-transfer]'),
-            floatingHold: document.querySelector('[data-webphone-floating-hold]'),
-            floatingTransfer: document.querySelector('[data-webphone-floating-transfer]'),
         };
+
+        this.initDialerCallActionDelegation();
 
         this.ui.connectBtn?.addEventListener('click', () => {
             this.ensureAudioContext().catch(() => {});
@@ -219,43 +245,42 @@ class ApexWebphone {
             });
         });
 
-        this.ui.disconnectBtn?.addEventListener('click', () => {
-            this.disconnect().catch(() => {});
-        });
-
-        this.ui.answerBtn?.addEventListener('click', () => {
-            this.ensureAudioContext().catch(() => {});
-            this.answer().catch((error) => {
-                showToast(error.message || 'Could not answer call.', 'error');
+        this.ui.disconnectBtns?.forEach((btn) => {
+            btn.addEventListener('click', () => {
+                if (btn.disabled) {
+                    return;
+                }
+                btn.closest('details')?.removeAttribute('open');
+                this.disconnect().catch(() => {});
             });
         });
 
-        this.ui.hangupBtn?.addEventListener('click', () => {
-            this.ensureAudioContext().catch(() => {});
-            this.hangup().catch(() => {});
-        });
-
-        this.ui.bridgeBtn?.addEventListener('click', () => {
-            this.openBridge();
-        });
-
-        this.ui.floatingAnswer?.addEventListener('click', () => {
-            this.ensureAudioContext().catch(() => {});
-            this.answer().catch((error) => {
-                showToast(error.message || 'Could not answer call.', 'error');
+        this.ui.answerBtns?.forEach((btn) => {
+            btn.addEventListener('click', () => {
+                this.ensureAudioContext().catch(() => {});
+                this.answer().catch((error) => {
+                    showToast(error.message || 'Could not answer call.', 'error');
+                });
             });
         });
 
-        this.ui.floatingHangup?.addEventListener('click', () => {
-            this.ensureAudioContext().catch(() => {});
-            this.hangup().catch(() => {});
+        this.ui.hangupBtns?.forEach((btn) => {
+            btn.addEventListener('click', () => {
+                this.ensureAudioContext().catch(() => {});
+                this.hangup('panel-hangup-btn').catch(() => {});
+            });
+        });
+
+        this.ui.bridgeBtns?.forEach((btn) => {
+            btn.addEventListener('click', () => {
+                this.openBridge();
+            });
         });
 
         this.ui.recordBtn?.addEventListener('click', () => this.toggleRecording());
-        this.ui.floatingRecord?.addEventListener('click', () => this.toggleRecording());
         this.ui.endCallBtn?.addEventListener('click', () => {
             this.ensureAudioContext().catch(() => {});
-            this.hangup().catch(() => {});
+            this.hangup('end-call-btn').catch(() => {});
         });
 
         this.ui.holdBtn?.addEventListener('click', () => {
@@ -264,19 +289,7 @@ class ApexWebphone {
             });
         });
 
-        this.ui.floatingHold?.addEventListener('click', () => {
-            this.toggleHold().catch((error) => {
-                showToast(error.message || 'Could not update hold.', 'error');
-            });
-        });
-
         this.ui.transferBtn?.addEventListener('click', () => {
-            this.promptTransfer().catch((error) => {
-                showToast(error.message || 'Could not transfer call.', 'error');
-            });
-        });
-
-        this.ui.floatingTransfer?.addEventListener('click', () => {
             this.promptTransfer().catch((error) => {
                 showToast(error.message || 'Could not transfer call.', 'error');
             });
@@ -438,13 +451,30 @@ class ApexWebphone {
             return false;
         }
 
-        if (data.bridged_to && data.bridged_to !== this.morpheusCallUuid) {
-            this.morpheusCallUuid = String(data.bridged_to);
+        if (this.isRemoteCallEnded(data)) {
+            void this.handleRemotePartyHangup(data, { source });
+
+            return true;
+        }
+
+        if (data.bridged_to && data.bridged_to !== this.originateCallUuid) {
+            this.bridgedCallUuid = String(data.bridged_to);
+            this.trackedCallUuids.add(String(data.bridged_to));
+        }
+
+        const remoteState = String(data.state || '').toUpperCase();
+        const ringingOnly =
+            ['RING_WAIT', 'RINGING', 'EARLY'].includes(remoteState)
+            && data.destination_connected !== true
+            && data.outcome !== 'connected';
+
+        if (ringingOnly && this.awaitingDestinationBridge && !this.timerPhase) {
+            this.startRingTimer();
         }
 
         const billsec = Number(data.billsec ?? 0);
         const destMatches = this.destinationMatchesPeer(data);
-        const answeredState = ['CONNECTED', 'ANSWERED', 'BRIDGED', 'ACTIVE'].includes(String(data.state || '').toUpperCase());
+        const answeredState = ['CONNECTED', 'ANSWERED', 'BRIDGED', 'ACTIVE'].includes(remoteState);
         const hasAnswerTime = Boolean(data.answer_time);
 
         if (billsec > this._lastSeenPstnBillsec) {
@@ -455,7 +485,9 @@ class ApexWebphone {
             data.destination_connected === true
             || data.destination_answered === true
             || data.outcome === 'connected'
-            || (answeredState && destMatches)
+            || (remoteState === 'ACTIVE' && data.live !== false && (destMatches || this.awaitingDestinationBridge))
+            || (answeredState && (destMatches || this.awaitingDestinationBridge))
+            || (this.awaitingDestinationBridge && data.live !== false && billsec >= 1 && !data.hangup_cause)
             || (data.live && destMatches && hasAnswerTime && billsec >= 1)
             || (data.live && destMatches && billsec >= 2 && !data.hangup_cause)
             || (data.live && destMatches && this._lastSeenPstnBillsec >= 2 && !data.hangup_cause);
@@ -469,11 +501,116 @@ class ApexWebphone {
         return false;
     }
 
+    isRemoteCallEnded(data) {
+        if (!data || data.ok === false) {
+            return false;
+        }
+
+        if (data.call_ended === true || data.outcome === 'ended') {
+            return true;
+        }
+
+        if (!data.live && data.hangup_cause) {
+            const cause = String(data.hangup_cause);
+            const billsec = Number(data.billsec ?? 0);
+            const elapsed = Date.now() - (this.outboundDialStartedAt || Date.now());
+
+            if (this.state === 'in-call' && !this.awaitingDestinationBridge) {
+                return billsec >= 1 || cause === 'NORMAL_CLEARING';
+            }
+
+            if (this.awaitingDestinationBridge || this.clickToCallActive) {
+                const transientCauses = [
+                    'NO_ROUTE_DESTINATION',
+                    'NO_USER_RESPONSE',
+                    'ORIGINATOR_CANCEL',
+                    'USER_BUSY',
+                    'CALL_REJECTED',
+                ];
+
+                if (
+                    this.clickToCallActive
+                    && billsec < 15
+                    && elapsed < 120_000
+                    && (this.customerFirstOutbound || transientCauses.includes(cause) || cause === 'NORMAL_CLEARING')
+                ) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    async handleRemotePartyHangup(data = {}, { source = 'poll' } = {}) {
+        if (this.hangupInFlight || this.remoteHangupHandled) {
+            return;
+        }
+
+        this.remoteHangupHandled = true;
+        this.userInitiatedHangup = true;
+
+        this.flushCallUiInstant();
+
+        this.logPhone('info', 'Remote party hung up', {
+            source,
+            hangup_cause: data.hangup_cause ?? null,
+            originateCallUuid: this.originateCallUuid,
+            state: this.state,
+        });
+
+        this.stopDestinationPoll();
+        this.stopRemoteAnswerWatcher();
+        this.stopAllLocalRingers();
+
+        const morpheusUuid = this.hangupCallUuid();
+        if (morpheusUuid) {
+            await this.hangupAllMorpheusLegs(morpheusUuid);
+        }
+        await this.releaseExtensionCalls();
+
+        try {
+            if (this.session) {
+                const sessionState = this.session.state;
+                if (sessionState === SessionState.Initial || sessionState === SessionState.Establishing) {
+                    if (this.session instanceof Inviter) {
+                        await this.session.cancel();
+                    } else {
+                        await this.session.reject();
+                    }
+                } else if (sessionState !== SessionState.Terminating && sessionState !== SessionState.Terminated) {
+                    await this.session.bye();
+                }
+            }
+        } catch (error) {
+            this.logPhone('warn', 'Local SIP cleanup after remote hangup failed', {
+                source,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+
+        if (this.timerPhase === 'connected' || this.state === 'in-call') {
+            const cause = data.hangup_cause
+                ? String(data.hangup_cause).replace(/_/g, ' ').toLowerCase()
+                : '';
+            showCommToast(
+                cause ? humanCallEndMessage(data.hangup_cause) : 'Other party hung up.',
+                'info',
+            );
+        }
+
+        this.clearSession();
+    }
+
     stopRemoteAnswerWatcher() {
         if (this._remoteAnswerWatcher) {
             window.clearInterval(this._remoteAnswerWatcher);
             this._remoteAnswerWatcher = null;
         }
+
+        this.stopLiveTrackWatcher();
 
         if (this._remoteAnswerSource) {
             try {
@@ -509,7 +646,7 @@ class ApexWebphone {
                 return;
             }
 
-            if (Date.now() - startedAt < 5000) {
+            if (Date.now() - startedAt < 2000) {
                 return;
             }
 
@@ -540,9 +677,9 @@ class ApexWebphone {
                 }
                 const rms = Math.sqrt(sum / bins.length);
 
-                if (rms > 0.035) {
+                if (rms > 0.02) {
                     this._voiceEnergyFrames += 1;
-                    if (this._voiceEnergyFrames >= 6) {
+                    if (this._voiceEnergyFrames >= 4) {
                         this.markDestinationConnected({ source: 'remote-audio' });
                         this.stopRemoteAnswerWatcher();
                     }
@@ -553,6 +690,44 @@ class ApexWebphone {
                 // Keep polling fallback active.
             }
         }, 250);
+    }
+
+    startLiveTrackWatcher(session) {
+        if (!this.awaitingDestinationBridge || this._liveTrackWatcher) {
+            return;
+        }
+
+        const startedAt = Date.now();
+        this._liveTrackWatcher = window.setInterval(() => {
+            if (!this.awaitingDestinationBridge) {
+                this.stopLiveTrackWatcher();
+
+                return;
+            }
+
+            const pc = session?.sessionDescriptionHandler?.peerConnection;
+            const hasLiveAudio = Boolean(
+                pc?.getReceivers?.().some(
+                    (receiver) => receiver.track?.kind === 'audio' && receiver.track.readyState === 'live',
+                ),
+            );
+
+            if (!hasLiveAudio) {
+                return;
+            }
+
+            if (Date.now() - startedAt >= 2000) {
+                this.markDestinationConnected({ source: 'live-track' });
+                this.stopLiveTrackWatcher();
+            }
+        }, 400);
+    }
+
+    stopLiveTrackWatcher() {
+        if (this._liveTrackWatcher) {
+            window.clearInterval(this._liveTrackWatcher);
+            this._liveTrackWatcher = null;
+        }
     }
 
     toggleRecording() {
@@ -569,15 +744,89 @@ class ApexWebphone {
     updateRecordingUi() {
         const active = this.recordingActive;
         this.ui?.recordBtn?.classList.toggle('is-recording', active);
-        this.ui?.floatingRecord?.classList.toggle('is-recording', active);
 
         const label = active ? 'Recording' : 'Record';
         if (this.ui?.recordLabel) {
             this.ui.recordLabel.textContent = label;
         }
-        if (this.ui?.floatingRecordLabel) {
-            this.ui.floatingRecordLabel.textContent = label;
+        document.querySelectorAll('[data-dialer-call-record]').forEach((btn) => {
+            btn.classList.toggle('is-recording', active);
+        });
+        document.querySelectorAll('[data-dialer-call-record-label]').forEach((el) => {
+            el.textContent = label;
+        });
+    }
+
+    setDialerCallControlsVisible(visible, { showRecord = false, showEndCall = false, showAnswer = false, showHold = false, showTransfer = false } = {}) {
+        document.querySelectorAll('[data-dialer-call-actions]').forEach((row) => {
+            row.classList.toggle('hidden', !visible);
+        });
+        document.querySelectorAll('[data-dialer-call-answer]').forEach((btn) => {
+            btn.classList.toggle('hidden', !showAnswer);
+        });
+        document.querySelectorAll('[data-dialer-call-hangup]').forEach((btn) => {
+            btn.classList.toggle('hidden', !showEndCall);
+        });
+        document.querySelectorAll('[data-dialer-call-record]').forEach((btn) => {
+            btn.classList.toggle('hidden', !showRecord);
+        });
+        document.querySelectorAll('[data-dialer-call-hold]').forEach((btn) => {
+            btn.classList.toggle('hidden', !showHold);
+        });
+        document.querySelectorAll('[data-dialer-call-transfer]').forEach((btn) => {
+            btn.classList.toggle('hidden', !showTransfer);
+        });
+    }
+
+    initDialerCallActionDelegation() {
+        if (document.documentElement.dataset.dialerCallActionsBound === '1') {
+            return;
         }
+
+        document.documentElement.dataset.dialerCallActionsBound = '1';
+
+        document.addEventListener('click', (event) => {
+            if (event.target.closest('[data-dialer-call-answer]')) {
+                event.preventDefault();
+                this.ensureAudioContext().catch(() => {});
+                this.answer().catch((error) => {
+                    showToast(error.message || 'Could not answer call.', 'error');
+                });
+
+                return;
+            }
+
+            if (event.target.closest('[data-dialer-call-hangup]')) {
+                event.preventDefault();
+                this.ensureAudioContext().catch(() => {});
+                this.hangup('dialer-hangup-btn').catch(() => {});
+
+                return;
+            }
+
+            if (event.target.closest('[data-dialer-call-record]')) {
+                event.preventDefault();
+                this.toggleRecording();
+
+                return;
+            }
+
+            if (event.target.closest('[data-dialer-call-hold]')) {
+                event.preventDefault();
+                this.toggleHold().catch((error) => {
+                    showToast(error.message || 'Could not update hold.', 'error');
+                });
+
+                return;
+            }
+
+            if (event.target.closest('[data-dialer-call-transfer]')) {
+                event.preventDefault();
+                this.promptTransfer().catch((error) => {
+                    showToast(error.message || 'Could not transfer call.', 'error');
+                });
+            }
+        });
     }
 
     setCallControlsVisible(visible, { showRecord = false, showEndCall = false, showAnswer = false, showHold = false, showTransfer = false } = {}) {
@@ -586,11 +835,7 @@ class ApexWebphone {
         this.ui?.endCallBtn?.classList.toggle('hidden', !showEndCall);
         this.ui?.holdBtn?.classList.toggle('hidden', !showHold);
         this.ui?.transferBtn?.classList.toggle('hidden', !showTransfer);
-        this.ui?.floatingRecord?.classList.toggle('hidden', !showRecord);
-        this.ui?.floatingHangup?.classList.toggle('hidden', !showEndCall);
-        this.ui?.floatingHold?.classList.toggle('hidden', !showHold);
-        this.ui?.floatingTransfer?.classList.toggle('hidden', !showTransfer);
-        this.ui?.floatingAnswer?.classList.toggle('hidden', !showAnswer);
+        this.setDialerCallControlsVisible(visible, { showRecord, showEndCall, showAnswer, showHold, showTransfer });
     }
 
     handleConnectFailure(error) {
@@ -649,12 +894,39 @@ class ApexWebphone {
     }
 
     setMorpheusCallUuid(uuid) {
-        this.morpheusCallUuid = uuid ? String(uuid) : null;
-        if (uuid) {
-            this.pstnPollUuid = String(uuid);
-            if (this.awaitingDestinationBridge && !this.destinationPollTimer) {
+        const id = uuid ? String(uuid) : null;
+        this.morpheusCallUuid = id;
+        if (id) {
+            this.originateCallUuid = id;
+            this.pstnPollUuid = id;
+            this.trackCallUuid(id);
+            if (
+                !this._callMonitorActive
+                && (this.awaitingDestinationBridge || this.state === 'dialing' || this.state === 'in-call')
+            ) {
                 this.startDestinationPoll();
             }
+        }
+    }
+
+    trackCallUuid(uuid) {
+        if (uuid) {
+            this.trackedCallUuids.add(String(uuid));
+        }
+    }
+
+    logPhone(level, message, context = {}) {
+        if (!this.config?.wss_console_debug && level === 'info') {
+            return;
+        }
+
+        const payload = { message, ...context };
+        if (level === 'warn') {
+            console.warn('[webphone]', payload);
+        } else if (level === 'error') {
+            console.error('[webphone]', payload);
+        } else {
+            console.info('[webphone]', payload);
         }
     }
 
@@ -791,6 +1063,7 @@ class ApexWebphone {
         this.clickToCallActive = true;
         this.awaitingDestinationBridge = true;
         this.customerFirstOutbound = customerFirst;
+        this.lastDialedDestination = normalized || this.currentCallPeer || '';
         this.outboundDialStartedAt = Date.now();
         this.recordingActive = true;
         this.updateRecordingUi();
@@ -818,20 +1091,121 @@ class ApexWebphone {
             statusLabel: customerFirst ? 'Ringing' : 'Connecting',
             showRingingVisual: true,
             showConnectedTimer: false,
+            timerLabel: 'Ringing time',
             showAnswer: false,
             showHangup: true,
             showRecord: true,
             state: 'dialing',
         });
+        this.startRingTimer();
         this.setState('dialing');
         this.markClickToCallPending();
         this.startDestinationPoll();
+    }
+
+    activeCallUuid() {
+        if (this.originateCallUuid) {
+            return this.originateCallUuid;
+        }
+
+        if (this.morpheusCallUuid) {
+            return this.morpheusCallUuid;
+        }
+
+        if (this.pstnPollUuid) {
+            return this.pstnPollUuid;
+        }
+
+        const tracked = Array.from(this.trackedCallUuids);
+
+        return tracked.length ? tracked[0] : null;
+    }
+
+    hangupCallUuid() {
+        return this.originateCallUuid || this.morpheusCallUuid || this.pstnPollUuid || null;
     }
 
     hangupUrlTemplate() {
         const panel = this.panel || document.querySelector('[data-webphone-panel]');
 
         return panel?.dataset.hangupUrl || '';
+    }
+
+    releaseExtensionUrl() {
+        const panel = this.panel || document.querySelector('[data-webphone-panel]');
+
+        return panel?.dataset.releaseExtensionUrl || '';
+    }
+
+    callEventsUrlTemplate() {
+        const panel = this.panel || document.querySelector('[data-webphone-panel]');
+
+        return panel?.dataset.callEventsUrl || '';
+    }
+
+    subscribeCallEvents() {
+        this.stopCallEventsStream();
+
+        const uuid = this.activeCallUuid();
+        const template = this.callEventsUrlTemplate();
+        if (!uuid || !template) {
+            return;
+        }
+
+        const url = new URL(template.replace('__UUID__', encodeURIComponent(uuid)), window.location.origin);
+        if (this.currentCallPeer) {
+            url.searchParams.set('destination', this.currentCallPeer);
+        }
+
+        try {
+            const source = new EventSource(url.toString(), { withCredentials: true });
+            this.callEventsSource = source;
+
+            source.onmessage = (event) => {
+                let data = {};
+                try {
+                    data = JSON.parse(event.data);
+                } catch {
+                    return;
+                }
+
+                if (this.applyRemoteCallStatus(data, { source: 'webhook-stream' })) {
+                    if (data.billsec) {
+                        this.syncCallTimerFromBillsec(Number(data.billsec));
+                    }
+                    if (this.isRemoteCallEnded(data)) {
+                        this.stopCallEventsStream();
+                    }
+
+                    return;
+                }
+
+                if (this.isRemoteCallEnded(data)) {
+                    void this.handleRemotePartyHangup(data, { source: 'webhook-stream' });
+                    this.stopCallEventsStream();
+                }
+            };
+
+            source.onerror = () => {
+                this.stopCallEventsStream();
+            };
+
+            this.logPhone('info', 'Subscribed to call events stream', {
+                uuid,
+                destination: this.currentCallPeer,
+            });
+        } catch (error) {
+            this.logPhone('warn', 'Could not open call events stream', {
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
+    stopCallEventsStream() {
+        if (this.callEventsSource) {
+            this.callEventsSource.close();
+            this.callEventsSource = null;
+        }
     }
 
     callStatusUrlTemplate() {
@@ -883,10 +1257,10 @@ class ApexWebphone {
             this.ui.holdBtn.textContent = label;
             this.ui.holdBtn.classList.toggle('is-active', this.callOnHold);
         }
-        if (this.ui?.floatingHold) {
-            this.ui.floatingHold.textContent = label;
-            this.ui.floatingHold.classList.toggle('is-active', this.callOnHold);
-        }
+        document.querySelectorAll('[data-dialer-call-hold]').forEach((btn) => {
+            btn.textContent = label;
+            btn.classList.toggle('is-active', this.callOnHold);
+        });
     }
 
     async toggleHold() {
@@ -898,7 +1272,7 @@ class ApexWebphone {
         await this.postCallAction(action);
         this.callOnHold = !this.callOnHold;
         this.updateHoldUi();
-        showToast(this.callOnHold ? 'Call on hold.' : 'Call resumed.', 'success');
+        showCommToast(this.callOnHold ? 'Call on hold.' : 'Call resumed.', 'info');
     }
 
     async promptTransfer() {
@@ -915,24 +1289,77 @@ class ApexWebphone {
         const payload = digits.length <= 6 ? digits : digits;
 
         await this.postCallAction('transfer', { destination: payload });
-        showToast(`Call transferred to ${destination}.`, 'success');
+        showCommToast(`Call transferred to ${destination}.`, 'info');
         await this.hangup().catch(() => {});
     }
 
     stopDestinationPoll() {
+        this._callMonitorActive = false;
+        this.stopCallEventsStream();
+
         if (!this.destinationPollTimer) {
             return;
         }
 
-        window.clearInterval(this.destinationPollTimer);
+        window.clearTimeout(this.destinationPollTimer);
         this.destinationPollTimer = null;
     }
 
+    startDestinationPoll() {
+        this.stopDestinationPoll();
+        this._callMonitorActive = true;
+        this.remoteHangupHandled = false;
+        this.subscribeCallEvents();
+        this.runCallMonitorLoop().catch(() => {});
+    }
+
+    scheduleCallMonitor(delayMs = 1200) {
+        if (!this._callMonitorActive || !this.activeCallUuid()) {
+            return;
+        }
+
+        if (this.destinationPollTimer) {
+            window.clearTimeout(this.destinationPollTimer);
+        }
+
+        this.destinationPollTimer = window.setTimeout(() => {
+            this.destinationPollTimer = null;
+            this.runCallMonitorLoop().catch(() => {});
+        }, delayMs);
+    }
+
+    async runCallMonitorLoop() {
+        if (!this._callMonitorActive || !this.activeCallUuid()) {
+            return;
+        }
+
+        await this.pollDestinationOnce();
+
+        if (this._callMonitorActive && this.activeCallUuid()) {
+            const delayMs = this.state === 'in-call' ? 450 : 550;
+            this.scheduleCallMonitor(delayMs);
+        }
+    }
+
     async pollDestinationOnce() {
-        const uuid = this.morpheusCallUuid;
+        const uuid = this.activeCallUuid();
         const template = this.callStatusUrlTemplate();
 
-        if (!uuid || !template || !this.awaitingDestinationBridge) {
+        if (!uuid || !template || !this._callMonitorActive) {
+            return;
+        }
+
+        if (
+            this.state === 'in-call'
+            && this.session?.state === SessionState.Terminated
+            && !this.hangupInFlight
+            && !this.remoteHangupHandled
+        ) {
+            await this.handleRemotePartyHangup(
+                { hangup_cause: 'NORMAL_CLEARING' },
+                { source: 'poll-sip-terminated' },
+            );
+
             return;
         }
 
@@ -960,14 +1387,41 @@ class ApexWebphone {
             }
 
             if (data.bridged_to && data.bridged_to !== uuid) {
-                this.morpheusCallUuid = data.bridged_to;
+                this.bridgedCallUuid = String(data.bridged_to);
+                this.trackedCallUuids.add(String(data.bridged_to));
             }
 
             if (this.applyRemoteCallStatus(data, { source: 'poll' })) {
                 return;
             }
 
-            if (data.live && Number(data.billsec ?? 0) >= 1 && this.awaitingDestinationBridge && !this.destinationMatchesPeer(data)) {
+            if (this.state === 'in-call' && Number(data.billsec ?? 0) > 0) {
+                this.syncCallTimerFromBillsec(Number(data.billsec));
+            }
+
+            if (
+                (this.awaitingDestinationBridge || this.state === 'dialing')
+                && Number(data.billsec ?? 0) >= 1
+                && data.live !== false
+                && !data.hangup_cause
+            ) {
+                this.markDestinationConnected({ source: 'poll-billsec' });
+
+                return;
+            }
+
+            if (this.isRemoteCallEnded(data)) {
+                await this.handleRemotePartyHangup(data, { source: 'poll' });
+
+                return;
+            }
+
+            if (
+                this.awaitingDestinationBridge
+                && data.live
+                && Number(data.billsec ?? 0) >= 1
+                && !this.destinationMatchesPeer(data)
+            ) {
                 const ringingCopy = this.currentCallPeer
                     ? `Your cell ${this.currentCallPeer} is ringing — check your phone now.`
                     : 'Destination is ringing — check your phone now.';
@@ -985,11 +1439,19 @@ class ApexWebphone {
                     statusLabel: 'Ringing',
                     showRingingVisual: true,
                     showConnectedTimer: false,
+                    timerLabel: 'Ringing time',
                     showAnswer: false,
                     showHangup: true,
                     showRecord: true,
                     state: 'dialing',
                 });
+                if (!this.timerPhase) {
+                    this.startRingTimer();
+                }
+            }
+
+            if (!this.awaitingDestinationBridge) {
+                return;
             }
 
             if (!data.live && data.hangup_cause) {
@@ -1015,65 +1477,72 @@ class ApexWebphone {
 
                 this.stopDestinationPoll();
 
-                const causeLabel = cause.replace(/_/g, ' ').toLowerCase();
-                const message = this.customerFirstOutbound
-                    ? 'Call ended before connecting. Keep Connect line on and try again.'
-                    : `Destination leg ended (${causeLabel}). If your phone never rang, stay on Connect line and try again.`;
-
-                showToast(message, 'warning');
+                showCommToast(
+                    humanCallEndMessage(cause, { outbound: true }),
+                    'warning',
+                );
+                this.clearSession();
             }
         } catch {
             // Keep polling while the SIP leg is still active.
         }
     }
 
-    startDestinationPoll() {
-        this.stopDestinationPoll();
-        this.pollDestinationOnce().catch(() => {});
-        this.destinationPollTimer = window.setInterval(() => {
-            this.pollDestinationOnce().catch(() => {});
-        }, 1200);
-    }
-
     markDestinationConnected({ source = 'poll' } = {}) {
-        if (!this.awaitingDestinationBridge && this.state === 'in-call') {
+        const promoting =
+            this.awaitingDestinationBridge || this.state === 'dialing' || this.state === 'connecting';
+
+        if (!promoting && this.state === 'in-call') {
             this.stopAllLocalRingers();
+            if (!this.callTimer || !this.callStartedAt) {
+                this.startCallTimer({ restart: true });
+            }
 
             return;
         }
 
-        if (!this.awaitingDestinationBridge) {
+        if (!promoting) {
             return;
         }
+
+        this.logPhone('info', 'Destination connected — updating UI to live', {
+            source,
+            peer: this.currentCallPeer,
+            uuid: this.originateCallUuid,
+        });
 
         this.awaitingDestinationBridge = false;
         this.clickToCallActive = false;
-        this.stopDestinationPoll();
+        if (!this.morpheusCallUuid && this.pstnPollUuid) {
+            this.morpheusCallUuid = this.pstnPollUuid;
+        }
         this.stopRemoteAnswerWatcher();
         this.stopAllLocalRingers();
+        if (!this._callMonitorActive) {
+            this.startDestinationPoll();
+        }
         // Keep morpheusCallUuid for hold/transfer/hangup until the user ends the call.
 
         if (this.session) {
             this.attachRemoteAudio(this.session);
         }
 
-        if (!this.callStartedAt) {
-            this.startCallTimer();
-        }
+        this.startCallTimer({ restart: true });
 
         this.updateCallCard({
             title: 'Call live',
             subtitle: 'Destination answered — two-way audio is active.',
             detail: this.currentCallPeer ? `To: ${this.currentCallPeer}` : '',
             visible: true,
-            timer: this.ui?.floatingTimer?.textContent || '00:00',
+            timer: '00:00',
         });
         this.updateFloatingPopup({
             title: 'Call live',
             subtitle: 'Destination answered — two-way audio is active.',
             detail: this.currentCallPeer ? `To: ${this.currentCallPeer}` : '',
             visible: true,
-            timer: this.ui?.floatingTimer?.textContent || '00:00',
+            timer: '00:00',
+            timerLabel: 'Connected time',
             statusLabel: 'Connected',
             showRingingVisual: false,
             showConnectedTimer: true,
@@ -1093,16 +1562,15 @@ class ApexWebphone {
         this.setState('in-call');
     }
 
-    async hangupMorpheusCall(uuid) {
-        const template = this.hangupUrlTemplate();
-        if (!template || !uuid) {
+    async releaseExtensionCalls() {
+        const url = this.releaseExtensionUrl();
+        const extension = selectedExtension() || this.currentExtension || '';
+        if (!url || !extension) {
             return;
         }
 
-        const url = template.replace('__UUID__', encodeURIComponent(uuid));
-
         try {
-            await fetch(url, {
+            const response = await fetch(url, {
                 method: 'POST',
                 headers: {
                     Accept: 'application/json',
@@ -1111,10 +1579,95 @@ class ApexWebphone {
                     'X-CSRF-TOKEN': csrfToken(),
                 },
                 credentials: 'same-origin',
-                body: JSON.stringify({}),
+                body: JSON.stringify({
+                    from_extension: extension,
+                    destination: this.currentCallPeer || this.lastDialedDestination || '',
+                }),
             });
-        } catch {
-            // SIP hangup may already have ended the call leg.
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || data.ok === false) {
+                this.logPhone('warn', 'Extension release API returned non-OK', {
+                    extension,
+                    status: response.status,
+                    data,
+                });
+            }
+        } catch (error) {
+            this.logPhone('warn', 'Extension release API failed', {
+                extension,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
+    async hangupAllMorpheusLegs(primaryUuid) {
+        const uuids = [
+            ...new Set(
+                [primaryUuid, this.bridgedCallUuid, this.originateCallUuid, this.morpheusCallUuid, this.pstnPollUuid, ...this.trackedCallUuids]
+                    .filter(Boolean)
+                    .map(String),
+            ),
+        ];
+
+        for (const uuid of uuids) {
+            await this.hangupMorpheusCall(uuid);
+        }
+    }
+
+    async hangupMorpheusCall(uuid) {
+        const template = this.hangupUrlTemplate();
+        const callUuid = this.hangupCallUuid() || uuid;
+        if (!template || !callUuid) {
+            this.logPhone('warn', 'No originate call_uuid for Morpheus hangup', {
+                morpheusCallUuid: this.morpheusCallUuid,
+                originateCallUuid: this.originateCallUuid,
+            });
+
+            return false;
+        }
+
+        const url = template.replace('__UUID__', encodeURIComponent(callUuid));
+
+        try {
+            const controller = new AbortController();
+            const timeout = window.setTimeout(() => controller.abort(), 8000);
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': csrfToken(),
+                },
+                credentials: 'same-origin',
+                signal: controller.signal,
+                body: JSON.stringify({
+                    from_extension: selectedExtension() || this.currentExtension || '',
+                    destination: this.currentCallPeer || this.lastDialedDestination || '',
+                    originate_uuid: callUuid,
+                    bridged_uuid: this.bridgedCallUuid || null,
+                    related_uuids: Array.from(this.trackedCallUuids),
+                }),
+            });
+            window.clearTimeout(timeout);
+
+            const data = await response.json().catch(() => ({}));
+            const ok = response.ok && data.ok === true;
+
+            this.logPhone(ok ? 'info' : 'warn', ok ? 'Morpheus hangup OK' : 'Morpheus hangup failed', {
+                callUuid,
+                status: response.status,
+                data,
+            });
+
+            return ok;
+        } catch (error) {
+            this.logPhone('warn', 'Morpheus hangup request failed', {
+                callUuid,
+                error: error instanceof Error ? error.message : String(error),
+            });
+
+            return false;
         }
     }
 
@@ -1199,12 +1752,22 @@ class ApexWebphone {
         }
 
         const extension = selectedExtension() || this.currentExtension || this.panel?.dataset.defaultExtension || '—';
+        const connected =
+            this.state === 'registered' ||
+            this.state === 'dialing' ||
+            this.state === 'ringing' ||
+            this.state === 'in-call';
+        const displayExtension = connected && this.currentExtension ? this.currentExtension : extension;
+
         if (this.ui.extension) {
             this.ui.extension.textContent = extension;
         }
         if (this.ui.bridgeExtension) {
             this.ui.bridgeExtension.textContent = extension;
         }
+        document.querySelectorAll('[data-webphone-connected-extension]').forEach((el) => {
+            el.textContent = displayExtension;
+        });
 
         if (
             this.state === 'registered' &&
@@ -1264,6 +1827,7 @@ class ApexWebphone {
         detail = '',
         visible = false,
         timer = '00:00',
+        timerLabel = 'Connected time',
         statusLabel = '',
         showRingingVisual = false,
         showConnectedTimer = false,
@@ -1274,79 +1838,255 @@ class ApexWebphone {
         showTransfer = false,
         state = 'offline',
     } = {}) {
-        if (!this.ui?.floatingPopup) {
+        const peer =
+            this.currentCallPeer ||
+            detail.replace(/^(To:|Caller:)\s*/i, '').trim() ||
+            document.querySelector('.ghl-dialer-form--phone [name="destination"]')?.value ||
+            '';
+        const showTimer =
+            visible &&
+            this.timerPhase === 'connected' &&
+            (state === 'in-call' || statusLabel === 'Connected');
+        const badgeText =
+            statusLabel ||
+            (state === 'in-call' ? 'Connected' : state === 'ringing' || state === 'dialing' ? 'Ringing' : '');
+
+        document.querySelectorAll('[data-dialer-input-shell]').forEach((shell) => {
+            shell.classList.toggle('is-call-active', visible);
+            shell.dataset.callState = visible ? state : 'idle';
+
+            const input = shell.querySelector('[name="destination"]');
+            if (input) {
+                input.readOnly = visible;
+                input.setAttribute('aria-readonly', visible ? 'true' : 'false');
+            }
+        });
+
+        document.querySelectorAll('[data-dialer-call-layer]').forEach((layer) => {
+            layer.classList.toggle('hidden', !visible);
+            layer.dataset.state = visible ? state : 'idle';
+            layer.classList.toggle('is-ringing', visible && (showRingingVisual || state === 'ringing' || state === 'dialing'));
+            layer.classList.toggle('is-connected', visible && (statusLabel === 'Connected' || state === 'in-call'));
+
+            const badge = layer.querySelector('[data-dialer-call-badge]');
+            if (badge) {
+                badge.textContent = badgeText;
+                badge.classList.toggle('hidden', !badgeText);
+                badge.classList.toggle('is-connected', badgeText === 'Connected');
+                badge.classList.toggle('is-ringing', badgeText === 'Ringing' || badgeText === 'Connecting');
+            }
+
+            const peerEl = layer.querySelector('[data-dialer-call-peer]');
+            if (peerEl) {
+                peerEl.textContent = peer;
+                peerEl.classList.toggle('hidden', !peer);
+            }
+
+            const timerEl = layer.querySelector('[data-dialer-call-timer]');
+            if (timerEl) {
+                timerEl.textContent = timer;
+                timerEl.classList.toggle('hidden', !showTimer);
+                timerEl.dataset.timerLabel = timerLabel;
+            }
+        });
+
+        this.setDialerCallControlsVisible(visible, {
+            showRecord,
+            showEndCall: showHangup,
+            showAnswer,
+            showHold,
+            showTransfer,
+        });
+
+        this.updateActiveCallScreen({
+            visible,
+            state,
+            peer,
+            timer,
+            showTimer,
+            showHold,
+            showTransfer,
+            showRecord,
+            statusLabel: badgeText,
+        });
+
+        if (!visible) {
+            this.resetDialerCallUi();
+        }
+    }
+
+    updateActiveCallScreen({
+        visible = false,
+        state = 'offline',
+        peer = '',
+        timer = '00:00',
+        showTimer = false,
+        showHold = false,
+        showTransfer = false,
+        showRecord = false,
+        statusLabel = '',
+    } = {}) {
+        const phoneMode = isPhoneDialerMode();
+        const onCall = visible && phoneMode;
+        const connected = state === 'in-call' && this.timerPhase === 'connected';
+        const statusText =
+            statusLabel ||
+            (connected ? 'Connected' : state === 'ringing' || state === 'dialing' ? 'Ringing…' : 'Connecting…');
+
+        document.querySelectorAll('[data-dialer-active-screen]').forEach((screen) => {
+            screen.classList.toggle('hidden', !onCall);
+            screen.setAttribute('aria-hidden', onCall ? 'false' : 'true');
+            screen.classList.toggle('is-ringing', onCall && !connected);
+            screen.classList.toggle('is-connected', onCall && connected);
+
+            const peerEl = screen.querySelector('[data-dialer-active-peer]');
+            if (peerEl) {
+                peerEl.textContent = peer || '—';
+            }
+
+            const statusEl = screen.querySelector('[data-dialer-active-status]');
+            if (statusEl) {
+                statusEl.textContent = statusText;
+            }
+
+            const timerEl = screen.querySelector('[data-dialer-active-timer]');
+            if (timerEl) {
+                timerEl.textContent = timer;
+                timerEl.classList.toggle('hidden', !showTimer);
+            }
+        });
+
+        document.querySelectorAll('[data-dialer-phone-stage]').forEach((stage) => {
+            stage.classList.toggle('is-hidden-during-call', onCall);
+        });
+    }
+
+    refreshDialerCallOverlay(state = this.state) {
+        const onActiveCall = state === 'dialing' || state === 'ringing' || state === 'in-call';
+        if (!onActiveCall) {
             return;
         }
 
-        this.ui.floatingPopup.classList.toggle('hidden', !visible);
-        this.ui.floatingPopup.dataset.state = state;
+        const peer =
+            this.currentCallPeer ||
+            document.querySelector('.ghl-dialer-form--phone [name="destination"]')?.value ||
+            '';
+        const outboundActive =
+            this.currentCallDirection === 'outbound' ||
+            this.clickToCallActive ||
+            this.pendingClickToCall ||
+            this.directDialActive;
+        const statusLabel =
+            state === 'in-call'
+                ? 'Connected'
+                : state === 'ringing'
+                  ? 'Ringing'
+                  : outboundActive && this.awaitingDestinationBridge
+                    ? 'Ringing'
+                    : state === 'dialing'
+                      ? 'Connecting'
+                      : 'Ringing';
+        const timerEl = document.querySelector('[data-dialer-call-timer]');
 
-        if (this.ui.floatingTitle) {
-            this.ui.floatingTitle.textContent = title;
-        }
-        if (this.ui.floatingSubtitle) {
-            this.ui.floatingSubtitle.textContent = subtitle;
-        }
-        if (this.ui.floatingDetail) {
-            this.ui.floatingDetail.textContent = detail;
-            this.ui.floatingDetail.classList.toggle('hidden', !detail);
-        }
-        if (this.ui.floatingBadge) {
-            this.ui.floatingBadge.textContent = statusLabel;
-            this.ui.floatingBadge.classList.toggle('hidden', !visible || !statusLabel);
-            this.ui.floatingBadge.classList.toggle('is-connected', statusLabel === 'Connected');
-            this.ui.floatingBadge.classList.toggle('is-ringing', statusLabel === 'Ringing');
-        }
-        if (this.ui.floatingVisual) {
-            this.ui.floatingVisual.classList.toggle('hidden', !visible || !showRingingVisual);
-        }
-        if (this.ui.floatingTimerRow) {
-            this.ui.floatingTimerRow.classList.toggle('hidden', !visible || !showConnectedTimer);
-        }
-        if (this.ui.floatingTimerLabel) {
-            this.ui.floatingTimerLabel.textContent = 'Connected time';
-        }
-        if (this.ui.floatingTimer) {
-            this.ui.floatingTimer.textContent = timer;
-        }
-        this.ui.floatingAnswer?.classList.toggle('hidden', !showAnswer);
-        this.ui.floatingHangup?.classList.toggle('hidden', !showHangup);
-        this.ui.floatingRecord?.classList.toggle('hidden', !showRecord);
-        this.ui.floatingHold?.classList.toggle('hidden', !showHold);
-        this.ui.floatingTransfer?.classList.toggle('hidden', !showTransfer);
+        this.updateFloatingPopup({
+            title: state === 'in-call' ? 'Call live' : 'Outgoing call',
+            subtitle: peer ? `Ringing ${peer}…` : 'Ringing destination…',
+            detail: peer ? `To: ${peer}` : '',
+            visible: true,
+            timer: timerEl?.textContent || '00:00',
+            timerLabel: state === 'in-call' ? 'Connected time' : 'Ringing time',
+            statusLabel,
+            showRingingVisual: state !== 'in-call',
+            showConnectedTimer: state === 'in-call' && this.timerPhase === 'connected',
+            showAnswer: state === 'ringing' && !outboundActive,
+            showHangup: true,
+            showRecord: true,
+            showHold: state === 'in-call' && Boolean(this.morpheusCallUuid),
+            showTransfer: state === 'in-call' && Boolean(this.morpheusCallUuid),
+            state,
+        });
     }
 
-    startCallTimer() {
-        if (this.awaitingDestinationBridge) {
+    flushCallUiInstant() {
+        this.stopCallTimer();
+        this.updateCallCard({ visible: false });
+        this.updateFloatingPopup({ visible: false });
+        if (this.ui?.remoteAudio) {
+            this.ui.remoteAudio.srcObject = null;
+            this.ui.remoteAudio.pause?.();
+        }
+    }
+
+    startRingTimer() {
+        this.stopCallTimer();
+        this.timerPhase = 'ringing';
+        this.callStartedAt = Date.now();
+        document.querySelectorAll('[data-dialer-call-timer], [data-dialer-active-timer]').forEach((timerEl) => {
+            timerEl.classList.add('hidden');
+            timerEl.textContent = '00:00';
+        });
+        this.callTimer = null;
+    }
+
+    startCallTimer({ restart = false } = {}) {
+        if (this.awaitingDestinationBridge && !restart) {
             return;
         }
 
         this.stopCallTimer();
+        this.timerPhase = 'connected';
         this.callStartedAt = Date.now();
-        this.ui?.callTimer?.classList.remove('hidden');
-        this.ui?.floatingTimerRow?.classList.remove('hidden');
-        if (this.ui?.floatingBadge) {
-            this.ui.floatingBadge.textContent = 'Connected';
-            this.ui.floatingBadge.classList.remove('hidden', 'is-ringing');
-            this.ui.floatingBadge.classList.add('is-connected');
-        }
-        if (this.ui?.floatingVisual) {
-            this.ui.floatingVisual.classList.add('hidden');
-        }
-        this.callTimer = window.setInterval(() => {
-            if (!this.callStartedAt) {
-                return;
+        document.querySelectorAll('[data-dialer-call-layer]').forEach((layer) => {
+            layer.classList.remove('is-ringing');
+            layer.classList.add('is-connected');
+            const badge = layer.querySelector('[data-dialer-call-badge]');
+            if (badge) {
+                badge.textContent = 'Connected';
+                badge.classList.remove('is-ringing');
+                badge.classList.add('is-connected');
             }
+        });
+        document.querySelectorAll('[data-dialer-call-timer], [data-dialer-active-timer]').forEach((timerEl) => {
+            timerEl.classList.remove('hidden');
+            timerEl.dataset.timerLabel = 'Connected time';
+        });
 
-            const seconds = Math.max(0, Math.floor((Date.now() - this.callStartedAt) / 1000));
-            const formatted = formatDuration(seconds);
-            if (this.ui?.callTimer) {
-                this.ui.callTimer.textContent = formatted;
-            }
-            if (this.ui?.floatingTimer && !this.ui.floatingPopup?.classList.contains('hidden')) {
-                this.ui.floatingTimer.textContent = formatted;
-            }
-        }, 1000);
+        this.tickCallTimer();
+        this.callTimer = window.setInterval(() => this.tickCallTimer(), 1000);
+        this.refreshDialerCallOverlay('in-call');
+    }
+
+    syncCallTimerFromBillsec(billsec) {
+        if (this.timerPhase !== 'connected') {
+            return;
+        }
+
+        const serverSeconds = Math.max(0, Math.floor(Number(billsec) || 0));
+        if (serverSeconds < 1 || !this.callStartedAt) {
+            return;
+        }
+
+        const localSeconds = Math.max(0, Math.floor((Date.now() - this.callStartedAt) / 1000));
+        if (serverSeconds > localSeconds + 1) {
+            this.callStartedAt = Date.now() - serverSeconds * 1000;
+            this.tickCallTimer();
+        }
+    }
+
+    tickCallTimer() {
+        if (!this.callStartedAt || this.timerPhase !== 'connected') {
+            return;
+        }
+
+        const seconds = Math.max(0, Math.floor((Date.now() - this.callStartedAt) / 1000));
+        const formatted = formatDuration(seconds);
+        if (this.ui?.callTimer) {
+            this.ui.callTimer.textContent = formatted;
+        }
+        document.querySelectorAll('[data-dialer-call-timer], [data-dialer-active-timer]').forEach((timerEl) => {
+            timerEl.textContent = formatted;
+            timerEl.classList.remove('hidden');
+        });
     }
 
     stopCallTimer() {
@@ -1355,17 +2095,58 @@ class ApexWebphone {
             this.callTimer = null;
         }
         this.callStartedAt = null;
+        this.timerPhase = null;
         if (this.ui?.callTimer) {
             this.ui.callTimer.textContent = '00:00';
         }
-        if (this.ui?.floatingTimer) {
-            this.ui.floatingTimer.textContent = '00:00';
-        }
-        this.ui?.floatingTimerRow?.classList.add('hidden');
+        document.querySelectorAll('[data-dialer-call-timer]').forEach((timerEl) => {
+            timerEl.textContent = '00:00';
+        });
+    }
+
+    resetDialerCallUi() {
+        document.querySelectorAll('[data-dialer-input-shell]').forEach((shell) => {
+            shell.classList.remove('is-call-active');
+            shell.dataset.callState = 'idle';
+            const input = shell.querySelector('[name="destination"]');
+            if (input) {
+                input.readOnly = false;
+                input.removeAttribute('aria-readonly');
+            }
+        });
+        document.querySelectorAll('[data-dialer-call-layer]').forEach((layer) => {
+            layer.classList.add('hidden');
+            layer.dataset.state = 'idle';
+            layer.classList.remove('is-ringing', 'is-connected');
+        });
+        document.querySelectorAll('[data-dialer-call-timer], [data-dialer-active-timer]').forEach((timerEl) => {
+            timerEl.textContent = '00:00';
+            timerEl.classList.add('hidden');
+        });
+        document.querySelectorAll('[data-dialer-active-screen]').forEach((screen) => {
+            screen.classList.add('hidden');
+            screen.setAttribute('aria-hidden', 'true');
+            screen.classList.remove('is-ringing', 'is-connected');
+        });
+        document.querySelectorAll('[data-dialer-phone-stage]').forEach((stage) => {
+            stage.classList.remove('is-hidden-during-call');
+        });
+        this.setDialerCallControlsVisible(false);
     }
 
     setState(state, message = '') {
+        const previousState = this.state;
         this.state = state;
+
+        const activeStates = ['dialing', 'ringing', 'in-call'];
+        if (activeStates.includes(state) && !activeStates.includes(previousState)) {
+            window.dispatchEvent(new CustomEvent('comm:call-active', {
+                detail: {
+                    phone: this.currentCallPeer || '',
+                    callUuid: this.hangupCallUuid() || '',
+                },
+            }));
+        }
 
         if (!this.ui) {
             return;
@@ -1402,21 +2183,56 @@ class ApexWebphone {
 
         const registered =
             state === 'registered' || state === 'dialing' || state === 'ringing' || state === 'in-call';
-        this.ui.connectBtn.textContent = state === 'connecting' ? 'Connecting…' : registered ? 'Reconnect line' : 'Connect line';
+        const connectLabel =
+            state === 'connecting'
+                ? 'Connecting…'
+                : registered
+                  ? 'Connected'
+                  : 'Connect';
+        const labelEl = this.ui.connectBtn?.querySelector('[data-webphone-connect-label]');
+        if (labelEl) {
+            labelEl.textContent = connectLabel;
+        } else if (this.ui.connectBtn) {
+            this.ui.connectBtn.textContent =
+                state === 'connecting' ? 'Connecting…' : registered ? 'Reconnect line' : 'Connect line';
+        }
         this.ui.connectBtn.disabled = state === 'connecting';
         this.ui.connectBtn.classList.toggle('hidden', state === 'dialing' || state === 'in-call');
-        this.ui.disconnectBtn?.classList.toggle('hidden', !registered || state === 'dialing' || state === 'in-call');
-        this.ui.disconnectBtn && (this.ui.disconnectBtn.disabled = state === 'connecting');
+        const canDisconnect = registered && state !== 'dialing' && state !== 'in-call';
+        this.ui.disconnectBtns?.forEach((btn) => {
+            const inMenu = btn.closest('.ghl-comm-connect-group__dropdown');
+            if (inMenu) {
+                btn.classList.remove('hidden');
+                btn.disabled = !canDisconnect || state === 'connecting';
+            } else {
+                btn.classList.toggle('hidden', !canDisconnect);
+                btn.disabled = !canDisconnect || state === 'connecting';
+            }
+        });
         const onActiveCall = state === 'dialing' || state === 'ringing' || state === 'in-call';
+        document.querySelectorAll('.ghl-dialer-call-icon-btn').forEach((btn) => {
+            if (onActiveCall) {
+                btn.dataset.webphoneDialState = state;
+            } else {
+                delete btn.dataset.webphoneDialState;
+            }
+        });
         const outboundActive =
             onActiveCall &&
             (this.currentCallDirection === 'outbound' ||
                 this.clickToCallActive ||
                 this.pendingClickToCall ||
                 this.directDialActive);
-        this.ui.answerBtn.classList.toggle('hidden', state !== 'ringing' || outboundActive);
-        this.ui.hangupBtn.classList.toggle('hidden', state !== 'dialing' && state !== 'ringing' && state !== 'in-call');
-        this.ui.hangupBtn?.classList.toggle('ghl-webphone-btn-end-call', state === 'dialing' || state === 'ringing' || state === 'in-call');
+        const showAnswer = state === 'ringing' && !outboundActive;
+        this.ui.answerBtns?.forEach((btn) => {
+            btn.classList.toggle('hidden', !showAnswer);
+        });
+        const showHangup = state === 'dialing' || state === 'ringing' || state === 'in-call';
+        this.ui.hangupBtns?.forEach((btn) => {
+            btn.classList.toggle('hidden', !showHangup);
+            btn.classList.toggle('ghl-webphone-btn-end-call', showHangup);
+        });
+        this.ui.hangupBtn?.classList.toggle('ghl-webphone-btn-end-call', showHangup);
 
         this.setCallControlsVisible(onActiveCall, {
             showRecord: onActiveCall,
@@ -1425,6 +2241,10 @@ class ApexWebphone {
             showTransfer: state === 'in-call' && Boolean(this.morpheusCallUuid),
             showAnswer: state === 'ringing' && !outboundActive,
         });
+
+        if (onActiveCall) {
+            this.refreshDialerCallOverlay(state);
+        }
 
         if (state === 'registered' && !this.ui.bridgePanel?.classList.contains('hidden')) {
             return;
@@ -2009,10 +2829,12 @@ class ApexWebphone {
             statusLabel: 'Ringing',
             showRingingVisual: true,
             showConnectedTimer: false,
+            timerLabel: 'Ringing time',
             showHangup: true,
             showRecord: true,
             state: 'dialing',
         });
+        this.startRingTimer();
         this.setState('dialing');
 
         const targetHost = this.config.dial_domain || this.config.domain;
@@ -2056,8 +2878,6 @@ class ApexWebphone {
                 inviter,
                 Math.min(15, this.config?.ring_timeout_sec || 12),
             );
-
-            showToast(`Calling ${normalized}… destination is ringing.`, 'success');
 
             return true;
         } catch (error) {
@@ -2107,11 +2927,13 @@ class ApexWebphone {
                 statusLabel: 'Ringing',
                 showRingingVisual: true,
                 showConnectedTimer: false,
+                timerLabel: 'Ringing time',
                 showAnswer: false,
                 showHangup: true,
                 showRecord: true,
                 state: 'dialing',
             });
+            this.startRingTimer();
         } else {
             this.setCallContext('inbound', caller);
             this.stopRingback();
@@ -2134,10 +2956,12 @@ class ApexWebphone {
                 statusLabel: 'Ringing',
                 showRingingVisual: true,
                 showConnectedTimer: false,
+                timerLabel: 'Ringing time',
                 showAnswer: true,
                 showHangup: true,
                 state: 'ringing',
             });
+            this.startRingTimer();
             this.startRingtone();
             this.setState('ringing');
         } else {
@@ -2256,11 +3080,19 @@ class ApexWebphone {
                 this.recordingActive = true;
                 this.updateRecordingUi();
 
-                const isClickToCallOutbound =
-                    this.clickToCallActive && this.currentCallDirection === 'outbound';
+                const isTrackedOriginatedOutbound =
+                    this.currentCallDirection === 'outbound'
+                    && !this.directDialActive
+                    && Boolean(this.activeCallUuid());
 
-                if (isClickToCallOutbound) {
-                    this.awaitingDestinationBridge = true;
+                if (isTrackedOriginatedOutbound && this.state === 'in-call') {
+                    this.attachRemoteAudio(session);
+
+                    return;
+                }
+
+                if (isTrackedOriginatedOutbound && this.awaitingDestinationBridge) {
+                    this.clickToCallActive = true;
                     this._lastSeenPstnBillsec = 0;
                     this.stopAllLocalRingers();
                     const routeDetail = this.buildCallRouteDetail(this.currentCallPeer);
@@ -2281,12 +3113,14 @@ class ApexWebphone {
                         statusLabel: 'Ringing',
                         showRingingVisual: true,
                         showConnectedTimer: false,
+                        timerLabel: 'Ringing time',
                         showAnswer: false,
                         showHangup: true,
                         showRecord: true,
                         state: 'dialing',
                     });
                     this.setState('dialing');
+                    this.startRingTimer();
                     this.startDestinationPoll();
                     this.attachRemoteAudio(session);
                     this.startRemoteAnswerWatcher(session);
@@ -2294,8 +3128,14 @@ class ApexWebphone {
                     return;
                 }
 
+                if (isTrackedOriginatedOutbound && !this.awaitingDestinationBridge) {
+                    this.markDestinationConnected({ source: 'sip-established' });
+                    this.attachRemoteAudio(session);
+
+                    return;
+                }
+
                 this.stopRingback();
-                this.morpheusCallUuid = null;
                 this.startCallTimer();
                 this.updateCallCard({
                     title: 'Call live',
@@ -2322,7 +3162,7 @@ class ApexWebphone {
                     timer: '00:00',
                     statusLabel: 'Connected',
                     showRingingVisual: false,
-                    showConnectedTimer: true,
+                    showConnectedTimer: false,
                     showAnswer: false,
                     showHangup: true,
                     showRecord: true,
@@ -2336,7 +3176,7 @@ class ApexWebphone {
                 const wasOutboundRinging =
                     this.currentCallDirection === 'outbound' &&
                     (this.state === 'dialing' || this.awaitingDestinationBridge);
-                const statusUuid = this.morpheusCallUuid || this.pstnPollUuid;
+                const statusUuid = this.hangupCallUuid();
                 const peer = this.currentCallPeer || '';
                 const stillRegistered = this.registerer?.state === RegistererState.Registered;
                 const clickToCallDrop =
@@ -2344,25 +3184,25 @@ class ApexWebphone {
                     !this.directDialActive &&
                     stillRegistered &&
                     this.clickToCallActive &&
-                    statusUuid;
+                    statusUuid &&
+                    !this.userInitiatedHangup;
 
                 this.stopRingback();
 
                 if (clickToCallDrop) {
-                    // Morpheus may still be dialing PSTN after agent-leg BYE — poll before toasting.
                     void this.finalizeClickToCallAfterBye(statusUuid, peer);
-                } else if (wasOutboundRinging && !this.directDialActive) {
+                } else if (wasOutboundRinging && !this.directDialActive && !this.userInitiatedHangup) {
                     const digits = peer.replace(/\D/g, '');
 
                     if (stillRegistered && this.clickToCallActive && digits.length >= 10) {
                         void this.showPstnLegFailedToast(statusUuid, peer);
                     } else if (digits.length >= 10) {
-                        showToast(
-                            `Your browser line disconnected before ${peer} answered. Stay on Connect line and try again.`,
+                        showCommToast(
+                            humanCallEndMessage('NO_ANSWER', { outbound: true }),
                             'warning',
                         );
                     } else {
-                        showToast('Call ended before the destination answered.', 'warning');
+                        showCommToast('Call ended before the destination answered.', 'warning');
                     }
                     this.clearSession();
                 } else if (wasOutboundRinging && this.directDialActive) {
@@ -2372,10 +3212,27 @@ class ApexWebphone {
                         const rejectDetail = this.lastInviteReject || this.outboundTerminateDetail;
                         const detailSuffix = rejectDetail ? ` (${rejectDetail})` : '';
                         const message = this.sawOutboundRinging
-                            ? `Destination did not answer${detailSuffix}.`
-                            : `Call ended before the destination answered${detailSuffix}. Check Socket tab for INVITE response.`;
-                        showToast(message, 'warning');
+                            ? humanCallEndMessage('NO_ANSWER', { outbound: true })
+                            : 'Call ended before the destination answered.';
+                        showCommToast(message, 'warning');
                     }
+                }
+
+                if (statusUuid && !this.userInitiatedHangup && !clickToCallDrop) {
+                    if (this.state === 'in-call') {
+                        void this.handleRemotePartyHangup(
+                            { hangup_cause: 'NORMAL_CLEARING' },
+                            { source: 'sip-terminated' },
+                        );
+
+                        return;
+                    }
+
+                    void this.hangupMorpheusCall(statusUuid).finally(() => {
+                        this.clearSession();
+                    });
+
+                    return;
                 }
 
                 if (!clickToCallDrop) {
@@ -2409,8 +3266,35 @@ class ApexWebphone {
             this.stopAllLocalRingers();
             if (this.awaitingDestinationBridge) {
                 this.startRemoteAnswerWatcher(session);
+                this.startLiveTrackWatcher(session);
             }
         };
+
+        if (!pc._commHubHangupBound) {
+            pc._commHubHangupBound = true;
+            pc.addEventListener('connectionstatechange', () => {
+                const connectionState = pc.connectionState;
+                if (
+                    this.awaitingDestinationBridge
+                    && connectionState === 'connected'
+                    && pc.getReceivers?.().some((receiver) => receiver.track?.readyState === 'live')
+                ) {
+                    this.markDestinationConnected({ source: 'webrtc-connected' });
+                }
+
+                if (
+                    this.state === 'in-call'
+                    && !this.hangupInFlight
+                    && !this.remoteHangupHandled
+                    && (connectionState === 'disconnected' || connectionState === 'failed' || connectionState === 'closed')
+                ) {
+                    void this.handleRemotePartyHangup(
+                        { hangup_cause: 'NORMAL_CLEARING' },
+                        { source: 'webrtc-state' },
+                    );
+                }
+            });
+        }
 
         const stream = new MediaStream();
         pc.getReceivers().forEach((receiver) => {
@@ -2423,6 +3307,7 @@ class ApexWebphone {
             this.stopAllLocalRingers();
             if (this.awaitingDestinationBridge) {
                 this.startRemoteAnswerWatcher(session);
+                this.startLiveTrackWatcher(session);
             }
         }
     }
@@ -2460,47 +3345,95 @@ class ApexWebphone {
         });
     }
 
-    async hangup() {
-        const morpheusUuid = this.morpheusCallUuid;
-
-        if (this.session) {
-            const state = this.session.state;
-            if (state === SessionState.Initial || state === SessionState.Establishing) {
-                if (this.session instanceof Inviter) {
-                    await this.session.cancel();
-                } else {
-                    await this.session.reject();
-                }
-            } else {
-                await this.session.bye();
-            }
+    async hangup(reason = 'unknown') {
+        if (this.hangupInFlight) {
+            return;
         }
+        this.hangupInFlight = true;
+        const morpheusUuid = this.hangupCallUuid();
+
+        this.userInitiatedHangup = true;
+        this.flushCallUiInstant();
+
+        this.logPhone('info', 'Hangup requested', {
+            reason,
+            originateCallUuid: morpheusUuid,
+            bridgedCallUuid: this.bridgedCallUuid,
+            sessionState: this.session?.state ?? null,
+            awaitingDestinationBridge: this.awaitingDestinationBridge,
+            peer: this.currentCallPeer,
+        });
+
+        this.stopDestinationPoll();
+        this.stopRemoteAnswerWatcher();
+        this.stopAllLocalRingers();
 
         if (morpheusUuid) {
-            await this.hangupMorpheusCall(morpheusUuid);
+            await this.hangupAllMorpheusLegs(morpheusUuid);
         }
+        await this.releaseExtensionCalls();
 
-        this.morpheusCallUuid = null;
-        this.pendingClickToCall = false;
-        this.clearSession();
+        try {
+            if (this.session) {
+                const state = this.session.state;
+                if (state === SessionState.Initial || state === SessionState.Establishing) {
+                    if (this.session instanceof Inviter) {
+                        await this.session.cancel();
+                    } else {
+                        await this.session.reject();
+                    }
+                } else if (state !== SessionState.Terminating && state !== SessionState.Terminated) {
+                    await this.session.bye();
+                }
+            }
+        } catch (error) {
+            this.logPhone('warn', 'Local SIP hangup failed after Morpheus hangup', {
+                reason,
+                error: error instanceof Error ? error.message : String(error),
+                morpheusCallUuid: morpheusUuid,
+            });
+        } finally {
+            this.pendingClickToCall = false;
+            this.hangupInFlight = false;
+            this.clearSession();
+        }
     }
 
     clearSession() {
+        const endedPhone = this.currentCallPeer || '';
+        const endedUuid = this.hangupCallUuid();
+        if (endedPhone || endedUuid) {
+            window.dispatchEvent(new CustomEvent('comm:call-ended', {
+                detail: {
+                    phone: endedPhone,
+                    callUuid: endedUuid || '',
+                },
+            }));
+        }
+
         this.session = null;
         this.stopAllLocalRingers();
         this.stopRemoteAnswerWatcher();
         this.stopDestinationPoll();
+        this.stopCallEventsStream();
         hideLoadingOverlay();
         this.stopCallTimer();
         this.recordingActive = false;
         this.updateRecordingUi();
         this.setCallContext(null, '');
         this.morpheusCallUuid = null;
+        this.originateCallUuid = null;
         this.pstnPollUuid = null;
+        this.bridgedCallUuid = null;
+        this.trackedCallUuids.clear();
         this.pendingClickToCall = false;
         this.clickToCallActive = false;
         this.awaitingDestinationBridge = false;
         this._lastSeenPstnBillsec = 0;
+        this.hangupInFlight = false;
+        this.userInitiatedHangup = false;
+        this.remoteHangupHandled = false;
+        this.lastDialedDestination = '';
         this.directDialActive = false;
         this.callOnHold = false;
         this.updateHoldUi();

@@ -32,6 +32,11 @@ class MorpheusCallEventService
         ]);
 
         $this->putState($uuid, $state);
+
+        $destDigits = $this->digits($destination);
+        if ($destDigits !== '') {
+            Cache::put($this->destinationWatchKey($destDigits), $uuid, self::CACHE_TTL_SECONDS);
+        }
     }
 
     /**
@@ -40,18 +45,31 @@ class MorpheusCallEventService
      */
     public function ingestWebhook(array $payload): array
     {
-        $uuids = $this->extractUuids($payload);
-        $eventName = $this->extractEventName($payload);
-        $destinationDigits = $this->extractDestinationDigits($payload);
-        $extensionDigits = $this->extractExtensionDigits($payload);
-        $sipCode = $this->extractSipCode($payload);
-        $billsec = (int) ($this->dig($payload, ['billsec', 'duration_sec', 'talk_seconds']) ?? 0);
         $bridgedTo = $this->stringOrNull($this->digAny($payload, [
             ['bridged_to'], ['bridge_uuid'], ['other_leg_uuid'],
             ['data', 'bridged_to'], ['data', 'bridge_uuid'], ['data', 'other_leg_uuid'],
             ['payload', 'bridged_to'], ['payload', 'bridge_uuid'], ['payload', 'other_leg_uuid'],
             ['call', 'bridged_to'], ['call', 'bridge_uuid'], ['call', 'other_leg_uuid'],
         ]));
+
+        $destinationDigits = $this->extractDestinationDigits($payload);
+        $extensionDigits = $this->extractExtensionDigits($payload);
+        $sipCode = $this->extractSipCode($payload);
+        $billsec = (int) ($this->dig($payload, ['billsec', 'duration_sec', 'talk_seconds']) ?? 0);
+
+        $uuids = $this->extractUuids($payload);
+        if ($uuids === [] && $destinationDigits !== '') {
+            $watchedUuid = Cache::get($this->destinationWatchKey($destinationDigits));
+            if (is_string($watchedUuid) && trim($watchedUuid) !== '') {
+                $uuids[] = trim($watchedUuid);
+            }
+        }
+
+        if ($bridgedTo !== null && ! in_array($bridgedTo, $uuids, true)) {
+            $uuids[] = $bridgedTo;
+        }
+
+        $eventName = $this->extractEventName($payload);
 
         $destinationAnswered = $this->payloadIndicatesDestinationAnswered(
             $payload,
@@ -117,6 +135,28 @@ class MorpheusCallEventService
         return $normalized;
     }
 
+    public function markCallEnded(string $uuid, ?string $hangupCause = null, ?int $billsec = null): void
+    {
+        $uuid = trim($uuid);
+        if ($uuid === '') {
+            return;
+        }
+
+        $existing = $this->getCallState($uuid) ?? [];
+        $merged = $this->normalizeState(array_merge($existing, [
+            'uuid' => $uuid,
+            'live' => false,
+            'outcome' => 'ended',
+            'destination_connected' => false,
+            'hangup_cause' => $this->stringOrNull($hangupCause),
+            'billsec' => $billsec,
+            'source' => 'hangup',
+            'updated_at' => now()->toIso8601String(),
+        ]));
+
+        $this->putState($uuid, $merged);
+    }
+
     /**
      * @return array<string, mixed>|null
      */
@@ -160,7 +200,21 @@ class MorpheusCallEventService
             return [];
         }
 
-        $bridgedLive = ($state['live'] ?? false) && ! empty($state['bridged_to']);
+        $live = (bool) ($state['live'] ?? true);
+        if (! $live) {
+            return array_filter([
+                'call_ended' => true,
+                'live' => false,
+                'outcome' => 'ended',
+                'hangup_cause' => $this->stringOrNull($state['hangup_cause'] ?? null),
+                'billsec' => isset($state['billsec']) ? (int) $state['billsec'] : null,
+                'destination_connected' => false,
+                'source' => 'webhook',
+                'webhook_event' => $state['event'] ?? null,
+            ], fn ($value) => $value !== null);
+        }
+
+        $bridgedLive = $live && ! empty($state['bridged_to']);
         if (! ($state['destination_answered'] ?? false) && ! $bridgedLive) {
             return [];
         }
@@ -170,7 +224,7 @@ class MorpheusCallEventService
             'destination_answered' => true,
             'outcome' => 'connected',
             'state' => 'CONNECTED',
-            'live' => $state['live'] ?? true,
+            'live' => true,
             'billsec' => $state['billsec'] ?? null,
             'bridged_to' => $state['bridged_to'] ?? null,
             'source' => 'webhook',
@@ -255,8 +309,8 @@ class MorpheusCallEventService
      */
     protected function extractEventName(array $payload): string
     {
-        foreach (['event', 'event_type', 'type', 'name', 'action'] as $key) {
-            $value = $payload[$key] ?? $payload['data'][$key] ?? $payload['payload'][$key] ?? null;
+        foreach (['event', 'event_type', 'type', 'name', 'action', 'status', 'call_state', 'state'] as $key) {
+            $value = $payload[$key] ?? $payload['data'][$key] ?? $payload['payload'][$key] ?? $payload['call'][$key] ?? null;
             if (is_string($value) && trim($value) !== '') {
                 return strtolower(trim($value));
             }
@@ -353,11 +407,25 @@ class MorpheusCallEventService
         }
 
         if ($eventName !== '' && strlen($destinationDigits) >= 10) {
-            foreach (['answered', 'connected', 'bridge', 'active', 'talking', 'established'] as $needle) {
+            foreach (['answered', 'connected', 'bridge', 'active', 'talking', 'established', 'pickup', 'pick_up'] as $needle) {
                 if (str_contains($eventName, $needle) && ! str_contains($eventName, 'unanswered')) {
                     return true;
                 }
             }
+
+            if (str_contains($eventName, 'ring_wait') || str_contains($eventName, 'ringing')) {
+                return false;
+            }
+        }
+
+        $callState = strtoupper((string) ($this->digAny($payload, [
+            ['state'], ['call_state'], ['status'],
+            ['data', 'state'], ['data', 'call_state'], ['data', 'status'],
+            ['call', 'state'], ['call', 'call_state'], ['call', 'status'],
+        ]) ?? ''));
+
+        if (in_array($callState, ['CONNECTED', 'ANSWERED', 'BRIDGED', 'ACTIVE', 'TALKING'], true)) {
+            return true;
         }
 
         return false;
@@ -377,11 +445,25 @@ class MorpheusCallEventService
             return true;
         }
 
+        $callState = strtoupper((string) ($this->digAny($payload, [
+            ['state'], ['call_state'], ['status'],
+            ['data', 'state'], ['data', 'call_state'], ['data', 'status'],
+            ['call', 'state'], ['call', 'call_state'], ['call', 'status'],
+        ]) ?? ''));
+
+        if (in_array($callState, ['HANGUP', 'COMPLETED', 'DESTROYED', 'ENDED'], true)) {
+            return true;
+        }
+
         return $eventName !== '' && (
             str_contains($eventName, 'hangup')
+            || str_contains($eventName, 'hang_up')
+            || str_contains($eventName, 'channel_hangup')
+            || str_contains($eventName, 'destroy')
             || str_contains($eventName, 'ended')
             || str_contains($eventName, 'completed')
-        );
+            || str_contains($eventName, 'disconnected')
+        ) || in_array(strtoupper($eventName), ['HANGUP', 'COMPLETED', 'DESTROYED'], true);
     }
 
     /**
@@ -408,6 +490,11 @@ class MorpheusCallEventService
     protected function destinationKey(string $destinationDigits): string
     {
         return 'integrations.morpheus.call_dest.'.$destinationDigits;
+    }
+
+    protected function destinationWatchKey(string $destinationDigits): string
+    {
+        return 'integrations.morpheus.call_dest_watch.'.$destinationDigits;
     }
 
     protected function digits(?string $value): string

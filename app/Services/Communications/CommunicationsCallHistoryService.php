@@ -102,8 +102,102 @@ class CommunicationsCallHistoryService
                 'cdr_destination' => $dest,
                 'hangup_cause' => $cause,
                 'cdr_synced_at' => now()->toIso8601String(),
+                'cdr_has_recording' => (bool) ($snap['has_recording'] ?? data_get($snap, 'raw.has_recording')),
             ]),
         ]);
+
+        $log = app(CommunicationsCallRecordingService::class)->resolveAndPersist($log->fresh());
+        if ($log->recording_status === CommunicationsCallRecordingService::STATUS_PENDING) {
+            $this->queueRecordingSync($log);
+        }
+    }
+
+    protected function queueRecordingSync(CommunicationCallLog $log): void
+    {
+        if (! filled($log->morpheus_call_uuid)) {
+            return;
+        }
+
+        \App\Jobs\SyncCallRecordingJob::dispatch($log->id)->afterResponse();
+    }
+
+    public function callNoteForRef(Workspace $workspace, string $callLogRef): string
+    {
+        if ($callLogRef === '') {
+            return '';
+        }
+
+        $log = $this->resolveCallLog($workspace, $callLogRef);
+
+        return (string) ($log?->note ?? '');
+    }
+
+    public function updateCallNote(Workspace $workspace, string $callLogRef, ?string $note, ?User $user = null): ?CommunicationCallLog
+    {
+        $log = $this->resolveCallLog($workspace, $callLogRef);
+        if (! $log && $callLogRef !== '' && ! str_starts_with($callLogRef, 'local:')) {
+            return $this->updateCallNoteByUuid($workspace, $callLogRef, $note, $user);
+        }
+
+        if (! $log) {
+            return null;
+        }
+
+        $log->update([
+            'note' => $note,
+            'user_id' => $log->user_id ?: $user?->id,
+        ]);
+
+        return $log->fresh();
+    }
+
+    public function updateCallNoteByUuid(Workspace $workspace, string $uuid, ?string $note, ?User $user = null): ?CommunicationCallLog
+    {
+        $log = CommunicationCallLog::query()
+            ->where('workspace_id', $workspace->id)
+            ->where('morpheus_call_uuid', $uuid)
+            ->latest('id')
+            ->first();
+
+        if (! $log) {
+            $log = CommunicationCallLog::create([
+                'workspace_id' => $workspace->id,
+                'user_id' => $user?->id,
+                'morpheus_call_uuid' => $uuid,
+                'direction' => 'unknown',
+                'note' => $note,
+                'status' => 'initiated',
+                'started_at' => now(),
+                'meta' => ['source' => 'dialer_notes'],
+            ]);
+
+            return $log;
+        }
+
+        $log->update([
+            'note' => $note,
+            'user_id' => $log->user_id ?: $user?->id,
+        ]);
+
+        return $log->fresh();
+    }
+
+    public function resolveCallLog(Workspace $workspace, string $callLogRef): ?CommunicationCallLog
+    {
+        if (str_starts_with($callLogRef, 'local:')) {
+            $id = (int) substr($callLogRef, 6);
+
+            return CommunicationCallLog::query()
+                ->where('workspace_id', $workspace->id)
+                ->whereKey($id)
+                ->first();
+        }
+
+        return CommunicationCallLog::query()
+            ->where('workspace_id', $workspace->id)
+            ->where('morpheus_call_uuid', $callLogRef)
+            ->latest('id')
+            ->first();
     }
 
     public function recordDisposition(
@@ -157,17 +251,26 @@ class CommunicationsCallHistoryService
                 : "{$agent} (ext {$row->from_extension})")
             : $agent;
 
+        $recording = app(CommunicationsCallRecordingService::class)->recordingFieldsForHubLog($row);
+
         return [
             'id' => $row->morpheus_call_uuid ?: ('local:'.$row->id),
             'direction' => $row->direction,
             'from' => $fromLabel,
             'to' => $row->to_phone ?? '—',
             'from_phone' => $fromPhone,
+            'from_extension' => $row->from_extension,
             'to_phone' => $row->to_phone ?? '',
             'start_time' => ($row->started_at ?? $row->created_at)?->toIso8601String(),
             'result' => $row->disposition ?: ucfirst($row->status),
+            'note' => $row->note,
             'duration' => $row->duration_sec ?? 0,
-            'recording' => '—',
+            'recording' => $recording['recording'],
+            'has_recording_media' => $recording['has_recording_media'],
+            'recording_id' => $recording['recording_id'],
+            'recording_source' => $recording['recording_source'],
+            'call_reference_id' => $recording['call_reference_id'],
+            'recording_status' => $recording['recording_status'],
             'campaign_id' => null,
             'source' => 'local_history',
             'raw' => $row->toArray(),

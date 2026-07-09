@@ -7,6 +7,10 @@
     $wssUrl = app(\App\Services\Communications\ZoomClickToCallService::class)->resolveSipWssUrl();
     $layout = $layout ?? 'sidebar';
     $isCenter = $layout === 'center';
+    $isRightRail = $layout === 'right-rail';
+    $isMinimal = $layout === 'minimal';
+    $isCompactPhone = $isCenter || $isRightRail || $isMinimal;
+    $callHistoryUrl = $callHistoryUrl ?? route($routePrefix . 'communications.index', ['channel' => 'calls']);
 @endphp
 
 @if ($webrtcEnabled && app(\App\Services\Integrations\ZoomApiService::class)->isConfigured())
@@ -15,18 +19,47 @@
         data-config-url="{{ route($routePrefix . 'communications.morpheus.webphone.config') }}"
         data-prepare-url="{{ route($routePrefix . 'communications.morpheus.webphone.prepare') }}"
         data-hangup-url="{{ route($routePrefix . 'communications.morpheus.calls.hangup', ['uuid' => '__UUID__']) }}"
+        data-release-extension-url="{{ route($routePrefix . 'communications.morpheus.calls.release-extension') }}"
         data-hold-url="{{ route($routePrefix . 'communications.morpheus.calls.hold', ['uuid' => '__UUID__']) }}"
         data-unhold-url="{{ route($routePrefix . 'communications.morpheus.calls.unhold', ['uuid' => '__UUID__']) }}"
         data-transfer-url="{{ route($routePrefix . 'communications.morpheus.calls.transfer', ['uuid' => '__UUID__']) }}"
         data-call-status-url="{{ route($routePrefix . 'communications.morpheus.calls.status', ['uuid' => '__UUID__']) }}"
+        data-call-events-url="{{ route($routePrefix . 'communications.morpheus.calls.events', ['uuid' => '__UUID__']) }}"
         data-originate-url="{{ route($routePrefix . 'communications.morpheus.calls.originate') }}"
         data-portal-url="{{ $portalUrl !== '#' ? $portalUrl . 'agent/' : 'https://' . config('integrations.morpheus.host') . '/agent/' }}"
         data-default-extension="{{ $defaultExtension }}"
         data-default-outbound-did="{{ $defaultOutboundDid }}"
         data-wss-url="{{ $wssUrl }}"
         data-csrf="{{ csrf_token() }}">
-        <div class="ghl-webphone-panel comm-hub-card {{ $isCenter ? 'ghl-webphone-panel--center ghl-webphone-panel--enterprise' : '' }}">
-            @unless ($isCenter)
+        <div class="ghl-webphone-panel comm-hub-card {{ $isCompactPhone ? 'ghl-webphone-panel--center ghl-webphone-panel--enterprise' : '' }} {{ $isRightRail ? 'ghl-webphone-panel--right-rail' : '' }} {{ $isMinimal ? 'ghl-webphone-panel--minimal' : '' }}">
+            @if ($isMinimal)
+                <div class="ghl-comm-connect-group" data-comm-connect-group>
+                    <button type="button" class="ghl-comm-connect-group__main" data-webphone-connect>
+                        <span class="ghl-comm-connect-group__label" data-webphone-connect-label>Connect</span>
+                        <span class="ghl-comm-connect-group__phone" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                            </svg>
+                        </span>
+                    </button>
+                    <button type="button" class="ghl-comm-connect-group__delete hidden" data-webphone-disconnect
+                        aria-label="Disconnect line" title="Disconnect">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                            <path d="M10 11v6M14 11v6" />
+                            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                        </svg>
+                    </button>
+                    <div class="sr-only" aria-hidden="true">
+                        <button type="button" data-webphone-answer>Answer call</button>
+                        <button type="button" data-webphone-hangup>End call</button>
+                        <button type="button" data-webphone-bridge>Open fallback phone</button>
+                    </div>
+                </div>
+            @endif
+
+            @unless ($isCompactPhone)
             <div class="ghl-webphone-header">
                 <div>
                     <h3 class="ghl-inbox-rail-title mb-0">Phone</h3>
@@ -39,7 +72,7 @@
             </div>
             @endunless
 
-            @unless ($isCenter)
+            @unless ($isCompactPhone)
             <x-communications.molecules.stat-grid
                 class="ghl-webphone-summary"
                 :items="[
@@ -60,16 +93,16 @@
             </p>
             @endunless
 
-            <div class="ghl-webphone-stage-row {{ $isCenter ? 'ghl-webphone-stage-row--compact' : '' }}">
+            <div class="ghl-webphone-stage-row {{ $isCompactPhone && !$isMinimal ? 'ghl-webphone-stage-row--compact' : '' }} {{ $isMinimal ? 'sr-only' : '' }}">
                 <span class="ghl-webphone-stage" data-webphone-stage data-state="offline">Idle</span>
-                @unless ($isCenter)
+                @unless ($isCompactPhone)
                     <span class="ghl-webphone-stage-note" data-webphone-stage-note>Waiting to connect your line.</span>
                 @else
                     <span class="sr-only" data-webphone-stage-note>Waiting to connect your line.</span>
                 @endunless
             </div>
 
-            @unless ($isCenter)
+            @unless ($isCompactPhone)
             <p class="ghl-webphone-hint text-xs text-slate-500 mt-1 mb-0" data-webphone-hint>
                 Click <strong>Connect line</strong> (opens WebSocket to Morpheus), then press <strong>Call</strong> in the dialer.
                 Calls use the originate API and auto-answer on your browser line.
@@ -78,7 +111,7 @@
             <p class="sr-only" data-webphone-hint>Click Connect line and allow microphone access when prompted.</p>
             @endunless
 
-            <div class="ghl-webphone-call-card hidden" data-webphone-call-card>
+            <div class="ghl-webphone-call-card hidden" data-webphone-call-card {{ $isMinimal ? 'hidden' : '' }}>
                 <div class="ghl-webphone-call-card-head">
                     <div>
                         <p class="ghl-webphone-call-title" data-webphone-call-title>Incoming call</p>
@@ -104,8 +137,9 @@
                 </div>
             </div>
 
+            @unless ($isMinimal)
             <div class="ghl-webphone-actions">
-                <button type="button" class="ch-btn ch-btn--primary {{ $isCenter ? '' : 'ch-btn--sm' }}" data-webphone-connect>Connect line</button>
+                <button type="button" class="ch-btn ch-btn--primary {{ $isCompactPhone ? 'ch-btn--sm' : 'ch-btn--sm' }}" data-webphone-connect>Connect line</button>
                 <button type="button" class="ch-btn ch-btn--secondary ch-btn--sm hidden" data-webphone-disconnect>Disconnect</button>
                 <button type="button" class="ch-btn ch-btn--secondary ch-btn--sm hidden" data-webphone-answer
                     title="Answer the incoming call on your browser line">Answer call</button>
@@ -113,8 +147,9 @@
                     title="Decline or end the current call">End call</button>
                 <button type="button" class="ch-btn ch-btn--secondary ch-btn--sm hidden" data-webphone-bridge>Open fallback phone</button>
             </div>
+            @endunless
 
-            @unless ($isCenter)
+            @unless ($isCompactPhone)
             <ul class="ghl-webphone-control-help text-xs text-slate-500 mt-2 mb-0 list-disc pl-4 space-y-1">
                 <li><strong>Connect line</strong> — WebSocket to Morpheus (<code>wss://…:7443</code>) registers your browser phone.</li>
                 <li><strong>Call</strong> in the dialer — POST to originate API; Morpheus rings your line, then dials the destination.</li>

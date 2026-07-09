@@ -1,6 +1,8 @@
 @import 'tailwindcss';
 @import './communications-inbox.css';
 @import './comm-hub-atomic.css';
+@import './comm-hub-ui-polish.css';
+@import './comm-hub-ghl-theme.css';
 
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
@@ -7214,7 +7216,7 @@ body.member-confirm-open {
 }
 
 /* Unified gray borders for toolkit / legacy markup inside app shell */
-.app-main input:not([type='checkbox']):not([type='radio']):not([type='hidden']):not([type='file']),
+.app-main input:not([type='checkbox']):not([type='radio']):not([type='hidden']):not([type='file']):not(.ghl-dialer-display--center),
 .app-main select,
 .app-main textarea {
     border: 1px solid #cbd5e1 !important;
@@ -7223,7 +7225,7 @@ body.member-confirm-open {
     color: #1e293b !important;
 }
 
-.app-main input:not([type='checkbox']):not([type='radio']):not([type='hidden']):not([type='file']):focus,
+.app-main input:not([type='checkbox']):not([type='radio']):not([type='hidden']):not([type='file']):not(.ghl-dialer-display--center):focus,
 .app-main select:focus,
 .app-main textarea:focus {
     outline: none !important;
@@ -8833,7 +8835,7 @@ a.admin-dash-row:hover .admin-dash-row-label {
 }
 
 /* Global button brand — small text, #122e53, rounded-lg */
-.app-shell button:not(.app-sidebar-edge-toggle):not(.app-floating-menu-btn):not(.app-floating-notify-btn):not(.app-topnav-icon-btn):not(.app-modal-close):not(.um-role-dropdown-trigger):not(.um-module-picker-trigger):not(.um-role-dropdown-option),
+.app-shell button:not(.app-sidebar-edge-toggle):not(.app-floating-menu-btn):not(.app-floating-notify-btn):not(.app-topnav-icon-btn):not(.app-modal-close):not(.um-role-dropdown-trigger):not(.um-module-picker-trigger):not(.um-role-dropdown-option):not(.ghl-line-dropdown__trigger):not(.ghl-line-dropdown__option):not(.ghl-dialer-key):not(.ghl-dialer-backspace-btn):not(.ghl-dialer-call-icon-btn),
 /* User management — compact page polish */
 .um-page {
     color: #64748b;

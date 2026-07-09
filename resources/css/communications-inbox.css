@@ -755,9 +755,19 @@
 
 .ghl-inbox-conversation-scroll--center {
     display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    padding: 1rem;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0.75rem 1rem;
+    min-height: calc(100vh - 9.5rem);
+    height: 100%;
+    box-sizing: border-box;
+}
+
+.ghl-comm-phone-mode .ghl-inbox-conversation-scroll--center {
+    min-height: 0 !important;
+    height: auto !important;
+    padding-bottom: 0;
 }
 
 .ghl-inbox-panel {
@@ -2432,7 +2442,31 @@
 .ghl-inbox-body-wide .ghl-inbox-conversation-scroll--center {
     display: flex;
     flex-direction: column;
-    max-height: calc(100vh - 10.5rem);
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+}
+
+.ghl-comm-phone-mode .ghl-inbox-body-wide .ghl-inbox-conversation-scroll--center {
+    flex: 0 0 auto;
+    min-height: 0 !important;
+    max-height: none !important;
+    height: auto !important;
+    padding-bottom: 0 !important;
+}
+
+.ghl-comm-phone-mode .ghl-inbox-body-wide .ghl-inbox-conversation-scroll--center:has(.ghl-dialer-center[data-phone-view='dialer']) {
+    flex: 0 0 auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    padding-bottom: 0 !important;
+}
+
+.ghl-comm-phone-mode .ghl-inbox-body-wide .ghl-inbox-conversation-scroll--center:has(.ghl-dialer-center[data-phone-view='logs']) {
+    flex: 0 0 auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    padding-bottom: 0 !important;
 }
 
 .ghl-inbox-body-wide .ch-dial-workspace--compact {
@@ -2520,7 +2554,7 @@
     gap: 0.5rem;
 }
 
-.ghl-dialer-form--center .ghl-dialer-key {
+.ghl-dialer-form--center .ghl-dialer-key:not(.ghl-dialer-key--round) {
     min-height: 3rem;
     font-size: 1.1rem;
     border-radius: 0.75rem;
@@ -2539,7 +2573,7 @@
     border-radius: 0.75rem;
 }
 
-.ghl-dialer-center-logs,
+.ghl-dialer-center-logs:not(.ghl-dialer-center-logs--full),
 .ghl-tools-call-feed {
     border: 1px solid var(--ghl-border);
     border-radius: 0.875rem;

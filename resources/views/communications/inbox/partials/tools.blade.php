@@ -1,11 +1,13 @@
 <aside class="ghl-inbox-tools">
-    <details class="ghl-inbox-tools-collapsible" open>
-        <summary class="ghl-inbox-tools-summary">
-            <span>Quick tools</span>
+    <div class="ghl-comm-tools-head">
+        <h3 class="ghl-comm-tools-head__title">Contact details</h3>
+        <button type="button" class="ghl-comm-icon-btn" data-ghl-tools-close title="Close panel" aria-label="Close panel">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <polyline points="6 9 12 15 18 9" />
+                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
             </svg>
-        </summary>
+        </button>
+    </div>
+
     <div class="ghl-inbox-tools-inner ghl-tools-dialer">
         @if (!empty($callStats))
             <section class="ghl-tools-section ghl-tools-section-card">
@@ -14,9 +16,9 @@
                     <div><span class="ghl-inbox-rail-stat-value">{{ $callStats['total'] ?? 0 }}</span><span
                             class="ghl-inbox-rail-stat-label">Total</span></div>
                     <div><span class="ghl-inbox-rail-stat-value">{{ $callStats['inbound'] ?? 0 }}</span><span
-                            class="ghl-inbox-rail-stat-label">Inbound</span></div>
+                            class="ghl-inbox-rail-stat-label">In</span></div>
                     <div><span class="ghl-inbox-rail-stat-value">{{ $callStats['outbound'] ?? 0 }}</span><span
-                            class="ghl-inbox-rail-stat-label">Outbound</span></div>
+                            class="ghl-inbox-rail-stat-label">Out</span></div>
                     <div><span class="ghl-inbox-rail-stat-value">{{ $callStats['missed'] ?? 0 }}</span><span
                             class="ghl-inbox-rail-stat-label">Missed</span></div>
                 </div>
@@ -75,7 +77,6 @@
         @endif
 
         <a href="{{ route($routePrefix . 'communications.index', ['channel' => 'calls']) }}"
-            class="comm-hub-btn comm-hub-btn-secondary w-full text-center comm-hub-btn-sm">Open call history</a>
+            class="ghl-comm-btn w-full text-center">Call history</a>
     </div>
-    </details>
 </aside>

@@ -2,6 +2,7 @@
 
 namespace App\Services\Communications;
 
+use App\Models\CommunicationCallLog;
 use App\Services\Integrations\ZoomApiService;
 use Illuminate\Support\Facades\Cache;
 
@@ -90,6 +91,15 @@ class CommunicationsDataService
      * @param  array<int, array<string, mixed>>  $logs
      * @return array<int, array<string, mixed>>
      */
+    public function enrichCallLogsWithRecordings(array $logs, array $filters = []): array
+    {
+        return $this->enrichLogsWithRecordingFlags($logs, $filters, true);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $logs
+     * @return array<int, array<string, mixed>>
+     */
     protected function enrichLogsWithRecordingFlags(array $logs, array $filters = [], bool $fetchIndex = false): array
     {
         if ($logs === [] || ! $fetchIndex) {
@@ -100,8 +110,11 @@ class CommunicationsDataService
             $hasRecording = (bool) ($log['raw']['has_recording'] ?? false)
                 || (bool) ($log['has_recording_media'] ?? false);
             $status = strtolower((string) ($log['raw']['recording_status'] ?? ''));
+            $duration = (int) ($log['duration'] ?? data_get($log, 'raw.billsec') ?? 0);
 
-            return $hasRecording || ($status !== '' && $status !== 'non_recorded');
+            return $hasRecording
+                || ($status !== '' && $status !== 'non_recorded')
+                || $duration > 0;
         });
 
         if (! $needsIndex) {
@@ -111,28 +124,76 @@ class CommunicationsDataService
         $index = $this->phoneRecordingFileIndex($filters);
 
         return array_map(function (array $log) use ($index) {
+            if (! empty($log['has_recording_media']) && ! empty($log['recording_id']) && ($log['source'] ?? '') === 'local_history') {
+                return $log;
+            }
+
             $hasRecording = (bool) ($log['raw']['has_recording'] ?? false)
                 || (bool) ($log['has_recording_media'] ?? false);
             $status = strtolower((string) ($log['raw']['recording_status'] ?? ''));
-            $isRecorded = $hasRecording || ($status !== '' && $status !== 'non_recorded');
+            $duration = (int) ($log['duration'] ?? data_get($log, 'raw.billsec') ?? 0);
+            $isRecorded = $hasRecording
+                || ($status !== '' && $status !== 'non_recorded')
+                || $duration > 0;
 
             if (! $isRecorded) {
                 return $log;
             }
 
-            $callKey = (string) $log['id'];
+            $callKey = (string) ($log['call_reference_id'] ?? $log['id']);
             $fileId = $index['by_reference'][$callKey]
                 ?? $index['by_reference'][$this->zoom->compactZoomReferenceId($callKey)]
                 ?? null;
 
-            $log['recording'] = 'Yes';
-            $log['recording_source'] = 'phone';
-            $log['has_recording_media'] = true;
-            $log['recording_id'] = $fileId ?? $callKey;
-            $log['call_reference_id'] = $callKey;
+            if ($fileId) {
+                $log['recording'] = 'Yes';
+                $log['recording_source'] = (string) ($log['recording_source'] ?? 'morpheus');
+                $log['has_recording_media'] = true;
+                $log['recording_id'] = $fileId;
+                $log['call_reference_id'] = $callKey;
+                $log['recording_status'] = 'ready';
+
+                if (($log['source'] ?? '') === 'local_history') {
+                    $this->persistRecordingOnLocalLog($log, $fileId);
+                }
+            } else {
+                $log['recording_status'] = (string) ($log['recording_status'] ?? 'pending');
+                $log['has_recording_media'] = false;
+                $log['recording_id'] = null;
+                $log['call_reference_id'] = $callKey;
+            }
 
             return $log;
         }, $logs);
+    }
+
+    /**
+     * @param  array<string, mixed>  $hubLog
+     */
+    protected function persistRecordingOnLocalLog(array $hubLog, string $fileId): void
+    {
+        $callKey = (string) ($hubLog['call_reference_id'] ?? $hubLog['id'] ?? '');
+        if ($callKey === '') {
+            return;
+        }
+
+        $query = CommunicationCallLog::query();
+        if (str_starts_with($callKey, 'local:')) {
+            $query->whereKey((int) substr($callKey, 6));
+        } else {
+            $query->where('morpheus_call_uuid', $callKey);
+        }
+
+        $localLog = $query->latest('id')->first();
+        if (! $localLog) {
+            return;
+        }
+
+        app(CommunicationsCallRecordingService::class)->persistFromHubLog($localLog, [
+            'recording_id' => $fileId,
+            'has_recording_media' => true,
+            'recording_source' => $hubLog['recording_source'] ?? 'morpheus',
+        ]);
     }
 
     /**

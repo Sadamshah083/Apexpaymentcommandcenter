@@ -1,0 +1,3001 @@
+import { Inviter, Registerer, RegistererState, SessionState, UserAgent } from 'sip.js';
+import { hideLoadingOverlay } from './form-loading.js';
+import { showToast } from './toast.js';
+
+const STORAGE_KEY = 'communications.webphone_extension';
+const WSS_LOG_PREFIX = '[Morpheus WSS]';
+const PHONE_LOG_PREFIX = '[Morpheus Phone]';
+const DEBUG_LOG_RING = 100;
+
+let singleton = null;
+
+function pushWebphoneDebugLog(channel, level, message, detail = null) {
+    const entry = {
+        channel,
+        level,
+        message,
+        at: new Date().toISOString(),
+        ...(detail && typeof detail === 'object' ? detail : {}),
+    };
+
+    if (typeof window !== 'undefined') {
+        const root = window.morpheusWebphoneDebug || { logs: [] };
+        root.logs = [...(root.logs || []), entry].slice(-DEBUG_LOG_RING);
+        root.last = entry;
+        window.morpheusWebphoneDebug = root;
+    }
+
+    const prefix = channel === 'wss' ? WSS_LOG_PREFIX : PHONE_LOG_PREFIX;
+    const fn = level === 'error' ? console.error : level === 'warn' ? console.warn : console.info;
+
+    if (detail && typeof detail === 'object') {
+        fn.call(console, `${prefix} ${message}`, detail);
+    } else {
+        fn.call(console, `${prefix} ${message}`);
+    }
+}
+
+function wssConsoleLog(level, message, detail = null) {
+    pushWebphoneDebugLog('wss', level, message, detail);
+    if (typeof window !== 'undefined') {
+        window.morpheusWebphoneWss = {
+            ...(window.morpheusWebphoneWss || {}),
+            lastEvent: message,
+            lastEventAt: new Date().toISOString(),
+            ...(detail && typeof detail === 'object' ? detail : {}),
+        };
+    }
+}
+
+function phoneConsoleLog(level, message, detail = null) {
+    pushWebphoneDebugLog('phone', level, message, detail);
+}
+
+function formatDuration(totalSeconds) {
+    const minutes = Math.floor(totalSeconds / 60)
+        .toString()
+        .padStart(2, '0');
+    const seconds = Math.floor(totalSeconds % 60)
+        .toString()
+        .padStart(2, '0');
+
+    return `${minutes}:${seconds}`;
+}
+
+function selectedExtension() {
+    const select = document.querySelector('[name="from_extension"]');
+    if (select?.value) {
+        return select.value;
+    }
+
+    const panel = document.querySelector('[data-webphone-panel]');
+
+    return panel?.dataset.defaultExtension || localStorage.getItem(STORAGE_KEY) || '';
+}
+
+function ensureDefaultExtensionSelected() {
+    const select = document.querySelector('[name="from_extension"]');
+    if (!select || select.value) {
+        return select?.value || '';
+    }
+
+    const first = Array.from(select.options).find((option) => option.value && !option.disabled);
+    if (first) {
+        select.value = first.value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    return select.value || '';
+}
+
+function csrfToken() {
+    return document.querySelector('meta[name="csrf-token"]')?.content || '';
+}
+
+function createCancelledError() {
+    const error = new Error('Connection cancelled.');
+    error.cancelled = true;
+
+    return error;
+}
+
+function stripCarrierPrefix(value) {
+    const raw = String(value || '').trim();
+    if (raw.includes('#')) {
+        return raw.slice(raw.lastIndexOf('#') + 1).trim();
+    }
+
+    return raw;
+}
+
+function normalizeDialTarget(value) {
+    const digits = String(stripCarrierPrefix(value)).replace(/[^\d+]/g, '');
+    if (!digits) {
+        return '';
+    }
+
+    if (digits.startsWith('+')) {
+        return digits;
+    }
+
+    const numeric = digits.replace(/^0+/, '');
+    if (numeric.length === 10) {
+        return `+1${numeric}`;
+    }
+    if (numeric.length <= 6) {
+        return numeric;
+    }
+
+    return `+${numeric}`;
+}
+
+function isExtensionTarget(value) {
+    const digits = String(value || '').replace(/\D/g, '');
+
+    return digits !== '' && digits.length <= 6;
+}
+
+function formatOutboundDid(value) {
+    const digits = String(value || '').replace(/\D/g, '');
+    if (!digits) {
+        return '';
+    }
+    if (digits.length === 10) {
+        return `+1${digits}`;
+    }
+    if (digits.length === 11 && digits.startsWith('1')) {
+        return `+${digits}`;
+    }
+
+    return `+${digits}`;
+}
+
+function selectedExtensionOutboundDid() {
+    const select = document.querySelector('[name="from_extension"]');
+    const selected = select?.selectedOptions?.[0];
+    if (selected?.dataset?.outboundDid) {
+        return formatOutboundDid(selected.dataset.outboundDid);
+    }
+
+    return formatOutboundDid(document.querySelector('[data-webphone-panel]')?.dataset.defaultOutboundDid);
+}
+
+class ApexWebphone {
+    constructor() {
+        this.userAgent = null;
+        this.registerer = null;
+        this.session = null;
+        this.config = null;
+        this.state = 'offline';
+        this.pendingClickToCall = false;
+        this.panel = null;
+        this.connectPromise = null;
+        this.currentExtension = '';
+        this.lastError = '';
+        this.callStartedAt = null;
+        this.callTimer = null;
+        this.connectAttempt = 0;
+        this.cancelledConnectAttempt = 0;
+        this.audioContext = null;
+        this.ringtoneInterval = null;
+        this.ringbackInterval = null;
+        this.outboundWaitingActive = false;
+        this.currentCallDirection = null;
+        this.currentCallPeer = '';
+        this.morpheusCallUuid = null;
+        this.bridgedCallUuid = null;
+        this.trackedCallUuids = new Set();
+        this.recordingActive = false;
+        this.clickToCallActive = false;
+        this.awaitingDestinationBridge = false;
+        this.awaitingAgentLegAnswer = false;
+        this.destinationPollTimer = null;
+        this.callEventsSource = null;
+        this.directDialActive = false;
+        this.userInitiatedHangup = false;
+        this.customerFirstOutbound = false;
+        this.outboundDialStartedAt = 0;
+        this.callOnHold = false;
+        this._lastPollSnapshot = '';
+        this.activeWssUrl = null;
+        this.transportWatchdogTimer = null;
+        this.autoConnectAttempt = 0;
+        this.destinationPollInFlight = false;
+        this._destinationPollActive = false;
+        this.destinationPollAbort = null;
+        this.hangupInFlight = false;
+        this.lastDialedDestination = '';
+    }
+
+    isTransportConnected() {
+        const transport = this.userAgent?.transport;
+        if (!transport) {
+            return false;
+        }
+        if (typeof transport.isConnected === 'function') {
+            return transport.isConnected();
+        }
+        const state = transport.state || transport._state;
+
+        return state === 'Connected' || state === 'Open';
+    }
+
+    updateWssStatus(label, detail = '') {
+        const text = this.ui?.wssStatusText;
+        if (!text) {
+            return;
+        }
+        text.textContent = detail ? `${label} (${detail})` : label;
+        text.classList.toggle('text-emerald-600', label === 'Connected');
+        text.classList.toggle('text-amber-600', label === 'Connecting');
+        text.classList.toggle('text-red-600', label === 'Disconnected' || label === 'Failed');
+
+        if (this.panel) {
+            this.panel.dataset.wssLive = label === 'Connected' ? '1' : '0';
+            this.panel.dataset.wssState = label.toLowerCase().replace(/\s+/g, '-');
+        }
+    }
+
+    configuredWssUrl() {
+        return (
+            this.panel?.dataset.wssUrl ||
+            this.config?.wss_url ||
+            'wss://apexone.morpheus.cx:7443/'
+        );
+    }
+
+    async ensureLiveTransport(extension) {
+        const normalized = String(extension || selectedExtension() || '').replace(/\D/g, '') || extension;
+        if (!normalized) {
+            return false;
+        }
+
+        if (
+            this.canDirectDial() &&
+            this.isTransportConnected() &&
+            String(this.currentExtension || '').replace(/\D/g, '') === String(normalized).replace(/\D/g, '')
+        ) {
+            return true;
+        }
+
+        await this.connect(normalized);
+
+        return this.canDirectDial() && this.isTransportConnected();
+    }
+
+    async assertTransportForOriginate() {
+        ensureDefaultExtensionSelected();
+        const extension = selectedExtension();
+        if (!extension) {
+            throw new Error('Select your extension before calling.');
+        }
+
+        const wssUrl = this.configuredWssUrl();
+        wssConsoleLog('info', 'Verifying Morpheus WebSocket before originate', {
+            url: wssUrl,
+            extension,
+            transportConnected: this.isTransportConnected(),
+            registered: this.registerer?.state === RegistererState.Registered,
+        });
+
+        await this.ensureLiveTransport(extension);
+
+        if (!this.canDirectDial() || !this.isTransportConnected()) {
+            throw new Error(
+                `Phone WebSocket is not connected. Click Connect line and wait for Registered on ${wssUrl} (DevTools → Network → WS).`,
+            );
+        }
+
+        return true;
+    }
+
+    startTransportWatchdog() {
+        if (this.transportWatchdogTimer) {
+            window.clearInterval(this.transportWatchdogTimer);
+        }
+
+        this.transportWatchdogTimer = window.setInterval(() => {
+            if (!this.panel || this.isBridgeMode()) {
+                return;
+            }
+
+            if (['connecting', 'in-call', 'ringing', 'dialing'].includes(this.state)) {
+                return;
+            }
+
+            if (this.registerer?.state === RegistererState.Registered && !this.isTransportConnected()) {
+                wssConsoleLog('warn', 'WebSocket dropped — reconnecting Morpheus line', {
+                    url: this.activeWssUrl || this.configuredWssUrl(),
+                });
+                this.restoreConnection().catch(() => {});
+            }
+        }, 8000);
+    }
+
+    stopTransportWatchdog() {
+        if (!this.transportWatchdogTimer) {
+            return;
+        }
+
+        window.clearInterval(this.transportWatchdogTimer);
+        this.transportWatchdogTimer = null;
+    }
+
+    shouldDebugLog() {
+        return this.config?.wss_console_debug !== false;
+    }
+
+    logPhone(level, message, detail = null) {
+        if (!this.shouldDebugLog()) {
+            return;
+        }
+
+        phoneConsoleLog(level, message, detail);
+    }
+
+    getDebugState() {
+        return {
+            state: this.state,
+            extension: this.currentExtension,
+            wssUrl: this.activeWssUrl || this.ui?.transport?.textContent || this.config?.wss_url || null,
+            transportConnected: this.isTransportConnected(),
+            morpheusCallUuid: this.morpheusCallUuid,
+            currentCallPeer: this.currentCallPeer,
+            currentCallDirection: this.currentCallDirection,
+            clickToCallActive: this.clickToCallActive,
+            awaitingAgentLegAnswer: this.awaitingAgentLegAnswer,
+            awaitingDestinationBridge: this.awaitingDestinationBridge,
+            sessionState: this.session?.state ?? null,
+            registered: this.registerer?.state === RegistererState.Registered,
+        };
+    }
+
+    bindPanel(panel) {
+        if (panel.dataset.webphoneBound === '1' && this.panel === panel) {
+            return;
+        }
+
+        panel.dataset.webphoneBound = '1';
+        this.panel = panel;
+        this.ui = {
+            statusText: panel.querySelector('[data-webphone-status-text]'),
+            dot: panel.querySelector('[data-webphone-dot]'),
+            hint: panel.querySelector('[data-webphone-hint]'),
+            stage: panel.querySelector('[data-webphone-stage]'),
+            stageNote: panel.querySelector('[data-webphone-stage-note]'),
+            extension: panel.querySelector('[data-webphone-extension]'),
+            domain: panel.querySelector('[data-webphone-domain]'),
+            transport: panel.querySelector('[data-webphone-transport]'),
+            wssStatusText: panel.querySelector('[data-webphone-wss-status-text]'),
+            callInfo: panel.querySelector('[data-webphone-call-info]'),
+            callCard: panel.querySelector('[data-webphone-call-card]'),
+            callTitle: panel.querySelector('[data-webphone-call-title]'),
+            callSubtitle: panel.querySelector('[data-webphone-call-subtitle]'),
+            callTimer: panel.querySelector('[data-webphone-call-timer]'),
+            connectBtn: panel.querySelector('[data-webphone-connect]'),
+            disconnectBtn: panel.querySelector('[data-webphone-disconnect]'),
+            answerBtn: panel.querySelector('[data-webphone-answer]'),
+            hangupBtn: panel.querySelector('[data-webphone-hangup]'),
+            bridgeBtn: panel.querySelector('[data-webphone-bridge]'),
+            bridgePanel: panel.querySelector('[data-webphone-bridge-panel]'),
+            bridgeExtension: panel.querySelector('[data-webphone-bridge-extension]'),
+            iframe: panel.querySelector('[data-webphone-iframe]'),
+            remoteAudio: panel.querySelector('[data-webphone-remote]'),
+            floatingPopup: document.querySelector('[data-webphone-floating]'),
+            floatingTitle: document.querySelector('[data-webphone-floating-title]'),
+            floatingSubtitle: document.querySelector('[data-webphone-floating-subtitle]'),
+            floatingDetail: document.querySelector('[data-webphone-floating-detail]'),
+            floatingBadge: document.querySelector('[data-webphone-floating-badge]'),
+            floatingVisual: document.querySelector('[data-webphone-floating-visual]'),
+            floatingTimerRow: document.querySelector('[data-webphone-floating-timer-row]'),
+            floatingTimerLabel: document.querySelector('[data-webphone-floating-timer-label]'),
+            floatingTimer: document.querySelector('[data-webphone-floating-timer]'),
+            floatingAnswer: document.querySelector('[data-webphone-floating-answer]'),
+            floatingHangup: document.querySelector('[data-webphone-floating-hangup]'),
+            floatingRecord: document.querySelector('[data-webphone-floating-record]'),
+            floatingRecordLabel: document.querySelector('[data-webphone-floating-record-label]'),
+            callControls: panel.querySelector('[data-webphone-call-controls]'),
+            recordBtn: panel.querySelector('[data-webphone-record]'),
+            recordLabel: panel.querySelector('[data-webphone-record-label]'),
+            endCallBtn: panel.querySelector('[data-webphone-end-call]'),
+            holdBtn: panel.querySelector('[data-webphone-hold]'),
+            transferBtn: panel.querySelector('[data-webphone-transfer]'),
+            floatingHold: document.querySelector('[data-webphone-floating-hold]'),
+            floatingTransfer: document.querySelector('[data-webphone-floating-transfer]'),
+        };
+
+        this.ui.connectBtn?.addEventListener('click', () => {
+            this.ensureAudioContext().catch(() => {});
+            this.connect(selectedExtension()).catch((error) => {
+                this.handleConnectFailure(error);
+            });
+        });
+
+        this.ui.disconnectBtn?.addEventListener('click', () => {
+            this.disconnect().catch(() => {});
+        });
+
+        this.ui.answerBtn?.addEventListener('click', () => {
+            this.ensureAudioContext().catch(() => {});
+            this.answer().catch((error) => {
+                showToast(error.message || 'Could not answer call.', 'error');
+            });
+        });
+
+        this.ui.hangupBtn?.addEventListener('click', () => {
+            this.ensureAudioContext().catch(() => {});
+            this.hangup('panel-hangup-btn').catch(() => {});
+        });
+
+        this.ui.bridgeBtn?.addEventListener('click', () => {
+            this.openBridge();
+        });
+
+        this.ui.floatingAnswer?.addEventListener('click', () => {
+            this.ensureAudioContext().catch(() => {});
+            this.answer().catch((error) => {
+                showToast(error.message || 'Could not answer call.', 'error');
+            });
+        });
+
+        this.ui.floatingHangup?.addEventListener('click', () => {
+            this.ensureAudioContext().catch(() => {});
+            this.hangup('floating-hangup-btn').catch(() => {});
+        });
+
+        this.ui.recordBtn?.addEventListener('click', () => this.toggleRecording());
+        this.ui.floatingRecord?.addEventListener('click', () => this.toggleRecording());
+        this.ui.endCallBtn?.addEventListener('click', () => {
+            this.ensureAudioContext().catch(() => {});
+            this.hangup('end-call-btn').catch(() => {});
+        });
+
+        this.ui.holdBtn?.addEventListener('click', () => {
+            this.toggleHold().catch((error) => {
+                showToast(error.message || 'Could not update hold.', 'error');
+            });
+        });
+
+        this.ui.floatingHold?.addEventListener('click', () => {
+            this.toggleHold().catch((error) => {
+                showToast(error.message || 'Could not update hold.', 'error');
+            });
+        });
+
+        this.ui.transferBtn?.addEventListener('click', () => {
+            this.promptTransfer().catch((error) => {
+                showToast(error.message || 'Could not transfer call.', 'error');
+            });
+        });
+
+        this.ui.floatingTransfer?.addEventListener('click', () => {
+            this.promptTransfer().catch((error) => {
+                showToast(error.message || 'Could not transfer call.', 'error');
+            });
+        });
+
+        const extSelect = document.querySelector('[name="from_extension"]');
+        extSelect?.addEventListener('change', () => this.syncSelectedExtension());
+
+        this.syncSelectedExtension();
+        this.setState('offline');
+
+        const bootWss = this.configuredWssUrl();
+        if (this.ui.transport) {
+            this.ui.transport.textContent = bootWss;
+        }
+        this.updateWssStatus('Not connected', bootWss.replace(/^wss:\/\//, ''));
+
+        this.primeAudio();
+
+        if (this.canDirectDial() && !this.isTransportConnected()) {
+            this.disconnect(false).catch(() => {});
+            this.setState('offline');
+        }
+    }
+
+    primeAudio() {
+        const unlock = () => {
+            this.ensureAudioContext().catch(() => {});
+        };
+
+        document.addEventListener('pointerdown', unlock, { once: true });
+        document.addEventListener('keydown', unlock, { once: true });
+    }
+
+    async ensureAudioContext() {
+        const AudioCtor = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtor) {
+            return null;
+        }
+
+        if (!this.audioContext) {
+            this.audioContext = new AudioCtor();
+        }
+
+        if (this.audioContext.state === 'suspended') {
+            await this.audioContext.resume();
+        }
+
+        return this.audioContext;
+    }
+
+    startRingtone() {
+        if (this.ringtoneInterval) {
+            return;
+        }
+
+        const playBurst = async () => {
+            const context = await this.ensureAudioContext();
+            if (!context) {
+                return;
+            }
+
+            const gain = context.createGain();
+            gain.gain.setValueAtTime(0.0001, context.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.42, context.currentTime + 0.03);
+            gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.95);
+            gain.connect(context.destination);
+
+            [880, 988, 1175].forEach((frequency, index) => {
+                const oscillator = context.createOscillator();
+                oscillator.type = 'triangle';
+                oscillator.frequency.setValueAtTime(frequency, context.currentTime + index * 0.18);
+                oscillator.connect(gain);
+                oscillator.start(context.currentTime + index * 0.18);
+                oscillator.stop(context.currentTime + 0.95);
+            });
+        };
+
+        playBurst().catch(() => {});
+        this.ringtoneInterval = window.setInterval(() => {
+            playBurst().catch(() => {});
+        }, 1400);
+    }
+
+    stopRingtone() {
+        if (!this.ringtoneInterval) {
+            return;
+        }
+
+        window.clearInterval(this.ringtoneInterval);
+        this.ringtoneInterval = null;
+    }
+
+    startRingback() {
+        if (this.ringbackInterval) {
+            return;
+        }
+
+        this.outboundWaitingActive = true;
+
+        const playOutboundRing = async () => {
+            if (!this.outboundWaitingActive) {
+                return;
+            }
+
+            const context = await this.ensureAudioContext();
+            if (!context) {
+                return;
+            }
+
+            const start = context.currentTime;
+            const master = context.createGain();
+            master.gain.setValueAtTime(0.0001, start);
+            master.gain.exponentialRampToValueAtTime(0.3, start + 0.02);
+            master.gain.setValueAtTime(0.3, start + 1.95);
+            master.gain.exponentialRampToValueAtTime(0.0001, start + 2.05);
+            master.connect(context.destination);
+
+            // Classic phone ringback (iPhone-style waiting tone): 440 Hz + 480 Hz, 2s on / 4s off.
+            [440, 480].forEach((frequency) => {
+                const osc = context.createOscillator();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(frequency, start);
+                osc.connect(master);
+                osc.start(start);
+                osc.stop(start + 2.05);
+            });
+        };
+
+        playOutboundRing().catch(() => {});
+        this.ringbackInterval = window.setInterval(() => {
+            playOutboundRing().catch(() => {});
+        }, 6000);
+    }
+
+    stopRingback() {
+        this.outboundWaitingActive = false;
+
+        if (!this.ringbackInterval) {
+            return;
+        }
+
+        window.clearInterval(this.ringbackInterval);
+        this.ringbackInterval = null;
+    }
+
+    stopAllLocalRingers() {
+        this.stopRingtone();
+        this.stopRingback();
+    }
+
+    toggleRecording() {
+        this.recordingActive = !this.recordingActive;
+        this.updateRecordingUi();
+
+        if (this.recordingActive) {
+            showToast('Recording is on. Morpheus saves this call automatically.', 'success');
+        } else {
+            showToast('Recording indicator off.', 'warning');
+        }
+    }
+
+    updateRecordingUi() {
+        const active = this.recordingActive;
+        this.ui?.recordBtn?.classList.toggle('is-recording', active);
+        this.ui?.floatingRecord?.classList.toggle('is-recording', active);
+
+        const label = active ? 'Recording' : 'Record';
+        if (this.ui?.recordLabel) {
+            this.ui.recordLabel.textContent = label;
+        }
+        if (this.ui?.floatingRecordLabel) {
+            this.ui.floatingRecordLabel.textContent = label;
+        }
+    }
+
+    setCallControlsVisible(visible, { showRecord = false, showEndCall = false, showAnswer = false, showHold = false, showTransfer = false } = {}) {
+        this.ui?.callControls?.classList.toggle('hidden', !visible);
+        this.ui?.recordBtn?.classList.toggle('hidden', !showRecord);
+        this.ui?.endCallBtn?.classList.toggle('hidden', !showEndCall);
+        this.ui?.holdBtn?.classList.toggle('hidden', !showHold);
+        this.ui?.transferBtn?.classList.toggle('hidden', !showTransfer);
+        this.ui?.floatingRecord?.classList.toggle('hidden', !showRecord);
+        this.ui?.floatingHangup?.classList.toggle('hidden', !showEndCall);
+        this.ui?.floatingHold?.classList.toggle('hidden', !showHold);
+        this.ui?.floatingTransfer?.classList.toggle('hidden', !showTransfer);
+        this.ui?.floatingAnswer?.classList.toggle('hidden', !showAnswer);
+    }
+
+    handleConnectFailure(error) {
+        if (error?.cancelled) {
+            this.lastError = '';
+            this.pendingClickToCall = false;
+            this.setState('offline');
+            if (this.ui?.hint) {
+                this.ui.hint.textContent = 'Call canceled before the line connected.';
+            }
+            return;
+        }
+
+        let message = error?.message || 'Could not connect phone.';
+        if (/websocket closed/i.test(message) && /1006/.test(message)) {
+            message =
+                'Phone WebSocket could not stay connected. Retrying through CRM proxy — click Connect line again. If it persists, allow microphone access and check your network firewall.';
+        }
+        this.lastError = message;
+        hideLoadingOverlay();
+        this.stopRingtone();
+        this.setState('error', 'Offline');
+        this.ui.hint.textContent = message;
+        this.ui.bridgeBtn?.classList.remove('hidden');
+        this.updateFloatingPopup({ visible: false });
+        showToast(message, 'error');
+    }
+
+    openBridge() {
+        const portalUrl = this.panel?.dataset.portalUrl;
+        if (!portalUrl || !this.ui?.iframe) {
+            return;
+        }
+
+        this.ui.iframe.src = portalUrl;
+        this.ui.bridgePanel?.classList.remove('hidden');
+        this.ui.bridgeBtn?.classList.add('hidden');
+        this.setState('registered', 'Embedded phone');
+        this.ui.hint.textContent =
+            'Morpheus phone loaded below. Log in there, then dial from Quick dial above.';
+        if (this.ui.stageNote) {
+            this.ui.stageNote.textContent = 'Fallback phone is open and ready to use.';
+        }
+        showToast('Use the embedded Morpheus phone below to register your line.', 'warning');
+    }
+
+    markClickToCallPending() {
+        this.pendingClickToCall = true;
+        window.setTimeout(() => {
+            this.pendingClickToCall = false;
+        }, 120_000);
+    }
+
+    setCustomerFirstOutbound(enabled) {
+        this.customerFirstOutbound = Boolean(enabled);
+    }
+
+    setMorpheusCallUuid(uuid) {
+        const id = uuid ? String(uuid) : null;
+        this.morpheusCallUuid = id;
+        if (id) {
+            this.trackedCallUuids.add(id);
+        }
+    }
+
+    trackCallUuid(uuid) {
+        if (uuid) {
+            this.trackedCallUuids.add(String(uuid));
+        }
+    }
+
+    buildCallRouteDetail(destination) {
+        const fromDid =
+            formatOutboundDid(this.config?.outbound_caller_id) || selectedExtensionOutboundDid();
+        const to = normalizeDialTarget(destination) || destination || this.currentCallPeer || '';
+        const parts = [];
+
+        if (fromDid) {
+            parts.push(`From: ${fromDid}`);
+        }
+        if (to) {
+            parts.push(`To: ${to}`);
+        }
+
+        return parts.join(' · ');
+    }
+
+    showClickToCallRinging(destination, { customerFirst = false } = {}) {
+        const normalized = normalizeDialTarget(destination) || destination;
+        const routeDetail = this.buildCallRouteDetail(normalized);
+        hideLoadingOverlay();
+        this.ensureAudioContext().catch(() => {});
+        this.setCallContext('outbound', normalized);
+        this.clickToCallActive = true;
+        this.awaitingDestinationBridge = true;
+        this._lastPollSnapshot = '';
+        this.customerFirstOutbound = customerFirst;
+        this.lastDialedDestination = normalized || this.currentCallPeer || '';
+        this.outboundDialStartedAt = Date.now();
+        this.logPhone('info', 'Click-to-call started', {
+            destination: normalized,
+            customerFirst,
+            uuid: this.morpheusCallUuid,
+        });
+        this.recordingActive = true;
+        this.updateRecordingUi();
+        this.stopRingtone();
+        this.startRingback();
+        const ringingCopy = customerFirst
+            ? (normalized
+                ? `Ringing ${normalized} — answer within 90 seconds. Keep Connect line on.`
+                : 'Ringing your phone — answer within 90 seconds. Keep Connect line on.')
+            : (normalized
+                ? `Connecting your line… ${normalized} will ring once your browser phone answers.`
+                : 'Connecting your line… the destination will ring once your browser phone answers.');
+        this.updateCallCard({
+            title: 'Outgoing call',
+            subtitle: ringingCopy,
+            detail: routeDetail,
+            visible: true,
+        });
+        this.setCallControlsVisible(true, { showRecord: true, showEndCall: true, showAnswer: false });
+        this.updateFloatingPopup({
+            title: 'Outgoing call',
+            subtitle: ringingCopy,
+            detail: routeDetail,
+            visible: true,
+            statusLabel: customerFirst ? 'Ringing' : 'Connecting',
+            showRingingVisual: true,
+            showConnectedTimer: false,
+            showAnswer: false,
+            showHangup: true,
+            showRecord: true,
+            state: 'dialing',
+        });
+        this.setState('dialing');
+        this.markClickToCallPending();
+        this.startDestinationPoll();
+        this.subscribeCallEvents();
+    }
+
+    callEventsUrlTemplate() {
+        const panel = this.panel || document.querySelector('[data-webphone-panel]');
+
+        return panel?.dataset.callEventsUrl || '';
+    }
+
+    subscribeCallEvents() {
+        this.stopCallEventsStream();
+
+        const uuid = this.morpheusCallUuid;
+        const template = this.callEventsUrlTemplate();
+        if (!uuid || !template) {
+            return;
+        }
+
+        const url = new URL(template.replace('__UUID__', encodeURIComponent(uuid)), window.location.origin);
+        if (this.currentCallPeer) {
+            url.searchParams.set('destination', this.currentCallPeer);
+        }
+
+        try {
+            const source = new EventSource(url.toString(), { withCredentials: true });
+            this.callEventsSource = source;
+
+            source.onmessage = (event) => {
+                let data = {};
+                try {
+                    data = JSON.parse(event.data);
+                } catch {
+                    return;
+                }
+
+                if (this.applyRemoteCallStatus(data, { source: 'webhook-stream' })) {
+                    this.stopCallEventsStream();
+                }
+            };
+
+            source.onerror = () => {
+                this.logPhone('warn', 'Call events stream closed — HTTP poll remains active', {
+                    uuid: this.morpheusCallUuid,
+                });
+                this.stopCallEventsStream();
+            };
+
+            this.logPhone('info', 'Subscribed to Morpheus call events stream', {
+                uuid,
+                destination: this.currentCallPeer,
+            });
+        } catch (error) {
+            this.logPhone('warn', 'Could not open call events stream', {
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
+    stopCallEventsStream() {
+        if (this.callEventsSource) {
+            this.callEventsSource.close();
+            this.callEventsSource = null;
+        }
+    }
+
+    applyRemoteCallStatus(data, { source = 'poll' } = {}) {
+        if (!data || data.ok === false) {
+            return false;
+        }
+
+        if (data.bridged_to && data.bridged_to !== this.morpheusCallUuid) {
+            this.bridgedCallUuid = String(data.bridged_to);
+            this.trackCallUuid(data.bridged_to);
+        }
+
+        const destinationConnected =
+            data.destination_connected === true
+            || data.destination_answered === true
+            || data.outcome === 'connected'
+            || data.state === 'CONNECTED'
+            || data.state === 'ANSWERED'
+            || (
+                data.live === true
+                && (data.state === 'ACTIVE' || data.state === 'BRIDGED')
+                && Boolean(data.bridged_to)
+            )
+            || (
+                Number(data.sip_code ?? 0) === 200
+                && String(data.destination_number || this.currentCallPeer || '').replace(/\D/g, '').length >= 10
+            )
+            || (
+                data.live
+                && Number(data.billsec ?? 0) >= 1
+                && (data.agent_connected || data.answer_time)
+                && !data.hangup_cause
+            );
+
+        if (destinationConnected) {
+            this.logPhone('info', 'Destination answered — closing ring and starting timer', {
+                source,
+                uuid: this.morpheusCallUuid,
+                webhook_event: data.webhook_event ?? null,
+            });
+            this.markDestinationConnected();
+
+            return true;
+        }
+
+        return false;
+    }
+
+    hangupUrlTemplate() {
+        const panel = this.panel || document.querySelector('[data-webphone-panel]');
+
+        return panel?.dataset.hangupUrl || '';
+    }
+
+    callStatusUrlTemplate() {
+        const panel = this.panel || document.querySelector('[data-webphone-panel]');
+
+        return panel?.dataset.callStatusUrl || '';
+    }
+
+    callActionUrlTemplate(action) {
+        const panel = this.panel || document.querySelector('[data-webphone-panel]');
+        const key = `${action}Url`;
+
+        return panel?.dataset[key] || '';
+    }
+
+    async postCallAction(action, body = {}) {
+        const uuid = this.morpheusCallUuid;
+        const template = this.callActionUrlTemplate(action);
+
+        if (!uuid || !template) {
+            throw new Error('No active Morpheus call to control.');
+        }
+
+        const url = template.replace('__UUID__', encodeURIComponent(uuid));
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-TOKEN': csrfToken(),
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify(body),
+        });
+
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok || data.ok === false) {
+            throw new Error(data.error || `Call ${action} failed.`);
+        }
+
+        return data;
+    }
+
+    updateHoldUi() {
+        const label = this.callOnHold ? 'Resume' : 'Hold';
+        if (this.ui?.holdBtn) {
+            this.ui.holdBtn.textContent = label;
+            this.ui.holdBtn.classList.toggle('is-active', this.callOnHold);
+        }
+        if (this.ui?.floatingHold) {
+            this.ui.floatingHold.textContent = label;
+            this.ui.floatingHold.classList.toggle('is-active', this.callOnHold);
+        }
+    }
+
+    async toggleHold() {
+        if (!this.morpheusCallUuid) {
+            throw new Error('Connect a call before using hold.');
+        }
+
+        const action = this.callOnHold ? 'unhold' : 'hold';
+        await this.postCallAction(action);
+        this.callOnHold = !this.callOnHold;
+        this.updateHoldUi();
+        showToast(this.callOnHold ? 'Call on hold.' : 'Call resumed.', 'success');
+    }
+
+    async promptTransfer() {
+        if (!this.morpheusCallUuid) {
+            throw new Error('Connect a call before transferring.');
+        }
+
+        const destination = window.prompt('Transfer to extension or phone number:', '');
+        if (!destination || !String(destination).trim()) {
+            return;
+        }
+
+        const digits = String(destination).replace(/\D/g, '');
+        const payload = digits.length <= 6 ? digits : digits;
+
+        await this.postCallAction('transfer', { destination: payload });
+        showToast(`Call transferred to ${destination}.`, 'success');
+        await this.hangup().catch(() => {});
+    }
+
+    stopDestinationPoll() {
+        this._destinationPollActive = false;
+        this.stopCallEventsStream();
+
+        if (this.destinationPollAbort) {
+            this.destinationPollAbort.abort();
+            this.destinationPollAbort = null;
+        }
+
+        if (this.destinationPollTimer) {
+            window.clearTimeout(this.destinationPollTimer);
+            this.destinationPollTimer = null;
+        }
+    }
+
+    scheduleDestinationPoll(delayMs = 800) {
+        if (!this._destinationPollActive || !this.awaitingDestinationBridge) {
+            return;
+        }
+
+        if (this.destinationPollTimer) {
+            window.clearTimeout(this.destinationPollTimer);
+        }
+
+        this.destinationPollTimer = window.setTimeout(() => {
+            this.destinationPollTimer = null;
+            this.runDestinationPollLoop().catch(() => {});
+        }, delayMs);
+    }
+
+    async runDestinationPollLoop() {
+        if (!this._destinationPollActive || !this.awaitingDestinationBridge || this.destinationPollInFlight) {
+            return;
+        }
+
+        this.destinationPollInFlight = true;
+
+        try {
+            const keepPolling = await this.pollDestinationOnce();
+            if (keepPolling && this._destinationPollActive && this.awaitingDestinationBridge) {
+                this.scheduleDestinationPoll(500);
+            }
+        } finally {
+            this.destinationPollInFlight = false;
+        }
+    }
+
+    async pollDestinationOnce() {
+        const uuid = this.morpheusCallUuid;
+        const template = this.callStatusUrlTemplate();
+
+        if (!uuid || !template || !this.awaitingDestinationBridge) {
+            return false;
+        }
+
+        const url = new URL(template.replace('__UUID__', encodeURIComponent(uuid)), window.location.origin);
+        if (this.currentCallPeer) {
+            url.searchParams.set('destination', this.currentCallPeer);
+        }
+        if (this.customerFirstOutbound) {
+            url.searchParams.set('customer_first', '1');
+        }
+
+        if (this.destinationPollAbort) {
+            this.destinationPollAbort.abort();
+        }
+        this.destinationPollAbort = new AbortController();
+
+        try {
+            const response = await fetch(url.toString(), {
+                headers: {
+                    Accept: 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                credentials: 'same-origin',
+                signal: this.destinationPollAbort.signal,
+            });
+
+            const data = await response.json().catch(() => ({}));
+
+            if (!response.ok || data.ok === false) {
+                return true;
+            }
+
+            const pollKey = JSON.stringify({
+                pending: data.pending,
+                live: data.live,
+                state: data.state,
+                destination_connected: data.destination_connected,
+                hangup_cause: data.hangup_cause,
+                billsec: data.billsec,
+            });
+            if (pollKey !== this._lastPollSnapshot) {
+                this._lastPollSnapshot = pollKey;
+                this.logPhone('info', 'Call status poll', {
+                    uuid: this.morpheusCallUuid,
+                    destination: this.currentCallPeer,
+                    ...data,
+                });
+            }
+
+            if (data.bridged_to && data.bridged_to !== uuid) {
+                this.bridgedCallUuid = String(data.bridged_to);
+                this.trackCallUuid(data.bridged_to);
+            }
+
+            if (this.applyRemoteCallStatus(data, { source: 'poll' })) {
+                return false;
+            }
+
+            if (data.extension_busy || data.extension_not_answered) {
+                this.stopDestinationPoll();
+                this.stopRingback();
+                this.clickToCallActive = false;
+                this.awaitingDestinationBridge = false;
+                showToast(
+                    data.hint ||
+                        (data.extension_busy
+                            ? 'Your extension line is busy — close other Morpheus phones/tabs, click Connect line, then try again.'
+                            : 'Your browser line did not answer. Click Connect line, wait for Registered, then try again.'),
+                    'warning',
+                );
+                this.setState('registered');
+                this.updateFloatingPopup({ visible: false, state: 'idle' });
+
+                return false;
+            }
+
+            if (data.routing_error || data.state === 'ROUTING_FAILED') {
+                this.stopDestinationPoll();
+                this.stopRingback();
+                this.clickToCallActive = false;
+                this.awaitingDestinationBridge = false;
+                showToast(
+                    data.hint ||
+                        'Morpheus could not route this outbound call. Stay on Connect line (Registered) and use Call again.',
+                    'warning',
+                );
+                this.setState('registered');
+                this.updateFloatingPopup({ visible: false, state: 'idle' });
+
+                return false;
+            }
+
+            if (data.extension_not_answered) {
+                this.stopDestinationPoll();
+                this.stopRingback();
+                this.clickToCallActive = false;
+                this.awaitingDestinationBridge = false;
+                showToast(
+                    data.hint ||
+                        'Your extension did not answer. Click Connect line, wait for Registered, then try again.',
+                    'warning',
+                );
+                this.setState('registered');
+                this.updateFloatingPopup({
+                    visible: false,
+                    state: 'idle',
+                });
+
+                return false;
+            }
+
+            if (
+                data.destination_connected === true
+                || data.outcome === 'connected'
+                || data.state === 'CONNECTED'
+                || data.state === 'ANSWERED'
+            ) {
+                this.markDestinationConnected();
+
+                return false;
+            }
+
+            // Live bridged call with billable seconds = destination picked up.
+            if (
+                data.live
+                && Number(data.billsec ?? 0) >= 1
+                && (data.agent_connected || data.answer_time)
+                && !data.hangup_cause
+            ) {
+                this.markDestinationConnected();
+
+                return false;
+            }
+
+            if (!data.live && data.hangup_cause) {
+                const elapsed = Date.now() - (this.outboundDialStartedAt || Date.now());
+                const cause = String(data.hangup_cause);
+                const billsec = Number(data.billsec ?? 0);
+                const transientCauses = [
+                    'NO_ROUTE_DESTINATION',
+                    'NO_USER_RESPONSE',
+                    'ORIGINATOR_CANCEL',
+                    'USER_BUSY',
+                    'CALL_REJECTED',
+                    'NORMAL_CLEARING',
+                ];
+
+                if (
+                    this.clickToCallActive
+                    && billsec < 5
+                    && elapsed < 120_000
+                    && (this.customerFirstOutbound || transientCauses.includes(cause))
+                ) {
+                    return true;
+                }
+
+                this.stopDestinationPoll();
+                this.stopRingback();
+                this.clickToCallActive = false;
+                this.awaitingDestinationBridge = false;
+                this.awaitingAgentLegAnswer = false;
+
+                const causeLabel = cause.replace(/_/g, ' ').toLowerCase();
+                const message = this.customerFirstOutbound
+                    ? 'Call ended before connecting. Keep Connect line on and try again.'
+                    : `Destination leg ended (${causeLabel}). If the phone never rang, check Morpheus trunk routing.`;
+
+                showToast(message, 'warning');
+                this.setState('registered');
+                this.updateFloatingPopup({ visible: false, state: 'idle' });
+
+                return false;
+            }
+
+            return true;
+        } catch (error) {
+            if (error?.name === 'AbortError') {
+                return false;
+            }
+
+            // Retry on transient network errors — one request at a time.
+            return true;
+        } finally {
+            if (this.destinationPollAbort?.signal.aborted) {
+                this.destinationPollAbort = null;
+            }
+        }
+    }
+
+    startDestinationPoll() {
+        this.stopDestinationPoll();
+        this._destinationPollActive = true;
+        this.runDestinationPollLoop().catch(() => {});
+    }
+
+    markDestinationConnected() {
+        if (!this.awaitingDestinationBridge && this.state === 'in-call') {
+            this.stopAllLocalRingers();
+
+            return;
+        }
+
+        if (!this.awaitingDestinationBridge && this.state !== 'dialing') {
+            this.stopAllLocalRingers();
+
+            return;
+        }
+
+        this.logPhone('info', 'Destination answered — stopping ring, both legs connected', {
+            peer: this.currentCallPeer,
+            uuid: this.morpheusCallUuid,
+        });
+
+        this.awaitingDestinationBridge = false;
+        this.clickToCallActive = false;
+        this.awaitingAgentLegAnswer = false;
+        this.stopDestinationPoll();
+        this.stopAllLocalRingers();
+        // Keep morpheusCallUuid for hold/transfer/hangup until the user ends the call.
+        this.attachRemoteAudio(this.session);
+        this.startCallTimer({ restart: true });
+
+        this.updateCallCard({
+            title: 'Call live',
+            subtitle: 'Destination answered — two-way audio is active.',
+            detail: this.currentCallPeer ? `To: ${this.currentCallPeer}` : '',
+            visible: true,
+            timer: this.ui?.floatingTimer?.textContent || '00:00',
+        });
+        this.updateFloatingPopup({
+            title: 'Call live',
+            subtitle: 'Destination answered — two-way audio is active.',
+            detail: this.currentCallPeer ? `To: ${this.currentCallPeer}` : '',
+            visible: true,
+            timer: this.ui?.floatingTimer?.textContent || '00:00',
+            statusLabel: 'Connected',
+            showRingingVisual: false,
+            showConnectedTimer: true,
+            showAnswer: false,
+            showHangup: true,
+            showRecord: true,
+            showHold: Boolean(this.morpheusCallUuid),
+            showTransfer: Boolean(this.morpheusCallUuid),
+            state: 'in-call',
+        });
+        this.setCallControlsVisible(true, {
+            showRecord: true,
+            showEndCall: true,
+            showHold: Boolean(this.morpheusCallUuid),
+            showTransfer: Boolean(this.morpheusCallUuid),
+        });
+        this.setState('in-call');
+    }
+
+    async hangupMorpheusCall(uuid) {
+        const template = this.hangupUrlTemplate();
+        const relatedUuids = Array.from(this.trackedCallUuids);
+        const pathUuid = relatedUuids[0] || uuid;
+        if (!template || !pathUuid) {
+            return;
+        }
+
+        const candidates = Array.from(
+            new Set(
+                [pathUuid, this.bridgedCallUuid, uuid, ...relatedUuids]
+                    .filter(Boolean)
+                    .map((id) => String(id)),
+            ),
+        );
+        const errors = [];
+
+        for (const candidateUuid of candidates) {
+            const url = template.replace('__UUID__', encodeURIComponent(candidateUuid));
+            try {
+                const controller = new AbortController();
+                const timeout = window.setTimeout(() => controller.abort(), 4500);
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        Accept: 'application/json',
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRF-TOKEN': csrfToken(),
+                    },
+                    credentials: 'same-origin',
+                    signal: controller.signal,
+                    body: JSON.stringify({
+                        from_extension: selectedExtension() || this.currentExtension || '',
+                        destination: this.currentCallPeer || this.lastDialedDestination || '',
+                        originate_uuid: pathUuid,
+                        related_uuids: relatedUuids.length ? relatedUuids : [pathUuid],
+                        bridged_uuid: this.bridgedCallUuid || null,
+                    }),
+                });
+                window.clearTimeout(timeout);
+
+                const data = await response.json().catch(() => ({}));
+                if (response.ok || data.ok === true) {
+                    return;
+                }
+
+                errors.push({
+                    status: response.status,
+                    candidateUuid,
+                    data,
+                });
+            } catch (error) {
+                errors.push({
+                    status: 'fetch_error',
+                    candidateUuid,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
+        }
+
+        this.logPhone('warn', 'Morpheus hangup API returned non-OK', {
+            pathUuid,
+            relatedUuids,
+            candidates,
+            errors,
+        });
+    }
+
+    cancelPendingConnect() {
+        this.pendingClickToCall = false;
+        this.cancelledConnectAttempt = this.connectAttempt;
+        this.disconnect().catch(() => {});
+    }
+
+    isBridgeMode() {
+        return !!(this.ui?.bridgePanel && !this.ui.bridgePanel.classList.contains('hidden'));
+    }
+
+    canDirectDial() {
+        return !!(
+            this.userAgent &&
+            this.isTransportConnected() &&
+            this.registerer?.state === RegistererState.Registered &&
+            !this.isBridgeMode()
+        );
+    }
+
+    setCallContext(direction, peer = '') {
+        this.currentCallDirection = direction;
+        this.currentCallPeer = peer;
+    }
+
+    syncSelectedExtension() {
+        if (!this.ui) {
+            return;
+        }
+
+        const extension = selectedExtension() || this.currentExtension || this.panel?.dataset.defaultExtension || '—';
+        if (this.ui.extension) {
+            this.ui.extension.textContent = extension;
+        }
+        if (this.ui.bridgeExtension) {
+            this.ui.bridgeExtension.textContent = extension;
+        }
+
+        if (
+            this.state === 'registered' &&
+            this.currentExtension &&
+            extension !== this.currentExtension &&
+            this.ui.stageNote
+        ) {
+            this.ui.stageNote.textContent = `Ready on ${this.currentExtension}. Click Reconnect to switch to ${extension}.`;
+        }
+    }
+
+    applyConfigMeta(config) {
+        if (!this.ui || !config) {
+            return;
+        }
+
+        config.display_name = this.sanitizeDisplayName(config);
+
+        if (this.ui.domain) {
+            this.ui.domain.textContent = config.domain || '—';
+        }
+        if (this.ui.transport) {
+            this.ui.transport.textContent = config.wss_url || this.configuredWssUrl();
+        }
+        if (this.ui.extension) {
+            this.ui.extension.textContent = config.extension || this.currentExtension || '—';
+        }
+        if (this.ui.bridgeExtension) {
+            this.ui.bridgeExtension.textContent = config.extension || this.currentExtension || '—';
+        }
+    }
+
+    updateCallCard({ title = '', subtitle = '', detail = '', visible = false, timer = '00:00' } = {}) {
+        if (!this.ui) {
+            return;
+        }
+
+        this.ui.callCard?.classList.toggle('hidden', !visible);
+        if (this.ui.callTitle) {
+            this.ui.callTitle.textContent = title;
+        }
+        if (this.ui.callSubtitle) {
+            this.ui.callSubtitle.textContent = subtitle;
+        }
+        if (this.ui.callTimer) {
+            this.ui.callTimer.textContent = timer;
+        }
+        if (this.ui.callInfo) {
+            this.ui.callInfo.textContent = detail;
+            this.ui.callInfo.classList.toggle('hidden', !detail);
+        }
+    }
+
+    updateFloatingPopup({
+        title = '',
+        subtitle = '',
+        detail = '',
+        visible = false,
+        timer = '00:00',
+        statusLabel = '',
+        showRingingVisual = false,
+        showConnectedTimer = false,
+        showAnswer = false,
+        showHangup = false,
+        showRecord = false,
+        showHold = false,
+        showTransfer = false,
+        state = 'offline',
+    } = {}) {
+        if (!this.ui?.floatingPopup) {
+            return;
+        }
+
+        this.ui.floatingPopup.classList.toggle('hidden', !visible);
+        this.ui.floatingPopup.dataset.state = state;
+
+        if (this.ui.floatingTitle) {
+            this.ui.floatingTitle.textContent = title;
+        }
+        if (this.ui.floatingSubtitle) {
+            this.ui.floatingSubtitle.textContent = subtitle;
+        }
+        if (this.ui.floatingDetail) {
+            this.ui.floatingDetail.textContent = detail;
+            this.ui.floatingDetail.classList.toggle('hidden', !detail);
+        }
+        if (this.ui.floatingBadge) {
+            this.ui.floatingBadge.textContent = statusLabel;
+            this.ui.floatingBadge.classList.toggle('hidden', !visible || !statusLabel);
+            this.ui.floatingBadge.classList.toggle('is-connected', statusLabel === 'Connected');
+            this.ui.floatingBadge.classList.toggle('is-ringing', statusLabel === 'Ringing');
+        }
+        if (this.ui.floatingVisual) {
+            this.ui.floatingVisual.classList.toggle('hidden', !visible || !showRingingVisual);
+        }
+        if (this.ui.floatingTimerRow) {
+            this.ui.floatingTimerRow.classList.toggle('hidden', !visible || !showConnectedTimer);
+        }
+        if (this.ui.floatingTimerLabel) {
+            this.ui.floatingTimerLabel.textContent = 'Connected time';
+        }
+        if (this.ui.floatingTimer) {
+            this.ui.floatingTimer.textContent = timer;
+        }
+        this.ui.floatingAnswer?.classList.toggle('hidden', !showAnswer);
+        this.ui.floatingHangup?.classList.toggle('hidden', !showHangup);
+        this.ui.floatingRecord?.classList.toggle('hidden', !showRecord);
+        this.ui.floatingHold?.classList.toggle('hidden', !showHold);
+        this.ui.floatingTransfer?.classList.toggle('hidden', !showTransfer);
+    }
+
+    startCallTimer({ allowDuringBridge = false, restart = false } = {}) {
+        if (this.awaitingDestinationBridge && !allowDuringBridge) {
+            return;
+        }
+
+        if (this.callStartedAt && !restart) {
+            return;
+        }
+
+        this.stopCallTimer();
+        this.callStartedAt = Date.now();
+        this.ui?.callTimer?.classList.remove('hidden');
+        this.ui?.floatingTimerRow?.classList.remove('hidden');
+        if (this.ui?.floatingBadge) {
+            this.ui.floatingBadge.textContent = 'Connected';
+            this.ui.floatingBadge.classList.remove('hidden', 'is-ringing');
+            this.ui.floatingBadge.classList.add('is-connected');
+        }
+        if (this.ui?.floatingVisual) {
+            this.ui.floatingVisual.classList.add('hidden');
+        }
+        this.callTimer = window.setInterval(() => {
+            if (!this.callStartedAt) {
+                return;
+            }
+
+            const seconds = Math.max(0, Math.floor((Date.now() - this.callStartedAt) / 1000));
+            const formatted = formatDuration(seconds);
+            if (this.ui?.callTimer) {
+                this.ui.callTimer.textContent = formatted;
+            }
+            if (this.ui?.floatingTimer && !this.ui.floatingPopup?.classList.contains('hidden')) {
+                this.ui.floatingTimer.textContent = formatted;
+            }
+        }, 1000);
+    }
+
+    stopCallTimer() {
+        if (this.callTimer) {
+            window.clearInterval(this.callTimer);
+            this.callTimer = null;
+        }
+        this.callStartedAt = null;
+        if (this.ui?.callTimer) {
+            this.ui.callTimer.textContent = '00:00';
+        }
+        if (this.ui?.floatingTimer) {
+            this.ui.floatingTimer.textContent = '00:00';
+        }
+        this.ui?.floatingTimerRow?.classList.add('hidden');
+    }
+
+    setState(state, message = '') {
+        this.state = state;
+
+        if (!this.ui) {
+            return;
+        }
+
+        const labels = {
+            offline: 'Offline',
+            connecting: 'Connecting…',
+            registered: 'Registered',
+            dialing: 'Dialing…',
+            ringing: 'Ringing…',
+            'in-call': 'On call',
+            error: 'Error',
+        };
+        const stageNotes = {
+            offline: 'Waiting to connect your line.',
+            connecting: 'Preparing extension credentials and opening SIP over WSS.',
+            registered: 'Line is live and ready for inbound or outbound calls.',
+            dialing: this.isTransportConnected()
+                ? 'WebSocket line active. One status check every 2s while the destination rings.'
+                : 'WebSocket disconnected — click Connect line before the destination can ring.',
+            ringing: 'Live invite received. Answer to join the call.',
+            'in-call': 'Audio is connected. Keep this tab open while you talk.',
+            error: 'Connection failed. You can retry or open the fallback phone.',
+        };
+
+        this.ui.statusText.textContent = message || labels[state] || state;
+        this.ui.dot.dataset.state = state;
+        if (this.ui.stage) {
+            this.ui.stage.dataset.state = state;
+            this.ui.stage.textContent = labels[state] || state;
+        }
+        if (this.ui.stageNote) {
+            this.ui.stageNote.textContent = stageNotes[state] || '';
+        }
+
+        const registered =
+            state === 'registered' || state === 'dialing' || state === 'ringing' || state === 'in-call';
+        this.ui.connectBtn.textContent = state === 'connecting' ? 'Connecting…' : registered ? 'Reconnect line' : 'Connect line';
+        this.ui.connectBtn.disabled = state === 'connecting';
+        this.ui.connectBtn.classList.toggle('hidden', state === 'dialing' || state === 'in-call');
+        this.ui.disconnectBtn?.classList.toggle('hidden', !registered || state === 'dialing' || state === 'in-call');
+        this.ui.disconnectBtn && (this.ui.disconnectBtn.disabled = state === 'connecting');
+        const onActiveCall = state === 'dialing' || state === 'ringing' || state === 'in-call';
+        const outboundActive =
+            onActiveCall &&
+            (this.currentCallDirection === 'outbound' ||
+                this.clickToCallActive ||
+                this.pendingClickToCall ||
+                this.directDialActive);
+        const showAgentAnswer = state === 'ringing' && (!outboundActive || this.awaitingAgentLegAnswer);
+        this.ui.answerBtn.classList.toggle('hidden', !showAgentAnswer);
+        this.ui.hangupBtn.classList.toggle('hidden', state !== 'dialing' && state !== 'ringing' && state !== 'in-call');
+        this.ui.hangupBtn?.classList.toggle('ghl-webphone-btn-end-call', state === 'dialing' || state === 'ringing' || state === 'in-call');
+
+        this.setCallControlsVisible(onActiveCall, {
+            showRecord: onActiveCall,
+            showEndCall: onActiveCall,
+            showHold: state === 'in-call' && Boolean(this.morpheusCallUuid),
+            showTransfer: state === 'in-call' && Boolean(this.morpheusCallUuid),
+            showAnswer: showAgentAnswer,
+        });
+
+        if (state === 'registered' && !this.ui.bridgePanel?.classList.contains('hidden')) {
+            return;
+        }
+
+        if (state === 'registered') {
+            this.ui.hint.textContent = 'Phone ready — place calls from Quick dial below.';
+            this.ui.bridgeBtn?.classList.add('hidden');
+        } else if (state === 'dialing') {
+            this.ui.hint.textContent = this.awaitingAgentLegAnswer
+                ? 'Morpheus is ringing your browser line — Answer, then the destination phone will ring.'
+                : this.awaitingDestinationBridge
+                  ? 'Your line is connected — ringing the destination now. Hang up cancels the outbound attempt.'
+                  : 'Calling the destination now. Hang up cancels the outbound attempt.';
+        } else if (state === 'connecting') {
+            this.ui.hint.textContent = 'Syncing SIP credentials and registering with Morpheus…';
+        } else if (state === 'ringing') {
+            this.ui.hint.textContent =
+                'Answer picks up the live call on your browser line. Hang up declines or ends the ringing call.';
+        } else if (state === 'in-call') {
+            this.ui.hint.textContent = 'Call is live. Audio should be routed through your browser now.';
+        } else if (state === 'offline' || state === 'error') {
+            this.ui.hint.textContent =
+                this.lastError ||
+                'Built-in web phone — click Connect and allow microphone access.';
+            this.setCallControlsVisible(false);
+            this.updateFloatingPopup({ visible: false });
+        }
+
+        this.syncSelectedExtension();
+
+        document.dispatchEvent(
+            new CustomEvent('apex:webphone-state', { detail: { state, message: message || labels[state] || state } }),
+        );
+    }
+
+    async syncExtensionInBackground(extension) {
+        const panel = this.panel || document.querySelector('[data-webphone-panel]');
+        if (!panel?.dataset.prepareUrl) {
+            return;
+        }
+
+        try {
+            await fetch(panel.dataset.prepareUrl, {
+                method: 'POST',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': csrfToken(),
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ extension }),
+            });
+        } catch {
+            // Optional Morpheus password sync — connect does not depend on this.
+        }
+    }
+
+    async prepareConfig(extension) {
+        const panel = this.panel || document.querySelector('[data-webphone-panel]');
+        if (!panel?.dataset.prepareUrl) {
+            return this.fetchConfig(extension);
+        }
+
+        const response = await fetch(panel.dataset.prepareUrl, {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-TOKEN': csrfToken(),
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({ extension }),
+        });
+
+        const payload = await response.json().catch(() => ({}));
+
+        if (!response.ok || payload.ok === false) {
+            if (response.status === 422) {
+                return this.fetchConfig(extension);
+            }
+
+            throw new Error(payload.error || 'Could not prepare phone settings.');
+        }
+
+        if (!payload.config) {
+            return this.fetchConfig(extension);
+        }
+
+        this.applyConfigMeta(payload.config);
+        return payload.config;
+    }
+
+    async fetchConfig(extension) {
+        const panel = this.panel || document.querySelector('[data-webphone-panel]');
+        if (!panel) {
+            throw new Error('Webphone panel not found.');
+        }
+
+        const url = new URL(panel.dataset.configUrl, window.location.origin);
+        url.searchParams.set('extension', extension);
+
+        const response = await fetch(url.toString(), {
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            credentials: 'same-origin',
+        });
+
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+            throw new Error(payload.error || 'Could not load phone settings.');
+        }
+
+        this.applyConfigMeta(payload.config);
+        return payload.config;
+    }
+
+    async connect(extension) {
+        const normalized = String(extension || '').replace(/\D/g, '') || String(extension || '');
+        if (!normalized) {
+            throw new Error('Select your extension in the From dropdown first.');
+        }
+
+        if (this.state === 'registered' && this.currentExtension === normalized) {
+            return true;
+        }
+
+        if (this.connectPromise) {
+            return this.connectPromise;
+        }
+
+        const attempt = ++this.connectAttempt;
+        this.connectPromise = this._connect(normalized, attempt).finally(() => {
+            this.connectPromise = null;
+        });
+
+        return this.connectPromise;
+    }
+
+    throwIfConnectCancelled(attempt) {
+        if (this.cancelledConnectAttempt === attempt) {
+            throw createCancelledError();
+        }
+    }
+
+    sanitizeDisplayName(config) {
+        const configuredName = String(config?.caller_id_name || config?.display_name || '').trim();
+        if (configuredName && !/^\d[\d\s().+-]{9,}$/.test(configuredName)) {
+            return configuredName;
+        }
+
+        const callerId = String(config?.outbound_caller_id || '').replace(/\D/g, '');
+        if (callerId) {
+            return 'ApexOne Payments';
+        }
+
+        const raw = String(config?.display_name || '').trim();
+        if (raw === '' || /^(admin|setter|closer)_(super|ops|tl|ag)_[a-z0-9]{3}$/i.test(raw)) {
+            return '';
+        }
+
+        if (/[<>"\\;]/.test(raw)) {
+            return '';
+        }
+
+        return raw;
+    }
+
+    wssUrlPriority(url) {
+        if (/morpheus\.cx:7443/i.test(url)) {
+            return 0;
+        }
+
+        if (/morpheus-ws/i.test(url)) {
+            return 2;
+        }
+
+        return 1;
+    }
+
+    normalizeWssUrl(url) {
+        if (!url) {
+            return null;
+        }
+
+        const normalized = String(url).trim();
+
+        if (/^wss:\/\/[^/]+:7443\/?$/i.test(normalized)) {
+            return normalized.endsWith('/') ? normalized : `${normalized}/`;
+        }
+
+        return normalized;
+    }
+
+    expandWssCandidates(url) {
+        const normalized = this.normalizeWssUrl(url);
+        if (!normalized) {
+            return [];
+        }
+
+        if (/^wss:\/\/[^/]+:7443\/?$/i.test(normalized)) {
+            return [normalized];
+        }
+
+        const candidates = [normalized];
+        if (normalized.endsWith('/ws')) {
+            const root = normalized.replace(/\/ws\/?$/, '/');
+            if (!candidates.includes(root)) {
+                candidates.push(root);
+            }
+        } else if (normalized.includes('/morpheus-ws/')) {
+            const withWs = `${normalized.replace(/\/?$/, '')}/ws`;
+            if (!candidates.includes(withWs)) {
+                candidates.push(withWs);
+            }
+        }
+
+        return candidates;
+    }
+
+    wssCandidates(config) {
+        const urls = [config?.wss_url, config?.wss_url_fallback];
+        const unique = [];
+
+        urls.forEach((url) => {
+            this.expandWssCandidates(url).forEach((candidate) => {
+                if (candidate && !unique.includes(candidate)) {
+                    unique.push(candidate);
+                }
+            });
+        });
+
+        return unique.sort((a, b) => this.wssUrlPriority(a) - this.wssUrlPriority(b));
+    }
+
+    async _connect(extension, attempt) {
+        await this.disconnect(false);
+        this.throwIfConnectCancelled(attempt);
+
+        this.setState('connecting');
+        this.updateWssStatus('Connecting', this.configuredWssUrl().replace(/^wss:\/\//, ''));
+        this.config = await this.prepareConfig(extension);
+        this.throwIfConnectCancelled(attempt);
+        this.currentExtension = extension;
+        this.config.display_name = this.sanitizeDisplayName(this.config);
+        this.applyConfigMeta(this.config);
+        localStorage.setItem(STORAGE_KEY, extension);
+
+        if (!window.isSecureContext && window.location.protocol === 'http:') {
+            throw new Error(
+                'Microphone requires HTTPS. Click "Use embedded Morpheus phone" below instead.',
+            );
+        }
+
+        const candidates = this.wssCandidates(this.config);
+        if (candidates.length === 0) {
+            throw new Error('No Morpheus WebSocket URL is configured for this extension.');
+        }
+
+        if (this.config?.wss_console_debug !== false) {
+            wssConsoleLog('info', 'WebSocket candidates', {
+                candidates,
+                extension,
+                domain: this.config.domain,
+                sip_user: this.config.sip_user || this.config.auth_user || extension,
+            });
+        }
+
+        let lastError = new Error('Could not register with Morpheus.');
+
+        for (let authAttempt = 0; authAttempt < 2; authAttempt++) {
+            for (const wssUrl of candidates) {
+                this.throwIfConnectCancelled(attempt);
+
+                try {
+                    await this._connectWithTransport(extension, attempt, wssUrl);
+                    if (this.ui?.transport) {
+                        this.ui.transport.textContent = wssUrl;
+                    }
+
+                    return true;
+                } catch (error) {
+                    lastError = error instanceof Error ? error : new Error('Could not register with Morpheus.');
+                    await this.disconnect(false);
+                }
+            }
+
+            const rejectedAuth =
+                lastError.message.includes('403') || lastError.message.includes('401');
+
+            if (!rejectedAuth || authAttempt > 0) {
+                break;
+            }
+
+            this.config = await this.prepareConfig(extension);
+            this.throwIfConnectCancelled(attempt);
+            this.applyConfigMeta(this.config);
+        }
+
+        throw lastError;
+    }
+
+    async _connectWithTransport(extension, attempt, wssUrl) {
+        const domain = this.config.domain;
+        const sipUser = this.config.sip_user || this.config.auth_user || extension;
+        const uri = UserAgent.makeURI(`sip:${sipUser}@${domain}`);
+        if (!uri) {
+            throw new Error('Invalid SIP address.');
+        }
+
+        const wssDebug = this.config?.wss_console_debug !== false;
+        this.activeWssUrl = wssUrl;
+        if (wssDebug) {
+            wssConsoleLog('info', 'Connecting WebSocket', {
+                url: wssUrl,
+                extension,
+                domain,
+                sip_user: sipUser,
+                state: 'connecting',
+                hint: 'Open DevTools → Network → WS to see wss://apexone.morpheus.cx:7443/',
+            });
+        }
+        this.updateWssStatus('Connecting', wssUrl.replace(/^wss:\/\//, ''));
+
+        const iceServers = (this.config.stun_servers || []).map((url) => ({ urls: url }));
+
+        this.userAgent = new UserAgent({
+            uri,
+            logBuiltinEnabled: wssDebug,
+            logLevel: wssDebug ? 'debug' : 'warn',
+            transportOptions: {
+                server: wssUrl,
+                connectionTimeout: 15,
+            },
+            contactParams: {
+                transport: 'ws',
+            },
+            authorizationUsername: this.config.auth_user,
+            authorizationPassword: this.config.password,
+            displayName: this.sanitizeDisplayName(this.config),
+            sessionDescriptionHandlerFactoryOptions: {
+                peerConnectionConfiguration: {
+                    iceServers,
+                },
+            },
+        });
+
+        this.userAgent.delegate = {
+            onInvite: (invitation) => this.handleInvite(invitation),
+        };
+
+        await this.userAgent.start();
+        this.throwIfConnectCancelled(attempt);
+
+        let transportError = '';
+
+        if (this.userAgent.transport) {
+            const transport = this.userAgent.transport;
+
+            transport.onConnect = () => {
+                this.updateWssStatus('Connected', wssUrl.replace(/^wss:\/\//, ''));
+                if (typeof window !== 'undefined') {
+                    window.morpheusWebphoneWss = {
+                        ...(window.morpheusWebphoneWss || {}),
+                        activeUrl: wssUrl,
+                        connected: true,
+                        connectedAt: new Date().toISOString(),
+                    };
+                }
+                if (wssDebug) {
+                    wssConsoleLog('info', 'WebSocket connected — visible in DevTools → Network → WS', {
+                        url: wssUrl,
+                        extension,
+                        state: 'open',
+                        status: '101 Switching Protocols',
+                    });
+                }
+                this.startTransportWatchdog();
+            };
+
+            transport.onDisconnect = (error) => {
+                this.updateWssStatus(error ? 'Disconnected' : 'Not connected');
+                if (typeof window !== 'undefined') {
+                    window.morpheusWebphoneWss = {
+                        ...(window.morpheusWebphoneWss || {}),
+                        connected: false,
+                        disconnectedAt: new Date().toISOString(),
+                    };
+                }
+                if (!error) {
+                    if (wssDebug) {
+                        wssConsoleLog('warn', 'WebSocket closed', {
+                            url: wssUrl,
+                            extension,
+                            state: 'closed',
+                        });
+                    }
+
+                    return;
+                }
+
+                transportError = error.message || 'WebSocket disconnected.';
+                if (wssDebug) {
+                    wssConsoleLog('error', 'WebSocket error', {
+                        url: wssUrl,
+                        extension,
+                        state: 'error',
+                        error: transportError,
+                    });
+                }
+            };
+        }
+
+        this.registerer = new Registerer(this.userAgent, {
+            expires: 300,
+        });
+        await this.waitForRegistration(this.registerer, attempt, wssUrl, () => transportError);
+        this.throwIfConnectCancelled(attempt);
+
+        if (wssDebug) {
+            wssConsoleLog('info', 'Webphone ready', {
+                url: wssUrl,
+                extension,
+                domain,
+                sip_user: sipUser,
+                state: 'registered',
+                debug: 'Use window.morpheusWebphoneDebug.getState() in console',
+            });
+        }
+    }
+
+    waitForRegistration(registerer, attempt, wssUrl, getTransportError) {
+        return new Promise((resolve, reject) => {
+            let settled = false;
+
+            const finish = (fn, value) => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                clearTimeout(timer);
+                fn(value);
+            };
+
+            const timer = window.setTimeout(() => {
+                const realm = this.config?.domain || 'Morpheus';
+                const ext = this.currentExtension || 'your extension';
+                const transportHint = getTransportError?.() || '';
+                const suffix = transportHint
+                    ? ` ${transportHint}`
+                    : ` Tried ${wssUrl}. If this keeps failing, open the fallback Morpheus phone below.`;
+                finish(
+                    reject,
+                    new Error(
+                        `Could not register extension ${ext} on ${realm}.${suffix}`,
+                    ),
+                );
+            }, 25000);
+
+            registerer.stateChange.addListener((state) => {
+                if (this.cancelledConnectAttempt === attempt) {
+                    finish(reject, createCancelledError());
+                    return;
+                }
+
+                if (state === RegistererState.Registered) {
+                    if (this.config?.wss_console_debug !== false) {
+                        wssConsoleLog('info', 'SIP registered over WebSocket', {
+                            url: wssUrl,
+                            extension: this.currentExtension,
+                            domain: this.config?.domain,
+                            state: 'registered',
+                        });
+                    }
+                    this.setState('registered');
+                    finish(resolve);
+                }
+            });
+
+            registerer
+                .register({
+                    requestDelegate: {
+                        onReject: (response) => {
+                            const code = response?.message?.statusCode || 'error';
+                            const reason = response?.message?.reasonPhrase || 'rejected';
+                            finish(
+                                reject,
+                                new Error(`SIP registration rejected (${code} ${reason}) on ${wssUrl}.`),
+                            );
+                        },
+                    },
+                })
+                .catch((error) => {
+                    if (this.cancelledConnectAttempt === attempt) {
+                        finish(reject, createCancelledError());
+                        return;
+                    }
+                    finish(reject, error);
+                });
+        });
+    }
+
+    buildInviteExtraHeaders() {
+        const headers = [];
+        const domain = this.config?.dial_domain || this.config?.domain;
+        const extension = this.config?.extension || this.currentExtension;
+        const callerId = this.config?.outbound_caller_id;
+
+        if (domain && extension) {
+            headers.push(`P-Preferred-Identity: <sip:${extension}@${domain}>`);
+        }
+
+        if (domain && callerId) {
+            const digits = String(callerId).replace(/\D/g, '');
+            if (digits) {
+                headers.push(`P-Asserted-Identity: <sip:${digits}@${domain}>`);
+            }
+        }
+
+        const campaignId = this.config?.campaign_id;
+        if (campaignId && String(this.config?.dial_method || 'api').toLowerCase() !== 'api') {
+            headers.push(`X-Campaign-ID: ${campaignId}`);
+        }
+
+        return headers;
+    }
+
+    buildTargetUri(destination) {
+        const normalized = normalizeDialTarget(destination);
+        if (!normalized || !this.config) {
+            return null;
+        }
+
+        const host = this.config.dial_domain || this.config.domain;
+        if (!host) {
+            return null;
+        }
+
+        const prefix = this.config.outbound_prefix || '';
+        const dialString = `${prefix}${normalized}`;
+        const sipTarget = isExtensionTarget(dialString)
+            ? `sip:${dialString}@${host}`
+            : `sip:${dialString.replace(/^\+/, '')}@${host}${
+                  this.config.sip_params ? `;${this.config.sip_params}` : ''
+              }`;
+
+        return UserAgent.makeURI(sipTarget);
+    }
+
+    async dial(destination) {
+        const normalized = normalizeDialTarget(destination);
+        if (!normalized) {
+            throw new Error('Enter a valid phone number first.');
+        }
+
+        if (String(this.config?.dial_method || 'api').toLowerCase() === 'api' && !isExtensionTarget(normalized)) {
+            throw new Error(
+                'Use the Call button for outbound calls — Morpheus click-to-call rings your browser line first, then dials the destination.',
+            );
+        }
+
+        if (!this.canDirectDial()) {
+            throw new Error('Connect your browser line before placing a direct call.');
+        }
+
+        if (this.session && this.session.state !== SessionState.Terminated) {
+            throw new Error('Finish the current call before placing another one.');
+        }
+
+        const targetUri = this.buildTargetUri(normalized);
+        if (!targetUri) {
+            throw new Error('Could not build a SIP destination for this number.');
+        }
+
+        await this.ensureAudioContext().catch(() => {});
+
+        const inviter = new Inviter(this.userAgent, targetUri);
+
+        this.session = inviter;
+        this.clickToCallActive = false;
+        this.awaitingDestinationBridge = false;
+        this.directDialActive = true;
+        this.setCallContext('outbound', normalized);
+        this.recordingActive = true;
+        this.updateRecordingUi();
+        this.bindSession(inviter);
+        this.startRingback();
+        this.updateCallCard({
+            title: 'Outgoing call',
+            subtitle: `Ringing ${normalized}… waiting for answer.`,
+            detail: `To: ${normalized}`,
+            visible: true,
+        });
+        this.updateFloatingPopup({
+            title: 'Outgoing call',
+            subtitle: `Ringing ${normalized}… waiting for answer.`,
+            detail: `To: ${normalized}`,
+            visible: true,
+            statusLabel: 'Ringing',
+            showRingingVisual: true,
+            showConnectedTimer: false,
+            showHangup: true,
+            showRecord: true,
+            state: 'dialing',
+        });
+        this.setState('dialing');
+
+        try {
+            await inviter.invite({
+                requestOptions: {
+                    extraHeaders: this.buildInviteExtraHeaders(),
+                },
+                sessionDescriptionHandlerOptions: {
+                    constraints: { audio: true, video: false },
+                },
+            });
+            showToast(`Calling ${normalized}… ringing until the destination answers.`, 'success');
+            return true;
+        } catch (error) {
+            this.stopRingback();
+            hideLoadingOverlay();
+            this.clearSession();
+            throw error instanceof Error ? error : new Error('Could not place the call.');
+        }
+    }
+
+    handleInvite(invitation) {
+        if (this.directDialActive) {
+            return;
+        }
+
+        this.session = invitation;
+        const caller = invitation.remoteIdentity?.uri?.user || 'Unknown';
+        const isOutboundLeg = this.pendingClickToCall;
+
+        this.logPhone('info', 'SIP INVITE received', {
+            caller,
+            isClickToCallAgentLeg: isOutboundLeg,
+            peer: this.currentCallPeer,
+            callId: invitation?.request?.callId || null,
+        });
+
+        if (isOutboundLeg) {
+            this.awaitingAgentLegAnswer = true;
+            this.setCallContext('outbound', this.currentCallPeer || caller);
+            this.stopRingtone();
+            this.startRingtone();
+            const destinationLabel = this.currentCallPeer
+                ? `To: ${this.currentCallPeer}`
+                : '';
+            this.updateCallCard({
+                title: 'Answer your line',
+                subtitle: 'Morpheus is ringing your browser — Answer to dial the destination.',
+                detail: destinationLabel,
+                visible: true,
+            });
+            this.updateFloatingPopup({
+                title: 'Answer your line',
+                subtitle: 'Morpheus is ringing your browser — Answer to dial the destination.',
+                detail: destinationLabel,
+                visible: true,
+                statusLabel: 'Ringing',
+                showRingingVisual: true,
+                showConnectedTimer: false,
+                showAnswer: true,
+                showHangup: true,
+                showRecord: true,
+                state: 'ringing',
+            });
+            this.setState('ringing');
+            this.setCallControlsVisible(true, {
+                showRecord: true,
+                showEndCall: true,
+                showAnswer: true,
+            });
+        } else {
+            this.setCallContext('inbound', caller);
+            this.stopRingback();
+            this.updateCallCard({
+                title: 'Incoming call',
+                subtitle: 'A live call is waiting on your line.',
+                detail: `Caller: ${caller}`,
+                visible: true,
+            });
+            this.updateFloatingPopup({
+                title: 'Incoming call',
+                subtitle: 'Answer your line to join the call.',
+                detail: `Caller: ${caller}`,
+                visible: true,
+                statusLabel: 'Ringing',
+                showRingingVisual: true,
+                showConnectedTimer: false,
+                showAnswer: true,
+                showHangup: true,
+                showRecord: true,
+                state: 'ringing',
+            });
+            this.startRingtone();
+            this.setState('ringing');
+        }
+
+        this.bindSession(invitation);
+
+        if (isOutboundLeg) {
+            this.clickToCallActive = true;
+            this.pendingClickToCall = false;
+
+            if (this.config?.auto_answer_click_to_call) {
+                this.ensureAudioContext()
+                    .catch(() => {})
+                    .finally(() => {
+                        this.answer().catch(() => {
+                            showToast('Could not auto-connect your line — click Answer to dial the destination.', 'warning');
+                        });
+                    });
+
+                return;
+            }
+
+            return;
+        }
+
+        if (this.config?.auto_answer_click_to_call && this.pendingClickToCall) {
+            this.pendingClickToCall = false;
+            this.ensureAudioContext()
+                .catch(() => {})
+                .finally(() => {
+                    this.answer().catch(() => {
+                        showToast('Incoming call — click Answer.', 'warning');
+                    });
+                });
+
+            return;
+        }
+
+        showToast('Incoming call — click Answer in the Phone panel.', 'warning');
+    }
+
+    bindSession(session) {
+        session.stateChange.addListener((state) => {
+            this.logPhone('info', 'SIP session state change', {
+                state,
+                direction: this.currentCallDirection,
+                clickToCallActive: this.clickToCallActive,
+                awaitingAgentLegAnswer: this.awaitingAgentLegAnswer,
+                awaitingDestinationBridge: this.awaitingDestinationBridge,
+                peer: this.currentCallPeer,
+            });
+
+            if (state === SessionState.Establishing) {
+                this.stopAllLocalRingers();
+                if (this.currentCallDirection === 'outbound' && !this.awaitingAgentLegAnswer) {
+                    // Local synthetic ringback only before the agent WebRTC leg is up.
+                    // After Established, Morpheus media carries ring / talk audio.
+                    this.startRingback();
+                    this.updateCallCard({
+                        title: 'Outgoing call',
+                        subtitle: this.currentCallPeer
+                            ? `Ringing ${this.currentCallPeer}… waiting for answer.`
+                            : 'Ringing destination… waiting for answer.',
+                        detail: this.currentCallPeer ? `To: ${this.currentCallPeer}` : '',
+                        visible: true,
+                    });
+                    this.updateFloatingPopup({
+                        title: 'Outgoing call',
+                        subtitle: this.currentCallPeer
+                            ? `Ringing ${this.currentCallPeer}… waiting for answer.`
+                            : 'Ringing destination… waiting for answer.',
+                        detail: this.currentCallPeer ? `To: ${this.currentCallPeer}` : '',
+                        visible: true,
+                        statusLabel: 'Ringing',
+                        showRingingVisual: true,
+                        showConnectedTimer: false,
+                        showAnswer: false,
+                        showHangup: true,
+                        showRecord: true,
+                        state: 'dialing',
+                    });
+                    this.setState('dialing');
+                } else if (this.awaitingAgentLegAnswer) {
+                    this.updateCallCard({
+                        title: 'Connecting your line',
+                        subtitle: 'Joining Morpheus — the destination will ring next.',
+                        detail: this.currentCallPeer ? `To: ${this.currentCallPeer}` : '',
+                        visible: true,
+                    });
+                    this.updateFloatingPopup({
+                        title: 'Connecting your line',
+                        subtitle: 'Joining Morpheus — the destination will ring next.',
+                        detail: this.currentCallPeer ? `To: ${this.currentCallPeer}` : '',
+                        visible: true,
+                        statusLabel: 'Connecting',
+                        showRingingVisual: false,
+                        showConnectedTimer: false,
+                        showAnswer: false,
+                        showHangup: true,
+                        showRecord: true,
+                        state: 'connecting',
+                    });
+                } else {
+                    this.updateCallCard({
+                        title: 'Connecting call',
+                        subtitle: 'Negotiating media with Morpheus…',
+                        detail: this.currentCallPeer ? `Caller: ${this.currentCallPeer}` : '',
+                        visible: true,
+                    });
+                    this.updateFloatingPopup({
+                        title: 'Connecting call',
+                        subtitle: 'Negotiating media with Morpheus…',
+                        detail: this.currentCallPeer ? `Caller: ${this.currentCallPeer}` : '',
+                        visible: true,
+                        statusLabel: 'Connecting',
+                        showRingingVisual: false,
+                        showConnectedTimer: false,
+                        showAnswer: false,
+                        showHangup: true,
+                        state: 'connecting',
+                    });
+                }
+            }
+
+            if (state === SessionState.Established) {
+                this.stopAllLocalRingers();
+                hideLoadingOverlay();
+                this.recordingActive = true;
+                this.updateRecordingUi();
+                this.attachRemoteAudio(session);
+
+                const isClickToCallOutbound =
+                    this.clickToCallActive && this.currentCallDirection === 'outbound';
+
+                if (isClickToCallOutbound) {
+                    this.awaitingAgentLegAnswer = false;
+                    this.awaitingDestinationBridge = true;
+                    this.stopRingback();
+                    // Do NOT play local synthetic ringback over live WebRTC audio —
+                    // Morpheus early-media provides ring/call progress on the remote stream.
+                    // Destination pickup is confirmed via status poll (then UI goes Call live).
+                    const routeDetail = this.buildCallRouteDetail(this.currentCallPeer);
+                    const dialingCopy = this.currentCallPeer
+                        ? `Your line is connected — ringing ${this.currentCallPeer} now. Stay on this tab.`
+                        : 'Your line is connected — ringing the destination now. Stay on this tab.';
+                    this.updateCallCard({
+                        title: 'Ringing destination',
+                        subtitle: dialingCopy,
+                        detail: routeDetail,
+                        visible: true,
+                    });
+                    this.updateFloatingPopup({
+                        title: 'Ringing destination',
+                        subtitle: dialingCopy,
+                        detail: routeDetail,
+                        visible: true,
+                        statusLabel: 'Ringing',
+                        showRingingVisual: true,
+                        showConnectedTimer: false,
+                        showAnswer: false,
+                        showHangup: true,
+                        showRecord: true,
+                        state: 'dialing',
+                    });
+                    this.setState('dialing');
+                    this.startDestinationPoll();
+                    this.subscribeCallEvents();
+                    this.logPhone('info', 'Agent leg established — waiting for destination answer', {
+                        peer: this.currentCallPeer,
+                        uuid: this.morpheusCallUuid,
+                    });
+
+                    return;
+                }
+
+                this.awaitingAgentLegAnswer = false;
+                this.awaitingDestinationBridge = false;
+                this.clickToCallActive = false;
+                this.morpheusCallUuid = this.morpheusCallUuid || null;
+                this.startCallTimer();
+                this.updateCallCard({
+                    title: 'Call live',
+                    subtitle: 'Two-way audio is active.',
+                    detail:
+                        this.currentCallDirection === 'outbound'
+                            ? `To: ${this.currentCallPeer}`
+                            : this.currentCallPeer
+                              ? `Caller: ${this.currentCallPeer}`
+                              : '',
+                    visible: true,
+                    timer: '00:00',
+                });
+                this.updateFloatingPopup({
+                    title: 'Call live',
+                    subtitle: 'Two-way audio is active.',
+                    detail:
+                        this.currentCallDirection === 'outbound'
+                            ? `To: ${this.currentCallPeer}`
+                            : this.currentCallPeer
+                              ? `Caller: ${this.currentCallPeer}`
+                              : '',
+                    visible: true,
+                    timer: '00:00',
+                    statusLabel: 'Connected',
+                    showRingingVisual: false,
+                    showConnectedTimer: true,
+                    showAnswer: false,
+                    showHangup: true,
+                    showRecord: true,
+                    state: 'in-call',
+                });
+                this.setState('in-call');
+            }
+
+            if (state === SessionState.Terminated) {
+                const wasOutboundRinging =
+                    this.currentCallDirection === 'outbound' &&
+                    (this.state === 'dialing' || this.awaitingDestinationBridge || this.awaitingAgentLegAnswer);
+
+                this.logPhone('warn', 'SIP session terminated', {
+                    wasOutboundRinging,
+                    peer: this.currentCallPeer,
+                    clickToCallActive: this.clickToCallActive,
+                    awaitingDestinationBridge: this.awaitingDestinationBridge,
+                });
+
+                this.stopRingback();
+                this.awaitingAgentLegAnswer = false;
+
+                if (wasOutboundRinging && !this.directDialActive && !this.userInitiatedHangup) {
+                    const peer = this.currentCallPeer || '';
+                    const digits = peer.replace(/\D/g, '');
+                    if (this.clickToCallActive || this.awaitingDestinationBridge) {
+                        showToast(
+                            'Morpheus disconnected before the destination answered. Stay on Connect line (Registered) and try Call again.',
+                            'warning',
+                        );
+                    } else if (digits.length >= 10) {
+                        showToast(
+                            `Your browser line disconnected before ${peer} answered. Stay on Connect line and try again.`,
+                            'warning',
+                        );
+                    } else {
+                        showToast('Call ended before the destination answered.', 'warning');
+                    }
+                } else if (wasOutboundRinging && this.directDialActive) {
+                    showToast(
+                        'Direct SIP dial failed. Use the Call button (Morpheus click-to-call) with Connect line Registered.',
+                        'warning',
+                    );
+                }
+
+                if (this.morpheusCallUuid && !this.userInitiatedHangup) {
+                    void this.hangupMorpheusCall(this.morpheusCallUuid).finally(() => {
+                        this.clearSession();
+                    });
+
+                    return;
+                }
+
+                this.clearSession();
+            }
+        });
+    }
+
+    attachRemoteAudio(session) {
+        const remoteAudio = this.ui?.remoteAudio;
+        const pc = session?.sessionDescriptionHandler?.peerConnection;
+        if (!remoteAudio || !pc) {
+            return;
+        }
+
+        const bindStream = (stream) => {
+            if (!stream) {
+                return;
+            }
+
+            remoteAudio.srcObject = stream;
+            remoteAudio.muted = false;
+            remoteAudio.autoplay = true;
+            remoteAudio.play().catch(() => {});
+        };
+
+        pc.ontrack = (event) => {
+            const stream = event.streams?.[0] || new MediaStream([event.track]);
+            bindStream(stream);
+            // Once real audio track arrives, never keep synthetic ringer over it.
+            this.stopAllLocalRingers();
+        };
+
+        const stream = new MediaStream();
+        pc.getReceivers().forEach((receiver) => {
+            if (receiver.track) {
+                stream.addTrack(receiver.track);
+            }
+        });
+        if (stream.getTracks().length > 0) {
+            bindStream(stream);
+            this.stopAllLocalRingers();
+        }
+    }
+
+    async answer() {
+        if (!this.session) {
+            return;
+        }
+
+        const state = this.session.state;
+        if (
+            state === SessionState.Established ||
+            state === SessionState.Terminating ||
+            state === SessionState.Terminated
+        ) {
+            return;
+        }
+
+        this.stopAllLocalRingers();
+
+        await this.session.accept({
+            sessionDescriptionHandlerOptions: {
+                constraints: { audio: true, video: false },
+            },
+            sessionDescriptionHandlerModifiers: [
+                (description) => {
+                    description.sdp = description.sdp.replace(/^(m=video )\d+(.*)$/gm, '$10$2');
+                    return Promise.resolve(description);
+                },
+            ],
+        });
+        this.logPhone('info', 'SIP INVITE accepted (agent leg)', {
+            peer: this.currentCallPeer,
+            awaitingDestinationBridge: this.awaitingDestinationBridge,
+        });
+        this.attachRemoteAudio(this.session);
+    }
+
+    async hangup(reason = 'unknown') {
+        if (this.hangupInFlight) {
+            return;
+        }
+        this.hangupInFlight = true;
+        const morpheusUuid = this.morpheusCallUuid;
+        const relatedUuids = Array.from(this.trackedCallUuids);
+
+        this.userInitiatedHangup = true;
+
+        this.logPhone('info', 'Hangup requested', {
+            reason,
+            morpheusCallUuid: morpheusUuid,
+            bridgedCallUuid: this.bridgedCallUuid,
+            relatedUuids,
+            sessionState: this.session?.state ?? null,
+            awaitingDestinationBridge: this.awaitingDestinationBridge,
+            peer: this.currentCallPeer,
+        });
+
+        this.stopDestinationPoll();
+        this.stopAllLocalRingers();
+
+        if (morpheusUuid) {
+            await this.hangupMorpheusCall(morpheusUuid);
+        }
+
+        try {
+            if (this.session) {
+                const state = this.session.state;
+                if (state === SessionState.Initial || state === SessionState.Establishing) {
+                    if (this.session instanceof Inviter) {
+                        await this.session.cancel();
+                    } else {
+                        await this.session.reject();
+                    }
+                } else if (state !== SessionState.Terminating && state !== SessionState.Terminated) {
+                    await this.session.bye();
+                }
+            }
+        } catch (error) {
+            this.logPhone('warn', 'Local SIP hangup failed after Morpheus hangup', {
+                reason,
+                error: error instanceof Error ? error.message : String(error),
+                morpheusCallUuid: morpheusUuid,
+            });
+        } finally {
+            this.morpheusCallUuid = null;
+            this.pendingClickToCall = false;
+            this.userInitiatedHangup = false;
+            this.hangupInFlight = false;
+            this.clearSession();
+        }
+    }
+
+    clearSession() {
+        this.session = null;
+        this.stopAllLocalRingers();
+        this.stopDestinationPoll();
+        hideLoadingOverlay();
+        this.stopCallTimer();
+        this.recordingActive = false;
+        this.updateRecordingUi();
+        this.setCallContext(null, '');
+        this.morpheusCallUuid = null;
+        this.bridgedCallUuid = null;
+        this.trackedCallUuids.clear();
+        this.pendingClickToCall = false;
+        this.clickToCallActive = false;
+        this.awaitingDestinationBridge = false;
+        this.awaitingAgentLegAnswer = false;
+        this.directDialActive = false;
+        this.callOnHold = false;
+        this.hangupInFlight = false;
+        this.lastDialedDestination = '';
+        this.updateHoldUi();
+
+        this.updateCallCard({ visible: false });
+        this.updateFloatingPopup({ visible: false });
+
+        if (this.ui?.remoteAudio) {
+            this.ui.remoteAudio.srcObject = null;
+        }
+
+        if (this.ui?.bridgePanel && !this.ui.bridgePanel.classList.contains('hidden')) {
+            this.setState('registered', 'Embedded phone');
+
+            return;
+        }
+
+        if (this.registerer?.state === RegistererState.Registered) {
+            this.setState('registered');
+        } else {
+            this.setState('offline');
+        }
+    }
+
+    async disconnect(resetUi = true) {
+        this.session = null;
+        this.stopRingtone();
+        this.stopRingback();
+        this.stopCallTimer();
+        this.setCallContext(null, '');
+
+        if (this.registerer) {
+            try {
+                await this.registerer.unregister();
+            } catch {
+                // ignore
+            }
+            this.registerer = null;
+        }
+
+        if (this.userAgent) {
+            try {
+                await this.userAgent.stop();
+            } catch {
+                // ignore
+            }
+            this.userAgent = null;
+        }
+
+        if (resetUi) {
+            this.setState('offline');
+            this.updateWssStatus('Not connected');
+        }
+    }
+
+    async restoreConnection() {
+        if (
+            this.connectPromise ||
+            this.state === 'connecting' ||
+            (!window.isSecureContext && window.location.protocol === 'http:')
+        ) {
+            return;
+        }
+
+        if (this.canDirectDial()) {
+            this.updateWssStatus('Connected', (this.activeWssUrl || this.configuredWssUrl()).replace(/^wss:\/\//, ''));
+
+            return;
+        }
+
+        const extension = selectedExtension();
+        if (!extension) {
+            return;
+        }
+
+        try {
+            await this.connect(extension);
+        } catch {
+            await this.disconnect(false).catch(() => {});
+            this.lastError = '';
+            this.setState('offline');
+            this.updateWssStatus('Failed', 'click Connect line');
+        }
+    }
+
+    async autoConnectOnBoot() {
+        ensureDefaultExtensionSelected();
+        const extension = selectedExtension();
+        const wssUrl = this.configuredWssUrl();
+
+        if (this.ui?.transport) {
+            this.ui.transport.textContent = wssUrl;
+        }
+
+        if (!extension) {
+            this.updateWssStatus('Not connected', 'select extension');
+
+            return;
+        }
+
+        wssConsoleLog('info', 'Auto-opening Morpheus WebSocket on page load', {
+            url: wssUrl,
+            extension,
+            hint: 'Filter DevTools Network tab by WS to see this connection',
+        });
+
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+            this.autoConnectAttempt = attempt;
+
+            try {
+                await this.restoreConnection();
+
+                if (this.canDirectDial() && this.isTransportConnected()) {
+                    wssConsoleLog('info', 'Morpheus WebSocket registered on page load', {
+                        url: this.activeWssUrl || wssUrl,
+                        extension,
+                        attempt,
+                    });
+                    this.startTransportWatchdog();
+
+                    return;
+                }
+            } catch (error) {
+                wssConsoleLog('warn', `Auto-connect attempt ${attempt} failed`, {
+                    url: wssUrl,
+                    extension,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
+
+            if (attempt < 3) {
+                await new Promise((resolve) => window.setTimeout(resolve, 1500 * attempt));
+            }
+        }
+
+        this.updateWssStatus('Not connected', 'click Connect line');
+        showToast(
+            `Click Connect line to open WebSocket (${wssUrl.replace(/^wss:\/\//, '')}) before calling.`,
+            'warning',
+        );
+    }
+
+    isReady() {
+        if (this.isBridgeMode()) {
+            return true;
+        }
+
+        return (
+            this.state === 'registered' ||
+            this.state === 'dialing' ||
+            this.state === 'in-call' ||
+            this.state === 'ringing'
+        );
+    }
+}
+
+export function getWebphone() {
+    if (!singleton) {
+        singleton = new ApexWebphone();
+    }
+
+    if (typeof window !== 'undefined') {
+        window.morpheusWebphoneDebug = window.morpheusWebphoneDebug || { logs: [] };
+        window.morpheusWebphoneDebug.getState = () => singleton.getDebugState();
+        window.morpheusWebphoneDebug.getLogs = () => window.morpheusWebphoneDebug.logs || [];
+    }
+
+    return singleton;
+}
+
+export async function ensureWebphoneReady(options = {}) {
+    const { silent = false } = options;
+    const phone = getWebphone();
+    ensureDefaultExtensionSelected();
+    const extension = selectedExtension();
+
+    if (!extension) {
+        if (!silent) {
+            showToast('Select your extension before calling.', 'error');
+        }
+
+        return false;
+    }
+
+    const normalized = String(extension).replace(/\D/g, '') || String(extension);
+
+    try {
+        await phone.assertTransportForOriginate();
+
+        return phone.canDirectDial() && phone.isTransportConnected();
+    } catch (error) {
+        if (!silent) {
+            phone.handleConnectFailure(error);
+        } else {
+            phone.lastError = error?.message || 'Could not connect phone.';
+            phone.setState('offline');
+        }
+
+        return false;
+    }
+}
+
+export function markDialerClickToCallPending() {
+    getWebphone().markClickToCallPending();
+}
+
+export function cancelPendingWebphoneConnect() {
+    getWebphone().cancelPendingConnect();
+}
+
+export function canWebphoneDirectDial() {
+    return getWebphone().canDirectDial();
+}
+
+export async function placeWebphoneCall(destination) {
+    throw new Error('Outbound calls must use the Call button — the server places Morpheus click-to-call.');
+}
+
+export function bootCommunicationsWebphone() {
+    const panel = document.querySelector('[data-webphone-panel]');
+    if (!panel) {
+        return;
+    }
+
+    const phone = getWebphone();
+    phone.bindPanel(panel);
+
+    if (!window.isSecureContext && window.location.protocol === 'http:') {
+        phone.ui.hint.textContent =
+            'Apex is on HTTP — use the embedded Morpheus phone (HTTPS) for audio.';
+        phone.ui.bridgeBtn?.classList.remove('hidden');
+        return;
+    }
+
+    phone.autoConnectOnBoot().catch((error) => {
+        wssConsoleLog('error', 'Webphone auto-connect failed', {
+            error: error instanceof Error ? error.message : String(error),
+        });
+    });
+}
+
+export async function teardownWebphoneForTurbo() {
+    const phone = singleton;
+    if (!phone) {
+        return;
+    }
+
+    phone.stopTransportWatchdog();
+    phone.stopDestinationPoll();
+    phone.cancelPendingConnect();
+    await phone.disconnect(false).catch(() => {});
+    phone.panel = null;
+    phone.ui = null;
+    phone.updateWssStatus('Not connected');
+}

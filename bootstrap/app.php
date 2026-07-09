@@ -14,6 +14,10 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->trustProxies(at: '*');
 
+        $middleware->validateCsrfTokens(except: [
+            'webhooks/morpheus/*',
+        ]);
+
         $middleware->alias([
             'communications.admin' => \App\Http\Middleware\EnsureCommunicationsAdminAccess::class,
         ]);

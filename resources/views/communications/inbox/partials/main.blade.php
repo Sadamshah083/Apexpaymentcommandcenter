@@ -123,21 +123,15 @@
     @break
 
     @case('dialer')
-        <div class="ghl-inbox-conversation-scroll">
-            @include('communications.inbox.partials.panels.dialer')
-        </div>
+        @include('communications.inbox.partials.panels.dialer')
     @break
 
     @default
-        <div class="ghl-inbox-conversation-scroll ghl-inbox-conversation-scroll--center">
-            @include('communications.partials.center-dialer-hub', [
-                'routePrefix' => $routePrefix,
-                'phoneUsers' => $phoneUsers ?? [],
-                'morpheusExtensions' => $morpheusExtensions ?? [],
-                'defaultCallerId' => $defaultCallerId ?? null,
-                'prefillNumber' => $prefillNumber ?? null,
-                'callLogs' => $callLogs ?? [],
-                'clickToCall' => $clickToCall ?? null,
+        <div class="ghl-inbox-conversation-scroll">
+            @include('communications.inbox.partials.empty', [
+                'icon' => '💬',
+                'title' => 'Select a conversation',
+                'message' => 'Pick a contact, call, or message from the inbox. Use Messages or Phone in the bar above.',
             ])
         </div>
 @endswitch
