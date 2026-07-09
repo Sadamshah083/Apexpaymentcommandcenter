@@ -2447,11 +2447,20 @@
     max-height: none;
 }
 
+.ghl-comm-app .ghl-inbox-body-wide .ghl-inbox-conversation-scroll--center {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    height: 100%;
+}
+
 .ghl-comm-phone-mode .ghl-inbox-body-wide .ghl-inbox-conversation-scroll--center {
-    flex: 0 0 auto;
+    flex: 1 1 auto !important;
     min-height: 0 !important;
     max-height: none !important;
-    height: auto !important;
+    height: 100% !important;
     padding-bottom: 0 !important;
 }
 
