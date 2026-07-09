@@ -2374,63 +2374,70 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
 }
 
 .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='logs'].ch-dial-workspace--compact {
-    flex: 0 0 auto !important;
-    height: auto !important;
+    flex: 1 1 auto !important;
+    height: 100% !important;
     min-height: 0 !important;
     padding-bottom: 0 !important;
-    overflow: visible;
+    overflow: hidden;
 }
 
 .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='logs'] .ch-dial-workspace__grid--phone-split {
-    flex: 0 0 auto !important;
-    height: auto !important;
+    flex: 1 1 auto !important;
+    height: 100% !important;
     min-height: 0 !important;
-    max-height: none !important;
-    grid-template-rows: auto !important;
-    align-items: start !important;
+    max-height: 100% !important;
+    grid-template-rows: minmax(0, 1fr) !important;
+    align-items: stretch !important;
+    overflow: hidden;
 }
 
 .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='logs'] .ghl-dialer-center-logs--full {
-    height: auto !important;
-    flex: 0 0 auto !important;
+    height: 100% !important;
+    flex: 1 1 auto !important;
     align-self: stretch;
-    max-height: min(72dvh, calc(100dvh - 8.5rem));
+    max-height: 100% !important;
+    min-height: 0 !important;
 }
 
 .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='logs'] .ghl-dialer-center-logs__scroll {
-    flex: 0 0 auto;
-    height: auto;
-    max-height: min(68dvh, calc(100dvh - 9.5rem));
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;
+    max-height: 100%;
+    overflow-y: auto !important;
     padding-bottom: 0 !important;
 }
 
 .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='logs'] .ghl-dialer-recent-list--full {
-    flex: 0 0 auto;
-    max-height: none !important;
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: 100% !important;
+    overflow: hidden;
 }
 
 .ghl-comm-phone-mode .ghl-inbox-conversation-scroll--center:has(.ghl-dialer-center[data-phone-view='logs']) {
-    flex: 0 0 auto !important;
-    height: auto !important;
+    flex: 1 1 auto !important;
+    height: 100% !important;
     min-height: 0 !important;
-    overflow: visible !important;
+    overflow: hidden !important;
     padding-bottom: 0 !important;
-    justify-content: flex-start !important;
+    justify-content: stretch !important;
 }
 
 .ghl-comm-phone-mode.ghl-inbox:has(.ghl-dialer-center[data-phone-view='logs']) {
-    height: auto !important;
-    max-height: none !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
     min-height: 0 !important;
 }
 
 .ghl-comm-phone-mode .ghl-inbox-card:has(.ghl-dialer-center[data-phone-view='logs']),
 .ghl-comm-phone-mode .ghl-inbox-body-wide:has(.ghl-dialer-center[data-phone-view='logs']),
 .ghl-comm-phone-mode .ghl-inbox-conversation:has(.ghl-dialer-center[data-phone-view='logs']) {
-    flex: 0 0 auto !important;
-    height: auto !important;
+    flex: 1 1 auto !important;
+    height: 100% !important;
     min-height: 0 !important;
-    max-height: none !important;
+    max-height: 100% !important;
+    overflow: hidden;
 }
 
 .ghl-comm-phone-mode .ch-dial-workspace__grid--phone-split {
@@ -2978,8 +2985,9 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
     }
 
     .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='logs'] {
-        flex: 0 0 auto;
-        height: auto;
+        flex: 1 1 auto;
+        height: 100%;
+        min-height: 0;
         padding-bottom: 0;
     }
 
@@ -2998,10 +3006,10 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
     }
 
     .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='logs'] .ch-dial-workspace__grid--phone-split {
-        flex: 0 0 auto;
+        flex: 1 1 auto;
         min-height: 0;
-        height: auto;
-        overflow: visible;
+        height: 100%;
+        overflow: hidden;
     }
 
     .ghl-comm-phone-mode .ch-dial-workspace__grid--phone-split {
@@ -3013,6 +3021,13 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
         flex: 1;
         height: auto;
         overflow: visible;
+    }
+
+    .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='logs'] .ch-dial-workspace__grid--phone-split {
+        flex: 1 1 auto !important;
+        height: 100% !important;
+        min-height: 0 !important;
+        overflow: hidden !important;
     }
 
     .ghl-comm-phone-mode .ghl-dialer-center-keypad--borderless {
@@ -3028,27 +3043,27 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
     }
 
     .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='logs'] .ghl-dialer-center-logs--full {
-        flex: 0 1 auto;
+        flex: 1 1 auto;
         min-height: 0;
-        height: auto;
-        max-height: min(70dvh, calc(100dvh - 9.5rem));
+        height: 100%;
+        max-height: 100%;
         overflow: hidden;
     }
 
     .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='logs'] .ghl-dialer-center-logs__scroll {
-        flex: 0 1 auto;
+        flex: 1 1 auto;
         min-height: 0;
-        height: auto;
-        max-height: min(65dvh, calc(100dvh - 10.5rem));
+        height: 100%;
+        max-height: 100%;
         overflow-y: auto !important;
-        padding-bottom: 0.15rem;
+        padding-bottom: 0 !important;
     }
 
     .ghl-comm-phone-mode .ghl-dialer-center-logs--full {
         order: 0;
-        flex: 0 1 auto;
+        flex: 1 1 auto;
         min-height: 0;
-        max-height: none;
+        max-height: 100%;
     }
 
     .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='dialer'] .ghl-dialer-form--phone {
@@ -3070,9 +3085,9 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
     }
 
     .ghl-comm-phone-mode .ghl-inbox-conversation-scroll--center:has(.ghl-dialer-center[data-phone-view='logs']) {
-        overflow: visible !important;
-        flex: 0 0 auto !important;
-        height: auto !important;
+        flex: 1 1 auto !important;
+        height: 100% !important;
+        overflow: hidden !important;
         padding-bottom: 0 !important;
     }
 
@@ -3217,17 +3232,19 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
     }
 
     .ghl-comm-phone-mode.ghl-inbox:has(.ghl-dialer-center[data-phone-view='logs']) {
-        height: auto !important;
-        max-height: none !important;
+        height: 100vh !important;
+        max-height: 100vh !important;
         min-height: 0 !important;
     }
 
     .ghl-comm-phone-mode .ghl-inbox-card:has(.ghl-dialer-center[data-phone-view='logs']),
     .ghl-comm-phone-mode .ghl-inbox-body-wide:has(.ghl-dialer-center[data-phone-view='logs']),
     .ghl-comm-phone-mode .ghl-inbox-conversation:has(.ghl-dialer-center[data-phone-view='logs']) {
-        flex: 0 0 auto;
-        height: auto;
+        flex: 1 1 auto;
+        height: 100%;
         min-height: 0;
+        max-height: 100%;
+        overflow: hidden;
     }
 
     .ghl-comm-phone-mode .ghl-inbox-card {

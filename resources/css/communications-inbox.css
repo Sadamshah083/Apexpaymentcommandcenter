@@ -2463,15 +2463,16 @@
 }
 
 .ghl-comm-phone-mode .ghl-inbox-body-wide .ghl-inbox-conversation-scroll--center:has(.ghl-dialer-center[data-phone-view='logs']) {
-    flex: 0 0 auto !important;
-    height: auto !important;
+    flex: 1 1 auto !important;
+    height: 100% !important;
     min-height: 0 !important;
-    max-height: none !important;
+    max-height: 100% !important;
     padding-bottom: 0 !important;
 }
 
 .ghl-comm-phone-mode .ghl-inbox-conversation-scroll--center:has(.ghl-dialer-center[data-phone-view='logs']) {
     min-height: 0 !important;
+    height: 100% !important;
 }
 
 .ghl-inbox-body-wide .ch-dial-workspace--compact {
