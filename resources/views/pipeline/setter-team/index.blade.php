@@ -16,6 +16,8 @@
 
         @include('pipeline.partials.dashboard-widgets', ['dashboard' => $dashboard ?? []])
 
+        @include('pipeline.partials.campaigns-overview', ['campaigns' => $campaigns ?? collect(), 'dashboard' => $dashboard ?? []])
+
         @include('pipeline.partials.portal-sync-context', ['portalView' => 'setter_team', 'leads' => $leads])
 
         @include('pipeline.partials.detail-focus-banner', ['focus' => $focus ?? null])
@@ -58,8 +60,17 @@
                         @endforeach
                     </select>
                 </div>
+                <div class="app-field min-w-[150px]">
+                    <label for="campaign" class="app-label">Campaign</label>
+                    <select name="campaign" id="campaign" class="app-input">
+                        <option value="">All campaigns</option>
+                        @foreach ($campaigns ?? [] as $campaign)
+                            <option value="{{ $campaign->id }}" @selected((string) request('campaign') === (string) $campaign->id)>{{ $campaign->name }}</option>
+                        @endforeach
+                    </select>
+                </div>
                 <button type="submit" class="app-btn app-btn-primary">Search</button>
-                @if (request()->filled('search') || request()->filled('setter') || request()->filled('phase'))
+                @if (request()->filled('search') || request()->filled('setter') || request()->filled('phase') || request()->filled('campaign'))
                     <a href="{{ route('portal.setter-team.dashboard') }}" class="app-btn app-btn-secondary">Clear</a>
                 @endif
             </form>

@@ -11,6 +11,7 @@ use App\Services\Pipeline\CampaignService;
 use App\Services\Pipeline\LeadSegmentationService;
 use App\Services\Pipeline\PipelineLeadReleaseService;
 use App\Services\Workspace\WorkspaceSyncService;
+use App\Support\WorkflowAssignmentRoles;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -154,6 +155,7 @@ class WorkflowService
                 ->wherePivot('role', 'appointment_setter')
                 ->wherePivot('status', 'active')
                 ->get(),
+            'teamLeads' => WorkflowAssignmentRoles::setterTeamLeadsFor($workspace),
             'campaign' => $workflow->campaign,
             'campaigns' => $this->campaigns->listForWorkspace($workspace),
             'leadList' => $workflow->leadList,

@@ -278,6 +278,10 @@ class RoleDashboardService
             });
         }
 
+        if (! empty($filters['campaign'])) {
+            $query->where('campaign_id', (int) $filters['campaign']);
+        }
+
         if (! empty($filters['focus'])) {
             $this->applyFocusFilter($query, $filters, $workspace);
         }

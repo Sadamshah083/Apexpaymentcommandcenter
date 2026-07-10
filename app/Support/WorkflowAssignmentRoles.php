@@ -32,6 +32,18 @@ class WorkflowAssignmentRoles
     /**
      * @return Collection<int, User>
      */
+    public static function setterTeamLeadsFor(Workspace $workspace): Collection
+    {
+        return $workspace->users()
+            ->wherePivot('status', 'active')
+            ->wherePivot('role', self::setterTeamLeadRole())
+            ->orderBy('users.name')
+            ->get();
+    }
+
+    /**
+     * @return Collection<int, User>
+     */
     public static function teamLeadsFor(Workspace $workspace): Collection
     {
         return $workspace->users()

@@ -28,9 +28,14 @@ class LeadPipelineService
         return match ($role) {
             'appointment_setter' => $lead->pipeline_phase === 'with_setter'
                 && (int) $lead->assigned_user_id === $user->id,
-            'appointment_setter_team_lead' => in_array($lead->pipeline_phase, ['with_setter', 'appointment_settled', 'with_closer', 'closed'], true)
-                && $lead->assigned_setter_id
-                && $this->isSetterOnTeam($workspace, (int) $lead->assigned_setter_id),
+            'appointment_setter_team_lead' => (
+                ($lead->pipeline_phase === 'enriched' && $lead->status === 'enriched' && ! $lead->assigned_user_id)
+                || (
+                    in_array($lead->pipeline_phase, ['with_setter', 'appointment_settled', 'with_closer', 'closed'], true)
+                    && $lead->assigned_setter_id
+                    && $this->isSetterOnTeam($workspace, (int) $lead->assigned_setter_id)
+                )
+            ),
             'closers_team_lead' => in_array($lead->pipeline_phase, ['appointment_settled', 'with_closer', 'closed'], true),
             'closer' => in_array($lead->pipeline_phase, ['with_closer', 'closed'], true)
                 && (

@@ -7,6 +7,7 @@ use App\Services\Pipeline\CampaignBatchService;
 use App\Services\Pipeline\CampaignService;
 use App\Services\Workflow\WorkflowProviderStatusService;
 use App\Services\Workspace\WorkspaceContextService;
+use App\Support\WorkflowAssignmentRoles;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -72,6 +73,7 @@ class CampaignController extends Controller
                 ->wherePivot('role', 'appointment_setter')
                 ->wherePivot('status', 'active')
                 ->get(),
+            'setterTeamLeads' => WorkflowAssignmentRoles::setterTeamLeadsFor($workspace),
             'enrichmentConfigured' => $this->providerStatus->isEnrichmentConfigured(),
             'enrichmentConfigMessage' => $this->providerStatus->configurationMessage(),
             'enrichmentStatus' => $this->providerStatus->getEnrichmentStatus(
@@ -117,6 +119,31 @@ class CampaignController extends Controller
         return redirect()
             ->back()
             ->with('success', "{$count} leads distributed to appointment setters.");
+    }
+
+    public function assignTeamLead(Request $request, LeadCampaign $campaign)
+    {
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+        $this->ensureInWorkspace($campaign, $workspace);
+
+        $data = $request->validate([
+            'team_lead_id' => 'required|integer|exists:users,id',
+            'lead_count' => 'required|integer|min:1|max:5000',
+            'workflow_id' => 'nullable|integer',
+        ]);
+
+        $count = $this->batchService->assignToTeamLead(
+            $workspace,
+            Auth::user(),
+            $campaign->id,
+            (int) $data['team_lead_id'],
+            (int) $data['lead_count'],
+            filled($data['workflow_id'] ?? null) ? (int) $data['workflow_id'] : null,
+        );
+
+        return redirect()
+            ->back()
+            ->with('success', "{$count} leads assigned to the team lead's setters.");
     }
 
     protected function ensureInWorkspace(LeadCampaign $campaign, $workspace): void

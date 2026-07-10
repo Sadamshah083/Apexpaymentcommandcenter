@@ -139,6 +139,7 @@ Route::prefix('admin')->name('admin.')->middleware([
         Route::get('/{campaign}', [CampaignController::class, 'show'])->name('show');
         Route::post('/{campaign}/enrich', [CampaignController::class, 'enrich'])->name('enrich');
         Route::post('/{campaign}/distribute', [CampaignController::class, 'distribute'])->name('distribute');
+        Route::post('/{campaign}/assign-team-lead', [CampaignController::class, 'assignTeamLead'])->name('assign-team-lead');
     });
 
     Route::post('leads/{lead}/approve', [WorkflowController::class, 'approveLead'])->name('leads.approve');

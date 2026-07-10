@@ -17,6 +17,7 @@ class CampaignBatchService
     public function __construct(
         protected PipelineLeadReleaseService $releaseService,
         protected WorkflowProviderStatusService $providerStatus,
+        protected SetterDistributionService $setterDistribution,
     ) {}
 
     public function paginateLeads(
@@ -122,6 +123,45 @@ class CampaignBatchService
         }
 
         return $count;
+    }
+
+    public function assignToTeamLead(
+        Workspace $workspace,
+        User $actor,
+        int $campaignId,
+        int $teamLeadId,
+        int $leadCount,
+        ?int $workflowId = null,
+    ): int {
+        $this->ensureCampaignInWorkspace($workspace, $campaignId);
+
+        $teamLead = $workspace->users()
+            ->where('users.id', $teamLeadId)
+            ->wherePivot('status', 'active')
+            ->first();
+
+        if (! $teamLead) {
+            throw ValidationException::withMessages([
+                'team_lead_id' => 'Selected team lead is not active in this workspace.',
+            ]);
+        }
+
+        $assigned = $this->setterDistribution->assignCampaignLeadsToTeamLead(
+            $workspace,
+            $campaignId,
+            $teamLead,
+            $leadCount,
+            $actor,
+            $workflowId,
+        );
+
+        if ($assigned === 0) {
+            throw ValidationException::withMessages([
+                'lead_count' => 'No enriched unassigned leads available, or no active setters on the team.',
+            ]);
+        }
+
+        return $assigned;
     }
 
     protected function baseLeadQuery(

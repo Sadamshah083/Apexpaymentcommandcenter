@@ -2,7 +2,7 @@
     use App\Support\SalesOps;
     use App\Support\WorkflowAssignmentRoles;
 
-    $teamLeads = $teamLeads ?? collect();
+    $teamLeads = $setterTeamLeads ?? $teamLeads ?? collect();
     $setterTeamLeadRole = WorkflowAssignmentRoles::setterTeamLeadRole();
 @endphp
 

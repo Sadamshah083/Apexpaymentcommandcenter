@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\WorkflowLead;
 use App\Services\Dashboard\DashboardDetailService;
+use App\Services\Pipeline\CampaignService;
 use App\Services\Pipeline\CloserAssignmentService;
 use App\Services\Pipeline\LeadPipelineService;
 use App\Services\Pipeline\RoleDashboardService;
@@ -25,6 +26,7 @@ class PipelineController extends Controller
         protected CloserAssignmentService $closerAssignment,
         protected SetterDistributionService $setterDistribution,
         protected DashboardDetailService $detailService,
+        protected CampaignService $campaigns,
     ) {}
 
     public function portalDashboard()
@@ -108,8 +110,9 @@ class PipelineController extends Controller
         $unassignedLeads = $this->setterDistribution->unassignedLeadCount($workspace);
         $dashboard = $this->portalDashboard->forUser($user, $workspace);
         $focus = $this->detailService->resolvePortalFocus($request, $workspace, $user);
+        $campaigns = $this->campaigns->portalSummaries($workspace);
 
-        return view('pipeline.setter-team.index', compact('workspace', 'leads', 'user', 'teamMetrics', 'dashboard', 'setters', 'unassignedLeads', 'focus'));
+        return view('pipeline.setter-team.index', compact('workspace', 'leads', 'user', 'teamMetrics', 'dashboard', 'setters', 'unassignedLeads', 'focus', 'campaigns'));
     }
 
     public function closerTeamDashboard(Request $request)
@@ -131,8 +134,9 @@ class PipelineController extends Controller
         $closers = $this->dashboardService->availableClosers($workspace);
         $dashboard = $this->portalDashboard->forUser($user, $workspace);
         $focus = $this->detailService->resolvePortalFocus($request, $workspace, $user);
+        $campaigns = $this->campaigns->portalSummaries($workspace);
 
-        return view('pipeline.closer-team.index', compact('workspace', 'leads', 'user', 'teamMetrics', 'dashboard', 'closers', 'focus'));
+        return view('pipeline.closer-team.index', compact('workspace', 'leads', 'user', 'teamMetrics', 'dashboard', 'closers', 'focus', 'campaigns'));
     }
 
     public function closerTeamQueue(Request $request)
@@ -299,6 +303,7 @@ class PipelineController extends Controller
             'tier' => $request->input('tier'),
             'status' => $request->input('status'),
             'member' => $request->input('member'),
+            'campaign' => $request->input('campaign'),
         ], fn ($value) => filled($value));
     }
 }

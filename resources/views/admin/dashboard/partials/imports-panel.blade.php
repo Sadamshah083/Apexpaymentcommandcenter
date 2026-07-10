@@ -166,6 +166,6 @@
         </div>
     @endif
 
-    @include('workflows.partials.import-modals', ['teamLeads' => $team ?? collect()])
+    @include('workflows.partials.import-modals', ['setterTeamLeads' => $setterTeamLeads ?? $team ?? collect()])
 </div>
 @endif

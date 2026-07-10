@@ -218,6 +218,59 @@ class SetterDistributionService
         return $assigned;
     }
 
+    public function assignCampaignLeadsToTeamLead(
+        Workspace $workspace,
+        int $campaignId,
+        User $teamLead,
+        int $count,
+        User $actor,
+        ?int $workflowId = null,
+    ): int {
+        if ($count < 1 || $teamLead->getWorkspaceRole($workspace->id) !== WorkflowAssignmentRoles::setterTeamLeadRole()) {
+            return 0;
+        }
+
+        $setters = $workspace->users()
+            ->wherePivot('role', 'appointment_setter')
+            ->wherePivot('status', 'active')
+            ->orderBy('users.name')
+            ->get();
+
+        if ($setters->isEmpty()) {
+            return 0;
+        }
+
+        $query = WorkflowLead::query()
+            ->where('campaign_id', $campaignId)
+            ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspace->id))
+            ->where('status', 'enriched')
+            ->where('pipeline_phase', 'enriched')
+            ->whereNull('assigned_user_id');
+
+        if ($workflowId) {
+            $query->where('workflow_id', $workflowId);
+        }
+
+        $poolSize = (clone $query)->count();
+        $toAssign = min($count, $poolSize);
+        if ($toAssign === 0) {
+            return 0;
+        }
+
+        $leads = $query->orderBy('row_number')->limit($toAssign)->get();
+
+        $assigned = 0;
+        $setterCount = $setters->count();
+        foreach ($leads as $index => $lead) {
+            $setter = $setters[$index % $setterCount];
+            if ($this->assignToSetter($workspace, $lead, $setter, $actor, $teamLead)) {
+                $assigned++;
+            }
+        }
+
+        return $assigned;
+    }
+
     public function unassignedWorkflowLeadCount(Workflow $workflow): int
     {
         return WorkflowLead::query()

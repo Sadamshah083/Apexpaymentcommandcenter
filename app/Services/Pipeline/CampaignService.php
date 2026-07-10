@@ -81,4 +81,33 @@ class CampaignService
             ->orderBy('name')
             ->get();
     }
+
+    /**
+     * Campaign summaries for portal team lead dashboards.
+     *
+     * @return Collection<int, LeadCampaign>
+     */
+    public function portalSummaries(Workspace $workspace): Collection
+    {
+        return LeadCampaign::query()
+            ->where('workspace_id', $workspace->id)
+            ->where('status', 'active')
+            ->withCount([
+                'leads as leads_count',
+                'leads as ready_count' => fn ($q) => $q
+                    ->where('workflow_leads.status', 'enriched')
+                    ->whereNull('workflow_leads.assigned_user_id'),
+                'leads as active_setter_count' => fn ($q) => $q
+                    ->where('workflow_leads.pipeline_phase', 'with_setter'),
+                'leads as handoff_count' => fn ($q) => $q
+                    ->where('workflow_leads.pipeline_phase', 'appointment_settled')
+                    ->whereNull('workflow_leads.assigned_closer_id'),
+                'leads as active_closer_count' => fn ($q) => $q
+                    ->where('workflow_leads.pipeline_phase', 'with_closer'),
+                'workflows as imports_count',
+            ])
+            ->whereHas('leads')
+            ->orderByDesc('leads_count')
+            ->get();
+    }
 }

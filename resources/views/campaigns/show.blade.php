@@ -48,7 +48,32 @@
             @endif
             @if (($counts['ready_to_distribute'] ?? 0) > 0)
                 <div class="app-card app-card-padded space-y-3">
-                    <h3 class="app-section-title">Batch assign setters</h3>
+                    <h3 class="app-section-title">Assign to team lead</h3>
+                    <p class="text-xs text-zinc-500">Distribute enriched leads to an Appointment Setter Team Lead. Leads are split across their active setters.</p>
+                    <form method="POST" action="{{ route('admin.campaigns.assign-team-lead', $campaign) }}" class="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                        @csrf
+                        @if ($workflowId)<input type="hidden" name="workflow_id" value="{{ $workflowId }}">@endif
+                        <div class="app-field">
+                            <label class="app-label">Team lead</label>
+                            <select name="team_lead_id" class="app-input" required @disabled(($setterTeamLeads ?? collect())->isEmpty())>
+                                <option value="">Select team lead…</option>
+                                @foreach ($setterTeamLeads ?? [] as $teamLead)
+                                    <option value="{{ $teamLead->id }}">{{ $teamLead->name }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+                        <div class="app-field">
+                            <label class="app-label">Number of leads (max {{ number_format($counts['ready_to_distribute']) }})</label>
+                            <input type="number" name="lead_count" class="app-input" min="1" max="{{ max(1, $counts['ready_to_distribute']) }}" value="{{ min($counts['ready_to_distribute'], max(1, $counts['ready_to_distribute'])) }}" required>
+                        </div>
+                        <button type="submit" class="app-btn app-btn-primary app-btn-sm" @disabled(($setterTeamLeads ?? collect())->isEmpty())>Assign to team</button>
+                    </form>
+                    @if (($setterTeamLeads ?? collect())->isEmpty())
+                        <p class="text-xs text-amber-700">Add an Appointment Setter Team Lead in User Management first.</p>
+                    @endif
+                </div>
+                <div class="app-card app-card-padded space-y-3">
+                    <h3 class="app-section-title">Batch assign setters (direct)</h3>
                     <form method="POST" action="{{ route('admin.campaigns.distribute', $campaign) }}" class="space-y-3">
                         @csrf
                         @if ($workflowId)<input type="hidden" name="workflow_id" value="{{ $workflowId }}">@endif
@@ -94,6 +119,7 @@
                     <thead>
                         <tr>
                             <th>Business</th>
+                            <th>Campaign</th>
                             <th>Import</th>
                             <th>Phone</th>
                             <th>Status</th>
@@ -105,12 +131,13 @@
                                 <td>
                                     <a href="{{ LeadRoute::show($lead, true) }}" class="font-bold hover:underline">{{ $lead->business_name }}</a>
                                 </td>
+                                <td>@include('partials.campaign-chip', ['campaign' => $lead->campaign ?? $campaign, 'compact' => true])</td>
                                 <td>{{ $lead->workflow?->name ?? '—' }}</td>
                                 <td>{{ $lead->input_phone ?: '—' }}</td>
                                 <td><x-lead-pipeline-badge :status="$lead->status" /></td>
                             </tr>
                         @empty
-                            <tr><td colspan="4" class="text-center py-8 text-zinc-500">No leads in this campaign.</td></tr>
+                            <tr><td colspan="5" class="text-center py-8 text-zinc-500">No leads in this campaign.</td></tr>
                         @endforelse
                     </tbody>
                 </table>

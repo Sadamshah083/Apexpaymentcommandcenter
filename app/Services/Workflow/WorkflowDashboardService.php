@@ -65,6 +65,7 @@ class WorkflowDashboardService
                 ->wherePivotIn('role', WorkflowAssignmentRoles::teamLeadRoles())
                 ->orderBy('users.name')
                 ->get(['users.id', 'users.name', 'users.email']),
+            'setterTeamLeads' => WorkflowAssignmentRoles::setterTeamLeadsFor($workspace),
             'pipelinePhases' => config('sales_ops.pipeline_phases', []),
             'enrichmentStatus' => $this->providerStatus->getEnrichmentStatus(
                 (bool) ($filters['refresh_enrichment'] ?? false),
