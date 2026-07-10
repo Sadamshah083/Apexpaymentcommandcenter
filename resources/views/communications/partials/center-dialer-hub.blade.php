@@ -23,8 +23,6 @@
             data-phone-logs-pane role="tabpanel" aria-label="Call logs">
             <div class="ghl-dialer-center-logs__header ch-panel__header ch-panel__header--slim">
                 <h3 class="ch-panel__title">Call logs</h3>
-                <a href="{{ route($routePrefix . 'communications.index', ['channel' => 'calls']) }}"
-                    class="comm-hub-link text-xs">All</a>
             </div>
             <div class="ghl-dialer-center-logs__scroll ch-panel__body ch-panel__body--slim ghl-dialer-recent-list ghl-dialer-recent-list--full"
                 data-call-logs-list
@@ -75,11 +73,6 @@
 
         <div class="ghl-dialer-center-keypad ghl-dialer-center-keypad--borderless ghl-dialer-center-keypad--full"
             id="ghl-phone-dial-pane-center" data-phone-dial-pane-wrap role="tabpanel" aria-label="Dial pad">
-            <div class="ghl-dialer-notes-wrap">
-                @include('communications.partials.phone-notes-panel', [
-                    'routePrefix' => $routePrefix,
-                ])
-            </div>
             <div class="ghl-phone-right-pane" data-phone-right-pane>
                 <div class="ghl-phone-dial-pane" data-phone-dial-pane>
                     <div class="ch-panel__body ch-panel__body--slim ch-panel__body--phone">

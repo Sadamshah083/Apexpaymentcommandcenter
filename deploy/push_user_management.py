@@ -14,6 +14,7 @@ from deploy._ssh import REMOTE_APP, connect, restart_queue_workers, sudo_run, su
 
 FILES = [
     "resources/views/workflows/workspaces.blade.php",
+    "resources/views/workflows/partials/add-member-modal.blade.php",
     "resources/views/workflows/partials/member-row.blade.php",
     "resources/views/workflows/partials/member-module-access.blade.php",
     "resources/views/workflows/partials/member-module-access-fields.blade.php",

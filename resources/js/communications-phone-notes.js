@@ -34,8 +34,8 @@ function escapeHtml(value) {
         .replace(/"/g, '&quot;');
 }
 
-function panelUrls(root) {
-    const panel = root.querySelector('[data-dialer-notes-panel]');
+function panelUrls() {
+    const panel = document.querySelector('[data-dialer-notes-panel]');
     if (!panel) {
         return null;
     }
@@ -161,8 +161,9 @@ async function persistCallLogNote({ callLogRef, noteText, phone = '' }) {
 }
 
 function activeUrlsFromScope() {
-    const workspace = document.querySelector('[data-phone-workspace]');
-    return workspace ? panelUrls(workspace) : null;
+    const urls = panelUrls();
+
+    return urls?.show ? urls : null;
 }
 
 function setStatus(el, message, tone = 'muted') {
@@ -277,6 +278,10 @@ function toggleRowNotes(row, forceOpen = null) {
 
 export function teardownPhoneNotesForTurbo() {
     delete document.documentElement.dataset.commPhoneNotesBound;
+    delete document.body.dataset.notesDrawerGlobalBound;
+    document.querySelectorAll('[data-dialer-notes-panel]').forEach((panel) => {
+        delete panel.dataset.notesBound;
+    });
     document.querySelectorAll('[data-call-logs-list]').forEach((list) => {
         delete list.dataset.phoneNotesListBound;
     });
@@ -305,14 +310,9 @@ export function initCommunicationsPhoneNotes(root = document) {
     };
 
     function activeUrls() {
-        for (const workspace of workspaces) {
-            const urls = panelUrls(workspace);
-            if (urls?.show) {
-                return urls;
-            }
-        }
+        const urls = panelUrls();
 
-        return null;
+        return urls?.show ? urls : null;
     }
 
     function dialerNumberInput() {
@@ -689,6 +689,7 @@ export function initCommunicationsPhoneNotes(root = document) {
     }
 
     if (document.documentElement.dataset.commPhoneNotesBound === '1') {
+        bindMainPanel();
         bindLogRows();
 
         return;
@@ -696,9 +697,24 @@ export function initCommunicationsPhoneNotes(root = document) {
 
     document.documentElement.dataset.commPhoneNotesBound = '1';
 
-    workspaces.forEach(() => {
-        bindMainPanel();
-    });
+    bindMainPanel();
+
+    if (document.body.dataset.notesDrawerGlobalBound !== '1') {
+        document.body.dataset.notesDrawerGlobalBound = '1';
+
+        document.addEventListener('click', (event) => {
+            if (!state.open) {
+                return;
+            }
+
+            if (event.target.closest('[data-dialer-notes-panel]')) {
+                return;
+            }
+
+            setDrawerOpen(false);
+        });
+    }
+
     bindLogRows();
     bindActiveCallNotes();
     bindCallLifecycle();

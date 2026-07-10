@@ -40,8 +40,17 @@ body.ghl-comm-mode .app-main {
     flex-direction: column;
 }
 
+body.ghl-comm-mode {
+    --ghl-comm-chrome-right: 3.25rem;
+}
+
 body.ghl-comm-mode .app-floating-chrome {
     display: flex;
+}
+
+body.ghl-comm-mode .app-floating-notify-btn {
+    position: relative;
+    z-index: 50;
 }
 
 @media (max-width: 1023px) {
@@ -175,7 +184,7 @@ body.ghl-comm-mode .app-shell > .flex {
     margin-left: auto;
     min-width: 0;
     position: relative;
-    z-index: 2;
+    z-index: 10050;
     overflow: visible;
 }
 
@@ -1123,6 +1132,39 @@ body.ghl-comm-mode .app-shell > .flex {
     cursor: wait;
 }
 
+.ghl-comm-connect-group.is-connecting .ghl-comm-connect-group__main:disabled {
+    opacity: 1;
+    color: #f8fafc;
+    background: #1e3a5f;
+    cursor: wait;
+}
+
+.ghl-comm-connect-group.is-connected {
+    border-color: #047857;
+    box-shadow: 0 2px 8px rgba(4, 120, 87, 0.2);
+}
+
+.ghl-comm-connect-group.is-connected .ghl-comm-connect-group__main,
+.ghl-comm-connect-group.is-connected .ghl-comm-connect-group__delete {
+    background: linear-gradient(180deg, #059669 0%, #047857 100%);
+    color: #ffffff;
+}
+
+.ghl-comm-connect-group.is-connected .ghl-comm-connect-group__label,
+.ghl-comm-connect-group.is-connected .ghl-comm-connect-group__phone {
+    color: #ffffff;
+    opacity: 1;
+}
+
+.ghl-comm-connect-group.is-connected .ghl-comm-connect-group__main:hover:not(:disabled) {
+    background: linear-gradient(180deg, #047857 0%, #065f46 100%);
+}
+
+.ghl-comm-connect-group.is-connected .ghl-comm-connect-group__delete:hover:not(:disabled) {
+    background: #065f46;
+    color: #fecaca;
+}
+
 .ghl-comm-connect-group__main.hidden {
     display: none;
 }
@@ -1768,6 +1810,11 @@ body.ghl-comm-mode .app-shell > .flex {
     min-width: 11.5rem;
     max-width: 16rem;
     width: 100%;
+    z-index: 1;
+}
+
+.ghl-line-dropdown.is-open {
+    z-index: 10070;
 }
 
 .ghl-line-dropdown__native {
@@ -2072,25 +2119,60 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
     right: auto;
     left: auto;
     z-index: auto;
-    max-width: none;
-    width: auto;
+    max-width: 100%;
+    width: 100%;
     margin: 0;
     justify-content: flex-end;
     flex-wrap: nowrap;
+    gap: 0.5rem;
+    overflow: visible;
+}
+
+.ghl-comm-global-line__status {
+    flex: 0 0 auto;
+    flex-shrink: 0;
+    align-self: center;
+    min-height: var(--ghl-comm-strip-height, 2rem);
+    padding: 0.28rem 0.55rem;
+    white-space: nowrap;
+}
+
+body.ghl-comm-mode .ghl-comm-global-line__status {
+    margin-right: 0.15rem;
 }
 
 .ghl-comm-topbar__actions .ghl-comm-global-line--toolbar {
-    flex: 0 0 auto;
+    flex: 1 1 auto;
+    min-width: 0;
     margin-left: 0;
 }
 
 .ghl-comm-topbar .ghl-comm-global-line__ext .ghl-line-dropdown {
     min-width: 10.5rem;
-    max-width: 14rem;
+    max-width: 15rem;
+}
+
+.ghl-comm-topbar .ghl-line-dropdown__trigger {
+    min-height: var(--ghl-comm-strip-height, 2rem);
+    border: 1px solid #e2e8f0;
+    border-radius: 0.5rem;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.ghl-comm-topbar .ghl-dialer-ext-field {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
 }
 
 .ghl-comm-topbar .ghl-dialer-ext-field__label {
-    font-size: 0.5625rem;
+    margin: 0;
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: #94a3b8;
+    white-space: nowrap;
 }
 
 .ghl-comm-topbar .ghl-comm-connect-group {
@@ -2117,6 +2199,14 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
     justify-content: flex-end;
     width: 100%;
     margin: 0 0 0.75rem;
+}
+
+.ghl-comm-global-line__ext {
+    flex: 0 0 auto;
+    min-width: 0;
+    position: relative;
+    z-index: 1;
+    overflow: visible;
 }
 
 .ghl-comm-global-line__ext .ghl-dialer-ext-field {
@@ -2163,28 +2253,34 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
 }
 
 .ghl-comm-phone-mode .ghl-comm-global-line--toolbar {
-    flex: 0 1 auto;
+    flex: 1 1 auto;
     min-width: 0;
     max-width: 100%;
-    gap: 0.5rem;
+    width: 100%;
+    gap: 0.45rem;
     align-items: center;
+    justify-content: flex-start;
 }
 
 .ghl-comm-phone-mode .ghl-comm-global-line__ext {
     flex: 0 0 auto;
     position: relative;
     z-index: 4;
-}
-
-.ghl-comm-phone-mode .ghl-comm-connect-strip {
-    flex: 0 0 auto;
-    position: relative;
-    z-index: 3;
     min-width: 0;
 }
 
+.ghl-comm-phone-mode .ghl-comm-connect-strip {
+    flex: 1 1 auto;
+    position: relative;
+    z-index: 3;
+    min-width: 0;
+    max-width: none;
+}
+
 .ghl-comm-phone-mode .ghl-comm-connect-group {
-    flex: 0 0 auto;
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
     max-width: none;
 }
 
@@ -2197,14 +2293,21 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
     margin-inline: 0;
 }
 
-.ghl-comm-phone-mode .ghl-comm-topbar .ghl-comm-live {
-    flex-shrink: 0;
-    position: relative;
-    z-index: 1;
+.ghl-comm-phone-mode .ghl-comm-topbar .ghl-comm-live,
+.ghl-comm-phone-mode .ghl-comm-topbar .ghl-comm-global-line__status {
+    flex: 0 0 auto;
+    position: static;
+    z-index: 2;
+    margin-left: 0;
+    box-shadow: none;
 }
 
 .ghl-line-dropdown.is-open {
-    z-index: 55;
+    z-index: 10070;
+}
+
+.ghl-comm-topbar .ghl-line-dropdown.is-open {
+    z-index: 10070;
 }
 
 @media (min-width: 769px) {
@@ -2220,7 +2323,9 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
         width: auto;
         margin-left: auto;
         padding-top: 0;
+        padding-right: 0.5rem;
         border-top: none;
+        box-sizing: border-box;
     }
 
     .ghl-comm-phone-mode .ghl-comm-global-line--toolbar {
@@ -2284,7 +2389,12 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
     border-radius: 0;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow: visible;
+}
+
+.ghl-comm-phone-mode .ghl-comm-topbar {
+    overflow: visible;
+    z-index: 10040;
 }
 
 .ghl-comm-phone-mode .ghl-inbox-body-wide {
@@ -2398,11 +2508,11 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
 }
 
 .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='logs'] .ghl-dialer-center-logs--full {
-    height: calc(100dvh - 6.5rem) !important;
-    flex: 1 1 auto !important;
+    flex: 1 1 0% !important;
     align-self: stretch;
-    max-height: calc(100dvh - 6.5rem) !important;
-    min-height: calc(100dvh - 6.5rem) !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
 }
 
 .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='logs'] .ghl-dialer-center-logs__scroll {
@@ -2411,7 +2521,7 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
     height: auto;
     max-height: 100%;
     overflow-x: hidden !important;
-    overflow-y: auto !important;
+    overflow-y: scroll !important;
     padding-bottom: 0 !important;
 }
 
@@ -2588,7 +2698,7 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
     height: auto;
     max-height: 100%;
     overflow-x: hidden !important;
-    overflow-y: auto !important;
+    overflow-y: scroll !important;
     -webkit-overflow-scrolling: touch;
     padding-bottom: 0 !important;
 }
@@ -2598,7 +2708,7 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
     flex-direction: column;
     min-height: 0;
     height: 100%;
-    max-height: none;
+    max-height: 100%;
     border: 1px solid var(--ghl-border);
     border-radius: 0.5rem;
     background: #fff;
@@ -2617,7 +2727,7 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
     min-height: 0;
     max-height: 100%;
     overflow-x: hidden !important;
-    overflow-y: auto !important;
+    overflow-y: scroll !important;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
     touch-action: pan-y;
@@ -2651,7 +2761,7 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
     min-height: 0;
     max-height: 100% !important;
     overflow-x: hidden !important;
-    overflow-y: auto !important;
+    overflow-y: scroll !important;
 }
 
 .ghl-dialer-recent-list--full:not(.ghl-dialer-center-logs__scroll) {
@@ -3096,7 +3206,7 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
         height: auto;
         max-height: 100%;
         overflow-x: hidden !important;
-        overflow-y: auto !important;
+        overflow-y: scroll !important;
         padding-bottom: 0 !important;
     }
 
@@ -3350,7 +3460,11 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
     }
 
     .ghl-comm-topbar .ghl-line-dropdown__trigger .ghl-line-dropdown__did {
-        display: none;
+        display: inline;
+        max-width: 5.75rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     .ghl-comm-topbar .ghl-line-dropdown.is-open .ghl-line-dropdown__menu {
@@ -3385,8 +3499,8 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
     }
 
     .ghl-comm-topbar .ghl-comm-global-line__ext .ghl-line-dropdown {
-        min-width: 5.5rem;
-        max-width: 7rem;
+        min-width: 8.5rem;
+        max-width: 11.5rem;
     }
 
     .ghl-comm-topbar .ghl-line-dropdown__ext-badge {
@@ -3398,22 +3512,16 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
         position: relative;
     }
 
-    body.ghl-comm-mode .ghl-comm-topbar .ghl-comm-live {
-        position: absolute;
-        top: 0.45rem;
-        right: 3.35rem;
-        z-index: 12;
+    body.ghl-comm-mode .ghl-comm-topbar .ghl-comm-live,
+    body.ghl-comm-mode .ghl-comm-topbar .ghl-comm-global-line__status {
+        position: static;
         margin-left: 0;
-        min-height: auto;
-        height: auto;
-        font-size: 0.5625rem;
-        padding: 0.18rem 0.45rem;
-        flex-shrink: 0;
-        box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+        min-height: var(--ghl-comm-strip-height, 1.85rem);
+        box-shadow: none;
     }
 
     body.ghl-comm-mode .ghl-comm-topbar__left {
-        padding-right: 3.25rem;
+        padding-right: 0;
     }
 
     .ghl-comm-phone-mode .ghl-comm-topbar {
@@ -3434,16 +3542,17 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
         flex: 1 1 100%;
         width: 100%;
         margin-left: 0;
-        padding-top: 0.4rem;
+        padding-top: 0.45rem;
         padding-left: 0;
-        padding-right: 0;
+        padding-right: var(--ghl-comm-chrome-right, 3.25rem);
         display: flex;
         flex-direction: row;
         flex-wrap: nowrap;
         align-items: center;
-        justify-content: flex-start;
-        gap: 0.35rem;
+        justify-content: stretch;
+        gap: 0;
         border-top: 1px solid var(--ghl-border);
+        overflow: visible;
     }
 
     .ghl-comm-phone-mode .ghl-comm-topbar__left .ghl-comm-channels-menu,
@@ -3472,6 +3581,7 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
         min-width: 0;
         position: relative;
         z-index: 3;
+        flex-shrink: 0;
     }
 
     .ghl-comm-phone-mode .ghl-comm-global-line__ext .ghl-dialer-ext-field {
@@ -3479,8 +3589,8 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
     }
 
     .ghl-comm-phone-mode .ghl-comm-global-line__ext .ghl-line-dropdown {
-        min-width: 6.25rem;
-        max-width: 7.75rem;
+        min-width: 8.75rem;
+        max-width: 11.75rem;
         width: auto;
     }
 
@@ -3502,10 +3612,11 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
     }
 
     .ghl-comm-phone-mode .ghl-comm-connect-group {
-        width: 100%;
+        width: auto;
         min-width: 0;
         max-width: none;
         display: inline-flex;
+        flex: 1 1 auto;
     }
 
     .ghl-comm-phone-mode .ghl-comm-connect-group__main {
@@ -3629,11 +3740,7 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
 @media (max-width: 520px) {
     body.ghl-comm-mode .ghl-comm-topbar {
         padding-left: 3rem;
-        padding-right: 0.75rem;
-    }
-
-    body.ghl-comm-mode .ghl-comm-topbar .ghl-comm-live {
-        right: 0.5rem;
+        padding-right: 3.15rem;
     }
 
     .ghl-comm-topbar__left .ghl-comm-dates,
@@ -3700,7 +3807,7 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
     }
 
     .ghl-comm-app .ghl-inbox-body-wide .ghl-dialer-center[data-phone-view='dialer'] .ghl-dialer-center-keypad--borderless .ch-panel__body--phone {
-        padding-top: 2.75rem;
+        padding-top: 0.75rem;
     }
 
     .ghl-comm-app .ghl-inbox-body-wide .ghl-dialer-center[data-phone-view='dialer'] .ghl-dialer-phone-stage {
@@ -3715,11 +3822,34 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
         overflow: hidden;
     }
 
+    .ghl-comm-app.ghl-inbox-body-wide .ghl-comm-phone-mode .ghl-inbox-conversation-scroll--center:has(.ghl-dialer-center[data-phone-view='dialer']) {
+        flex: 1 1 auto !important;
+        height: 100% !important;
+        min-height: 0 !important;
+        max-height: 100% !important;
+        overflow: hidden !important;
+        padding-bottom: 0 !important;
+    }
+
+    .ghl-comm-app.ghl-inbox-body-wide .ghl-comm-phone-mode .ghl-inbox-conversation:has(.ghl-dialer-center[data-phone-view='dialer']) {
+        flex: 1 1 auto !important;
+        height: 100% !important;
+        min-height: 0 !important;
+        overflow: hidden !important;
+    }
+
+    .ghl-comm-app.ghl-inbox-body-wide .ghl-comm-phone-mode .ghl-inbox-body-wide:has(.ghl-dialer-center[data-phone-view='dialer']) {
+        flex: 1 1 auto !important;
+        height: 100% !important;
+        min-height: 0 !important;
+        overflow: hidden !important;
+    }
+
     .ghl-comm-app.ghl-inbox-body-wide .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='dialer'] .ch-dial-workspace__grid--phone-split {
         flex: 1 1 auto !important;
         height: 100% !important;
-        min-height: calc(100vh - 10rem) !important;
-        max-height: none !important;
+        min-height: 0 !important;
+        max-height: 100% !important;
         align-items: stretch !important;
     }
 
@@ -3738,7 +3868,7 @@ body.ghl-comm-tools-hidden .ghl-comm-app .ghl-inbox-tools {
         height: auto;
         max-height: 100%;
         overflow-x: hidden !important;
-        overflow-y: auto !important;
+        overflow-y: scroll !important;
         padding-bottom: 0 !important;
     }
 }
@@ -4059,7 +4189,17 @@ body.ghl-comm-mode .app-toast--compact .app-toast-icon {
 }
 
 .ghl-dialer-recent-row {
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 0.35rem 0.65rem;
+    flex-wrap: nowrap;
+}
+
+.ghl-dialer-recent-main {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
 }
 
 .ghl-dialer-recent-actions {
@@ -4067,6 +4207,9 @@ body.ghl-comm-mode .app-toast--compact .app-toast-icon {
     align-items: center;
     gap: 0.35rem;
     flex-shrink: 0;
+    grid-column: 2;
+    grid-row: 1;
+    align-self: start;
 }
 
 .ghl-dialer-recent-notes-btn {
@@ -4095,8 +4238,10 @@ body.ghl-comm-mode .app-toast--compact .app-toast-icon {
 }
 
 .ghl-dialer-recent-notes {
-    flex: 1 1 100%;
-    width: 100%;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    flex: unset;
+    width: auto;
     margin-top: 0.35rem;
     padding-top: 0.45rem;
     border-top: 1px dashed #e2e8f0;
@@ -4145,4 +4290,188 @@ body.ghl-comm-mode .app-toast--compact .app-toast-icon {
 
 .ghl-dialer-recent-notes:not(.hidden) {
     display: block;
+}
+
+/* ── Phone hub polish (toolbar + dialer card) ─────────────────────── */
+
+.ghl-comm-topbar__notes {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    margin-left: 0.1rem;
+}
+
+.ghl-comm-topbar__notes .ghl-dialer-notes-panel {
+    position: relative;
+    z-index: 10065;
+}
+
+.ghl-comm-topbar__notes .ghl-dialer-notes-drawer {
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    right: 0;
+    left: auto;
+    z-index: 10080;
+    width: min(18rem, calc(100vw - 2rem));
+}
+
+.ghl-comm-topbar__notes .ghl-dialer-notes-toggle {
+    min-height: var(--ghl-comm-strip-height, 2rem);
+    padding: 0.28rem 0.65rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.5rem;
+    background: #fff;
+    color: #475569;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.ghl-comm-topbar__notes .ghl-dialer-notes-toggle:hover,
+.ghl-comm-topbar__notes .ghl-dialer-notes-panel.is-open .ghl-dialer-notes-toggle {
+    border-color: #93c5fd;
+    background: #f8fbff;
+    color: #1d4ed8;
+}
+
+.ghl-dialer-line-meta {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: 0.35rem auto 0.15rem;
+    padding: 0.28rem 0.65rem;
+    border-radius: 999px;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    font-size: 0.6875rem;
+    line-height: 1.2;
+    color: #64748b;
+}
+
+.ghl-dialer-line-meta__badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.1rem 0.45rem;
+    border-radius: 999px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    color: #1d4ed8;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+
+.ghl-dialer-line-meta__sep {
+    color: #cbd5e1;
+    font-weight: 700;
+}
+
+.ghl-dialer-line-meta__did {
+    font-weight: 700;
+    color: #334155;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-input-shell {
+    border: 1px solid #e2e8f0;
+    border-radius: 1rem;
+    background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+    overflow: hidden;
+    transition:
+        border-color 0.15s ease,
+        box-shadow 0.15s ease,
+        background-color 0.15s ease;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-input-shell:focus-within {
+    border-color: #93c5fd;
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.ghl-comm-phone-mode .ghl-dialer-phone-frame {
+    border-color: #dbe3ee;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    box-shadow:
+        0 1px 2px rgba(15, 23, 42, 0.04),
+        0 10px 28px rgba(15, 23, 42, 0.08);
+}
+
+@media (min-width: 769px) {
+    .ghl-comm-phone-mode .ghl-comm-topbar {
+        flex-wrap: nowrap;
+        align-items: center;
+        min-height: 3rem;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar__actions {
+        flex: 0 1 auto;
+        width: auto;
+        margin-left: auto;
+        flex-wrap: nowrap;
+        align-items: center;
+        gap: 0.45rem;
+        padding-right: var(--ghl-comm-chrome-right, 0.5rem);
+        border-top: none;
+        padding-top: 0;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-global-line--toolbar {
+        width: auto;
+        flex: 0 1 auto;
+        max-width: calc(100% - 6.5rem);
+        justify-content: flex-end;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-global-line__ext {
+        flex: 0 1 auto;
+        min-width: 11.5rem;
+        max-width: 16rem;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-connect-strip,
+    .ghl-comm-phone-mode .ghl-comm-connect-strip--right {
+        flex: 0 0 auto;
+        justify-content: flex-end;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-connect-group {
+        flex: 0 0 auto;
+        width: auto;
+        min-width: 7.25rem;
+        max-width: 9.5rem;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-connect-group__main {
+        flex: 1 1 auto;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-connect-group__phone {
+        flex: 0 0 auto;
+    }
+
+    .ghl-comm-topbar .ghl-comm-global-line__ext .ghl-line-dropdown {
+        min-width: 12rem;
+        max-width: 16rem;
+    }
+
+    .ghl-comm-app .ghl-inbox-body-wide .ghl-dialer-center[data-phone-view='dialer'] .ghl-dialer-center-keypad--borderless .ch-panel__body--phone {
+        padding-top: 0.75rem;
+    }
+}
+
+@media (max-width: 768px) {
+    .ghl-comm-topbar__notes .ghl-dialer-notes-toggle span:not(.ghl-dialer-notes-indicator) {
+        display: none;
+    }
+
+    .ghl-comm-topbar__notes .ghl-dialer-notes-toggle {
+        width: 2rem;
+        min-width: 2rem;
+        padding: 0.28rem;
+        justify-content: center;
+    }
 }

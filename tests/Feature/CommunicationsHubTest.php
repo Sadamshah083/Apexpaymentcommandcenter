@@ -32,18 +32,30 @@ class CommunicationsHubTest extends TestCase
         ]);
     }
 
-    public function test_admin_can_open_contacts_hub(): void
+    public function test_admin_can_open_phone_hub(): void
     {
         $this->mockZoomServices();
 
         $admin = $this->makeAdmin();
 
         $this->actingAs($admin)
-            ->get(route('admin.communications.index', ['channel' => 'inbox']))
+            ->get(route('admin.communications.index'))
             ->assertOk()
-            ->assertSee('Communications')
-            ->assertSee('Mark Barrette')
+            ->assertSee('Phone')
+            ->assertSee('Call logs')
+            ->assertSee('Call with Morpheus CX')
             ->assertDontSee('super_secret_value_1234');
+    }
+
+    public function test_legacy_communications_query_params_redirect_to_clean_url(): void
+    {
+        $this->mockZoomServices();
+
+        $admin = $this->makeAdmin();
+
+        $this->actingAs($admin)
+            ->get(route('admin.communications.index', ['channel' => 'inbox', 'panel' => 'dialer']))
+            ->assertRedirect(route('admin.communications.index'));
     }
 
     public function test_portal_agent_can_open_contacts_hub(): void
@@ -63,46 +75,18 @@ class CommunicationsHubTest extends TestCase
         $this->actingAs($agent)
             ->get(route('portal.communications.index'))
             ->assertOk()
-            ->assertSee('Communications');
+            ->assertSee('Phone');
     }
 
-    public function test_zoom_settings_masks_secret(): void
+    public function test_zoom_settings_panel_is_no_longer_exposed_in_phone_hub(): void
     {
-        $zoom = Mockery::mock(ZoomApiService::class);
-        $zoom->shouldReceive('isConfigured')->andReturn(true);
-        $zoom->shouldReceive('connectionStatus')->andReturn([
-            'connected' => true,
-            'message' => 'Connected to Morpheus CX API.',
-            'expires_at' => null,
-        ]);
-        $this->mockZoomConnectionDiagnostics($zoom);
-        $zoom->shouldReceive('accountId')->andReturn('acct_test');
-        $zoom->shouldReceive('clientId')->andReturn('client_test');
-        $zoom->shouldReceive('maskedSecret')->andReturn('••••••••1234');
-        $zoom->shouldReceive('webhookSecret')->andReturn(null);
-        $zoom->shouldReceive('requiredScopes')->andReturn([
-            'phone:read:list_call_logs:admin' => 'Account call logs',
-        ]);
-        $zoom->shouldReceive('outboundCallingProfile')->zeroOrMoreTimes()->andReturn([]);
-        $zoom->shouldReceive('humanizeError')->zeroOrMoreTimes()->andReturnUsing(fn ($m) => $m);
-        $zoom->shouldReceive('normalizeOriginateCallerId')->zeroOrMoreTimes()->andReturnArg(0);
-        $zoom->shouldReceive('defaultOutboundCampaignId')->zeroOrMoreTimes()->andReturn('camp_123');
-        $zoom->shouldReceive('clearExtensionForOutboundDial')->zeroOrMoreTimes();
-        $zoom->shouldReceive('getCall')->zeroOrMoreTimes()->andReturn([]);
-
-        $contacts = Mockery::mock(ZoomContactService::class);
-        $this->app->instance(ZoomApiService::class, $zoom);
-        $this->app->instance(ZoomContactService::class, $contacts);
-        $this->mockHubDataService();
+        $this->mockZoomServices();
 
         $admin = $this->makeAdmin();
 
         $this->actingAs($admin)
             ->get(route('admin.communications.index', ['panel' => 'settings']))
-            ->assertOk()
-            ->assertSee('acct_test')
-            ->assertSee('••••••••1234')
-            ->assertDontSee('super_secret_value_1234');
+            ->assertRedirect(route('admin.communications.index'));
     }
 
     public function test_recording_media_resolves_call_element_id(): void
@@ -284,11 +268,11 @@ class CommunicationsHubTest extends TestCase
                 'destination' => '+15551234567',
                 'fallback' => 'sip',
             ])
-            ->assertRedirect(route('admin.communications.index', ['panel' => 'dialer']))
+            ->assertRedirect(route('admin.communications.index'))
             ->assertSessionHas('success', 'Outbound call ringing. Answer your extension or softphone when it rings.');
     }
 
-    public function test_admin_can_open_morpheus_hub_channels(): void
+    public function test_legacy_hub_channels_redirect_to_phone_hub(): void
     {
         $this->mockZoomServices();
 
@@ -297,14 +281,12 @@ class CommunicationsHubTest extends TestCase
         foreach (['queues', 'conferences', 'leads', 'campaigns', 'lists', 'extensions', 'team'] as $channel) {
             $this->actingAs($admin)
                 ->get(route('admin.communications.index', ['channel' => $channel]))
-                ->assertOk()
-                ->assertSee('Communications');
+                ->assertRedirect(route('admin.communications.index'));
         }
 
         $this->actingAs($admin)
-            ->get(route('admin.communications.index', ['panel' => 'dialer']))
+            ->get(route('admin.communications.index'))
             ->assertOk()
-            ->assertSee('Phone dialer')
             ->assertSee('Call with Morpheus CX');
     }
 
@@ -315,9 +297,8 @@ class CommunicationsHubTest extends TestCase
         $admin = $this->makeAdmin();
 
         $this->actingAs($admin)
-            ->get(route('admin.communications.index', ['panel' => 'dialer', 'number' => '+15559876543']))
+            ->get(route('admin.communications.index', ['number' => '+15559876543']))
             ->assertOk()
-            ->assertSee('Phone dialer')
             ->assertSee('Call with Morpheus CX')
             ->assertSee('+15559876543', false);
     }
@@ -347,62 +328,15 @@ class CommunicationsHubTest extends TestCase
         });
     }
 
-    public function test_inbox_contact_detail_renders_without_error(): void
+    public function test_legacy_contact_links_redirect_to_phone_hub(): void
     {
         $this->mockZoomServices();
-
-        $contacts = Mockery::mock(ZoomContactService::class);
-        $contacts->shouldReceive('buildIndexPayload')->andReturn([
-            'contacts' => [[
-                'contact_key' => 'user:u1',
-                'name' => 'Mark Barrette',
-                'phone' => '+12098526079',
-                'email' => 'mark@example.com',
-                'tag' => 'user',
-                'last_activity_at' => now()->toIso8601String(),
-                'last_activity_type' => 'call',
-            ]],
-            'call_logs' => [],
-            'error' => null,
-        ]);
-        $contacts->shouldReceive('buildShowPayload')->andReturn([
-            'contact' => [
-                'contact_key' => 'user:u1',
-                'name' => 'Mark Barrette',
-                'phone' => '+12098526079',
-                'email' => 'mark@example.com',
-                'tag' => 'user',
-                'last_activity_at' => now()->toIso8601String(),
-                'last_activity_type' => 'call',
-            ],
-            'timeline' => [[
-                'type' => 'call',
-                'label' => 'Call inbound',
-                'at' => now()->toIso8601String(),
-                'detail' => 'connected · 30s',
-                'direction' => 'inbound',
-                'from' => 'Caller',
-                'to' => 'Mark',
-            ]],
-            'stats' => [
-                'call_count' => 1,
-                'sms_count' => 0,
-                'voicemail_count' => 0,
-                'activity_count' => 1,
-                'last_activity_at' => now()->toIso8601String(),
-            ],
-            'sms_session' => null,
-            'error' => null,
-        ]);
-        $this->app->instance(ZoomContactService::class, $contacts);
 
         $admin = $this->makeAdmin();
 
         $this->actingAs($admin)
             ->get(route('admin.communications.index', ['channel' => 'inbox', 'contact' => 'user:u1']))
-            ->assertOk()
-            ->assertSee('Mark Barrette')
-            ->assertSee('Activity timeline');
+            ->assertRedirect(route('admin.communications.index'));
     }
 
     public function test_inbox_still_loads_when_phone_users_fail(): void
@@ -473,13 +407,13 @@ class CommunicationsHubTest extends TestCase
         $admin = $this->makeAdmin();
 
         $this->actingAs($admin)
-            ->get(route('admin.communications.index', ['channel' => 'inbox']))
+            ->get(route('admin.communications.index'))
             ->assertOk()
-            ->assertSee('Mark Barrette')
+            ->assertSee('Call logs')
             ->assertSee('Morpheus CX: no extensions', false);
     }
 
-    public function test_sms_compose_panel_loads(): void
+    public function test_sms_compose_panel_is_no_longer_exposed(): void
     {
         $this->mockZoomServices();
 
@@ -487,8 +421,7 @@ class CommunicationsHubTest extends TestCase
 
         $this->actingAs($admin)
             ->get(route('admin.communications.index', ['channel' => 'sms', 'panel' => 'compose_sms']))
-            ->assertOk()
-            ->assertSee('New SMS message');
+            ->assertRedirect(route('admin.communications.index'));
     }
 
     public function test_dialer_call_logs_api_returns_paginated_json(): void
@@ -555,7 +488,7 @@ class CommunicationsHubTest extends TestCase
 
         $this->actingAs($admin)
             ->post(route('admin.communications.zoom.refresh'))
-            ->assertRedirect(route('admin.communications.index', ['channel' => 'inbox', 'panel' => 'settings']))
+            ->assertRedirect(route('admin.communications.index'))
             ->assertSessionHas('success');
     }
 
@@ -613,9 +546,7 @@ class CommunicationsHubTest extends TestCase
 
         $this->actingAs($admin)
             ->get(route('admin.communications.index', ['channel' => 'calls', 'filter' => 'missed']))
-            ->assertOk()
-            ->assertSee('no answer', false)
-            ->assertDontSee('connected · 30s', false);
+            ->assertRedirect(route('admin.communications.index'));
     }
 
     public function test_voicemail_media_streams_when_cached(): void
@@ -779,8 +710,8 @@ class CommunicationsHubTest extends TestCase
         $this->actingAs($agent)
             ->get(route('portal.communications.index'))
             ->assertOk()
-            ->assertSee('Phone dialer')
-            ->assertSee('Dial')
+            ->assertSee('Phone')
+            ->assertSee('Call with Morpheus CX')
             ->assertDontSee('Phone agents')
             ->assertDontSee('>Queues<', false);
     }
@@ -793,8 +724,7 @@ class CommunicationsHubTest extends TestCase
 
         $this->actingAs($agent)
             ->get(route('portal.communications.index', ['channel' => 'queues']))
-            ->assertOk()
-            ->assertDontSee('Create queue');
+            ->assertRedirect(route('portal.communications.index'));
     }
 
     public function test_portal_agent_cannot_refresh_communications_cache(): void
@@ -880,10 +810,7 @@ class CommunicationsHubTest extends TestCase
 
         $this->actingAs($manager)
             ->get(route('admin.communications.index', ['channel' => 'queues']))
-            ->assertOk()
-            ->assertSee('All queues')
-            ->assertDontSee('Create queue')
-            ->assertDontSee('Phone agents');
+            ->assertRedirect(route('admin.communications.index'));
     }
 
     public function test_team_lead_sees_team_channel_in_portal(): void
@@ -894,9 +821,7 @@ class CommunicationsHubTest extends TestCase
 
         $this->actingAs($lead)
             ->get(route('portal.communications.index', ['channel' => 'team']))
-            ->assertOk()
-            ->assertSee('Morpheus users')
-            ->assertDontSee('Create Morpheus user');
+            ->assertRedirect(route('portal.communications.index'));
     }
 
     public function test_manager_cannot_create_morpheus_queue(): void

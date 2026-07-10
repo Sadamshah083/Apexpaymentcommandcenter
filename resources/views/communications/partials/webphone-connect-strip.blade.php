@@ -1,7 +1,7 @@
 @php
     $routePrefix = $routePrefix ?? (request()->is('admin*') ? 'admin.' : 'portal.');
     $align = $align ?? 'right';
-    $callHistoryUrl = $callHistoryUrl ?? route($routePrefix . 'communications.index', ['channel' => 'calls']);
+    $callHistoryUrl = $callHistoryUrl ?? route($routePrefix . 'communications.index');
 @endphp
 
 <div class="ghl-comm-connect-strip ghl-comm-connect-strip--{{ $align }}">

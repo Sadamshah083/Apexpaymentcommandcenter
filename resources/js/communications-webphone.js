@@ -2197,6 +2197,12 @@ class ApexWebphone {
                 state === 'connecting' ? 'Connecting…' : registered ? 'Reconnect line' : 'Connect line';
         }
         this.ui.connectBtn.disabled = state === 'connecting';
+        const isConnecting = state === 'connecting';
+        const isConnected = registered && !isConnecting;
+        document.querySelectorAll('[data-comm-connect-group]').forEach((group) => {
+            group.classList.toggle('is-connecting', isConnecting);
+            group.classList.toggle('is-connected', isConnected);
+        });
         this.ui.connectBtn.classList.toggle('hidden', state === 'dialing' || state === 'in-call');
         const canDisconnect = registered && state !== 'dialing' && state !== 'in-call';
         this.ui.disconnectBtns?.forEach((btn) => {

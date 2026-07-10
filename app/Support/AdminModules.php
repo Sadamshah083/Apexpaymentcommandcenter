@@ -84,10 +84,7 @@ class AdminModules
 
     public static function communicationsDialerParams(): array
     {
-        return [
-            'channel' => 'inbox',
-            'panel' => 'dialer',
-        ];
+        return [];
     }
 
     /**

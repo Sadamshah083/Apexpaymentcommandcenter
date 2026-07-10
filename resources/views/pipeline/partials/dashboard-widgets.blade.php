@@ -220,7 +220,7 @@
         @endif
 
         <div class="flex flex-wrap gap-2">
-            <a href="{{ route('portal.communications.index', ['panel' => 'dialer']) }}"
+            <a href="{{ route('portal.communications.index', array_filter(['number' => $lead->phone ?? null])) }}"
                 class="app-btn app-btn-primary app-btn-sm">Open dialer</a>
             @if (($dashboard['role'] ?? '') === 'appointment_setter')
                 <a href="{{ route('portal.performance') }}" class="app-btn app-btn-secondary app-btn-sm">View performance</a>

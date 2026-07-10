@@ -10,7 +10,7 @@
     $isRightRail = $layout === 'right-rail';
     $isMinimal = $layout === 'minimal';
     $isCompactPhone = $isCenter || $isRightRail || $isMinimal;
-    $callHistoryUrl = $callHistoryUrl ?? route($routePrefix . 'communications.index', ['channel' => 'calls']);
+    $callHistoryUrl = $callHistoryUrl ?? route($routePrefix . 'communications.index');
 @endphp
 
 @if ($webrtcEnabled && app(\App\Services\Integrations\ZoomApiService::class)->isConfigured())

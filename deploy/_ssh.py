@@ -13,7 +13,7 @@ import paramiko
 
 HOST = os.environ.get("DEPLOY_HOST", "203.215.160.44")
 USER = os.environ.get("DEPLOY_USER", "issac")
-PASSWORD = os.environ.get("DEPLOY_PASSWORD", "btdev")
+PASSWORD = os.environ.get("DEPLOY_PASSWORD", "")
 REMOTE_APP = os.environ.get("REMOTE_APP", "/var/www/apexone")
 
 

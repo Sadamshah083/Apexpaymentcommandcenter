@@ -61,7 +61,7 @@ class CommunicationsHubController extends Controller
 
     public function index(Request $request)
     {
-        if ($redirect = $this->dialerLandingRedirect($request)) {
+        if ($redirect = $this->communicationsHubUrlRedirect($request)) {
             return $redirect;
         }
 
@@ -286,26 +286,21 @@ class CommunicationsHubController extends Controller
         ]);
     }
 
-    protected function dialerLandingRedirect(Request $request): ?\Illuminate\Http\RedirectResponse
+    protected function communicationsHubUrlRedirect(Request $request): ?\Illuminate\Http\RedirectResponse
     {
-        if ($request->get('panel') !== 'dialer') {
+        $allowed = array_filter([
+            'number' => $request->query('number'),
+        ], fn ($value) => filled($value));
+
+        $disallowed = collect($request->query())
+            ->except(array_keys($allowed))
+            ->isNotEmpty();
+
+        if (! $disallowed) {
             return null;
         }
 
-        if (! $request->filled('from') && ! $request->filled('to')) {
-            return null;
-        }
-
-        return redirect()->route($this->routePrefix().'communications.index', array_filter([
-            'channel' => $request->get('channel', 'inbox'),
-            'panel' => 'dialer',
-            'contact' => $request->get('contact'),
-            'session' => $request->get('session'),
-            'search' => $request->get('search'),
-            'filter' => $request->get('filter'),
-            'direction' => $request->get('direction'),
-            'status' => $request->get('status'),
-        ]));
+        return redirect()->route($this->routePrefix().'communications.index', $allowed);
     }
 
 
@@ -314,13 +309,7 @@ class CommunicationsHubController extends Controller
 
     {
 
-        return redirect()->route($this->routePrefix().'communications.index', array_merge(
-
-            $this->filters($request),
-
-            ['channel' => 'inbox', 'contact' => $contactKey]
-
-        ));
+        return redirect()->route($this->routePrefix().'communications.index');
 
     }
 
@@ -1053,7 +1042,7 @@ class CommunicationsHubController extends Controller
         \Illuminate\Support\Facades\Cache::forget('integrations.morpheus.connection_diagnostics');
         \Illuminate\Support\Facades\Cache::forget('zoom.connection.diagnostics');
 
-        return redirect()->route($this->routePrefix().'communications.index', ['channel' => 'inbox', 'panel' => 'settings'])
+        return redirect()->route($this->routePrefix().'communications.index')
             ->with('success', 'Communications cache refreshed. Fresh Morpheus CX data will load on your next visit.');
 
     }
@@ -1146,18 +1135,7 @@ class CommunicationsHubController extends Controller
 
 
 
-            $redirectParams = ['channel' => 'sms'];
-
-            if (filled($result['session_id'] ?? $validated['session_id'] ?? null)) {
-
-                $redirectParams['session'] = $result['session_id'] ?? $validated['session_id'];
-
-            }
-
-
-
-            return redirect()->route($this->routePrefix().'communications.index', $redirectParams)
-
+            return redirect()->route($this->routePrefix().'communications.index')
                 ->with('success', 'SMS sent successfully.');
 
         } catch (\Throwable $e) {
@@ -1193,12 +1171,8 @@ class CommunicationsHubController extends Controller
             $this->zoom->sendTeamChatMessage($validated['owner_user_id'], $payload);
             $this->data->bustCache();
 
-            return redirect()->route($this->routePrefix().'communications.index', array_filter([
-                'channel' => 'chat',
-                'chat_owner' => $validated['owner_user_id'],
-                'chat_channel' => $validated['chat_channel'] ?? null,
-                'chat_contact' => $validated['chat_contact'] ?? null,
-            ]))->with('success', 'Chat message sent.');
+            return redirect()->route($this->routePrefix().'communications.index')
+                ->with('success', 'Chat message sent.');
         } catch (\Throwable $e) {
             return back()->withInput()->with('error', $this->zoom->humanizeError($e->getMessage()));
         }

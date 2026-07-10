@@ -14,7 +14,7 @@
             <div class="flex flex-col gap-2">
                 <a href="{{ $sipUrl }}" id="sip-launch-link" class="comm-hub-btn ghl-dialer-call-btn">Launch call in
                     softphone</a>
-                <a href="{{ route($routePrefix . 'communications.index', ['panel' => 'dialer']) }}"
+                <a href="{{ route($routePrefix . 'communications.index') }}"
                     class="comm-hub-btn comm-hub-btn-secondary">Back to dialer</a>
             </div>
         </div>

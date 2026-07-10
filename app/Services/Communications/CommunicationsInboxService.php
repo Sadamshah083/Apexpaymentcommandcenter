@@ -182,7 +182,7 @@ class CommunicationsInboxService
 
     if ($this->zoom->isConfigured()) {
       try {
-        $fastDialerShell = $channel === 'inbox' && $panel === 'empty';
+        $fastDialerShell = $panel === 'dialer';
         $morpheusReachable = (bool) ($connection['connected'] ?? false);
         $loadDialerExtras = in_array($channel, ['inbox', 'calls'], true) || $panel === 'dialer';
         $needsPhoneUsers = ! $fastDialerShell && $channel !== 'calls' && (
@@ -852,90 +852,12 @@ class CommunicationsInboxService
 
   public function resolveChannel(Request $request): string
   {
-    if ($request->filled('channel')) {
-      $channel = (string) $request->get('channel');
-
-      return array_key_exists($channel, self::CHANNELS) ? $channel : 'inbox';
-    }
-
-    $mode = (string) $request->get('mode', 'inbox');
-
-    return match ($mode) {
-      'contacts', 'inbox', '' => 'inbox',
-      'calls' => 'calls',
-      'queues' => 'queues',
-      'conferences' => 'conferences',
-      'leads' => 'leads',
-      'campaigns' => 'campaigns',
-      'lists' => 'lists',
-      'extensions' => 'extensions',
-      'agents' => 'agents',
-      'dialer' => 'inbox',
-      'recordings' => 'recordings',
-      'voicemails' => 'voicemail',
-      'sms' => 'sms',
-      'chat' => 'chat',
-      'team' => 'team',
-      'settings', 'zoom' => 'inbox',
-      default => 'inbox',
-    };
+    return 'inbox';
   }
 
   public function resolvePanel(Request $request, string $channel): string
   {
-    if ($request->get('panel') === 'settings') {
-      return 'settings';
-    }
-
-    if ($request->get('panel') === 'dialer' || $request->get('mode') === 'dialer') {
-      return 'dialer';
-    }
-
-    if ($request->get('panel') === 'compose_sms') {
-      return 'compose_sms';
-    }
-
-    if ($request->filled('contact')) {
-      return 'contact';
-    }
-
-    if ($request->filled('session')) {
-      return 'sms';
-    }
-
-    if ($request->filled('chat_owner') && ($request->filled('chat_channel') || $request->filled('chat_contact'))) {
-      return 'chat';
-    }
-
-    if ($request->filled('call')) {
-      return 'call';
-    }
-
-    if ($request->filled('voicemail')) {
-      return 'voicemail';
-    }
-
-    if ($request->filled('recording')) {
-      return 'recording';
-    }
-
-    if ($request->get('mode') === 'zoom' || $request->get('zoom_tab') === 'settings') {
-      return 'settings';
-    }
-
-    return match ($channel) {
-      'team' => 'team',
-      'queues' => 'queues',
-      'conferences' => 'conferences',
-      'leads' => 'leads',
-      'campaigns' => 'campaigns',
-      'lists' => 'lists',
-      'extensions' => 'extensions',
-      'recordings' => 'recordings',
-      'voicemail' => 'voicemails',
-      'calls' => 'calls',
-      default => 'empty',
-    };
+    return 'dialer';
   }
 
   /**

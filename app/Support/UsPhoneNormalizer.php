@@ -31,6 +31,16 @@ class UsPhoneNormalizer
     }
 
     /**
+     * Compact E.164 display: +15551234567
+     */
+    public static function e164(?string $value): ?string
+    {
+        $normalized = self::normalize($value);
+
+        return $normalized ? '+'.$normalized : null;
+    }
+
+    /**
      * Display format: +1 (555) 123-4567
      */
     public static function format(?string $normalized): ?string

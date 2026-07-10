@@ -23,6 +23,12 @@
     $endpointHint = $selectedExt['endpoint_hint'] ?? null;
     $sipHost = $clickToCall->publicSipHost();
     $defaultOutboundDid = config('integrations.communications.default_outbound_did');
+    $lineDidResolver = app(\App\Services\Communications\CommunicationsAgentService::class);
+    $apiDid = $selectedExt['outbound_cid_num'] ?? $selectedExt['caller_id_num'] ?? null;
+    $resolvedDid = $lineDidResolver->resolveOutboundDid(
+        filled($defaultExtension) ? (string) $defaultExtension : null,
+        filled($apiDid) ? (string) $apiDid : null,
+    ) ?? ($defaultOutboundDid ?: 'Not set');
     $layout = $layout ?? 'sidebar';
     $isCompactDial = in_array($layout, ['center', 'right-rail'], true);
     $hideExtension = (bool) ($hideExtension ?? false);
@@ -165,8 +171,10 @@
                         </div>
                     </div>
                 </div>
-                <p class="ghl-dialer-outbound-route ghl-dialer-outbound-route--compact" data-dialer-route-summary>
-                    CID <strong data-dialer-from-did>{{ $defaultOutboundDid ?: 'Not set' }}</strong>
+                <p class="ghl-dialer-line-meta" data-dialer-line-meta aria-live="polite">
+                    <span class="ghl-dialer-line-meta__badge" data-dialer-line-ext>Ext {{ $defaultExtension ?: '—' }}</span>
+                    <span class="ghl-dialer-line-meta__sep" aria-hidden="true">·</span>
+                    <span class="ghl-dialer-line-meta__did" data-dialer-from-did>{{ $resolvedDid }}</span>
                 </p>
                 <div class="ghl-dialer-call-actions hidden" data-dialer-call-actions>
                     <button type="button" class="ghl-webphone-btn-answer hidden" data-dialer-call-answer

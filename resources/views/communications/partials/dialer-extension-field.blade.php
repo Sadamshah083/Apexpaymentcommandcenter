@@ -13,26 +13,43 @@
     $defaultExtension = $defaultCallerId ?? config('integrations.communications.default_caller_id');
     $defaultOutboundDid = config('integrations.communications.default_outbound_did');
     $formId = $formId ?? null;
+    $lineDidResolver = app(\App\Services\Communications\CommunicationsAgentService::class);
 
     $lineOptions = collect($extensions)
-        ->map(function ($ext) use ($defaultOutboundDid) {
+        ->map(function ($ext) use ($defaultOutboundDid, $lineDidResolver) {
             $extNum = $ext['extension_num'] ?? '';
             if (!filled($extNum)) {
                 return null;
             }
 
+            $resolvedDid = $lineDidResolver->resolveOutboundDid(
+                (string) $extNum,
+                filled($ext['outbound_cid_num'] ?? null)
+                    ? (string) $ext['outbound_cid_num']
+                    : (filled($ext['caller_id_num'] ?? null) ? (string) $ext['caller_id_num'] : null),
+            );
+
             return [
                 'extension' => (string) $extNum,
-                'did' => (string) ($ext['outbound_cid_num'] ?? $ext['caller_id_num'] ?? $defaultOutboundDid ?? ''),
-                'outbound_did' => $ext['outbound_cid_num'] ?? $ext['caller_id_num'] ?? $defaultOutboundDid,
+                'did' => (string) ($resolvedDid ?? $defaultOutboundDid ?? ''),
+                'outbound_did' => $resolvedDid ?? $ext['outbound_cid_num'] ?? $ext['caller_id_num'] ?? $defaultOutboundDid,
             ];
         })
         ->filter()
         ->values();
 
+    if ($lineOptions->isEmpty() && filled($defaultExtension)) {
+        $resolvedDid = $lineDidResolver->resolveOutboundDid((string) $defaultExtension);
+        $lineOptions = collect([[
+            'extension' => (string) $defaultExtension,
+            'did' => (string) ($resolvedDid ?? $defaultOutboundDid ?? ''),
+            'outbound_did' => $resolvedDid ?? $defaultOutboundDid,
+        ]]);
+    }
+
     $selectedOption = $lineOptions->first(
         fn ($line) => (string) $defaultExtension === (string) $line['extension'],
-    );
+    ) ?? $lineOptions->first();
 @endphp
 
 <div class="ghl-dialer-ext-field">

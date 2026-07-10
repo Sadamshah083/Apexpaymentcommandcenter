@@ -10,7 +10,7 @@
             <div>
                 <h2 id="um-add-member-title" class="member-confirm-title">Add team account</h2>
                 <p class="um-panel-desc um-add-member-desc">
-                    Admins and managers use the <strong>admin portal</strong>. Setters and closers use the
+                    Admins and managers use the <strong>admin portal</strong>. Team leads, setters, and closers use the
                     <strong>agent portal</strong> with their username.
                 </p>
             </div>

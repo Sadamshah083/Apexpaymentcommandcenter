@@ -2473,11 +2473,15 @@
     padding-bottom: 0 !important;
 }
 
-.ghl-comm-phone-mode .ghl-inbox-body-wide .ghl-inbox-conversation-scroll--center:has(.ghl-dialer-center[data-phone-view='dialer']) {
-    flex: 0 0 auto !important;
-    height: auto !important;
-    min-height: 0 !important;
-    padding-bottom: 0 !important;
+@media (min-width: 901px) {
+    .ghl-comm-phone-mode .ghl-inbox-body-wide .ghl-inbox-conversation-scroll--center:has(.ghl-dialer-center[data-phone-view='dialer']) {
+        flex: 1 1 auto !important;
+        height: 100% !important;
+        min-height: 0 !important;
+        max-height: 100% !important;
+        overflow: hidden !important;
+        padding-bottom: 0 !important;
+    }
 }
 
 .ghl-comm-phone-mode .ghl-inbox-body-wide .ghl-inbox-conversation-scroll--center:has(.ghl-dialer-center[data-phone-view='logs']) {

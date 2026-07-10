@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Services\Integrations\ZoomApiService;
 use App\Support\MorpheusSipIdentity;
+use App\Support\UsPhoneNormalizer;
 use Illuminate\Support\Str;
 
 class CommunicationsAgentService
@@ -246,6 +247,21 @@ class CommunicationsAgentService
         $default = (string) (config('integrations.communications.default_caller_id') ?: '1020');
 
         if (in_array($tier, ['admin', 'supervisor'], true)) {
+            $billing = config('morpheus_billing_dids.extensions', []);
+            if (is_array($billing) && $billing !== []) {
+                return collect($billing)
+                    ->map(fn ($did, $extNum) => $this->formatDialerExtension([
+                        'id' => null,
+                        'extension_num' => (string) $extNum,
+                        'caller_id_name' => $user->name,
+                        'outbound_cid_num' => $did,
+                        'status' => 'active',
+                    ]))
+                    ->sortBy('extension_num', SORT_NATURAL)
+                    ->values()
+                    ->all();
+            }
+
             $extNum = $default;
         } else {
             $extNum = $this->extensionForUser($user, $workspace->id) ?: $default;
@@ -401,12 +417,33 @@ class CommunicationsAgentService
      * @param  array<string, mixed>  $ext
      * @return array<string, mixed>
      */
+    public function resolveOutboundDid(?string $extensionNum, ?string $fromApi = null): ?string
+    {
+        if (filled($fromApi)) {
+            return $this->formatDidDisplay((string) $fromApi);
+        }
+
+        $ext = trim((string) $extensionNum);
+        if ($ext !== '') {
+            $billingDid = config("morpheus_billing_dids.extensions.{$ext}");
+            if (filled($billingDid)) {
+                return $this->formatDidDisplay((string) $billingDid);
+            }
+        }
+
+        $fallback = $this->defaultOutboundDid();
+
+        return $fallback ? $this->formatDidDisplay($fallback) : null;
+    }
+
     protected function formatDialerExtension(array $ext): array
     {
-        $callerIdNum = $ext['outbound_cid_num'] ?? $ext['caller_id_num'] ?? null;
-        if (! filled($callerIdNum)) {
-            $callerIdNum = $this->defaultOutboundDid();
-        }
+        $extNum = $ext['extension_num'] ?? null;
+        $fromApi = $ext['outbound_cid_num'] ?? $ext['caller_id_num'] ?? null;
+        $callerIdNum = $this->resolveOutboundDid(
+            filled($extNum) ? (string) $extNum : null,
+            filled($fromApi) ? (string) $fromApi : null,
+        );
         $userId = $ext['user_id'] ?? null;
         $lastLogin = null;
 
@@ -459,5 +496,10 @@ class CommunicationsAgentService
         $raw = trim($raw);
 
         return $raw !== '' ? $raw : null;
+    }
+
+    protected function formatDidDisplay(string $raw): string
+    {
+        return UsPhoneNormalizer::e164($raw) ?? trim($raw);
     }
 }

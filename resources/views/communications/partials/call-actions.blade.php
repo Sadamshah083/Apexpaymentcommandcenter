@@ -1,8 +1,8 @@
 @php
     $clickToCall = $clickToCall ?? app(\App\Services\Communications\ZoomClickToCallService::class);
     $dialerUrl = filled($phone ?? null)
-        ? route($routePrefix . 'communications.index', ['panel' => 'dialer', 'number' => $phone])
-        : route($routePrefix . 'communications.index', ['panel' => 'dialer']);
+        ? route($routePrefix . 'communications.index', ['number' => $phone])
+        : route($routePrefix . 'communications.index');
 @endphp
 
 @if (filled($phone ?? null))

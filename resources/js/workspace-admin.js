@@ -21,6 +21,115 @@ function updateText(id, value) {
     }
 }
 
+function closeAllUmModals() {
+    document.querySelectorAll('.member-confirm-modal').forEach((modal) => {
+        modal.hidden = true;
+        modal.setAttribute('aria-hidden', 'true');
+    });
+    document.body.classList.remove('member-confirm-open');
+}
+
+function openUmModal(modal, onOpen) {
+    if (!modal) {
+        return;
+    }
+
+    closeAllUmModals();
+    modal.hidden = false;
+    modal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('member-confirm-open');
+    onOpen?.(modal);
+}
+
+function closeUmModal(modal) {
+    if (!modal) {
+        return;
+    }
+
+    modal.hidden = true;
+    modal.setAttribute('aria-hidden', 'true');
+
+    const anyOpen = Array.from(document.querySelectorAll('.member-confirm-modal')).some(
+        (entry) => !entry.hidden,
+    );
+    if (!anyOpen) {
+        document.body.classList.remove('member-confirm-open');
+    }
+}
+
+function bindUmModal({ modalId, openSelector, dismissSelector, onOpen }) {
+    const modal = document.getElementById(modalId);
+    if (!modal || modal.dataset.bound === '1') {
+        return modal;
+    }
+
+    modal.dataset.bound = '1';
+
+    document.querySelectorAll(openSelector).forEach((button) => {
+        button.addEventListener('click', (event) => {
+            event.preventDefault();
+            openUmModal(modal, onOpen);
+        });
+    });
+
+    modal.querySelectorAll(dismissSelector).forEach((element) => {
+        element.addEventListener('click', () => closeUmModal(modal));
+    });
+
+    return modal;
+}
+
+function bindUmModals() {
+    if (document.body.dataset.umModalsBound === '1') {
+        return;
+    }
+
+    document.body.dataset.umModalsBound = '1';
+
+    const addMemberModal = bindUmModal({
+        modalId: 'um-add-member-modal',
+        openSelector: '[data-um-add-member-open]',
+        dismissSelector: '[data-um-add-member-dismiss]',
+        onOpen: (modal) => {
+            modal.querySelector('#create-username')?.focus();
+        },
+    });
+
+    if (addMemberModal?.querySelector('.um-alert-error')) {
+        openUmModal(addMemberModal, () => {
+            addMemberModal.querySelector('#create-username')?.focus();
+        });
+    }
+
+    bindUmModal({
+        modalId: 'um-portal-info-modal',
+        openSelector: '[data-um-portal-info-open]',
+        dismissSelector: '[data-um-portal-info-dismiss]',
+    });
+
+    bindUmModal({
+        modalId: 'um-create-workspace-modal',
+        openSelector: '[data-um-create-workspace-open]',
+        dismissSelector: '[data-um-create-workspace-dismiss]',
+        onOpen: (modal) => {
+            modal.querySelector('#create-workspace-name')?.focus();
+        },
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') {
+            return;
+        }
+
+        const openModal = Array.from(document.querySelectorAll('.member-confirm-modal')).find(
+            (modal) => !modal.hidden,
+        );
+        if (openModal) {
+            closeUmModal(openModal);
+        }
+    });
+}
+
 export function applyWorkspaceAdminState(data) {
     const root = adminRoot();
     if (!root || !data) {
@@ -133,12 +242,7 @@ function bindWorkspaceSwitchForms() {
 }
 
 function bindCreateMemberForm() {
-    const root = adminRoot();
-    if (!root) {
-        return;
-    }
-
-    const createForm = root.querySelector('[data-workspace-create-member]');
+    const createForm = document.querySelector('[data-workspace-create-member]');
     if (!createForm || createForm.dataset.bound === '1') {
         return;
     }
@@ -189,6 +293,7 @@ function bindCreateMemberForm() {
             }
 
             createForm.reset();
+            closeUmModal(document.getElementById('um-add-member-modal'));
             window.showToast?.(payload.message || 'Agent account created.', 'success');
             window.setTimeout(() => window.location.reload(), 600);
         } catch {
@@ -204,16 +309,13 @@ function bindCreateMemberForm() {
 }
 
 function bindCreateMemberRoleToggle() {
-    const root = adminRoot();
-    if (!root) {
+    const roleSelect = document.querySelector('[data-create-member-role]');
+    const modulesPanel = document.querySelector('[data-create-member-modules]');
+    if (!roleSelect || !modulesPanel || roleSelect.dataset.bound === '1') {
         return;
     }
 
-    const roleSelect = root.querySelector('[data-create-member-role]');
-    const modulesPanel = root.querySelector('[data-create-member-modules]');
-    if (!roleSelect || !modulesPanel) {
-        return;
-    }
+    roleSelect.dataset.bound = '1';
 
     const configurableRoles = new Set([
         'admin',
@@ -241,6 +343,7 @@ export function initWorkspaceAdmin() {
         return;
     }
 
+    bindUmModals();
     bindWorkspaceSwitchForms();
     bindCreateMemberForm();
     bindCreateMemberRoleToggle();

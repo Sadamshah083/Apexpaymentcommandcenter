@@ -36,9 +36,17 @@
 
         'align' => 'right',
 
-        'callHistoryUrl' => route($routePrefix . 'communications.index', ['channel' => 'calls']),
+        'callHistoryUrl' => route($routePrefix . 'communications.index'),
 
     ])
+
+    @if (($placement ?? 'toolbar') === 'toolbar')
+        <span class="ghl-comm-global-line__status ghl-comm-live {{ ($connection['connected'] ?? false) ? 'ghl-comm-live--on' : 'ghl-comm-live--off' }}"
+            title="{{ ($connection['connected'] ?? false) ? 'Morpheus telephony is connected' : 'Morpheus telephony is offline' }}">
+            <span class="ghl-comm-live-dot" aria-hidden="true"></span>
+            {{ ($connection['connected'] ?? false) ? 'Live' : 'Off' }}
+        </span>
+    @endif
 
 </div>
 

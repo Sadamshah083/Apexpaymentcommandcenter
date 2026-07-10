@@ -90,6 +90,13 @@ function handleDialerNumberChange(form) {
 
 function updateDialerRouteSummary(callerSelect) {
     const summary = document.querySelector('[data-dialer-from-did]');
+    const extBadge = document.querySelector('[data-dialer-line-ext]');
+    const extension = callerSelect?.value || '';
+
+    if (extBadge && extension) {
+        extBadge.textContent = `Ext ${extension}`;
+    }
+
     if (!summary) {
         return;
     }
@@ -504,6 +511,10 @@ function initLineDropdowns(root = document) {
             event.preventDefault();
             event.stopPropagation();
 
+            document.querySelector('[data-dialer-notes-drawer]')?.classList.add('hidden');
+            document.querySelector('[data-dialer-notes-panel]')?.classList.remove('is-open');
+            document.querySelector('[data-dialer-notes-toggle]')?.setAttribute('aria-expanded', 'false');
+
             const willOpen = !wrapper.classList.contains('is-open');
             closeAllLineDropdowns(willOpen ? wrapper : null);
 
@@ -872,15 +883,47 @@ function stabilizeCallLogsScroll(workspace) {
         return;
     }
 
+    const pane = workspace.querySelector('.ghl-dialer-center-logs--full');
     const scroll = workspace.querySelector('[data-call-logs-list]');
-    if (!scroll) {
+    if (!pane || !scroll) {
         return;
     }
 
+    const apply = () => {
+        const header = pane.querySelector('.ghl-dialer-center-logs__header');
+        const headerHeight = header?.offsetHeight ?? 0;
+        const paneHeight = pane.clientHeight;
+
+        if (paneHeight > headerHeight + 48) {
+            const maxHeight = paneHeight - headerHeight;
+            scroll.style.maxHeight = `${maxHeight}px`;
+            scroll.style.height = `${maxHeight}px`;
+        }
+    };
+
     requestAnimationFrame(() => {
-        void scroll.offsetHeight;
-        scroll.scrollTop = scroll.scrollTop;
+        apply();
+        requestAnimationFrame(apply);
     });
+}
+
+function bindCallLogsScrollResize(workspace) {
+    if (!workspace || workspace.dataset.callLogsScrollResizeBound === '1') {
+        return;
+    }
+
+    workspace.dataset.callLogsScrollResizeBound = '1';
+
+    const onResize = () => stabilizeCallLogsScroll(workspace);
+    window.addEventListener('resize', onResize, { passive: true });
+
+    if (typeof ResizeObserver !== 'undefined') {
+        const pane = workspace.querySelector('.ghl-dialer-center-logs--full');
+        if (pane) {
+            const observer = new ResizeObserver(() => stabilizeCallLogsScroll(workspace));
+            observer.observe(pane);
+        }
+    }
 }
 
 function setPhoneWorkspaceView(workspace, view) {
@@ -898,9 +941,7 @@ function setPhoneWorkspaceView(workspace, view) {
         btn.setAttribute('aria-selected', active ? 'true' : 'false');
     });
 
-    if (nextView === 'logs') {
-        stabilizeCallLogsScroll(workspace);
-    }
+    stabilizeCallLogsScroll(workspace);
 }
 
 function initPhonePanelSwitch(root = document) {
@@ -938,6 +979,9 @@ function initPhonePanelSwitch(root = document) {
         if (!workspace.dataset.phoneView) {
             setPhoneWorkspaceView(workspace, 'dialer');
         }
+
+        bindCallLogsScrollResize(workspace);
+        stabilizeCallLogsScroll(workspace);
     });
 }
 
@@ -1342,6 +1386,12 @@ function initCallLogsInfiniteScroll(root = document) {
                 },
             );
             observer.observe(sentinel);
+        }
+
+        const workspace = list.closest('[data-phone-workspace]');
+        if (workspace) {
+            bindCallLogsScrollResize(workspace);
+            stabilizeCallLogsScroll(workspace);
         }
     });
 }
