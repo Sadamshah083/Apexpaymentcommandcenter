@@ -26,7 +26,7 @@ class LeadImportDedupServiceTest extends TestCase
     public function test_discards_phone_already_in_workspace(): void
     {
         $admin = User::factory()->create();
-        $workspace = Workspace::factory()->create(['admin_id' => $admin->id]);
+        $workspace = Workspace::create(['name' => 'Acme', 'admin_id' => $admin->id]);
         Workflow::create([
             'workspace_id' => $workspace->id,
             'name' => 'Import',

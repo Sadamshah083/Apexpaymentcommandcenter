@@ -53,7 +53,7 @@ class WorkflowLeadVerificationTest extends TestCase
         $sync->shouldReceive('record')->once();
 
         $service = new WorkflowLeadVerificationService(
-            app(\App\Services\Workflow\WorkflowLeadDistributor::class),
+            app(\App\Services\Pipeline\SetterDistributionService::class),
             $sync,
         );
 
@@ -94,7 +94,7 @@ class WorkflowLeadVerificationTest extends TestCase
         $sync->shouldReceive('record')->once();
 
         $service = new WorkflowLeadVerificationService(
-            app(\App\Services\Workflow\WorkflowLeadDistributor::class),
+            app(\App\Services\Pipeline\SetterDistributionService::class),
             $sync,
         );
 

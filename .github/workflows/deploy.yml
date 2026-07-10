@@ -1,0 +1,54 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.repository == 'Sadamshah083/Apexpaymentcommandcenter'
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to production
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            APP=/var/www/apexone
+            REPO=https://github.com/Sadamshah083/Apexpaymentcommandcenter.git
+            cd "$APP"
+            test -f .env && cp .env /tmp/apexone.env.bak || true
+            if [ ! -d .git ]; then
+              git init
+              git remote add origin "$REPO"
+            else
+              git remote set-url origin "$REPO" || git remote add origin "$REPO"
+            fi
+            git fetch origin main
+            git reset --hard origin/main
+            test -f /tmp/apexone.env.bak && cp /tmp/apexone.env.bak .env || true
+            export COMPOSER_ALLOW_SUPERUSER=1
+            composer install --no-dev --optimize-autoloader --no-interaction
+            npm ci --ignore-scripts
+            npm run build
+            rm -rf node_modules
+            php artisan migrate --force
+            php artisan config:cache
+            php artisan route:cache
+            php artisan view:cache
+            rm -f public/hot
+            chown -R www-data:www-data storage bootstrap/cache public/build .env
+            systemctl restart apexone-queue php8.3-fpm
+            systemctl reload nginx
+            curl -fsS https://crm.apexonepayments.com/up
