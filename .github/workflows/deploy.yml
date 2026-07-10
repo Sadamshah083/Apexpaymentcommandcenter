@@ -28,6 +28,7 @@ jobs:
             APP=/var/www/apexone
             REPO=https://github.com/Sadamshah083/Apexpaymentcommandcenter.git
             cd "$APP"
+            git config --global --add safe.directory "$APP" || true
             test -f .env && cp .env /tmp/apexone.env.bak || true
             if [ ! -d .git ]; then
               git init

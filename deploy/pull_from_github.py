@@ -30,6 +30,7 @@ set -euo pipefail
 APP={shlex.quote(REMOTE_APP)}
 REPO={shlex.quote(REPO)}
 cd "$APP"
+git config --global --add safe.directory "$APP" || true
 test -f .env && cp .env /tmp/apexone.env.bak || true
 if [ ! -d .git ]; then
   git init
@@ -56,7 +57,7 @@ systemctl reload nginx
 curl -fsS https://crm.apexonepayments.com/up
 """
     out = sudo_run(ssh, script)
-    print(out)
+    print(out.encode("ascii", errors="replace").decode("ascii"))
     ssh.close()
     print("DEPLOY FROM GITHUB COMPLETE")
     return 0
