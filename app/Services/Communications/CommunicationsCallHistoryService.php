@@ -132,6 +132,77 @@ class CommunicationsCallHistoryService
         return (string) ($log?->note ?? '');
     }
 
+    /**
+     * @param  array<int, array<string, mixed>>  $logs
+     * @return array<string, string>
+     */
+    public function mapCallNotesForRefs(Workspace $workspace, array $logs): array
+    {
+        $uuids = [];
+        $localIds = [];
+
+        foreach ($logs as $log) {
+            $id = (string) ($log['id'] ?? '');
+            if ($id === '') {
+                continue;
+            }
+
+            if (str_starts_with($id, 'local:')) {
+                $localIds[] = (int) substr($id, 6);
+            } else {
+                $uuids[] = $id;
+            }
+        }
+
+        $notesByRef = [];
+
+        if ($localIds !== []) {
+            CommunicationCallLog::query()
+                ->where('workspace_id', $workspace->id)
+                ->whereIn('id', array_values(array_unique($localIds)))
+                ->get()
+                ->each(function (CommunicationCallLog $row) use (&$notesByRef) {
+                    $note = trim((string) ($row->note ?? ''));
+                    if ($note === '') {
+                        return;
+                    }
+
+                    $notesByRef['local:'.$row->id] = $note;
+                    if (filled($row->morpheus_call_uuid)) {
+                        $notesByRef[(string) $row->morpheus_call_uuid] = $note;
+                    }
+                });
+        }
+
+        if ($uuids !== []) {
+            CommunicationCallLog::query()
+                ->where('workspace_id', $workspace->id)
+                ->whereIn('morpheus_call_uuid', array_values(array_unique($uuids)))
+                ->orderByDesc('id')
+                ->get()
+                ->groupBy('morpheus_call_uuid')
+                ->each(function ($rows, $uuid) use (&$notesByRef) {
+                    $note = trim((string) ($rows->first()?->note ?? ''));
+                    if ($note !== '') {
+                        $notesByRef[(string) $uuid] = $note;
+                    }
+                });
+        }
+
+        return $notesByRef;
+    }
+
+    public function resolveCallNoteForHubLog(array $log, array $notesByRef = []): string
+    {
+        $callLogRef = (string) ($log['id'] ?? '');
+
+        if ($callLogRef !== '' && isset($notesByRef[$callLogRef])) {
+            return trim($notesByRef[$callLogRef]);
+        }
+
+        return trim((string) ($log['call_note'] ?? $log['note'] ?? data_get($log, 'raw.note') ?? ''));
+    }
+
     public function updateCallNote(Workspace $workspace, string $callLogRef, ?string $note, ?User $user = null): ?CommunicationCallLog
     {
         $log = $this->resolveCallLog($workspace, $callLogRef);

@@ -256,6 +256,13 @@ function toggleRowNotes(row, forceOpen = null) {
     row.classList.toggle('is-notes-open', shouldOpen);
     toggle?.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
 
+    const scroll = row.closest('[data-call-logs-list]');
+    if (scroll) {
+        requestAnimationFrame(() => {
+            void scroll.offsetHeight;
+        });
+    }
+
     if (!shouldOpen || !input) {
         return;
     }

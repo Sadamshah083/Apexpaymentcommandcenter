@@ -1530,25 +1530,13 @@ class CommunicationsInboxService
     $nextOffset = $offset + count($slice);
 
     $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
-    $phoneBodies = $workspace
-      ? $this->phoneNotes->mapBodiesForPhones(
-        $workspace,
-        collect($slice)
-          ->map(function (array $log) {
-            return match ($log['direction'] ?? '') {
-              'inbound' => (string) ($log['from_phone'] ?? ''),
-              'outbound' => (string) ($log['to_phone'] ?? ''),
-              default => (string) ($log['to_phone'] ?? ($log['from_phone'] ?? '')),
-            };
-          })
-          ->filter()
-          ->all(),
-      )
+    $callNotesByRef = $workspace
+      ? $this->callHistory->mapCallNotesForRefs($workspace, $enriched)
       : [];
 
     return [
       'logs' => array_map(
-        fn (array $log) => $this->formatDialerCallLogForApi($log, $routePrefix, $phoneBodies),
+        fn (array $log) => $this->formatDialerCallLogForApi($log, $routePrefix, [], $callNotesByRef),
         $slice,
       ),
       'next_offset' => $nextOffset,
@@ -1573,31 +1561,14 @@ class CommunicationsInboxService
    */
   public function enrichDialerCallLogsWithNotes(Workspace $workspace, array $logs): array
   {
-    $phones = collect($logs)
-      ->map(function (array $log) {
-        return match ($log['direction'] ?? '') {
-          'inbound' => (string) ($log['from_phone'] ?? ''),
-          'outbound' => (string) ($log['to_phone'] ?? ''),
-          default => (string) ($log['to_phone'] ?? ($log['from_phone'] ?? '')),
-        };
-      })
-      ->filter()
-      ->all();
+    $notesByRef = $this->callHistory->mapCallNotesForRefs($workspace, $logs);
 
-    $phoneBodies = $this->phoneNotes->mapBodiesForPhones($workspace, $phones);
+    return array_map(function (array $log) use ($notesByRef) {
+      $callNote = $this->callHistory->resolveCallNoteForHubLog($log, $notesByRef);
 
-    return array_map(function (array $log) use ($phoneBodies) {
-      $callbackPhone = match ($log['direction'] ?? '') {
-        'inbound' => $log['from_phone'] ?? null,
-        'outbound' => $log['to_phone'] ?? null,
-        default => $log['to_phone'] ?? ($log['from_phone'] ?? null),
-      };
-      $phoneKey = $this->phoneNotes->normalizePhoneKey($callbackPhone);
-      $phoneNote = $phoneKey ? trim((string) ($phoneBodies[$phoneKey] ?? '')) : '';
-      $callNote = trim((string) ($log['note'] ?? data_get($log, 'raw.note') ?? ''));
-
-      $log['phone_note'] = $phoneNote;
+      $log['phone_note'] = '';
       $log['call_note'] = $callNote;
+      $log['note'] = $callNote;
       $log['has_notes'] = $callNote !== '';
 
       return $log;
@@ -1609,7 +1580,7 @@ class CommunicationsInboxService
    * @param  array<string, string>  $phoneBodies
    * @return array<string, mixed>
    */
-  public function formatDialerCallLogForApi(array $log, string $routePrefix, array $phoneBodies = []): array
+  public function formatDialerCallLogForApi(array $log, string $routePrefix, array $phoneBodies = [], array $callNotesByRef = []): array
   {
     $callbackPhone = match ($log['direction'] ?? '') {
       'inbound' => $log['from_phone'] ?? null,
@@ -1655,8 +1626,8 @@ class CommunicationsInboxService
       ?? 0
     );
 
-    $callNote = trim((string) ($log['note'] ?? data_get($log, 'raw.note') ?? ''));
     $callLogRef = (string) ($log['id'] ?? '');
+    $callNote = $this->callHistory->resolveCallNoteForHubLog($log, $callNotesByRef);
     $localCallLogId = null;
     if (str_starts_with($callLogRef, 'local:')) {
       $localCallLogId = (int) substr($callLogRef, 6);

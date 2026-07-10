@@ -867,6 +867,22 @@ export function bootCommunicationsDialer() {
     initCommunicationsPhoneNotes();
 }
 
+function stabilizeCallLogsScroll(workspace) {
+    if (!workspace) {
+        return;
+    }
+
+    const scroll = workspace.querySelector('[data-call-logs-list]');
+    if (!scroll) {
+        return;
+    }
+
+    requestAnimationFrame(() => {
+        void scroll.offsetHeight;
+        scroll.scrollTop = scroll.scrollTop;
+    });
+}
+
 function setPhoneWorkspaceView(workspace, view) {
     if (!workspace) {
         return;
@@ -881,6 +897,10 @@ function setPhoneWorkspaceView(workspace, view) {
         btn.classList.toggle('is-active', active);
         btn.setAttribute('aria-selected', active ? 'true' : 'false');
     });
+
+    if (nextView === 'logs') {
+        stabilizeCallLogsScroll(workspace);
+    }
 }
 
 function initPhonePanelSwitch(root = document) {

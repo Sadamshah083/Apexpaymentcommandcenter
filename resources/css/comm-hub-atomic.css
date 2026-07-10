@@ -535,11 +535,11 @@
     overflow: auto;
 }
 
-.ghl-dialer-recent-list--full {
+.ghl-dialer-recent-list--full:not(.ghl-dialer-center-logs__scroll) {
     display: flex;
     flex-direction: column;
     gap: 0.4rem;
-    flex: 1 1 auto;
+    flex: 1 1 0%;
     min-height: 0;
     max-height: none;
     overflow-y: auto;
