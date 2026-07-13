@@ -18,12 +18,25 @@ class CommunicationsCallHistoryService
         $from = isset($filters['from']) ? Carbon::parse($filters['from'])->startOfDay() : now()->subDays(14)->startOfDay();
         $to = isset($filters['to']) ? Carbon::parse($filters['to'])->endOfDay() : now()->endOfDay();
 
-        return CommunicationCallLog::query()
+        $query = CommunicationCallLog::query()
             ->where('workspace_id', $workspace->id)
             ->whereBetween('created_at', [$from, $to])
-            ->with('user:id,name')
+            ->with('user:id,name');
+
+        if (! empty($filters['user_id'])) {
+            $query->where('user_id', (int) $filters['user_id']);
+        } elseif (! empty($filters['from_extension'])) {
+            $ext = preg_replace('/\D/', '', (string) $filters['from_extension']) ?: (string) $filters['from_extension'];
+            if ($ext !== '') {
+                $query->where('from_extension', $ext);
+            }
+        }
+
+        $limit = ! empty($filters['user_id']) ? 200 : 100;
+
+        return $query
             ->orderByDesc('created_at')
-            ->limit(100)
+            ->limit($limit)
             ->get()
             ->map(fn (CommunicationCallLog $row) => $this->toHubLog($row))
             ->all();
@@ -162,11 +175,9 @@ class CommunicationsCallHistoryService
                 ->whereIn('id', array_values(array_unique($localIds)))
                 ->get()
                 ->each(function (CommunicationCallLog $row) use (&$notesByRef) {
+                    // Always map the row (even empty) so callers know this call was resolved
+                    // and do not fall back to a shared phone/contact note.
                     $note = trim((string) ($row->note ?? ''));
-                    if ($note === '') {
-                        return;
-                    }
-
                     $notesByRef['local:'.$row->id] = $note;
                     if (filled($row->morpheus_call_uuid)) {
                         $notesByRef[(string) $row->morpheus_call_uuid] = $note;
@@ -182,10 +193,12 @@ class CommunicationsCallHistoryService
                 ->get()
                 ->groupBy('morpheus_call_uuid')
                 ->each(function ($rows, $uuid) use (&$notesByRef) {
-                    $note = trim((string) ($rows->first()?->note ?? ''));
-                    if ($note !== '') {
-                        $notesByRef[(string) $uuid] = $note;
+                    if (isset($notesByRef[(string) $uuid])) {
+                        return;
                     }
+
+                    $note = trim((string) ($rows->first()?->note ?? ''));
+                    $notesByRef[(string) $uuid] = $note;
                 });
         }
 
@@ -196,11 +209,18 @@ class CommunicationsCallHistoryService
     {
         $callLogRef = (string) ($log['id'] ?? '');
 
-        if ($callLogRef !== '' && isset($notesByRef[$callLogRef])) {
-            return trim($notesByRef[$callLogRef]);
+        // Exact per-call match only (including empty) — never reuse another call's comment.
+        if ($callLogRef !== '' && array_key_exists($callLogRef, $notesByRef)) {
+            return trim((string) $notesByRef[$callLogRef]);
         }
 
-        return trim((string) ($log['call_note'] ?? $log['note'] ?? data_get($log, 'raw.note') ?? ''));
+        // Local history rows already carry their own DB note for this call id.
+        if (($log['source'] ?? '') === 'local_history') {
+            return trim((string) ($log['note'] ?? $log['call_note'] ?? ''));
+        }
+
+        // Do not fall back to Morpheus/raw/contact notes — those repeat for the same phone number.
+        return '';
     }
 
     public function updateCallNote(Workspace $workspace, string $callLogRef, ?string $note, ?User $user = null): ?CommunicationCallLog
@@ -278,35 +298,106 @@ class CommunicationsCallHistoryService
         ?string $note,
         ?User $user = null,
     ): void {
-        $log = CommunicationCallLog::query()
-            ->where('workspace_id', $workspace->id)
-            ->where('morpheus_call_uuid', $uuid)
-            ->latest('id')
-            ->first();
+        $this->recordDialerDisposition($workspace, [
+            'call_uuid' => $uuid,
+            'disposition' => $disposition,
+            'note' => $note,
+            'user' => $user,
+        ]);
+    }
+
+    /**
+     * Persist disposition onto call history so it appears in dialer Call logs.
+     *
+     * @param  array{call_uuid?: ?string, phone?: ?string, disposition: string, note?: ?string, duration_sec?: ?int, user?: ?User, lead_id?: ?int}  $payload
+     */
+    public function recordDialerDisposition(Workspace $workspace, array $payload): CommunicationCallLog
+    {
+        $disposition = trim((string) ($payload['disposition'] ?? ''));
+        // Keep comment separate from disposition so Call logs can show both cleanly.
+        $historyNote = filled($payload['note'] ?? null) ? trim((string) $payload['note']) : null;
+        $uuid = trim((string) ($payload['call_uuid'] ?? ''));
+        $phone = trim((string) ($payload['phone'] ?? ''));
+        $durationSec = isset($payload['duration_sec']) ? max(0, (int) $payload['duration_sec']) : null;
+        /** @var User|null $user */
+        $user = $payload['user'] ?? null;
+        $leadId = isset($payload['lead_id']) ? (int) $payload['lead_id'] : null;
+
+        $log = null;
+        if ($uuid !== '') {
+            $log = CommunicationCallLog::query()
+                ->where('workspace_id', $workspace->id)
+                ->where('morpheus_call_uuid', $uuid)
+                ->latest('id')
+                ->first();
+        }
+
+        if (! $log && $phone !== '') {
+            $log = CommunicationCallLog::query()
+                ->where('workspace_id', $workspace->id)
+                ->where('to_phone', $phone)
+                ->where('direction', 'outbound')
+                ->where(function ($query) {
+                    $query->whereNull('disposition')
+                        ->orWhere('disposition', '');
+                })
+                ->where('created_at', '>=', now()->subHours(6))
+                ->latest('id')
+                ->first();
+        }
+
+        $callResult = ($durationSec ?? 0) > 0 ? 'connected' : 'no-answer';
+        $inCallNotes = filled($payload['in_call_notes'] ?? null) ? trim((string) $payload['in_call_notes']) : null;
+        $meta = [
+            'source' => 'dialer_disposition',
+            'lead_id' => $leadId ?: null,
+            'call_result' => $callResult,
+        ];
+        if ($disposition !== '') {
+            $meta['disposition'] = $disposition;
+        }
+        if ($inCallNotes !== null && $inCallNotes !== '') {
+            $meta['in_call_notes'] = $inCallNotes;
+        }
 
         if (! $log) {
-            CommunicationCallLog::create([
+            return CommunicationCallLog::create([
                 'workspace_id' => $workspace->id,
                 'user_id' => $user?->id,
-                'morpheus_call_uuid' => $uuid,
-                'direction' => 'unknown',
-                'disposition' => $disposition,
-                'note' => $note,
+                'morpheus_call_uuid' => $uuid !== '' ? $uuid : null,
+                'direction' => 'outbound',
+                'to_phone' => $phone !== '' ? $phone : null,
+                'disposition' => $disposition !== '' ? $disposition : null,
+                'note' => $historyNote !== '' && $historyNote !== null ? $historyNote : null,
                 'status' => 'completed',
+                'duration_sec' => $durationSec,
+                'started_at' => $durationSec ? now()->subSeconds($durationSec) : now(),
                 'ended_at' => now(),
-                'meta' => ['source' => 'morpheus_disposition'],
+                'meta' => $meta,
             ]);
-
-            return;
         }
 
         $log->update([
-            'disposition' => $disposition,
-            'note' => $note,
+            'disposition' => $disposition !== '' ? $disposition : $log->disposition,
+            'note' => $historyNote !== null && $historyNote !== '' ? $historyNote : $log->note,
             'status' => 'completed',
             'ended_at' => now(),
-            'duration_sec' => $log->started_at ? (int) $log->started_at->diffInSeconds(now()) : null,
+            'duration_sec' => $durationSec ?? $log->duration_sec ?? ($log->started_at ? (int) $log->started_at->diffInSeconds(now()) : null),
+            'to_phone' => $log->to_phone ?: ($phone !== '' ? $phone : null),
+            'morpheus_call_uuid' => $log->morpheus_call_uuid ?: ($uuid !== '' ? $uuid : null),
+            'user_id' => $log->user_id ?: $user?->id,
+            'meta' => array_merge($log->meta ?? [], $meta),
         ]);
+
+        return $log->fresh() ?? $log;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function toHubLogPublic(CommunicationCallLog $row): array
+    {
+        return $this->toHubLog($row);
     }
 
     /**
@@ -324,6 +415,11 @@ class CommunicationsCallHistoryService
 
         $recording = app(CommunicationsCallRecordingService::class)->recordingFieldsForHubLog($row);
 
+        $callResult = data_get($row->meta, 'call_result');
+        if (! filled($callResult)) {
+            $callResult = ($row->duration_sec ?? 0) > 0 ? 'connected' : ucfirst((string) ($row->status ?: 'completed'));
+        }
+
         return [
             'id' => $row->morpheus_call_uuid ?: ('local:'.$row->id),
             'direction' => $row->direction,
@@ -332,9 +428,15 @@ class CommunicationsCallHistoryService
             'from_phone' => $fromPhone,
             'from_extension' => $row->from_extension,
             'to_phone' => $row->to_phone ?? '',
+            'user_id' => $row->user_id,
+            'agent_name' => $agent,
             'start_time' => ($row->started_at ?? $row->created_at)?->toIso8601String(),
-            'result' => $row->disposition ?: ucfirst($row->status),
+            'result' => $callResult,
+            'disposition' => filled($row->disposition)
+                ? $row->disposition
+                : (trim((string) data_get($row->meta, 'disposition', '')) ?: null),
             'note' => $row->note,
+            'in_call_notes' => trim((string) data_get($row->meta, 'in_call_notes', '')),
             'duration' => $row->duration_sec ?? 0,
             'recording' => $recording['recording'],
             'has_recording_media' => $recording['has_recording_media'],
@@ -355,12 +457,51 @@ class CommunicationsCallHistoryService
      */
     public function mergeLiveAndHistory(array $liveLogs, array $historyLogs): array
     {
-        $liveUuids = collect($liveLogs)->pluck('id')->filter()->all();
+        $historyById = collect($historyLogs)
+            ->filter(fn (array $row) => filled($row['id'] ?? null))
+            ->keyBy(fn (array $row) => (string) $row['id']);
 
-        $merged = collect($liveLogs)
+        $liveUuids = collect($liveLogs)->pluck('id')->filter()->map(fn ($id) => (string) $id)->all();
+
+        // Overlay hub-saved disposition / notes onto matching live CDR rows so Call logs keep them.
+        $liveMerged = collect($liveLogs)->map(function (array $live) use ($historyById) {
+            $id = (string) ($live['id'] ?? '');
+            if ($id === '' || ! $historyById->has($id)) {
+                return $live;
+            }
+
+            $history = $historyById->get($id);
+            $historyDisposition = trim((string) ($history['disposition'] ?? ''));
+            $historyNote = trim((string) ($history['note'] ?? $history['call_note'] ?? ''));
+            $historyInCallNotes = trim((string) ($history['in_call_notes'] ?? data_get($history, 'raw.meta.in_call_notes') ?? ''));
+
+            if ($historyDisposition !== '') {
+                $live['disposition'] = $historyDisposition;
+            }
+            if ($historyNote !== '') {
+                $live['note'] = $historyNote;
+                $live['call_note'] = $historyNote;
+            }
+            if ($historyInCallNotes !== '') {
+                $live['in_call_notes'] = $historyInCallNotes;
+            }
+
+            // Prefer local recording fields when live CDR lacks them.
+            if (empty($live['has_recording_media']) && ! empty($history['has_recording_media'])) {
+                foreach (['has_recording_media', 'recording_id', 'recording_source', 'call_reference_id', 'recording_status', 'recording'] as $key) {
+                    if (array_key_exists($key, $history)) {
+                        $live[$key] = $history[$key];
+                    }
+                }
+            }
+
+            return $live;
+        })->all();
+
+        $merged = collect($liveMerged)
             ->concat(
                 collect($historyLogs)->reject(
-                    fn (array $row) => in_array($row['id'], $liveUuids, true)
+                    fn (array $row) => in_array((string) ($row['id'] ?? ''), $liveUuids, true)
                 )
             )
             ->sortByDesc(fn (array $row) => $row['start_time'] ?? '')

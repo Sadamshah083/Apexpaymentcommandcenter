@@ -458,19 +458,7 @@ class MorpheusHubController extends Controller
         try {
             $status = $this->morpheus->hubCallStatus($uuid, $destination, $request->boolean('customer_first'));
             $overlay = $this->callEvents->hubStatusOverlay($uuid, $destination);
-            if ($overlay !== []) {
-                if (($overlay['call_ended'] ?? false) === true) {
-                    $status = array_merge($status, $overlay, [
-                        'live' => false,
-                        'call_ended' => true,
-                        'outcome' => 'ended',
-                    ]);
-                } elseif (($overlay['destination_connected'] ?? false) === true && ($overlay['live'] ?? true) !== false) {
-                    $status = array_merge($status, $overlay, ['outcome' => 'connected']);
-                } else {
-                    $status = array_merge($status, $overlay);
-                }
-            }
+            $status = $this->mergeLiveCallStatus($status, $overlay);
 
             return response()->json($status);
         } catch (\Throwable $e) {
@@ -546,26 +534,67 @@ class MorpheusHubController extends Controller
                 @set_time_limit(0);
             }
 
+            // Disable output buffering so webhook-driven events flush immediately.
+            while (ob_get_level() > 0) {
+                @ob_end_flush();
+            }
+            @ob_implicit_flush(true);
+
             $lastFingerprint = '';
             $idleTicks = 0;
-            $maxTicks = 900;
+            $maxTicks = 1800;
+            $apiEveryTicks = 8; // full hub status ~800ms
+            $destProbeEveryTicks = 3; // destination active-call probe ~300ms
+            $tick = 0;
+            $apiStatus = ['ok' => true, 'pending' => true, 'live' => true];
+
+            echo ': connected'."\n\n";
+            if (function_exists('ob_flush')) {
+                @ob_flush();
+            }
+            flush();
 
             while (! connection_aborted() && $idleTicks < $maxTicks) {
+                $tick++;
+
                 try {
-                    $apiStatus = $this->morpheus->hubCallStatus($uuid, $destination, false);
+                    // Real-time path: webhook cache only (no Morpheus HTTP).
                     $overlay = $this->callEvents->hubStatusOverlay($uuid, $destination);
-                    $status = array_merge($apiStatus, $overlay);
+
+                    // Slower fallback: Morpheus API / active-calls analysis.
+                    if ($tick === 1 || ($tick % $apiEveryTicks) === 0) {
+                        $apiStatus = $this->morpheus->hubLiveCallStatus($uuid, $destination);
+                    } elseif (
+                        ($tick % $destProbeEveryTicks) === 0
+                        && ($apiStatus['destination_connected'] ?? false) !== true
+                        && ($apiStatus['call_ended'] ?? false) !== true
+                        && filled($destination)
+                    ) {
+                        // Fast path while UUID is 404: watch PSTN destination on /calls.
+                        $destLive = $this->morpheus->probeDestinationOnActiveCalls($destination);
+                        if (is_array($destLive) && ($destLive['destination_connected'] ?? false) === true) {
+                            $apiStatus = array_merge($apiStatus, $destLive, [
+                                'ok' => true,
+                                'pending' => false,
+                                'source' => 'active_calls_destination',
+                            ]);
+                        }
+                    }
+
+                    $status = $this->mergeLiveCallStatus($apiStatus, $overlay);
                 } catch (\Throwable) {
                     $status = ['ok' => false];
                 }
 
                 $fingerprint = json_encode([
-                    'destination_connected' => $status['destination_connected'] ?? false,
-                    'call_ended' => $status['call_ended'] ?? false,
+                    'destination_connected' => (bool) ($status['destination_connected'] ?? false),
+                    'call_ended' => (bool) ($status['call_ended'] ?? false),
                     'live' => $status['live'] ?? null,
                     'outcome' => $status['outcome'] ?? null,
                     'hangup_cause' => $status['hangup_cause'] ?? null,
                     'billsec' => $status['billsec'] ?? null,
+                    'state' => $status['state'] ?? null,
+                    'updated_at' => $status['updated_at'] ?? null,
                 ]);
 
                 if ($fingerprint !== $lastFingerprint) {
@@ -582,13 +611,21 @@ class MorpheusHubController extends Controller
                     $idleTicks = 0;
                 } else {
                     $idleTicks++;
+                    // Keepalive so proxies do not close the stream.
+                    if (($idleTicks % 50) === 0) {
+                        echo ': ping'."\n\n";
+                        if (function_exists('ob_flush')) {
+                            @ob_flush();
+                        }
+                        flush();
+                    }
                 }
 
                 if (($status['call_ended'] ?? false) === true || (($status['live'] ?? true) === false && filled($status['hangup_cause'] ?? null))) {
                     break;
                 }
 
-                usleep(300_000);
+                usleep(100_000);
             }
         }, 200, [
             'Content-Type' => 'text/event-stream',
@@ -596,6 +633,70 @@ class MorpheusHubController extends Controller
             'Connection' => 'keep-alive',
             'X-Accel-Buffering' => 'no',
         ]);
+    }
+
+    /**
+     * Prefer webhook-confirmed answer/hangup; never let a "ringing" overlay
+     * wipe a connected/ended API status.
+     *
+     * @param  array<string, mixed>  $apiStatus
+     * @param  array<string, mixed>  $overlay
+     * @return array<string, mixed>
+     */
+    protected function mergeLiveCallStatus(array $apiStatus, array $overlay): array
+    {
+        if ($overlay === []) {
+            return $apiStatus;
+        }
+
+        if (($overlay['call_ended'] ?? false) === true || (($overlay['live'] ?? true) === false && filled($overlay['hangup_cause'] ?? null))) {
+            return array_merge($apiStatus, $overlay, [
+                'ok' => true,
+                'live' => false,
+                'call_ended' => true,
+                'outcome' => 'ended',
+                'destination_connected' => false,
+            ]);
+        }
+
+        if (($overlay['destination_connected'] ?? false) === true || ($overlay['destination_answered'] ?? false) === true) {
+            return array_merge($apiStatus, $overlay, [
+                'ok' => true,
+                'live' => true,
+                'destination_connected' => true,
+                'destination_answered' => true,
+                'outcome' => 'connected',
+            ]);
+        }
+
+        if (($apiStatus['destination_connected'] ?? false) === true || ($apiStatus['destination_answered'] ?? false) === true) {
+            return array_merge($overlay, $apiStatus, [
+                'destination_connected' => true,
+                'destination_answered' => true,
+                'outcome' => 'connected',
+                'live' => true,
+            ]);
+        }
+
+        if (($apiStatus['call_ended'] ?? false) === true) {
+            return array_merge($overlay, $apiStatus, [
+                'call_ended' => true,
+                'live' => false,
+                'outcome' => 'ended',
+            ]);
+        }
+
+        // Overlay "ringing" must never wipe a connected/active API status.
+        if (($apiStatus['outcome'] ?? '') === 'connected' || ($apiStatus['destination_connected'] ?? false) === true) {
+            return array_merge($overlay, $apiStatus, [
+                'destination_connected' => true,
+                'destination_answered' => true,
+                'outcome' => 'connected',
+                'live' => true,
+            ]);
+        }
+
+        return array_merge($apiStatus, $overlay);
     }
 
     public function holdCall(Request $request, string $uuid)

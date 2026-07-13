@@ -108,6 +108,66 @@ export function syncSidebarActiveLinks() {
     });
 }
 
+function syncSidebarLinkTooltips() {
+    const collapsed = ! isMobile() && document.body.classList.contains('app-sidebar-collapsed');
+
+    document.querySelectorAll('.app-sidebar .sidebar-link').forEach((link) => {
+        // Never expose raw URLs via native title tooltips.
+        link.removeAttribute('title');
+
+        if (! collapsed) {
+            return;
+        }
+
+        const label = link.querySelector('.sidebar-link-label')?.textContent?.trim();
+        if (label) {
+            link.setAttribute('title', label);
+        }
+    });
+}
+
+function bindSidebarLinkStatusHide(link) {
+    if (link.dataset.statusHrefBound === '1') {
+        return;
+    }
+
+    link.dataset.statusHrefBound = '1';
+
+    const restoreHref = () => {
+        const href = link.dataset.statusHref;
+        if (href && ! link.getAttribute('href')) {
+            link.setAttribute('href', href);
+        }
+    };
+
+    const hideStatusUrl = () => {
+        const href = link.getAttribute('href');
+        if (! href || href === '#' || href.startsWith('javascript:')) {
+            return;
+        }
+
+        link.dataset.statusHref = href;
+        link.removeAttribute('href');
+    };
+
+    link.addEventListener('mouseenter', hideStatusUrl);
+    link.addEventListener('mouseleave', restoreHref);
+    link.addEventListener('focus', hideStatusUrl);
+    link.addEventListener('blur', restoreHref);
+    link.addEventListener('mousedown', restoreHref, true);
+    link.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+            restoreHref();
+        }
+    });
+    link.addEventListener('auxclick', restoreHref, true);
+}
+
+function bindAllSidebarLinkStatusHide() {
+    document.querySelectorAll('.app-sidebar .sidebar-link').forEach(bindSidebarLinkStatusHide);
+    syncSidebarLinkTooltips();
+}
+
 function updateEdgeIcons(collapsed, mobileOpen) {
     document.querySelectorAll('[data-sidebar-edge-icon]').forEach((icon) => {
         icon.textContent = collapsed ? '\u203A' : '\u2039';
@@ -182,6 +242,7 @@ function setMobileOpen(open) {
         mobileOpen: open,
     });
     updateEdgeIcons(document.body.classList.contains('app-sidebar-collapsed'), open);
+    syncSidebarLinkTooltips();
 }
 
 function setDesktopCollapsed(collapsed) {
@@ -189,6 +250,7 @@ function setDesktopCollapsed(collapsed) {
     localStorage.setItem(STORAGE_KEY, collapsed ? '1' : '0');
     syncToggleButtons({ collapsed, mobileOpen: false });
     updateEdgeIcons(collapsed, false);
+    syncSidebarLinkTooltips();
 }
 
 function applySidebarLayout() {
@@ -271,11 +333,19 @@ function bindGlobalSidebarListeners() {
     document.addEventListener('turbo:load', () => {
         restoreSidebarNavScroll();
         syncSidebarActiveLinks();
+        bindAllSidebarLinkStatusHide();
     });
     document.addEventListener('turbo:before-cache', () => {
         if (isMobile()) {
             setMobileOpen(false);
         }
+        // Restore hrefs before Turbo caches the page.
+        document.querySelectorAll('.app-sidebar .sidebar-link[data-status-href]').forEach((link) => {
+            const href = link.dataset.statusHref;
+            if (href) {
+                link.setAttribute('href', href);
+            }
+        });
     });
     document.addEventListener('click', handleSidebarToggleClick);
     document.addEventListener('click', handleSidebarLinkClick);
@@ -307,6 +377,7 @@ export function initSidebar() {
     syncSidebarActiveLinks();
     bindSidebarEvents();
     bindGlobalSidebarListeners();
+    bindAllSidebarLinkStatusHide();
 
     if (document.documentElement.dataset[BOUND_KEY] === '1') {
         requestAnimationFrame(enableSidebarTransitions);

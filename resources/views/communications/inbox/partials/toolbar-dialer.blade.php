@@ -1,12 +1,6 @@
-<header class="ghl-comm-topbar ghl-inbox-toolbar">
+<header class="ghl-comm-topbar ghl-inbox-toolbar ghl-comm-topbar--dialer">
     <div class="ghl-comm-topbar__left">
-        <button type="button" class="ghl-comm-icon-btn" data-sidebar-toggle aria-label="Open menu" title="Menu">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
-            </svg>
-        </button>
-
-        <h1 class="ghl-comm-topbar__title">Phone</h1>
+        <h1 class="ghl-comm-topbar__title">Communications Dialer</h1>
     </div>
 
     <div class="ghl-comm-topbar__actions">

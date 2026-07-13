@@ -4,17 +4,16 @@ import { initToasts } from './toast.js';
 import './system-notifications.js';
 import { initTopnav } from './topnav.js';
 import { initSidebar } from './sidebar.js';
-import { initWorkspaceSync, teardownWorkspaceSync } from './workspace-sync.js';
-import { initPushNotifications } from './push-notifications.js';
 import { initFormLoading } from './form-loading.js';
-import { initMemberManagement } from './member-management.js';
-import { initWorkspaceAdmin } from './workspace-admin.js';
+import { initFastImportNav } from './fast-import-nav.js';
 import { startProgressPoll } from './realtime-poll.js';
-import { initPortalDashboard, teardownPortalDashboard } from './portal-dashboard.js';
 import { updateAdminDetailPanel } from './admin-dashboard-detail.js';
 
 window.startProgressPoll = startProgressPoll;
 window.updateAdminDetailPanel = updateAdminDetailPanel;
+
+let workspaceSyncModule = null;
+let portalDashboardModule = null;
 
 function initPageTransitions() {
     if (document.documentElement.dataset.pageTransitionsInit === '1') {
@@ -97,50 +96,103 @@ async function bootCommunicationsFeatures() {
     }
 }
 
-function boot() {
+async function bootDeferredFeatures() {
+    const tasks = [
+        import('./push-notifications.js').then(({ initPushNotifications }) => initPushNotifications()),
+    ];
+
+    if (document.getElementById('workspace-member-management')) {
+        tasks.push(Promise.all([
+            import('./member-management.js'),
+            import('./workspace-admin.js'),
+        ]).then(([memberModule, adminModule]) => {
+            memberModule.initMemberManagement();
+            adminModule.initWorkspaceAdmin();
+        }));
+    }
+
+    if (document.getElementById('portal-sync-context') || document.getElementById('portal-dash-widgets')) {
+        tasks.push(import('./portal-dashboard.js').then((module) => {
+            portalDashboardModule = module;
+            module.initPortalDashboard();
+        }));
+    }
+
+    if (document.querySelector('[data-auto-dial-hub], [data-call-summary-modal]')) {
+        tasks.push(import('./communications-auto-dial.js').then((module) => module.initAutoDialHub()));
+    }
+
+    if (document.querySelector('[data-workflow-upload]')) {
+        tasks.push(import('./workflow-upload.js').then((module) => module.initWorkflowUpload()));
+    }
+
+    if (document.querySelector('.js-pretty-select, select[data-pretty-select]')) {
+        tasks.push(import('./pretty-select.js').then((module) => module.initPrettySelects()));
+    }
+
+    tasks.push(import('./workspace-sync.js').then((module) => {
+        workspaceSyncModule = module;
+        module.initWorkspaceSync();
+    }));
+
+    tasks.push(bootCommunicationsFeatures());
+
+    await Promise.allSettled(tasks);
+}
+
+function scheduleDeferredBoot() {
+    const run = () => {
+        void bootDeferredFeatures();
+    };
+
+    if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(run, { timeout: 1000 });
+        return;
+    }
+
+    window.setTimeout(run, 1);
+}
+
+function bootCore() {
     initTurboAuthGuard();
     initPageTransitions();
     initToasts();
     initTopnav();
     initSidebar();
-    initWorkspaceSync();
-    initPushNotifications();
     initFormLoading();
-    initMemberManagement();
-    initWorkspaceAdmin();
-    initPortalDashboard();
     initHorizontalWheelScroll();
-    void bootCommunicationsFeatures();
+    initFastImportNav();
+    scheduleDeferredBoot();
 }
 
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot, { once: true });
+    document.addEventListener('DOMContentLoaded', bootCore, { once: true });
 } else {
-    boot();
+    bootCore();
 }
 
 document.addEventListener('turbo:load', () => {
     initToasts();
     initTopnav();
     initSidebar();
-    initWorkspaceSync();
-    initPushNotifications();
     initFormLoading();
-    initMemberManagement();
-    initWorkspaceAdmin();
-    initPortalDashboard();
     initHorizontalWheelScroll();
-    void bootCommunicationsFeatures();
+    initFastImportNav();
+    scheduleDeferredBoot();
 });
+
 document.addEventListener('turbo:before-cache', () => {
-    teardownWorkspaceSync();
-    teardownPortalDashboard();
+    workspaceSyncModule?.teardownWorkspaceSync();
+    portalDashboardModule?.teardownPortalDashboard();
+
     import('./communications-webphone.js').then((webphoneModule) => {
         webphoneModule.teardownWebphoneForTurbo?.();
     }).catch(() => {});
+
     import('./communications-dialer.js').then((dialerModule) => {
         dialerModule.resetDialerButtonsForCache();
     }).catch(() => {});
+
     import('./communications-phone-notes.js').then((notesModule) => {
         notesModule.teardownPhoneNotesForTurbo?.();
     }).catch(() => {});

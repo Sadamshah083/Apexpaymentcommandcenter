@@ -31,18 +31,24 @@ class WorkflowExtractor
         $input = ResearchInput::fromWorkflowLead($lead);
         $location = $this->resolveLocation($lead);
 
-        $maxQueries = max(1, (int) config('workflow_enrichment.web_search_queries', 8));
-        Log::info("Gathering web context for: {$input->businessName} in {$location} ({$maxQueries} queries)");
+        $maxQueries = max(0, (int) config('workflow_enrichment.web_search_queries', 0));
+        $webContext = [];
 
-        $webContext = $this->webSearch->gatherContext(
-            $input->businessName,
-            $input->address ?: $location,
-            $input->website,
-            $maxQueries,
-        );
+        if ($maxQueries > 0) {
+            Log::info("Gathering web context for: {$input->businessName} in {$location} ({$maxQueries} queries)");
+            $webContext = $this->webSearch->gatherContext(
+                $input->businessName,
+                $input->address ?: $location,
+                $input->website,
+                $maxQueries,
+            );
+        } else {
+            Log::info("Skipping DuckDuckGo prefetch for: {$input->businessName} (Gemini Google Search only)");
+        }
+
         $contextBlock = $this->webSearch->formatContextBlock($webContext);
 
-        if (count($webContext) === 0) {
+        if ($maxQueries > 0 && count($webContext) === 0) {
             Log::warning('Workflow enrichment has no DuckDuckGo context — relying on Gemini Google Search', [
                 'lead_id' => $lead->id,
                 'business' => $input->businessName,

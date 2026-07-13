@@ -19,6 +19,9 @@
     --ghl-list-w: 16rem;
     --ghl-tools-w: 18.5rem;
     --ghl-dial-rail-w: 18.5rem;
+    --ghl-font-sans:
+        'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont,
+        'Helvetica Neue', Arial, sans-serif;
 }
 
 /* ── Communications Hub keeps app sidebar open ────────────────────── */
@@ -38,6 +41,7 @@ body.ghl-comm-mode .app-main {
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    scrollbar-gutter: auto !important;
 }
 
 body.ghl-comm-mode {
@@ -59,8 +63,13 @@ body.ghl-comm-mode .app-floating-notify-btn {
     }
 
     body.ghl-comm-mode .ghl-comm-topbar {
-        padding-left: 3.35rem;
-        padding-right: 3.15rem;
+        padding-left: 3.5rem;
+        padding-right: 3.5rem;
+    }
+
+    body.ghl-comm-mode .ghl-comm-topbar--dialer {
+        padding-left: 3.5rem;
+        padding-right: 3.5rem;
     }
 }
 
@@ -90,6 +99,9 @@ body.ghl-comm-mode .app-shell > .flex {
     padding: 0;
     display: flex;
     flex-direction: column;
+    font-family: var(--ghl-font-sans);
+    font-weight: 400;
+    font-synthesis: none;
 }
 
 .ghl-comm-app.ghl-inbox::before {
@@ -99,6 +111,7 @@ body.ghl-comm-mode .app-shell > .flex {
 .app-main:has(.ghl-comm-app) {
     padding: 0 !important;
     overflow: hidden;
+    scrollbar-gutter: auto !important;
 }
 
 .app-content-shell:has(.ghl-comm-app) {
@@ -140,6 +153,40 @@ body.ghl-comm-mode .app-shell > .flex {
     overflow: visible;
 }
 
+.ghl-comm-topbar--dialer {
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    min-height: 2.5rem;
+    /* Clear sidebar edge-toggle (left) + floating notify (right) */
+    padding: 0.35rem 3.5rem 0.35rem 2rem;
+}
+
+.ghl-comm-topbar--dialer .ghl-comm-topbar__left {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    padding-left: 0.125rem; /* ~2px breathing room after chrome inset */
+}
+
+.ghl-comm-topbar--dialer .ghl-comm-topbar__title {
+    font-size: 1.25rem;
+    font-weight: 400;
+    position: relative;
+    z-index: 1;
+    color: #64748b;
+    letter-spacing: -0.01em;
+}
+
+.ghl-comm-topbar--dialer .ghl-comm-topbar__actions {
+    width: auto;
+    flex: 0 1 auto;
+    justify-content: flex-end;
+    margin-left: auto;
+    min-width: 0;
+    padding-right: 0.125rem; /* ~2px before right chrome */
+}
+
 .ghl-comm-topbar__left {
     display: flex;
     flex-direction: row;
@@ -167,8 +214,8 @@ body.ghl-comm-mode .app-shell > .flex {
 .ghl-comm-topbar__title {
     margin: 0;
     font-size: var(--ghl-text-base);
-    font-weight: 600;
-    color: var(--ghl-text);
+    font-weight: 500;
+    color: #64748b;
     letter-spacing: -0.01em;
     white-space: nowrap;
 }
@@ -238,10 +285,10 @@ body.ghl-comm-mode .app-shell > .flex {
     gap: 0.25rem;
     min-height: 1.75rem;
     padding: 0 0.5rem;
-    border: 1px solid var(--ghl-border-strong);
-    border-radius: 0.375rem;
-    background: var(--ghl-surface);
-    color: var(--ghl-text);
+    border: 1.5px solid #bbf7d0;
+    border-radius: 0.5rem;
+    background: #ffffff;
+    color: #059669;
     font-size: var(--ghl-text-xs);
     font-weight: 600;
     line-height: 1.2;
@@ -252,20 +299,21 @@ body.ghl-comm-mode .app-shell > .flex {
 }
 
 .ghl-comm-btn:hover {
-    background: #f8fafc;
-    border-color: #cbd5e1;
+    background: #ecfdf5;
+    border-color: #6ee7b7;
+    color: #047857;
 }
 
 .ghl-comm-btn--primary {
-    background: var(--ghl-blue);
-    border-color: var(--ghl-blue);
-    color: #fff;
+    background: #d1fae5;
+    border-color: #6ee7b7;
+    color: #047857;
 }
 
 .ghl-comm-btn--primary:hover {
-    background: var(--ghl-blue-hover);
-    border-color: var(--ghl-blue-hover);
-    color: #fff;
+    background: #a7f3d0;
+    border-color: #34d399;
+    color: #065f46;
 }
 
 .ghl-comm-pill {
@@ -290,8 +338,8 @@ body.ghl-comm-mode .app-shell > .flex {
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
-    padding: 0.15rem 0.45rem;
-    border-radius: 9999px;
+    padding: 0.2rem 0.45rem;
+    border-radius: 0.125rem;
     font-size: 0.625rem;
     font-weight: 700;
     letter-spacing: 0.03em;
@@ -1073,8 +1121,9 @@ body.ghl-comm-mode .app-shell > .flex {
     min-width: 7.5rem;
     border-radius: 0.5rem;
     overflow: hidden;
-    border: 1px solid #122e53;
-    box-shadow: 0 2px 8px rgba(18, 46, 83, 0.12);
+    border: 1px solid #e2e8f0;
+    box-shadow: none;
+    background: #ffffff;
 }
 
 .ghl-comm-connect-group__main {
@@ -1084,16 +1133,18 @@ body.ghl-comm-mode .app-shell > .flex {
     gap: 0.35rem;
     min-width: 0;
     min-height: 2rem;
-    padding: 0.35rem 0.5rem 0.35rem 0.75rem;
+    padding: 0.35rem 0.65rem 0.35rem 0.75rem;
     border: none;
-    background: #122e53;
-    color: #fff;
+    background: #ffffff;
+    color: #64748b;
     font-size: 0.6875rem;
-    font-weight: 700;
+    font-weight: 600;
     letter-spacing: 0.01em;
     cursor: pointer;
     white-space: nowrap;
-    transition: background 0.15s;
+    transition:
+        background 0.15s ease,
+        color 0.15s ease;
 }
 
 .ghl-comm-connect-group__label {
@@ -1102,6 +1153,7 @@ body.ghl-comm-mode .app-shell > .flex {
     max-width: 5.5rem;
     overflow: hidden;
     text-overflow: ellipsis;
+    color: #64748b;
 }
 
 .ghl-comm-connect-group__phone {
@@ -1113,8 +1165,8 @@ body.ghl-comm-mode .app-shell > .flex {
     width: 1.125rem;
     height: 1.125rem;
     margin-inline: 0;
-    color: #fff;
-    opacity: 0.95;
+    color: #64748b;
+    opacity: 1;
     pointer-events: none;
 }
 
@@ -1124,7 +1176,13 @@ body.ghl-comm-mode .app-shell > .flex {
 }
 
 .ghl-comm-connect-group__main:hover:not(:disabled) {
-    background: #0e243f;
+    background: #f8fafc;
+    color: #475569;
+}
+
+.ghl-comm-connect-group__main:hover:not(:disabled) .ghl-comm-connect-group__label,
+.ghl-comm-connect-group__main:hover:not(:disabled) .ghl-comm-connect-group__phone {
+    color: #475569;
 }
 
 .ghl-comm-connect-group__main:disabled {
@@ -1134,8 +1192,8 @@ body.ghl-comm-mode .app-shell > .flex {
 
 .ghl-comm-connect-group.is-connecting .ghl-comm-connect-group__main:disabled {
     opacity: 1;
-    color: #f8fafc;
-    background: #1e3a5f;
+    color: #64748b;
+    background: #f1f5f9;
     cursor: wait;
 }
 
@@ -1178,11 +1236,13 @@ body.ghl-comm-mode .app-shell > .flex {
     min-height: 2rem;
     padding: 0.25rem;
     border: none;
-    border-left: 1px solid rgba(255, 255, 255, 0.15);
-    background: #122e53;
-    color: #fff;
+    border-left: 1px solid #e2e8f0;
+    background: #ffffff;
+    color: #94a3b8;
     cursor: pointer;
-    transition: background 0.15s, color 0.15s;
+    transition:
+        background 0.15s ease,
+        color 0.15s ease;
 }
 
 .ghl-comm-connect-group__delete svg {
@@ -1191,8 +1251,8 @@ body.ghl-comm-mode .app-shell > .flex {
 }
 
 .ghl-comm-connect-group__delete:hover:not(:disabled) {
-    background: #0e243f;
-    color: #fecaca;
+    background: #fef2f2;
+    color: #dc2626;
 }
 
 .ghl-comm-connect-group__delete:disabled {
@@ -1887,9 +1947,9 @@ body.ghl-comm-mode .app-shell > .flex {
     flex-shrink: 0;
     padding: 0.12rem 0.45rem;
     border-radius: 9999px;
-    background: #eff6ff;
-    border: 1px solid #bfdbfe;
-    color: #1d4ed8;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    color: #64748b;
     font-size: 0.625rem;
     font-weight: 700;
     letter-spacing: 0.02em;
@@ -2035,7 +2095,7 @@ body.ghl-comm-mode .app-shell > .flex {
 
 .ghl-line-dropdown__option .ghl-line-dropdown__option-did {
     min-width: 0;
-    text-align: right;
+    text-align: left;
     font-size: 0.6875rem;
     letter-spacing: 0.01em;
 }
@@ -2142,9 +2202,12 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
 }
 
 .ghl-comm-topbar__actions .ghl-comm-global-line--toolbar {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
+    width: auto;
+    max-width: 100%;
     min-width: 0;
     margin-left: 0;
+    justify-content: flex-end;
 }
 
 .ghl-comm-topbar .ghl-comm-global-line__ext .ghl-line-dropdown {
@@ -2253,13 +2316,13 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
 }
 
 .ghl-comm-phone-mode .ghl-comm-global-line--toolbar {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     min-width: 0;
     max-width: 100%;
-    width: 100%;
+    width: auto;
     gap: 0.45rem;
     align-items: center;
-    justify-content: flex-start;
+    justify-content: flex-end;
 }
 
 .ghl-comm-phone-mode .ghl-comm-global-line__ext {
@@ -2270,7 +2333,7 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
 }
 
 .ghl-comm-phone-mode .ghl-comm-connect-strip {
-    flex: 1 1 auto;
+    flex: 0 0 auto;
     position: relative;
     z-index: 3;
     min-width: 0;
@@ -2278,7 +2341,7 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
 }
 
 .ghl-comm-phone-mode .ghl-comm-connect-group {
-    flex: 1 1 auto;
+    flex: 0 0 auto;
     width: auto;
     min-width: 0;
     max-width: none;
@@ -2434,11 +2497,15 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
     height: 100%;
     min-height: 0 !important;
     max-height: none;
-    padding: 0.5rem 0.75rem 0;
+    padding: 0.5rem 0 0 0.5rem;
     box-sizing: border-box;
     overflow: hidden;
     display: flex;
     flex-direction: column;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-center.ch-dial-workspace--admin.ch-dial-workspace--compact {
+    padding: 0.35rem 0 0.35rem 0.5rem;
 }
 
 /* Mobile dial pad tab: hug keypad — desktop wide uses full-height split below */
@@ -2507,7 +2574,7 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
     overflow: hidden;
 }
 
-.ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='logs'] .ghl-dialer-center-logs--full {
+.ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='logs'] .ghl-dialer-center-logs--full:not(.hidden) {
     flex: 1 1 0% !important;
     align-self: stretch;
     height: auto !important;
@@ -2560,7 +2627,7 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
 
 .ghl-comm-phone-mode .ch-dial-workspace__grid--phone-split {
     display: grid;
-    grid-template-columns: minmax(12rem, 0.72fr) minmax(16rem, 1.28fr);
+    grid-template-columns: minmax(14rem, 1.1fr) minmax(16rem, 0.95fr);
     grid-template-rows: minmax(0, 1fr);
     flex: 1 1 auto;
     min-height: 0;
@@ -2568,11 +2635,16 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
     max-height: 100%;
     width: 100%;
     align-items: stretch;
+    gap: 1rem;
+    column-gap: 1rem;
     overflow: hidden;
+    box-sizing: border-box;
+    padding: 0 0.15rem;
 }
 
 .ghl-comm-phone-mode .ch-dial-workspace__grid--phone-split > * {
     min-height: 0;
+    min-width: 0;
     align-self: stretch;
 }
 
@@ -2583,12 +2655,11 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
     height: 100%;
     max-height: 100%;
     overflow: hidden;
-    border: none !important;
+    border: 1px solid var(--ghl-border) !important;
     box-shadow: none !important;
-    background: transparent !important;
-    border-left: 1px solid var(--ghl-border) !important;
-    border-radius: 0 !important;
-    padding-left: 1rem;
+    background: #fff !important;
+    border-radius: 0.75rem !important;
+    padding: 0.35rem 0.5rem 0.5rem;
 }
 
 .ghl-comm-phone-mode .ghl-dialer-center-keypad--full {
@@ -2607,9 +2678,11 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
 }
 
 .ghl-comm-phone-mode .ghl-dialer-form--phone {
-    flex: 0 0 auto;
+    flex: 1 1 auto;
     min-height: 0;
-    height: auto;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
 }
 
 .ghl-comm-phone-mode .ghl-dialer-phone-frame {
@@ -2619,10 +2692,12 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
 }
 
 .ghl-comm-phone-mode .ghl-dialer-phone-stage {
-    flex: 0 0 auto;
+    flex: 1 1 auto;
     min-height: 0 !important;
+    height: 100%;
     padding: 0.25rem 0;
-    justify-content: center;
+    justify-content: flex-start;
+    align-items: stretch;
 }
 
 .ghl-comm-phone-mode .ghl-dialer-display--center {
@@ -2681,7 +2756,7 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
     min-height: 0 !important;
 }
 
-.ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='dialer'] .ghl-dialer-center-logs--full {
+.ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='dialer'] .ghl-dialer-center-logs--full:not(.hidden) {
     display: flex !important;
     flex-direction: column;
     min-height: 0;
@@ -2709,9 +2784,10 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
     min-height: 0;
     height: 100%;
     max-height: 100%;
-    border: 1px solid var(--ghl-border);
-    border-radius: 0.5rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 1rem;
     background: #fff;
+    box-shadow: none;
     min-width: 0;
     overflow: hidden;
     padding: 0 !important;
@@ -2727,14 +2803,14 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
     min-height: 0;
     max-height: 100%;
     overflow-x: hidden !important;
-    overflow-y: scroll !important;
+    overflow-y: auto !important;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
     touch-action: pan-y;
     scrollbar-gutter: stable;
     scrollbar-width: thin;
     scrollbar-color: #94a3b8 #f1f5f9;
-    padding: 0.65rem 0.75rem 0.15rem;
+    padding: 0.75rem 0.85rem 0.85rem;
 }
 
 .ghl-dialer-center-logs__scroll::-webkit-scrollbar {
@@ -2775,32 +2851,36 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
 .ghl-dialer-recent-list--full [data-call-logs-items] {
     display: flex;
     flex-direction: column;
-    gap: 0.55rem;
+    gap: 0.5rem;
 }
 
 .ghl-dialer-recent-row {
     cursor: pointer;
-    padding: 0.75rem 0.85rem !important;
-    gap: 0.65rem !important;
+    padding: 0.7rem 0.8rem !important;
+    gap: 0.45rem 0.55rem !important;
+    max-width: none;
+    width: 100%;
+    border: 1px solid #cbd5e1;
 }
 
 .ghl-dialer-recent-main {
-    gap: 0.2rem !important;
+    gap: 0.28rem !important;
 }
 
 .ghl-dialer-recent-number {
-    font-size: 0.875rem !important;
-    line-height: 1.25;
+    font-size: 0.9375rem !important;
+    line-height: 1.3;
+    font-weight: 700;
 }
 
 .ghl-dialer-recent-meta {
-    font-size: 0.6875rem !important;
+    font-size: 0.71875rem !important;
     line-height: 1.35;
 }
 
 .ghl-dialer-recent-duration {
-    font-weight: 600;
-    color: #475569;
+    font-weight: 700;
+    color: #334155;
 }
 
 .ghl-dialer-recent-loading {
@@ -2823,9 +2903,9 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
 }
 
 .ghl-dialer-recent-row.is-active {
-    border-color: #93c5fd;
-    background: #eff6ff;
-    box-shadow: 0 0 0 1px #bfdbfe;
+    border-color: #94a3b8;
+    background: #f8fafc;
+    box-shadow: none;
 }
 
 .ghl-phone-right-pane {
@@ -2851,78 +2931,232 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
 }
 
 .ghl-phone-recording-pane {
-    padding: 0.5rem 0 0;
+    padding: 0.15rem 0.1rem 0.5rem;
     overflow: auto;
+    align-items: stretch;
+}
+
+.ghl-phone-recording-card {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 1.15rem 1.25rem 1.35rem;
+    border: 1px solid #e8edf3;
+    border-radius: 1rem;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    box-sizing: border-box;
+    min-height: 0;
+    height: auto;
+    align-self: stretch;
 }
 
 .ghl-phone-back-btn {
     display: inline-flex;
     align-items: center;
-    gap: 0.35rem;
-    padding: 0.35rem 0.55rem;
-    margin-bottom: 0.75rem;
-    border: 1px solid var(--ghl-border);
-    border-radius: 0.5rem;
-    background: #fff;
-    color: var(--ghl-text);
-    font-size: 0.75rem;
-    font-weight: 600;
+    align-self: flex-start;
+    gap: 0.3rem;
+    padding: 0;
+    margin: 0 0 1rem;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    color: #64748b;
+    font-size: 0.8125rem;
+    font-weight: 500;
     cursor: pointer;
+    box-shadow: none;
 }
 
 .ghl-phone-back-btn svg {
-    width: 1rem;
-    height: 1rem;
+    width: 0.95rem;
+    height: 0.95rem;
 }
 
 .ghl-phone-back-btn:hover {
-    background: #f8fafc;
+    background: transparent;
+    color: #334155;
 }
 
 .ghl-phone-recording-title {
-    margin: 0 0 0.65rem;
-    font-size: 1rem;
-    font-weight: 700;
-    color: var(--ghl-text);
+    margin: 0 0 1rem;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: #334155;
+    letter-spacing: -0.01em;
 }
 
 .ghl-phone-recording-meta {
-    margin-bottom: 1rem;
+    margin-bottom: 1.15rem;
 }
 
 .ghl-phone-recording-meta__line {
-    margin: 0 0 0.25rem;
-    font-size: 0.75rem;
-    color: var(--ghl-text-muted);
+    margin: 0 0 0.35rem;
+    font-size: 0.8125rem;
+    font-weight: 400;
+    color: #94a3b8;
+}
+
+.ghl-phone-recording-meta__line strong {
+    font-weight: 400;
 }
 
 .ghl-phone-recording-meta__number {
-    margin: 0 0 0.2rem;
-    font-size: 1.1rem;
+    margin: 0 0 0.35rem;
+    font-size: 1.5rem;
     font-weight: 700;
-    color: var(--ghl-text);
+    color: #0f172a;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
 }
 
 .ghl-phone-recording-meta__sub {
     margin: 0;
-    font-size: 0.6875rem;
-    color: var(--ghl-text-muted);
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: #94a3b8;
+}
+
+.ghl-phone-recording-player {
+    width: 100%;
+    margin: 0 0 0.9rem;
+    padding: 0.55rem 0.75rem;
+    border-radius: 9999px;
+    background: #f1f5f9;
+    box-sizing: border-box;
+}
+
+.ghl-phone-recording-player.hidden {
+    display: none !important;
 }
 
 .ghl-phone-recording-audio {
     width: 100%;
-    margin-bottom: 0.75rem;
+    margin: 0;
+    height: 2.25rem;
+    display: block;
+}
+
+.ghl-phone-recording-audio::-webkit-media-controls-panel {
+    background: transparent;
 }
 
 .ghl-phone-recording-empty {
-    margin: 0;
+    margin: 0 0 0.85rem;
     font-size: 0.8125rem;
-    color: var(--ghl-text-muted);
+    color: #94a3b8;
 }
 
 .ghl-phone-recording-actions {
     display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
     gap: 0.5rem;
+    margin-top: 0.35rem;
+}
+
+.ghl-phone-recording-play,
+.ghl-phone-recording-download {
+    display: inline-flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    min-height: 2.25rem;
+    padding: 0.4rem 0.9rem;
+    border: 1.5px solid #bbf7d0;
+    border-radius: 0.5rem;
+    background: #fff;
+    color: #059669;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    line-height: 1;
+    text-decoration: none;
+    cursor: pointer;
+    transition:
+        background-color 0.12s ease,
+        border-color 0.12s ease,
+        color 0.12s ease;
+}
+
+.ghl-phone-recording-play svg,
+.ghl-phone-recording-download svg {
+    width: 0.95rem;
+    height: 0.95rem;
+    flex: 0 0 auto;
+}
+
+.ghl-phone-recording-play span,
+.ghl-phone-recording-download span {
+    display: inline-block;
+    line-height: 1;
+}
+
+.ghl-phone-recording-play {
+    border-color: #6ee7b7;
+    background: #d1fae5;
+    color: #047857;
+}
+
+.ghl-phone-recording-play:hover {
+    background: #a7f3d0;
+    border-color: #34d399;
+    color: #065f46;
+}
+
+.ghl-phone-recording-download:hover {
+    background: #ecfdf5;
+    border-color: #6ee7b7;
+    color: #047857;
+}
+
+.ghl-phone-recording-download.is-disabled {
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+.ghl-dialer-recording-download {
+    display: inline-flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.ghl-dialer-recording-download svg {
+    width: 0.9rem;
+    height: 0.9rem;
+    flex: 0 0 auto;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-rec {
+    cursor: pointer;
+    font: inherit;
+    appearance: none;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-rec:hover {
+    filter: brightness(0.96);
+}
+
+@media (max-width: 768px) {
+    .ghl-phone-recording-pane {
+        padding: 0.25rem 0 0.5rem;
+    }
+
+    .ghl-phone-recording-card {
+        max-width: 100%;
+        min-height: 0;
+        padding: 1rem 1rem 1.15rem;
+        border-radius: 0.875rem;
+    }
+
+    .ghl-phone-recording-meta__number {
+        font-size: 1.35rem;
+    }
 }
 
 .ghl-dialer-recent-head {
@@ -2933,14 +3167,19 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
 }
 
 .ghl-dialer-recent-ext {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
     font-size: 0.625rem;
     font-weight: 700;
-    color: #2563eb;
-    background: #eff6ff;
-    border: 1px solid #bfdbfe;
+    color: #64748b;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
     border-radius: 9999px;
     padding: 0.1rem 0.45rem;
     letter-spacing: 0.02em;
+    white-space: nowrap;
+    line-height: 1.3;
 }
 
 .ghl-dialer-center-keypad--borderless {
@@ -2948,12 +3187,11 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
     flex-direction: column;
     min-height: 100%;
     height: 100%;
-    border: none !important;
+    border: 1px solid var(--ghl-border) !important;
     box-shadow: none !important;
-    background: transparent !important;
-    border-left: 1px solid var(--ghl-border) !important;
-    border-radius: 0 !important;
-    padding-left: 1rem;
+    background: #fff !important;
+    border-radius: 0.75rem !important;
+    padding: 0.35rem 0.5rem 0.5rem;
     min-width: 0;
 }
 
@@ -3005,29 +3243,42 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
     box-shadow: 0 5px 18px rgba(22, 163, 74, 0.48);
 }
 
+/* Active call = red hang-up only (no yellow/blue). Idle stays green above. */
 .ghl-dialer-call-icon-btn[data-webphone-dial-state='dialing'],
-.ghl-dialer-call-icon-btn[data-webphone-dial-state='ringing'] {
-    background: linear-gradient(180deg, #fcd34d 0%, #f59e0b 100%);
-    box-shadow: 0 4px 18px rgba(245, 158, 11, 0.45);
+.ghl-dialer-call-icon-btn[data-webphone-dial-state='ringing'],
+.ghl-dialer-call-icon-btn[data-webphone-dial-state='in-call'],
+.ghl-dialer-call-icon-btn.is-hangup-mode {
+    background: linear-gradient(180deg, #f87171 0%, #dc2626 100%);
+    box-shadow: 0 4px 18px rgba(220, 38, 38, 0.45);
     animation: ghl-dialer-call-pulse 1.15s ease-in-out infinite;
 }
 
 .ghl-dialer-call-icon-btn[data-webphone-dial-state='in-call'] {
-    background: linear-gradient(180deg, #60a5fa 0%, #2563eb 100%);
-    box-shadow: 0 4px 18px rgba(37, 99, 235, 0.42);
     animation: none;
+}
+
+.ghl-dialer-call-icon-btn.is-hangup-mode:hover:not(:disabled),
+.ghl-dialer-call-icon-btn[data-webphone-dial-state='dialing']:hover:not(:disabled),
+.ghl-dialer-call-icon-btn[data-webphone-dial-state='ringing']:hover:not(:disabled),
+.ghl-dialer-call-icon-btn[data-webphone-dial-state='in-call']:hover:not(:disabled) {
+    background: linear-gradient(180deg, #ef4444 0%, #b91c1c 100%);
+    box-shadow: 0 5px 18px rgba(220, 38, 38, 0.55);
+}
+
+.ghl-dialer-call-icon-btn.is-hangup-mode svg {
+    transform: rotate(135deg) translateY(-0.5px);
 }
 
 @keyframes ghl-dialer-call-pulse {
     0%,
     100% {
         transform: scale(1);
-        box-shadow: 0 4px 18px rgba(245, 158, 11, 0.45);
+        box-shadow: 0 4px 18px rgba(220, 38, 38, 0.45);
     }
 
     50% {
         transform: scale(1.05);
-        box-shadow: 0 6px 22px rgba(245, 158, 11, 0.55);
+        box-shadow: 0 6px 22px rgba(220, 38, 38, 0.55);
     }
 }
 
@@ -3061,53 +3312,65 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
     flex-shrink: 0;
 }
 
-/* Phone workspace: Dial pad / Call logs switch (mobile) */
+/* Phone workspace: Dial pad / Call logs switch (mobile; always on for admin) */
 .ghl-phone-panel-switch {
     display: none;
     flex-shrink: 0;
     align-items: stretch;
-    gap: 0;
-    margin: 0 0 0.4rem;
-    padding: 0.2rem;
-    border-radius: 0.5rem;
-    background: #f1f5f9;
-    border: 1px solid var(--ghl-border);
+    gap: 0.35rem;
+    margin: 0;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    border: none;
+}
+
+.ch-dial-workspace--admin .ghl-phone-panel-switch {
+    display: inline-flex;
 }
 
 .ghl-phone-panel-switch__btn {
     flex: 1;
-    border: none;
-    background: transparent;
-    border-radius: 0.375rem;
-    padding: 0.45rem 0.75rem;
-    font-size: 0.8125rem;
-    font-weight: 600;
+    border: 1.5px solid #e2e8f0;
+    background: #ffffff;
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.9rem;
+    font-size: 0.875rem;
+    font-weight: 400;
     color: #64748b;
     cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+    box-shadow: none;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
 .ghl-phone-panel-switch__btn.is-active {
-    background: #fff;
+    background: #f8fafc;
     color: #0f172a;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+    border-color: #94a3b8;
+    box-shadow: none;
+}
+
+.ghl-phone-panel-switch__btn:hover {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+    color: #334155;
 }
 
 .ghl-phone-panel-switch__btn:focus-visible {
-    outline: 2px solid #3b82f6;
+    outline: 2px solid #94a3b8;
     outline-offset: 1px;
 }
 
 @media (max-width: 900px) {
     .ghl-comm-topbar__actions .ghl-comm-global-line--toolbar {
         flex: 1 1 auto;
-        justify-content: flex-start;
+        justify-content: flex-end;
         min-width: 0;
     }
 
     .ghl-comm-phone-mode .ghl-comm-topbar__actions .ghl-comm-global-line--toolbar {
         flex: 1 1 auto;
-        justify-content: flex-start;
+        justify-content: flex-end;
         width: auto;
         min-width: 0;
     }
@@ -3145,7 +3408,50 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
         display: none !important;
     }
 
-    .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='logs'] .ghl-dialer-center-keypad--borderless {
+    /* Non-admin: hide keypad when viewing call logs only */
+    .ghl-comm-phone-mode .ghl-dialer-center:not(.ch-dial-workspace--admin)[data-phone-view='logs'] .ghl-dialer-center-keypad--borderless {
+        display: none !important;
+    }
+
+    /* Admin mobile: always show dial pad stacked above logs/leads */
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='logs'] .ghl-dialer-center-keypad--borderless,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='leads'] .ghl-dialer-center-keypad--borderless,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='recordings'] .ghl-dialer-center-keypad--borderless,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='logs'] .ghl-dialer-center-keypad--full,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='leads'] .ghl-dialer-center-keypad--full {
+        display: flex !important;
+        order: -1;
+        flex: 0 0 auto;
+        min-height: 0;
+        height: auto;
+        max-height: none;
+        overflow: visible;
+        border: 1px solid var(--ghl-border) !important;
+        border-radius: 0.75rem !important;
+        padding: 0.45rem 0.35rem 0.55rem;
+        margin-bottom: 0;
+    }
+
+    /* Keep recording detail visible on mobile when a log is selected */
+    .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='logs']:has([data-phone-recording-pane]:not(.hidden)) .ghl-dialer-center-keypad--borderless {
+        display: flex !important;
+        order: -1;
+        flex: 1 1 auto;
+        min-height: 0;
+        height: auto;
+        max-height: none;
+        overflow: auto;
+        border: 1px solid var(--ghl-border) !important;
+        border-radius: 0.75rem !important;
+        padding: 0.5rem;
+        margin-bottom: 0.75rem;
+    }
+
+    .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='logs']:has([data-phone-recording-pane]:not(.hidden)) .ghl-dialer-center-logs--full {
+        display: none !important;
+    }
+
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='logs']:has([data-phone-recording-pane]:not(.hidden)) .ghl-phone-dial-pane {
         display: none !important;
     }
 
@@ -3153,6 +3459,7 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
         flex: 0 0 auto;
         min-height: 0;
         overflow: visible;
+        gap: 0.85rem;
     }
 
     .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='logs'] .ch-dial-workspace__grid--phone-split {
@@ -3160,6 +3467,7 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
         min-height: 0;
         height: 100%;
         overflow: hidden;
+        gap: 0.85rem;
     }
 
     .ghl-comm-phone-mode .ch-dial-workspace__grid--phone-split {
@@ -3171,13 +3479,29 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
         flex: 1;
         height: auto;
         overflow: visible;
+        gap: 0.85rem;
+        padding: 0;
     }
 
-    .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='logs'] .ch-dial-workspace__grid--phone-split {
+    .ghl-comm-phone-mode .ghl-dialer-center:not(.ch-dial-workspace--admin)[data-phone-view='logs'] .ch-dial-workspace__grid--phone-split {
         flex: 1 1 auto !important;
         height: 100% !important;
         min-height: 0 !important;
         overflow: hidden !important;
+    }
+
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='logs'] .ch-dial-workspace__grid--phone-split,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='logs'] .ch-dial-workspace__grid--admin-split,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='leads'] .ch-dial-workspace__grid--admin-split {
+        flex: 0 1 auto !important;
+        height: auto !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+    }
+
+    .ghl-comm-phone-mode .ch-dial-workspace--admin {
+        overflow: visible !important;
+        height: auto !important;
     }
 
     .ghl-comm-phone-mode .ghl-dialer-center-keypad--borderless {
@@ -3367,6 +3691,21 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
         grid-column: 1 / -1;
         border-top: 1px solid var(--ghl-border);
     }
+
+    .ghl-comm-phone-mode .ch-dial-workspace__grid--phone-split {
+        grid-template-columns: minmax(12rem, 1fr) minmax(14rem, 1fr);
+        gap: 0.85rem;
+    }
+
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ch-dial-workspace__grid--phone-split,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ch-dial-workspace__grid--admin-split {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+        gap: clamp(0.75rem, 2vw, 1.25rem) !important;
+    }
+
+    .ghl-phone-recording-meta__number {
+        font-size: 1.35rem;
+    }
 }
 
 @media (max-width: 768px) {
@@ -3553,6 +3892,26 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
         gap: 0;
         border-top: 1px solid var(--ghl-border);
         overflow: visible;
+    }
+
+    /* Dialer topbar: title left, controls right — no double chrome padding */
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-topbar__actions {
+        flex: 0 1 auto;
+        width: auto;
+        max-width: 100%;
+        margin: 0;
+        padding: 0;
+        border-top: none;
+        gap: 0.4rem;
+        justify-content: flex-end;
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-topbar__actions::-webkit-scrollbar {
+        display: none;
     }
 
     .ghl-comm-phone-mode .ghl-comm-topbar__left .ghl-comm-channels-menu,
@@ -3853,7 +4212,7 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
         align-items: stretch !important;
     }
 
-    .ghl-comm-app.ghl-inbox-body-wide .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='dialer'] .ghl-dialer-center-logs--full {
+    .ghl-comm-app.ghl-inbox-body-wide .ghl-comm-phone-mode .ghl-dialer-center[data-phone-view='dialer'] .ghl-dialer-center-logs--full:not(.hidden) {
         flex: 1 1 auto !important;
         height: 100% !important;
         min-height: 0 !important;
@@ -3879,15 +4238,16 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
     display: none;
     flex-direction: column;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
+    gap: 0.85rem;
     flex: 1 1 auto;
     min-height: 0;
     width: 100%;
-    padding: 1.25rem 1rem 1rem;
-    border-radius: 1rem;
+    padding: 1.1rem 0.9rem 1rem;
+    border-radius: 0.85rem;
     background:
-        linear-gradient(180deg, rgba(15, 23, 42, 0.88) 0%, rgba(15, 23, 42, 0.94) 100%),
-        radial-gradient(circle at 50% 0%, rgba(59, 130, 246, 0.18), transparent 55%);
+        linear-gradient(180deg, rgba(15, 23, 42, 0.92) 0%, rgba(15, 23, 42, 0.96) 100%),
+        radial-gradient(circle at 50% 0%, rgba(59, 130, 246, 0.16), transparent 55%);
     color: #f8fafc;
     box-sizing: border-box;
 }
@@ -3904,26 +4264,27 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.35rem;
+    gap: 0.3rem;
     text-align: center;
     width: 100%;
-    padding-top: 0.5rem;
+    padding-top: 0.35rem;
+    flex: 0 0 auto;
 }
 
 .ghl-dialer-active-screen__number {
     margin: 0;
-    font-size: 1.65rem;
+    font-size: 1.45rem;
     font-weight: 700;
-    letter-spacing: 0.03em;
-    line-height: 1.15;
+    letter-spacing: 0.02em;
+    line-height: 1.2;
     color: #fff;
     word-break: break-word;
 }
 
 .ghl-dialer-active-screen__status {
     margin: 0;
-    font-size: 0.85rem;
-    font-weight: 500;
+    font-size: 0.82rem;
+    font-weight: 600;
     color: #cbd5e1;
 }
 
@@ -3936,11 +4297,12 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
 }
 
 .ghl-dialer-active-screen__timer {
-    margin: 0.15rem 0 0;
-    font-size: 1.05rem;
+    margin: 0.1rem 0 0;
+    font-size: 1.15rem;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
     color: #e2e8f0;
+    letter-spacing: 0.04em;
 }
 
 .ghl-dialer-active-screen__timer.hidden {
@@ -3951,10 +4313,11 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
-    gap: 0.65rem 1rem;
+    gap: 0.5rem 1.1rem;
     width: 100%;
-    max-width: 18rem;
-    margin: 1rem 0;
+    max-width: 16rem;
+    margin: 0.15rem 0 0;
+    flex: 0 0 auto;
 }
 
 .ghl-dialer-active-screen__tool {
@@ -3962,9 +4325,9 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 0.3rem;
-    min-width: 4.25rem;
-    padding: 0.35rem 0.25rem;
+    gap: 0.25rem;
+    min-width: 3.75rem;
+    padding: 0.25rem 0.2rem;
     border: none;
     background: transparent;
     color: #f8fafc;
@@ -3972,12 +4335,12 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
 }
 
 .ghl-dialer-active-screen__tool svg {
-    width: 1.35rem;
-    height: 1.35rem;
+    width: 1.25rem;
+    height: 1.25rem;
 }
 
 .ghl-dialer-active-screen__tool span {
-    font-size: 0.68rem;
+    font-size: 0.65rem;
     font-weight: 600;
     color: #cbd5e1;
 }
@@ -3991,15 +4354,18 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
     align-items: center;
     justify-content: center;
     width: 100%;
-    padding-bottom: 0.35rem;
+    margin-top: auto;
+    padding-top: 0.35rem;
+    padding-bottom: 0.15rem;
+    flex: 0 0 auto;
 }
 
 .ghl-dialer-active-screen__end {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 4.25rem;
-    height: 4.25rem;
+    width: 4rem;
+    height: 4rem;
     padding: 0;
     border: none;
     border-radius: 50%;
@@ -4010,10 +4376,14 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
     line-height: 0;
 }
 
+.ghl-dialer-active-screen__end:hover {
+    background: linear-gradient(180deg, #ef4444 0%, #b91c1c 100%);
+}
+
 .ghl-dialer-active-screen__end svg {
     display: block;
-    width: 1.65rem;
-    height: 1.65rem;
+    width: 1.55rem;
+    height: 1.55rem;
     transform: rotate(135deg) translateY(-0.5px);
 }
 
@@ -4026,7 +4396,8 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
 
 .ghl-comm-phone-mode .ghl-dialer-form--phone:has(.ghl-dialer-active-screen:not(.hidden)) .ghl-dialer-active-screen {
     flex: 1 1 auto;
-    min-height: 14rem;
+    min-height: 12rem;
+    width: 100%;
 }
 
 /* Communications Hub toasts — bottom, compact, non-blocking */
@@ -4058,6 +4429,38 @@ body.ghl-comm-mode .app-toast--compact .app-toast-icon {
     width: 1.1rem;
     height: 1.1rem;
     margin-top: 0.05rem;
+}
+
+body.ghl-comm-mode .app-toast-success {
+    border-color: #e2e8f0;
+    background: #f8fafc;
+}
+
+body.ghl-comm-mode .app-toast-success .app-toast-icon,
+body.ghl-comm-mode .app-toast-success .app-toast-title {
+    color: #64748b;
+}
+
+body.ghl-comm-mode .app-toast-success .app-toast-message {
+    color: #64748b;
+}
+
+body.ghl-comm-mode .app-toast-warning {
+    border-color: #e2e8f0;
+    background: #f8fafc;
+}
+
+body.ghl-comm-mode .app-toast-warning .app-toast-icon {
+    color: #94a3b8;
+}
+
+body.ghl-comm-mode .app-toast-warning .app-toast-title,
+body.ghl-comm-mode .app-toast-warning .app-toast-message {
+    color: #64748b;
+}
+
+body.ch-call-summary-open .app-toast-container {
+    display: none !important;
 }
 
 /* Dialer notes */
@@ -4157,6 +4560,8 @@ body.ghl-comm-mode .app-toast--compact .app-toast-icon {
     line-height: 1.4;
     color: #0f172a;
     background: #f8fafc;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 .ghl-dialer-notes-drawer__actions,
@@ -4189,16 +4594,16 @@ body.ghl-comm-mode .app-toast--compact .app-toast-icon {
 }
 
 .ghl-dialer-recent-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: start;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: flex-start;
     gap: 0.35rem 0.65rem;
-    flex-wrap: nowrap;
 }
 
 .ghl-dialer-recent-main {
-    grid-column: 1;
-    grid-row: 1;
+    flex: 1 1 auto;
     min-width: 0;
 }
 
@@ -4207,9 +4612,7 @@ body.ghl-comm-mode .app-toast--compact .app-toast-icon {
     align-items: center;
     gap: 0.35rem;
     flex-shrink: 0;
-    grid-column: 2;
-    grid-row: 1;
-    align-self: start;
+    align-self: flex-start;
 }
 
 .ghl-dialer-recent-notes-btn {
@@ -4238,25 +4641,129 @@ body.ghl-comm-mode .app-toast--compact .app-toast-icon {
 }
 
 .ghl-dialer-recent-notes {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    flex: unset;
-    width: auto;
+    flex: 1 1 100%;
+    width: 100%;
     margin-top: 0.35rem;
     padding-top: 0.45rem;
     border-top: 1px dashed #e2e8f0;
 }
 
 .ghl-dialer-active-notes {
-    margin: 0.5rem 0.75rem 0;
-    padding: 0.55rem;
-    border: 1px solid #e2e8f0;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    margin: 0.5rem 0 0;
+    padding: 0.75rem 0.8rem 0.8rem;
+    border: 1px solid rgba(148, 163, 184, 0.22);
     border-radius: 0.65rem;
-    background: #f8fafc;
+    background: linear-gradient(180deg, #111827 0%, #0f172a 100%);
+    color: #e2e8f0;
+    text-align: left;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+}
+
+.ghl-dialer-active-notes__title {
+    margin: 0 0 0.55rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #f1f5f9;
+}
+
+.ghl-dialer-active-notes__label {
+    display: block;
+    margin: 0.5rem 0 0.3rem;
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #94a3b8;
+}
+
+.ghl-dialer-active-notes__label:first-of-type {
+    margin-top: 0;
+}
+
+.ghl-dialer-active-notes .ghl-dialer-active-notes-input {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    min-height: 3.25rem;
+    margin: 0;
+    padding: 0.55rem 0.65rem;
+    color: #f1f5f9;
+    background: #1e293b;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    border-radius: 0.5rem;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    white-space: pre-wrap;
+}
+
+.ghl-dialer-active-notes .ghl-dialer-active-notes-input::placeholder {
+    color: #64748b;
+}
+
+.ghl-dialer-active-notes .ghl-dialer-active-notes-input:focus {
+    outline: none;
+    border-color: #94a3b8;
+    box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.2);
+    background: #1e293b;
+}
+
+.ghl-dialer-active-notes-actions {
+    margin-top: 0.55rem;
+    padding-top: 0.45rem;
+    border-top: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.ghl-dialer-active-notes-status {
+    color: #94a3b8;
+}
+
+.ghl-dialer-active-notes-status[data-tone='success'] {
+    color: #cbd5e1;
+}
+
+.ghl-dialer-active-notes .ch-btn--secondary {
+    border-color: rgba(148, 163, 184, 0.35);
+    background: #1e293b;
+    color: #e2e8f0;
+}
+
+.ghl-dialer-active-notes .ch-btn--secondary:hover {
+    border-color: #94a3b8;
+    background: #334155;
+    color: #f8fafc;
 }
 
 .ghl-dialer-active-screen__tool[data-dialer-active-notes-toggle] {
     display: inline-flex;
+}
+
+.ghl-dialer-recent-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    margin-top: 0.35rem;
+}
+
+.ghl-dialer-recent-field {
+    margin: 0;
+    font-size: 0.6875rem;
+    line-height: 1.4;
+    color: #475569;
+    white-space: normal;
+    word-break: break-word;
+}
+
+.ghl-dialer-recent-field__label {
+    font-weight: 600;
+    color: #334155;
+}
+
+.ghl-dialer-recent-field__value {
+    color: #475569;
 }
 
 .ghl-dialer-recent-note-preview {
@@ -4308,30 +4815,38 @@ body.ghl-comm-mode .app-toast--compact .app-toast-icon {
 
 .ghl-comm-topbar__notes .ghl-dialer-notes-drawer {
     position: absolute;
-    top: calc(100% + 0.35rem);
+    top: calc(100% + 0.45rem);
     right: 0;
     left: auto;
     z-index: 10080;
-    width: min(18rem, calc(100vw - 2rem));
+    width: min(22rem, calc(100vw - 1.5rem));
+    padding: 0;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 0.75rem;
+    background: #ffffff;
+    box-shadow:
+        0 18px 40px rgba(15, 23, 42, 0.12),
+        0 4px 12px rgba(15, 23, 42, 0.06);
+    overflow: hidden;
 }
 
 .ghl-comm-topbar__notes .ghl-dialer-notes-toggle {
     min-height: var(--ghl-comm-strip-height, 2rem);
     padding: 0.28rem 0.65rem;
-    border: 1px solid #e2e8f0;
+    border: 1.5px solid #bbf7d0;
     border-radius: 0.5rem;
-    background: #fff;
-    color: #475569;
+    background: #ffffff;
+    color: #059669;
     font-size: 0.6875rem;
     font-weight: 600;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    box-shadow: none;
 }
 
 .ghl-comm-topbar__notes .ghl-dialer-notes-toggle:hover,
 .ghl-comm-topbar__notes .ghl-dialer-notes-panel.is-open .ghl-dialer-notes-toggle {
-    border-color: #93c5fd;
-    background: #f8fbff;
-    color: #1d4ed8;
+    border-color: #6ee7b7;
+    background: #d1fae5;
+    color: #047857;
 }
 
 .ghl-dialer-line-meta {
@@ -4393,11 +4908,11 @@ body.ghl-comm-mode .app-toast--compact .app-toast-icon {
 }
 
 .ghl-comm-phone-mode .ghl-dialer-phone-frame {
-    border-color: #dbe3ee;
-    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    border-color: #6ee7b7;
+    background: linear-gradient(180deg, #ecfdf5 0%, #d1fae5 100%);
     box-shadow:
-        0 1px 2px rgba(15, 23, 42, 0.04),
-        0 10px 28px rgba(15, 23, 42, 0.08);
+        0 1px 2px rgba(16, 185, 129, 0.04),
+        0 10px 28px rgba(16, 185, 129, 0.08);
 }
 
 @media (min-width: 769px) {
@@ -4473,5 +4988,309 @@ body.ghl-comm-mode .app-toast--compact .app-toast-icon {
         min-width: 2rem;
         padding: 0.28rem;
         justify-content: center;
+    }
+}
+
+/* ── iPhone-style dial pad (visual only; data-dial-key behavior unchanged) ── */
+
+.ghl-dialer-form--phone .ghl-dialer-phone-frame {
+    max-width: 22rem;
+    padding: 1.25rem 1rem 1.35rem;
+    border: none;
+    border-radius: 2rem;
+    background: #d1fae5;
+    box-shadow: none;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-phone-frame,
+.ghl-comm-phone-mode .ghl-dialer-form--phone .ghl-dialer-phone-frame {
+    border: none !important;
+    background: #d1fae5 !important;
+    box-shadow: none !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-input-shell,
+.ghl-dialer-form--phone .ghl-dialer-input-shell {
+    border: none !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    overflow: visible;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-input-shell:focus-within,
+.ghl-dialer-form--phone .ghl-dialer-input-shell:focus-within {
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+}
+
+.ghl-dialer-form--phone .ghl-dialer-display--center,
+.ghl-comm-phone-mode .ghl-dialer-display--center {
+    min-height: 3rem !important;
+    height: auto !important;
+    max-height: none !important;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.55rem 0.75rem !important;
+    border: 1.5px solid #34d399 !important;
+    border-radius: 0.5rem !important; /* rounded-lg */
+    background: #ffffff !important;
+    box-shadow: none !important;
+    font-family: var(--ghl-font-sans, 'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif);
+    font-size: clamp(1.15rem, 3.2vw, 1.45rem) !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.01em;
+    color: #0f172a !important;
+    line-height: 1.25 !important;
+    text-align: center;
+}
+
+.ghl-dialer-form--phone .ghl-dialer-display--center:focus,
+.ghl-comm-phone-mode .ghl-dialer-display--center:focus {
+    outline: none !important;
+    border-color: #059669 !important;
+    box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.2) !important;
+}
+
+.ghl-dialer-form--phone .ghl-dialer-display--center::placeholder,
+.ghl-comm-phone-mode .ghl-dialer-display--center::placeholder {
+    color: #94a3b8 !important;
+    font-size: clamp(0.95rem, 2.6vw, 1.1rem) !important;
+    font-weight: 500 !important;
+}
+
+.ghl-dialer-form--phone .ghl-dialer-line-meta {
+    margin: 0.45rem auto 0.85rem;
+    padding: 0;
+    border: none;
+    background: transparent;
+    gap: 0.4rem;
+}
+
+.ghl-dialer-form--phone .ghl-dialer-line-meta__badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.2rem 0.5rem;
+    border-radius: 0.5rem; /* rounded-lg */
+    background: #ffffff;
+    border: 1.5px solid #34d399;
+    color: #047857;
+    font-weight: 600;
+    font-size: 0.6875rem;
+}
+
+.ghl-dialer-form--phone .ghl-dialer-line-meta__sep {
+    display: none;
+}
+
+.ghl-dialer-form--phone .ghl-dialer-line-meta__did {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.2rem 0.55rem;
+    border-radius: 0.5rem; /* rounded-lg */
+    background: #ffffff;
+    border: 1.5px solid #34d399;
+    color: #0f172a;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.ghl-dialer-keypad--iphone {
+    gap: 0.7rem 0.85rem !important;
+    max-width: 17.5rem !important;
+    --ghl-dialer-key-size: 4.35rem;
+    --ghl-dialer-icon-svg-size: 1.65rem;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-keypad--iphone {
+    max-width: 19.5rem !important;
+    gap: 0.85rem 1rem !important;
+    --ghl-dialer-key-size: 4.75rem;
+    --ghl-dialer-icon-svg-size: 1.85rem;
+}
+
+.ch-dial-workspace--admin .ghl-dialer-keypad--iphone,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-keypad--iphone {
+    max-width: min(100%, 24rem) !important;
+    width: 100%;
+    margin-inline: auto;
+}
+
+.ghl-dialer-form--phone .ghl-dialer-keypad--iphone .ghl-dialer-key--iphone,
+.ghl-comm-app .ghl-dialer-form--phone .ghl-dialer-keypad--iphone .ghl-dialer-key--iphone,
+.ghl-comm-phone-mode .ghl-dialer-form--phone .ghl-dialer-keypad--iphone .ghl-dialer-key--iphone,
+.ch-dial-workspace--admin .ghl-dialer-keypad--iphone .ghl-dialer-key--iphone,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-keypad--iphone .ghl-dialer-key--iphone {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 0.05rem;
+    width: var(--ghl-dialer-key-size) !important;
+    height: var(--ghl-dialer-key-size) !important;
+    min-width: var(--ghl-dialer-key-size) !important;
+    min-height: var(--ghl-dialer-key-size) !important;
+    max-width: var(--ghl-dialer-key-size) !important;
+    padding: 0.35rem 0 0.3rem !important;
+    border: none !important;
+    border-radius: 50% !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+    color: #000 !important;
+    font-family: var(--ghl-font-sans, 'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif);
+    line-height: 1 !important;
+    -webkit-tap-highlight-color: transparent;
+    transition: background-color 0.12s ease, transform 0.08s ease;
+}
+
+.ghl-dialer-form--phone .ghl-dialer-keypad--iphone .ghl-dialer-key--iphone:hover,
+.ghl-comm-phone-mode .ghl-dialer-form--phone .ghl-dialer-keypad--iphone .ghl-dialer-key--iphone:hover {
+    background: #e8e8ed !important;
+    border: none !important;
+    transform: none;
+}
+
+.ghl-dialer-form--phone .ghl-dialer-keypad--iphone .ghl-dialer-key--iphone:active,
+.ghl-comm-phone-mode .ghl-dialer-form--phone .ghl-dialer-keypad--iphone .ghl-dialer-key--iphone:active {
+    background: #d1d1d6 !important;
+    transform: scale(0.96);
+}
+
+.ghl-dialer-key--iphone .ghl-dialer-key__digit {
+    display: block;
+    font-size: clamp(1.45rem, 3.8vw, 1.85rem);
+    font-weight: 400;
+    letter-spacing: 0;
+    line-height: 1;
+    color: #000;
+}
+
+.ghl-dialer-key--iphone .ghl-dialer-key__letters {
+    display: block;
+    min-height: 0.7rem;
+    margin-top: 0.08rem;
+    font-size: 0.55rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    line-height: 1;
+    text-transform: uppercase;
+    color: #000;
+    opacity: 0.85;
+}
+
+.ghl-dialer-key--iphone .ghl-dialer-key__letters--empty {
+    opacity: 0;
+}
+
+.ghl-dialer-keypad--iphone .ghl-dialer-call-icon-btn {
+    background: #30d158 !important;
+    box-shadow: none !important;
+    border: none !important;
+}
+
+.ghl-dialer-keypad--iphone .ghl-dialer-call-icon-btn:hover:not(:disabled) {
+    background: #28c84c !important;
+    transform: scale(1.02);
+    box-shadow: none !important;
+}
+
+.ghl-dialer-keypad--iphone .ghl-dialer-call-icon-btn svg {
+    fill: #fff;
+    stroke: none;
+}
+
+.ghl-dialer-keypad--iphone .ghl-dialer-call-icon-btn.is-hangup-mode,
+.ghl-dialer-keypad--iphone .ghl-dialer-call-icon-btn[data-webphone-dial-state='dialing'],
+.ghl-dialer-keypad--iphone .ghl-dialer-call-icon-btn[data-webphone-dial-state='ringing'],
+.ghl-dialer-keypad--iphone .ghl-dialer-call-icon-btn[data-webphone-dial-state='in-call'] {
+    background: #ff3b30 !important;
+}
+
+.ghl-dialer-keypad--iphone .ghl-dialer-backspace-btn {
+    border: none !important;
+    background: transparent !important;
+    color: #000 !important;
+    box-shadow: none !important;
+}
+
+.ghl-dialer-keypad--iphone .ghl-dialer-backspace-btn:hover {
+    background: rgba(0, 0, 0, 0.06) !important;
+    color: #000 !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+.ghl-dialer-keypad--iphone .ghl-dialer-backspace-btn:active {
+    background: rgba(0, 0, 0, 0.12) !important;
+    transform: scale(0.96);
+}
+
+.ch-dial-workspace--admin .ghl-dialer-keypad--iphone {
+    gap: 0.55rem 0.65rem !important;
+    max-width: 16.5rem !important;
+    --ghl-dialer-key-size: 3.55rem;
+    --ghl-dialer-icon-svg-size: 1.45rem;
+}
+
+.ch-dial-workspace--admin .ghl-dialer-keypad--iphone .ghl-dialer-key--iphone {
+    width: var(--ghl-dialer-key-size) !important;
+    height: var(--ghl-dialer-key-size) !important;
+    min-width: var(--ghl-dialer-key-size) !important;
+    min-height: var(--ghl-dialer-key-size) !important;
+    max-width: var(--ghl-dialer-key-size) !important;
+    font-size: inherit !important;
+}
+
+.ch-dial-workspace--admin .ghl-dialer-keypad--iphone .ghl-dialer-key__digit {
+    font-size: 1.35rem;
+}
+
+.ch-dial-workspace--admin .ghl-dialer-keypad--iphone .ghl-dialer-key__letters {
+    font-size: 0.48rem;
+    letter-spacing: 0.1em;
+}
+
+.ch-dial-workspace--admin .ghl-dialer-keypad--iphone .ghl-dialer-call-icon-btn,
+.ch-dial-workspace--admin .ghl-dialer-keypad--iphone .ghl-dialer-backspace-btn {
+    width: var(--ghl-dialer-key-size) !important;
+    height: var(--ghl-dialer-key-size) !important;
+}
+
+@media (max-width: 768px) {
+    .ghl-dialer-form--phone .ghl-dialer-phone-frame {
+        max-width: 100%;
+        padding: 0.85rem 0.65rem 1rem;
+        border-radius: 1.5rem;
+    }
+
+    .ghl-dialer-keypad--iphone,
+    .ghl-comm-phone-mode .ghl-dialer-keypad--iphone {
+        max-width: min(18.5rem, 92vw) !important;
+        gap: 0.65rem 0.75rem !important;
+        --ghl-dialer-key-size: clamp(3.35rem, 14vw, 4.25rem);
+        --ghl-dialer-icon-svg-size: clamp(1.35rem, 5vw, 1.7rem);
+    }
+
+    .ghl-dialer-key--iphone .ghl-dialer-key__digit {
+        font-size: clamp(1.3rem, 5.5vw, 1.7rem);
+    }
+
+    .ghl-dialer-key--iphone .ghl-dialer-key__letters {
+        font-size: clamp(0.45rem, 1.8vw, 0.55rem);
+    }
+
+    .ghl-dialer-form--phone .ghl-dialer-display--center,
+    .ghl-comm-phone-mode .ghl-dialer-display--center {
+        font-size: clamp(1.45rem, 6vw, 1.9rem) !important;
+        min-height: 3rem !important;
+    }
+}
+
+@media (max-width: 380px) {
+    .ghl-dialer-keypad--iphone,
+    .ghl-comm-phone-mode .ghl-dialer-keypad--iphone {
+        --ghl-dialer-key-size: 3.15rem;
+        gap: 0.5rem 0.55rem !important;
     }
 }

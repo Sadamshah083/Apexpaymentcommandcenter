@@ -21,14 +21,34 @@
     </button>
     <div class="ghl-dialer-notes-drawer hidden" id="ghl-dialer-notes-drawer" data-dialer-notes-drawer>
         <div class="ghl-dialer-notes-drawer__head">
-            <p class="ghl-dialer-notes-drawer__title">Notes</p>
-            <p class="ghl-dialer-notes-drawer__phone" data-dialer-notes-phone-label>—</p>
+            <div class="ghl-dialer-notes-drawer__head-main">
+                <span class="ghl-dialer-notes-drawer__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                        <line x1="16" y1="13" x2="8" y2="13" />
+                        <line x1="16" y1="17" x2="8" y2="17" />
+                    </svg>
+                </span>
+                <div class="ghl-dialer-notes-drawer__titles">
+                    <p class="ghl-dialer-notes-drawer__title">Notes</p>
+                    <p class="ghl-dialer-notes-drawer__phone" data-dialer-notes-phone-label>—</p>
+                </div>
+            </div>
+            <button type="button" class="ghl-dialer-notes-drawer__close" data-dialer-notes-close
+                aria-label="Close notes" title="Close">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
         </div>
-        <textarea class="ghl-dialer-notes-input" data-dialer-notes-input rows="5"
+        <label class="ghl-dialer-notes-drawer__label" for="ghl-dialer-notes-field">Call note</label>
+        <textarea id="ghl-dialer-notes-field" class="ghl-dialer-notes-input" data-dialer-notes-input rows="6"
             placeholder="Add notes for this number or call…" maxlength="5000"></textarea>
         <div class="ghl-dialer-notes-drawer__actions">
             <span class="ghl-dialer-notes-status" data-dialer-notes-status aria-live="polite"></span>
-            <button type="button" class="ch-btn ch-btn--secondary ch-btn--sm" data-dialer-notes-save>Save</button>
+            <button type="button" class="ghl-dialer-notes-save" data-dialer-notes-save>Save note</button>
         </div>
     </div>
 </div>

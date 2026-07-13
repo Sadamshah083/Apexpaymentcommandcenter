@@ -13,7 +13,7 @@
                 <h3 class="admin-dash-section-title">Import leads</h3>
                 <p class="admin-dash-section-desc">Upload files under campaigns, enrich, and assign to your team.</p>
             </div>
-            <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-primary app-btn-sm shrink-0">Import leads</a>
+            <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-primary app-btn-sm shrink-0" data-turbo-preload data-import-file-nav>Import leads</a>
         </div>
 
         @if (isset($enrichmentStatus))
@@ -24,7 +24,7 @@
             <div class="app-empty-state">
                 <p class="app-empty-state-title">No imports yet</p>
                 <p class="app-empty-state-desc">Create a campaign and upload your first file.</p>
-                <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-primary app-btn-sm mt-4">Import leads</a>
+                <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-primary app-btn-sm mt-4" data-turbo-preload data-import-file-nav>Import leads</a>
             </div>
         @else
             <x-data-table :paginator="$importsWorkflows" min-width="1080px" class="import-workflows-data-table">
@@ -38,7 +38,7 @@
                             <th>Total</th>
                             <th>Enriched</th>
                             <th>Assigned</th>
-                            <th>Remaining</th>
+                            <th>Unassigned</th>
                             <th>Assign</th>
                             <th class="text-right">Actions</th>
                         </tr>
@@ -47,12 +47,9 @@
                         @foreach ($importsWorkflows as $wf)
                             @php
                                 $assignedCount = (int) ($wf->assigned_leads_count ?? 0);
-                                $enrichedCount = (int) ($wf->enriched_leads ?? 0);
-                                $remaining = max(0, (int) ($wf->ready_to_assign_count ?? 0));
-                                if ($remaining === 0 && $enrichedCount > $assignedCount && ! in_array($wf->status, ['mapping', 'failed'], true)) {
-                                    $remaining = $enrichedCount - $assignedCount;
-                                }
-                                $canAssign = $remaining > 0 && ! in_array($wf->status, ['mapping', 'failed'], true);
+                                $enrichedCount = (int) ($wf->enriched_leads_count ?? $wf->enriched_leads ?? 0);
+                                $unassigned = max(0, (int) ($wf->ready_to_assign_count ?? 0));
+                                $canAssign = $unassigned > 0 && ! in_array($wf->status, ['mapping', 'failed'], true);
                                 $totalLeads = (int) ($wf->total_leads ?? 0);
                                 $attempted = $enrichedCount + (int) ($wf->failed_leads ?? 0);
                                 $progressPct = $totalLeads > 0 ? min(100, (int) round(($attempted / $totalLeads) * 100)) : 0;
@@ -82,7 +79,15 @@
                                 <td class="import-workflow-stat">{{ number_format($totalLeads) }}</td>
                                 <td class="import-workflow-stat">{{ number_format($enrichedCount) }}</td>
                                 <td class="import-workflow-stat import-workflow-stat-success">{{ number_format($assignedCount) }}</td>
-                                <td class="import-workflow-stat import-workflow-stat-warning">{{ number_format($remaining) }}</td>
+                                <td class="import-workflow-stat import-workflow-stat-warning">
+                                    @if ($unassigned > 0)
+                                        <a href="{{ route('admin.workflows.show', ['workflow' => $wf->id, 'pool' => 'unassigned']) }}"
+                                            class="import-workflow-unassigned-link"
+                                            title="View and review unassigned leads">{{ number_format($unassigned) }}</a>
+                                    @else
+                                        {{ number_format($unassigned) }}
+                                    @endif
+                                </td>
                                 <td>
                                     @if ($canAssign)
                                         <button type="button" class="app-btn app-btn-primary app-btn-sm import-assign-btn"
@@ -90,7 +95,7 @@
                                             data-workflow-name="{{ $wf->name }}" data-workflow-total="{{ $totalLeads }}"
                                             data-workflow-enriched="{{ $enrichedCount }}"
                                             data-workflow-assigned="{{ $assignedCount }}"
-                                            data-workflow-remaining="{{ $remaining }}">Assign</button>
+                                            data-workflow-remaining="{{ $unassigned }}">Assign</button>
                                     @else
                                         <span class="import-assign-empty">&mdash;</span>
                                     @endif
@@ -166,6 +171,9 @@
         </div>
     @endif
 
-    @include('workflows.partials.import-modals', ['setterTeamLeads' => $setterTeamLeads ?? $team ?? collect()])
+    @include('workflows.partials.import-modals', [
+        'setterTeamLeads' => $setterTeamLeads ?? $team ?? collect(),
+        'activeSetterCount' => $activeSetterCount ?? 0,
+    ])
 </div>
 @endif

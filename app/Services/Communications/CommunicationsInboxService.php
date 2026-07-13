@@ -39,6 +39,7 @@ class CommunicationsInboxService
     protected WorkspaceContextService $workspaceContext,
     protected CommunicationsAccessService $access,
     protected CommunicationsPhoneNotesService $phoneNotes,
+    protected CommunicationsLeadLookupService $leadLookup,
   ) {}
 
   /**
@@ -248,17 +249,18 @@ class CommunicationsInboxService
         if (in_array($channel, ['inbox', 'calls'], true)) {
           if (auth()->check()) {
             $workspace = $this->workspaceContext->resolveActiveWorkspace(auth()->user());
-            $callLogs = $this->callHistory->listForHub($workspace, $filters);
+            $scopedFilters = $this->applyCallLogActorScope($filters, $user, $routePrefix);
+            $callLogs = $this->callHistory->listForHub($workspace, $scopedFilters);
             // Apply direction/missed/recorded filters to local history too
             if ($channel === 'calls') {
-              $callLogs = $this->filterCallLogs($callLogs, $filters);
+              $callLogs = $this->filterCallLogs($callLogs, $scopedFilters);
             }
             $callStats = $this->data->callStatsFromLogs($callLogs);
 
-            if (! $fastDialerShell && $channel === 'inbox' && $morpheusReachable) {
+            if (! $fastDialerShell && $channel === 'inbox' && $morpheusReachable && empty($scopedFilters['actor_scoped'])) {
               $callPayload = $this->safeDataLoad(
                 fn () => $this->data->callLogs(
-                  $filters,
+                  $scopedFilters,
                   (int) config('integrations.communications.detail_max_pages', 1),
                   $enrichCallRecordings,
                 ),
@@ -269,8 +271,8 @@ class CommunicationsInboxService
                 $warnings[] = $callPayload['warning'];
               }
               $callLogs = $this->filterCallLogs(
-                $this->mergeLocalCallHistory($callPayload['logs'], $filters, $warnings),
-                $filters,
+                $this->mergeLocalCallHistory($callPayload['logs'], $scopedFilters, $warnings),
+                $scopedFilters,
               );
               $nextPageToken = $callPayload['next_page_token'];
               $callStats = $this->data->callStatsFromLogs($callLogs);
@@ -366,14 +368,25 @@ class CommunicationsInboxService
         }
 
         if ($channel === 'recordings') {
-          $recPayload = $this->safeDataLoad(
-            fn () => $this->data->recordings($filters),
-            ['recordings' => [], 'next_page_token' => null, 'warnings' => []],
-            $warnings,
-          );
-          $recordings = $recPayload['recordings'];
-          $nextPageToken = $recPayload['next_page_token'];
-          $warnings = array_merge($warnings, $recPayload['warnings'] ?? []);
+          $scopedFilters = $this->applyCallLogActorScope($filters, $user, $routePrefix);
+          if (! empty($scopedFilters['actor_scoped'])) {
+            $agentLogs = $this->resolveDialerCallLogs($scopedFilters, false, $routePrefix);
+            $agentLogs = $this->data->enrichCallLogsWithRecordings($agentLogs, $scopedFilters);
+            $recordings = array_values(array_filter(
+              $agentLogs,
+              fn (array $log) => ! empty($log['has_recording_media']) && ! empty($log['recording_id']),
+            ));
+            $nextPageToken = null;
+          } else {
+            $recPayload = $this->safeDataLoad(
+              fn () => $this->data->recordings($filters),
+              ['recordings' => [], 'next_page_token' => null, 'warnings' => []],
+              $warnings,
+            );
+            $recordings = $recPayload['recordings'];
+            $nextPageToken = $recPayload['next_page_token'];
+            $warnings = array_merge($warnings, $recPayload['warnings'] ?? []);
+          }
         }
 
         if ($canConfigure && ($channel === 'team' || $channel === 'queues')) {
@@ -679,15 +692,33 @@ class CommunicationsInboxService
     }
 
     $dialerCallLogsHasMore = false;
+    $dialerImportedLeads = [];
+    $dialerImportedLeadsHasMore = false;
+    $dialerCampaignOptions = [];
 
     if ($panel === 'dialer') {
       try {
-        $callLogs = $this->resolveDialerCallLogs($filters, (bool) ($connection['connected'] ?? false));
+        $callLogs = $this->resolveDialerCallLogs($filters, (bool) ($connection['connected'] ?? false), $routePrefix);
         $callLogs = $this->data->enrichCallLogsWithRecordings($callLogs, $filters);
         if ($workspace) {
           $callLogs = $this->enrichDialerCallLogsWithNotes($workspace, $callLogs);
+          $callLogs = $this->enrichDialerCallLogsWithLeadLabels($workspace, $callLogs);
         }
         $dialerCallLogsHasMore = count($callLogs) > (int) config('integrations.communications.list_page_size', 20);
+
+        if (($hubAccess['canAutoDial'] ?? false) && $workspace) {
+          $importedLeads = app(DialerImportedLeadsService::class);
+          $leadPageSize = (int) config('integrations.communications.dialer_leads_page_size', 25);
+          $leadFilters = ['pool' => 'callable'];
+          if (($hubAccess['tier'] ?? '') === 'agent' && $user) {
+            $leadFilters['assigned_user_id'] = (int) $user->id;
+            $leadFilters['pool'] = 'assigned';
+          }
+          $leadPayload = $importedLeads->paginate($workspace, $leadFilters, 0, $leadPageSize);
+          $dialerImportedLeads = $leadPayload['leads'];
+          $dialerImportedLeadsHasMore = (bool) ($leadPayload['has_more'] ?? false);
+          $dialerCampaignOptions = $importedLeads->campaignOptions($workspace);
+        }
       } catch (\Throwable $e) {
         $warnings[] = $this->zoom->humanizeError($e->getMessage());
       }
@@ -702,6 +733,10 @@ class CommunicationsInboxService
       'sidebarItems' => $sidebarItems,
       'contacts' => $contacts,
       'callLogs' => $callLogs,
+      'dialerCallLogsHasMore' => $dialerCallLogsHasMore,
+      'dialerImportedLeads' => $dialerImportedLeads,
+      'dialerImportedLeadsHasMore' => $dialerImportedLeadsHasMore,
+      'dialerCampaignOptions' => $dialerCampaignOptions,
       'callStats' => $callStats,
       'voiceMails' => $voiceMails,
       'smsSessions' => $smsSessions,
@@ -980,6 +1015,32 @@ class CommunicationsInboxService
 
     if (($filters['filter'] ?? '') === 'missed') {
       $logs = $logs->filter(fn ($log) => $this->isMissedCall($log));
+    }
+
+    $scopedUserId = (int) ($filters['user_id'] ?? 0);
+    $scopedExt = preg_replace('/\D/', '', (string) ($filters['from_extension'] ?? '')) ?: '';
+    if ($scopedUserId > 0 || $scopedExt !== '') {
+      $logs = $logs->filter(function (array $log) use ($scopedUserId, $scopedExt) {
+        $logUserId = (int) ($log['user_id'] ?? data_get($log, 'raw.user_id') ?? 0);
+        if ($scopedUserId > 0 && $logUserId === $scopedUserId) {
+          return true;
+        }
+
+        $logExt = preg_replace(
+          '/\D/',
+          '',
+          (string) ($log['from_extension'] ?? data_get($log, 'raw.from_extension') ?? ''),
+        ) ?: '';
+        if ($logExt === '' && ! empty($log['from']) && preg_match('/ext\s+(\d+)/i', (string) $log['from'], $m)) {
+          $logExt = $m[1];
+        }
+
+        if ($scopedExt !== '' && $logExt === $scopedExt) {
+          return true;
+        }
+
+        return false;
+      });
     }
 
     return $logs->values()->all();
@@ -1370,13 +1431,45 @@ class CommunicationsInboxService
   }
 
   /**
+   * Agents only see their own calls; admins/supervisors/team leads see all agent calls.
+   *
+   * @param  array<string, mixed>  $filters
+   * @return array<string, mixed>
+   */
+  public function applyCallLogActorScope(array $filters, $user, string $routePrefix): array
+  {
+    if (! $user) {
+      return $filters;
+    }
+
+    if ($this->access->tierFor($user, $routePrefix) !== 'agent') {
+      return $filters;
+    }
+
+    $filters['user_id'] = (int) $user->id;
+    $filters['actor_scoped'] = true;
+
+    $extension = app(CommunicationsAgentService::class)->extensionForUser($user);
+    if (filled($extension)) {
+      $digits = preg_replace('/\D/', '', (string) $extension) ?: (string) $extension;
+      if ($digits !== '') {
+        $filters['from_extension'] = $digits;
+      }
+    }
+
+    return $filters;
+  }
+
+  /**
    * @return array<int, array<string, mixed>>
    */
-  public function resolveDialerCallLogs(array $filters, bool $mergeRemote = true): array
+  public function resolveDialerCallLogs(array $filters, bool $mergeRemote = true, ?string $routePrefix = null): array
   {
     $filters = $this->dialerCallLogFilters($filters);
-
+    $routePrefix = $routePrefix ?? (request()->is('admin*') ? 'admin.' : 'portal.');
     $user = Auth::user();
+    $filters = $this->applyCallLogActorScope($filters, $user, $routePrefix);
+
     if (! $user) {
       return [];
     }
@@ -1388,7 +1481,12 @@ class CommunicationsInboxService
 
     $logs = $this->callHistory->listForHub($workspace, $filters);
 
-    if (! $mergeRemote || ! $this->zoom->isConfigured()) {
+    // Agents stay on local history so account-wide Morpheus CDR cannot leak other agents' calls.
+    $allowRemote = $mergeRemote
+      && $this->zoom->isConfigured()
+      && empty($filters['actor_scoped']);
+
+    if (! $allowRemote) {
       return $this->filterCallLogs($logs, $filters);
     }
 
@@ -1431,23 +1529,38 @@ class CommunicationsInboxService
     string $routePrefix,
     bool $mergeRemote = true,
   ): array {
+    $filters = $this->applyCallLogActorScope($filters, Auth::user(), $routePrefix);
+    $recordingsOnly = (bool) ($filters['recordings_only'] ?? false);
     $userId = Auth::id() ?? 0;
     $version = (int) Cache::get('dialer_logs_ver.'.$userId, 0);
-    $cacheKey = 'dialer_logs.v2.'.$userId.'.'.$version.'.'.md5(json_encode([
+    $cacheKey = 'dialer_logs.v3.'.$userId.'.'.$version.'.'.md5(json_encode([
       $filters['from'] ?? null,
       $filters['to'] ?? null,
       $filters['direction'] ?? null,
       $filters['filter'] ?? null,
+      $filters['user_id'] ?? null,
+      $filters['from_extension'] ?? null,
+      $filters['actor_scoped'] ?? null,
+      $recordingsOnly,
       $mergeRemote,
+      $routePrefix,
     ]));
 
     $all = Cache::remember(
       $cacheKey,
       30,
-      fn () => $this->resolveDialerCallLogs($filters, $mergeRemote),
+      fn () => $this->resolveDialerCallLogs($filters, $mergeRemote, $routePrefix),
     );
 
     $enriched = $this->data->enrichCallLogsWithRecordings($all, $filters);
+
+    if ($recordingsOnly) {
+      $enriched = array_values(array_filter(
+        $enriched,
+        fn (array $log) => ! empty($log['has_recording_media']) && ! empty($log['recording_id']),
+      ));
+    }
+
     $slice = array_slice($enriched, $offset, $limit);
     $nextOffset = $offset + count($slice);
 
@@ -1455,10 +1568,17 @@ class CommunicationsInboxService
     $callNotesByRef = $workspace
       ? $this->callHistory->mapCallNotesForRefs($workspace, $enriched)
       : [];
+    $phones = array_map(
+      fn (array $log) => CommunicationsLeadLookupService::callbackPhoneFromLog($log),
+      $slice,
+    );
+    $leadLabelsByPhone = $workspace
+      ? $this->leadLookup->mapLabelsForPhones($workspace, $phones)
+      : [];
 
     return [
       'logs' => array_map(
-        fn (array $log) => $this->formatDialerCallLogForApi($log, $routePrefix, [], $callNotesByRef),
+        fn (array $log) => $this->formatDialerCallLogForApi($log, $routePrefix, [], $callNotesByRef, $leadLabelsByPhone),
         $slice,
       ),
       'next_offset' => $nextOffset,
@@ -1484,9 +1604,28 @@ class CommunicationsInboxService
   public function enrichDialerCallLogsWithNotes(Workspace $workspace, array $logs): array
   {
     $notesByRef = $this->callHistory->mapCallNotesForRefs($workspace, $logs);
+    $phones = array_values(array_filter(array_map(
+      fn (array $log) => CommunicationsLeadLookupService::callbackPhoneFromLog($log),
+      $logs,
+    )));
+    $phoneBodies = $this->phoneNotes->mapBodiesForPhones($workspace, $phones);
 
-    return array_map(function (array $log) use ($notesByRef) {
+    return array_map(function (array $log) use ($notesByRef, $phoneBodies) {
       $callNote = $this->callHistory->resolveCallNoteForHubLog($log, $notesByRef);
+      $phone = CommunicationsLeadLookupService::callbackPhoneFromLog($log);
+      $phoneKey = $phone ? $this->phoneNotes->normalizePhoneKey($phone) : null;
+      $phoneNote = ($phoneKey && isset($phoneBodies[$phoneKey]))
+        ? trim((string) $phoneBodies[$phoneKey])
+        : '';
+
+      // Phone-level notes are shared across numbers — never show them as this call's comment.
+      if ($callNote !== '' && $phoneNote !== '' && strcasecmp($callNote, $phoneNote) === 0) {
+        $ref = (string) ($log['id'] ?? '');
+        $ownedByThisCall = $ref !== '' && array_key_exists($ref, $notesByRef) && trim((string) $notesByRef[$ref]) === $callNote;
+        if (! $ownedByThisCall) {
+          $callNote = '';
+        }
+      }
 
       $log['phone_note'] = '';
       $log['call_note'] = $callNote;
@@ -1498,17 +1637,44 @@ class CommunicationsInboxService
   }
 
   /**
+   * @param  array<int, array<string, mixed>>  $logs
+   * @return array<int, array<string, mixed>>
+   */
+  public function enrichDialerCallLogsWithLeadLabels(Workspace $workspace, array $logs): array
+  {
+    $phones = array_map(
+      fn (array $log) => CommunicationsLeadLookupService::callbackPhoneFromLog($log),
+      $logs,
+    );
+    $labels = $this->leadLookup->mapLabelsForPhones($workspace, $phones);
+
+    return array_map(function (array $log) use ($labels) {
+      $phone = CommunicationsLeadLookupService::callbackPhoneFromLog($log);
+      $key = $phone ? $this->phoneNotes->normalizePhoneKey($phone) : null;
+      $label = ($key && isset($labels[$key])) ? $labels[$key] : null;
+
+      $log['lead_name'] = $label['name'] ?? null;
+      $log['lead_contact'] = $label['contact'] ?? null;
+      $log['lead_id'] = $label['lead_id'] ?? null;
+      $log['phone_display'] = CommunicationsLeadLookupService::formatPhoneDisplay($phone);
+
+      return $log;
+    }, $logs);
+  }
+
+  /**
    * @param  array<string, mixed>  $log
    * @param  array<string, string>  $phoneBodies
    * @return array<string, mixed>
    */
-  public function formatDialerCallLogForApi(array $log, string $routePrefix, array $phoneBodies = [], array $callNotesByRef = []): array
-  {
-    $callbackPhone = match ($log['direction'] ?? '') {
-      'inbound' => $log['from_phone'] ?? null,
-      'outbound' => $log['to_phone'] ?? null,
-      default => $log['to_phone'] ?? ($log['from_phone'] ?? null),
-    };
+  public function formatDialerCallLogForApi(
+    array $log,
+    string $routePrefix,
+    array $phoneBodies = [],
+    array $callNotesByRef = [],
+    array $leadLabelsByPhone = [],
+  ): array {
+    $callbackPhone = CommunicationsLeadLookupService::callbackPhoneFromLog($log);
 
     $logExtension = $log['from_extension']
       ?? data_get($log, 'raw.from_extension')
@@ -1557,6 +1723,16 @@ class CommunicationsInboxService
 
     $phoneKey = $this->phoneNotes->normalizePhoneKey($callbackPhone);
     $phoneNote = $phoneKey ? trim((string) ($phoneBodies[$phoneKey] ?? '')) : '';
+    $leadLabel = ($phoneKey && isset($leadLabelsByPhone[$phoneKey])) ? $leadLabelsByPhone[$phoneKey] : null;
+    $leadName = filled($log['lead_name'] ?? null)
+      ? (string) $log['lead_name']
+      : (string) ($leadLabel['name'] ?? '');
+    $leadContact = filled($log['lead_contact'] ?? null)
+      ? (string) $log['lead_contact']
+      : (string) ($leadLabel['contact'] ?? '');
+    $phoneDisplay = filled($log['phone_display'] ?? null)
+      ? (string) $log['phone_display']
+      : (CommunicationsLeadLookupService::formatPhoneDisplay($callbackPhone) ?? $callbackPhone);
 
     return [
       'id' => $log['id'] ?? null,
@@ -1564,8 +1740,15 @@ class CommunicationsInboxService
       'local_call_log_id' => $localCallLogId,
       'direction' => $log['direction'] ?? 'call',
       'extension' => $logExtension,
+      'user_id' => $log['user_id'] ?? data_get($log, 'raw.user_id'),
+      'agent_name' => $log['agent_name'] ?? data_get($log, 'raw.user.name') ?? null,
       'phone' => $callbackPhone,
+      'phone_display' => $phoneDisplay,
+      'lead_name' => $leadName !== '' ? $leadName : null,
+      'lead_contact' => $leadContact !== '' ? $leadContact : null,
+      'lead_id' => $log['lead_id'] ?? ($leadLabel['lead_id'] ?? null),
       'result' => $log['result'] ?? '—',
+      'disposition' => $this->resolveDialerDispositionLabel($log),
       'duration_seconds' => $durationSeconds,
       'duration_label' => self::formatDialerCallDuration($durationSeconds),
       'time_ago' => filled($startTime) ? \Carbon\Carbon::parse($startTime)->diffForHumans(short: true) : '—',
@@ -1576,7 +1759,8 @@ class CommunicationsInboxService
       'download_url' => $downloadUrl,
       'call_note' => $callNote,
       'phone_note' => $phoneNote,
-      'has_notes' => $callNote !== '',
+      'in_call_notes' => trim((string) ($log['in_call_notes'] ?? data_get($log, 'raw.meta.in_call_notes') ?? '')),
+      'has_notes' => $callNote !== '' || trim((string) ($log['in_call_notes'] ?? data_get($log, 'raw.meta.in_call_notes') ?? '')) !== '',
     ];
   }
 
@@ -1599,5 +1783,39 @@ class CommunicationsInboxService
     }
 
     return sprintf('%ds', $remaining);
+  }
+
+  /**
+   * Real agent disposition only — never fall back to call result/status (connected, busy, …).
+   *
+   * @param  array<string, mixed>  $log
+   */
+  protected function resolveDialerDispositionLabel(array $log): ?string
+  {
+    $candidates = [
+      $log['disposition'] ?? null,
+      data_get($log, 'raw.disposition'),
+      data_get($log, 'raw.meta.disposition'),
+      data_get($log, 'meta.disposition'),
+    ];
+
+    $statusLike = [
+      '', '—', '-', 'completed', 'initiated', 'connected', 'answered',
+      'no-answer', 'no answer', 'busy', 'failed', 'missed', 'unknown',
+    ];
+
+    foreach ($candidates as $candidate) {
+      $value = trim((string) ($candidate ?? ''));
+      if ($value === '') {
+        continue;
+      }
+      if (in_array(strtolower($value), $statusLike, true)) {
+        continue;
+      }
+
+      return $value;
+    }
+
+    return null;
   }
 }

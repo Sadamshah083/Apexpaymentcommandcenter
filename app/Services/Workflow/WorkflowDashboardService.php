@@ -20,6 +20,11 @@ class WorkflowDashboardService
     {
         $workflows = $workspace->workflows()
             ->with(['leadList', 'campaign'])
+            ->withCount([
+                'leads as assigned_leads_count' => fn ($query) => $query->whereNotNull('assigned_user_id'),
+                'leads as enriched_leads_count' => fn ($query) => $query->where('status', 'enriched'),
+                'leads as ready_to_assign_count' => fn ($query) => $query->readyToAssign(),
+            ])
             ->latest()
             ->paginate(config('pagination.workflows_per_page', 8), ['*'], 'pipelines_page')
             ->withQueryString();
@@ -66,6 +71,10 @@ class WorkflowDashboardService
                 ->orderBy('users.name')
                 ->get(['users.id', 'users.name', 'users.email']),
             'setterTeamLeads' => WorkflowAssignmentRoles::setterTeamLeadsFor($workspace),
+            'activeSetterCount' => $workspace->users()
+                ->wherePivot('role', 'appointment_setter')
+                ->wherePivot('status', 'active')
+                ->count(),
             'pipelinePhases' => config('sales_ops.pipeline_phases', []),
             'enrichmentStatus' => $this->providerStatus->getEnrichmentStatus(
                 (bool) ($filters['refresh_enrichment'] ?? false),

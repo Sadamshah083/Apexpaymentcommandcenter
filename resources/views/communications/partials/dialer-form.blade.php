@@ -136,10 +136,17 @@
                 </button>
             </div>
             <div class="ghl-dialer-active-notes hidden" data-dialer-active-notes>
-                <textarea class="ghl-dialer-active-notes-input" data-dialer-active-notes-input rows="4"
-                    placeholder="Notes during this call…" maxlength="5000"></textarea>
+                <p class="ghl-dialer-active-notes__title">Call notes</p>
+                <label class="ghl-dialer-active-notes__label" for="dialer-active-notes-field">Notes</label>
+                <textarea id="dialer-active-notes-field" class="ghl-dialer-active-notes-input"
+                    data-dialer-active-notes-input rows="3"
+                    placeholder="Notes for this call…" maxlength="5000"></textarea>
+                <label class="ghl-dialer-active-notes__label" for="dialer-active-comment-field">Comment</label>
+                <textarea id="dialer-active-comment-field" class="ghl-dialer-active-notes-input"
+                    data-dialer-active-comment-input rows="2"
+                    placeholder="Comment for this call…" maxlength="5000"></textarea>
                 <div class="ghl-dialer-active-notes-actions">
-                    <span class="ghl-dialer-active-notes-status" data-dialer-active-notes-status aria-live="polite"></span>
+                    <span class="ghl-dialer-active-notes-status" data-dialer-active-notes-status aria-live="polite">Auto-saves to call log</span>
                     <button type="button" class="ch-btn ch-btn--secondary ch-btn--sm" data-dialer-active-notes-save>Save</button>
                 </div>
             </div>
@@ -193,16 +200,39 @@
                 </div>
             </div>
 
-            <div class="ghl-dialer-keypad ghl-dialer-keypad--compact ghl-dialer-keypad--round ghl-dialer-keypad--with-actions" id="{{ $keypadRootId }}">
+            @php
+                $iphoneKeyLetters = [
+                    '1' => '',
+                    '2' => 'ABC',
+                    '3' => 'DEF',
+                    '4' => 'GHI',
+                    '5' => 'JKL',
+                    '6' => 'MNO',
+                    '7' => 'PQRS',
+                    '8' => 'TUV',
+                    '9' => 'WXYZ',
+                    '*' => '',
+                    '0' => '+',
+                    '#' => '',
+                ];
+            @endphp
+            <div class="ghl-dialer-keypad ghl-dialer-keypad--compact ghl-dialer-keypad--round ghl-dialer-keypad--with-actions ghl-dialer-keypad--iphone" id="{{ $keypadRootId }}">
                 @foreach (['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'] as $key)
-                    <button type="button" class="ghl-dialer-key ghl-dialer-key--round" data-dial-key="{{ $key }}">{{ $key }}</button>
+                    <button type="button" class="ghl-dialer-key ghl-dialer-key--round ghl-dialer-key--iphone" data-dial-key="{{ $key }}" aria-label="{{ $key }}">
+                        <span class="ghl-dialer-key__digit">{{ $key }}</span>
+                        @if (($iphoneKeyLetters[$key] ?? '') !== '')
+                            <span class="ghl-dialer-key__letters">{{ $iphoneKeyLetters[$key] }}</span>
+                        @else
+                            <span class="ghl-dialer-key__letters ghl-dialer-key__letters--empty" aria-hidden="true">&nbsp;</span>
+                        @endif
+                    </button>
                 @endforeach
                 @if ($backspaceId)
                     <button type="button" id="{{ $backspaceId }}"
                         class="ghl-dialer-backspace-btn ghl-dialer-keypad__action ghl-dialer-keypad__action--delete is-hidden"
                         data-dial-backspace aria-label="Delete last digit" title="Delete">
                         <svg class="ghl-dialer-backspace-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"></path>
                             <line x1="18" y1="9" x2="12" y2="15"></line>
                             <line x1="12" y1="9" x2="18" y2="15"></line>
@@ -212,10 +242,9 @@
                 <button type="submit" id="{{ $dialBtnId }}"
                     class="ghl-dialer-call-icon-btn ghl-dialer-keypad__action ghl-dialer-keypad__action--call"
                     @disabled($extensions === []) aria-label="Place call" title="Call">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                         <path
-                            d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                            d="M6.62 10.79a15.05 15.05 0 0 0 6.59 6.59l2.2-2.2a1 1 0 0 1 1.01-.24 11.36 11.36 0 0 0 3.58.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11.36 11.36 0 0 0 .57 3.58 1 1 0 0 1-.25 1.01l-2.2 2.2z" />
                     </svg>
                 </button>
             </div>

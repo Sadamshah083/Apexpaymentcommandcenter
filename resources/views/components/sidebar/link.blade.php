@@ -22,7 +22,9 @@
     data-nav-query="{{ $navQuery }}"
     data-nav-query-mode="{{ $resolvedQueryMode }}"
     @if ($navMatchPrefixes !== []) data-nav-match-prefixes='@json($navMatchPrefixes)' @endif
-    @if ($active) aria-current="page" @endif>
+    @if ($active) aria-current="page" @endif
+    title="{{ $label }}"
+    aria-label="{{ $label }}">
     @isset($icon)
         <span @class([
             'sidebar-link-icon',

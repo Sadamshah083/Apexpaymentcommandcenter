@@ -11,11 +11,11 @@
         </div>
         <div class="flex gap-2">
             <a href="{{ route('admin.dashboard') }}" class="app-btn app-btn-secondary">Command Center</a>
-            <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-primary">Import file</a>
+            <x-import-file-link />
         </div>
     </div>
 
-    <div class="app-card app-card-padded mb-6">
+    <div class="app-card app-card-padded mb-6 campaigns-create-bar">
         <form method="POST" action="{{ route('admin.campaigns.store') }}" class="flex flex-col sm:flex-row gap-3">
             @csrf
             <input type="text" name="name" required maxlength="100" placeholder="New campaign name" class="app-input flex-1">
@@ -29,21 +29,46 @@
             <p class="app-empty-state-desc">Create a campaign, then import a file and select it during upload.</p>
         </div>
     @else
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            @foreach ($campaigns as $campaign)
-                <a href="{{ route('admin.campaigns.show', $campaign) }}" class="campaign-card">
-                    <div class="campaign-card-head">
-                        <span class="campaign-card-name">{{ $campaign->name }}</span>
-                        <span class="campaign-card-count">{{ number_format($campaign->leads_count) }} leads</span>
-                    </div>
-                    <dl class="campaign-card-stats">
-                        <div><dt>Imports</dt><dd>{{ $campaign->imports_count }}</dd></div>
-                        <div><dt>Enriched</dt><dd>{{ number_format($campaign->enriched_count) }}</dd></div>
-                        <div><dt>Assigned</dt><dd>{{ number_format($campaign->assigned_count) }}</dd></div>
-                        <div><dt>Failed</dt><dd>{{ number_format($campaign->failed_count) }}</dd></div>
-                    </dl>
-                </a>
-            @endforeach
+        <div class="app-data-table campaigns-table-wrap">
+            <div class="app-data-table-header">
+                <h2 class="app-data-table-title">All campaigns</h2>
+            </div>
+            <div class="app-table-wrap" data-min-width="880px">
+                <table class="campaigns-table">
+                    <thead>
+                        <tr>
+                            <th class="col-name">Campaign</th>
+                            <th class="col-leads">Leads</th>
+                            <th class="col-imports">Imports</th>
+                            <th class="col-enriched">Enriched</th>
+                            <th class="col-assigned">Assigned</th>
+                            <th class="col-failed">Failed</th>
+                            <th class="col-action text-right">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach ($campaigns as $campaign)
+                            <tr>
+                                <td class="col-name">
+                                    <a href="{{ route('admin.campaigns.show', $campaign) }}" class="campaigns-table-name">
+                                        {{ $campaign->name }}
+                                    </a>
+                                </td>
+                                <td class="col-leads">{{ number_format($campaign->leads_count) }}</td>
+                                <td class="col-imports">{{ number_format($campaign->imports_count) }}</td>
+                                <td class="col-enriched">{{ number_format($campaign->enriched_count) }}</td>
+                                <td class="col-assigned">{{ number_format($campaign->assigned_count) }}</td>
+                                <td class="col-failed">{{ number_format($campaign->failed_count) }}</td>
+                                <td class="col-action text-right">
+                                    <a href="{{ route('admin.campaigns.show', $campaign) }}" class="app-btn app-btn-secondary app-btn-sm">
+                                        Open
+                                    </a>
+                                </td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
         </div>
     @endif
 </div>

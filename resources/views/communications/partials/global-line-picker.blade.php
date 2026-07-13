@@ -13,17 +13,12 @@
     <div class="ghl-comm-global-line__ext">
 
         @include('communications.partials.dialer-extension-field', [
-
             'routePrefix' => $routePrefix,
-
             'morpheusExtensions' => $morpheusExtensions ?? [],
-
             'phoneUsers' => $phoneUsers ?? [],
-
             'defaultCallerId' => $defaultCallerId ?? null,
-
             'callerSelectId' => 'dial-caller-id-global',
-
+            'triggerStyle' => ($placement ?? 'toolbar') === 'toolbar' ? 'toolbar' : 'default',
         ])
 
     </div>

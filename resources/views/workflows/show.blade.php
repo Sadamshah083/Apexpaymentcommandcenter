@@ -1,4 +1,4 @@
-﻿@extends('layouts.admin')
+@extends('layouts.admin')
 
 @section('title', $workflow->name)
 
@@ -12,10 +12,11 @@
         : 0;
     $importedCount = $workflow->imported_leads_count ?? 0;
     $enrichedCount = $workflow->enriched_leads_count ?? 0;
-    $readyToDistribute = $workflow->ready_to_distribute_count ?? 0;
+    $readyToDistribute = (int) ($workflow->ready_to_assign_count ?? $workflow->ready_to_distribute_count ?? 0);
+    $showUnassignedPool = request('pool') === 'unassigned';
 @endphp
 
-<div class="app-page space-y-6">
+<div class="app-page space-y-6 workflow-show-page {{ $workflow->status === 'mapping' ? 'workflow-mapping-page' : '' }}">
     <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <div>
             <x-back-link :href="route('admin.workflows.index')" label="All imports" />
@@ -67,7 +68,7 @@
                 @if($workflow->sheets)
                     <div class="app-field">
                         <label for="selected_sheet" class="app-label">Sheet</label>
-                        <select name="selected_sheet" id="selected_sheet" class="app-input max-w-xs">
+                        <select name="selected_sheet" id="selected_sheet" class="app-input max-w-xs js-pretty-select">
                             @foreach($workflow->sheets as $sheetName)
                                 <option value="{{ $sheetName }}" {{ $workflow->selected_sheet === $sheetName ? 'selected' : '' }}>{{ $sheetName }}</option>
                             @endforeach
@@ -78,8 +79,8 @@
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="app-field">
                         <label class="app-label">Business name <span class="text-rose-600">*</span></label>
-                        <select name="mapping[business_name]" required class="app-input">
-                            <option value="">Select columnΓÇª</option>
+                        <select name="mapping[business_name]" required class="app-input js-pretty-select">
+                            <option value="">Select column…</option>
                             @foreach($headers as $h)
                                 @if($h !== '')
                                     <option value="{{ $h }}" {{ ($workflow->column_mapping['business_name'] ?? '') === $h ? 'selected' : '' }}>{{ $h }}</option>
@@ -90,7 +91,7 @@
                     @foreach(['owner_name' => 'Owner / Contact', 'city' => 'City', 'state' => 'State', 'input_phone' => 'Phone', 'input_email' => 'Email', 'website' => 'Website'] as $key => $label)
                         <div class="app-field">
                             <label class="app-label">{{ $label }}</label>
-                            <select name="mapping[{{ $key }}]" class="app-input">
+                            <select name="mapping[{{ $key }}]" class="app-input js-pretty-select">
                                 <option value="">Skip</option>
                                 @foreach($headers as $h)
                                     @if($h !== '')
@@ -103,12 +104,12 @@
                 </div>
 
                 <details class="app-details">
-                    <summary>More columns (address, ZIPΓÇª)</summary>
+                    <summary>More columns (address, ZIP…)</summary>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4 pt-4 border-t border-zinc-100">
                         @foreach(['address' => 'Street address', 'zip_code' => 'ZIP'] as $key => $label)
                             <div class="app-field">
                                 <label class="app-label">{{ $label }}</label>
-                                <select name="mapping[{{ $key }}]" class="app-input">
+                                <select name="mapping[{{ $key }}]" class="app-input js-pretty-select">
                                     <option value="">Skip</option>
                                     @foreach($headers as $h)
                                         @if($h !== '')
@@ -165,7 +166,7 @@
                         @if(!($enrichmentConfigured ?? false))
                             <span class="block text-xs text-zinc-500 font-normal mt-0.5">Requires GEMINI_API_KEY or OPENROUTER_API_KEY on the server.</span>
                         @else
-                            <span class="block text-xs text-zinc-500 font-normal mt-0.5">Uncheck to import only ΓÇö enrich from this page when ready.</span>
+                            <span class="block text-xs text-zinc-500 font-normal mt-0.5">Uncheck to import only — enrich from this page when ready.</span>
                         @endif
                     </span>
                 </label>
@@ -188,7 +189,7 @@
 Target Business: [INSERT BUSINESS NAME HERE]
 Target Location (City/State): [INSERT CITY/STATE HERE]
 
-Extract business identity, owner contact, payment processor, and booking/POS software. Output factual data only ΓÇö use "Not Publicly Available" when unknown.</textarea>
+Extract business identity, owner contact, payment processor, and booking/POS software. Output factual data only — use "Not Publicly Available" when unknown.</textarea>
                 </details>
 
                 <div class="flex justify-end gap-3 pt-2">
@@ -240,10 +241,20 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                 </div>
             @endif
 
+            @if($showUnassignedPool)
+                <div class="app-alert app-alert-warning flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                        <p class="app-alert-title">Showing {{ number_format($readyToDistribute) }} unassigned lead(s)</p>
+                        <p class="app-alert-desc">Review leads below, then assign them to your setter team lead from the assignment panel.</p>
+                    </div>
+                    <a href="{{ route('admin.workflows.show', $workflow->id) }}" class="app-btn app-btn-secondary app-btn-sm whitespace-nowrap">Show all leads</a>
+                </div>
+            @endif
+
             @if($readyToDistribute > 0 && ! $workflow->isProcessing())
                 <div class="app-alert app-alert-info">
-                    <p class="app-alert-title">{{ number_format($readyToDistribute) }} of {{ number_format($workflow->total_leads) }} leads still need assignment</p>
-                    <p class="app-alert-desc">Assign all leads to setters below. They will appear in Active leads only after assignment is complete.</p>
+                    <p class="app-alert-title">{{ number_format($readyToDistribute) }} unassigned lead(s) in this import</p>
+                    <p class="app-alert-desc">Assign leads to an Appointment Setter Team Lead below. They will be distributed across active setters on that team.</p>
                 </div>
             @endif
 

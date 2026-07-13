@@ -1,9 +1,9 @@
-﻿@extends(request()->is('admin*') ? 'layouts.admin' : 'layouts.portal')
+@extends(request()->is('admin*') ? 'layouts.admin' : 'layouts.portal')
 
 @section('title', request()->is('admin*') ? 'Import leads' : 'My Lead Pool')
 
 @section('content')
-<div class="app-page import-workflows-page space-y-5">
+<div class="app-page import-workflows-page space-y-5" data-import-hub>
     <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
             @if(request()->is('admin*'))
@@ -15,10 +15,7 @@
             @endif
         </div>
         @if(request()->is('admin*'))
-            <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-primary w-full sm:w-auto shrink-0">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-                Import file
-            </a>
+            <x-import-file-link />
         @endif
     </div>
 
@@ -184,3 +181,7 @@
     @endif
 </div>
 @endsection
+
+@push('head')
+    <link rel="prefetch" href="{{ route('admin.workflows.create') }}" as="document" data-import-prefetch>
+@endpush

@@ -91,6 +91,22 @@ function bindUmModals() {
         openSelector: '[data-um-add-member-open]',
         dismissSelector: '[data-um-add-member-dismiss]',
         onOpen: (modal) => {
+            const roleSelect = modal.querySelector('[data-create-member-role]');
+            const modulesPanel = modal.querySelector('[data-create-member-modules]');
+            if (roleSelect && modulesPanel) {
+                const role = roleSelect.value;
+                const configurableRoles = new Set([
+                    'admin',
+                    'manager',
+                    'appointment_setter_team_lead',
+                    'closers_team_lead',
+                    'appointment_setter',
+                    'closer',
+                ]);
+                modulesPanel.classList.toggle('hidden', !configurableRoles.has(role));
+                syncModuleAccessForRole(modulesPanel, role);
+            }
+
             modal.querySelector('#create-username')?.focus();
         },
     });

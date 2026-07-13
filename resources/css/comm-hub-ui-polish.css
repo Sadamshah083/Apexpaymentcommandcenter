@@ -3,6 +3,106 @@
  * Visual enhancements, motion, and responsive panel switching.
  */
 
+/* Ensure .hidden always wins inside the hub (Tailwind may not cover this bundle). */
+.ghl-comm-app .hidden,
+.ch-dial-workspace .hidden,
+.ghl-dialer-center .hidden {
+    display: none !important;
+}
+
+/* ── Windows 11 typography (Segoe UI Variable, regular — not bold) ─── */
+body.ghl-comm-mode,
+body.ghl-comm-mode .app-shell,
+body.ghl-comm-mode .app-main,
+.ghl-comm-app,
+.ghl-comm-topbar,
+.ch-dial-workspace {
+    font-family:
+        var(
+            --ghl-font-sans,
+            'Segoe UI Variable Text',
+            'Segoe UI Variable',
+            'Segoe UI',
+            system-ui,
+            -apple-system,
+            BlinkMacSystemFont,
+            'Helvetica Neue',
+            Arial,
+            sans-serif
+        );
+    font-weight: 400;
+    font-synthesis: none;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+body.ghl-comm-mode .ghl-comm-topbar__title,
+body.ghl-comm-mode .ghl-comm-app :is(h1, h2, h3, h4),
+.ghl-comm-app :is(h1, h2, h3, h4),
+.ghl-comm-topbar__title {
+    font-family: inherit;
+    font-weight: 400 !important;
+    color: #64748b !important;
+}
+
+.app-page-title,
+.um-page-title {
+    color: #64748b !important;
+}
+
+/* Connect button: light gray (no black fill) */
+.ghl-comm-connect-group {
+    border-color: #e2e8f0 !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+}
+
+.ghl-comm-connect-group__main {
+    background: #ffffff !important;
+    color: #64748b !important;
+}
+
+.ghl-comm-connect-group__label,
+.ghl-comm-connect-group__phone {
+    color: #64748b !important;
+}
+
+.ghl-comm-connect-group__main:hover:not(:disabled) {
+    background: #f8fafc !important;
+    color: #475569 !important;
+}
+
+.ghl-comm-connect-group__delete {
+    background: #ffffff !important;
+    border-left-color: #e2e8f0 !important;
+    color: #94a3b8 !important;
+}
+
+/* Cap bold UI labels to normal (not bold) */
+.ghl-comm-app :is(
+    .ghl-comm-dial-mode__btn,
+    .ghl-phone-panel-switch__btn,
+    .ghl-dialer-recent-number,
+    .ghl-inbox-title,
+    .ghl-hub-title,
+    .ch-panel__header,
+    .ch-panel__title,
+    strong,
+    b
+) {
+    font-weight: 400 !important;
+}
+
+.ghl-comm-app button,
+.ghl-comm-app input,
+.ghl-comm-app select,
+.ghl-comm-app textarea,
+.ghl-comm-topbar button,
+.ghl-comm-topbar input {
+    font-family: inherit;
+    font-weight: 400;
+}
+
 /* ── Shell & atmosphere ─────────────────────────────────────────────── */
 
 .ghl-inbox.ch-hub-shell {
@@ -396,17 +496,46 @@
     box-shadow: 0 2px 8px rgba(5, 150, 105, 0.12);
 }
 
-.ghl-dialer-recent-row {
-    transition:
-        background 0.15s,
-        border-color 0.15s,
-        transform 0.1s;
+.ghl-dialer-recent-contact {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
 }
 
-.ghl-dialer-recent-row:hover {
-    background: #fff;
-    border-color: var(--ch-brand-muted);
-    transform: translateX(2px);
+.ghl-dialer-recent-name {
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1.25;
+    color: #64748b;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ghl-dialer-recent-contact-name {
+    font-size: 0.75rem;
+    font-weight: 400;
+    line-height: 1.2;
+    color: #94a3b8;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ghl-dialer-recent-number {
+    font-size: 0.9375rem;
+    font-weight: 500;
+    line-height: 1.3;
+    color: #64748b;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.015em;
+}
+
+.ghl-dialer-recent-contact:not(:has(.ghl-dialer-recent-name)) .ghl-dialer-recent-number {
+    font-size: 1rem;
+    color: #64748b;
+    font-weight: 500;
 }
 
 .ghl-dialer-form--enterprise .ghl-dialer-key {
@@ -653,6 +782,2424 @@
     }
 }
 
+/* Admin dialer split: logs/leads left (~40%), dial pad right (~40%), side padding (~10% each) */
+.ch-dial-workspace--admin {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    height: 100%;
+    gap: 0.35rem;
+    padding: 0.5rem 1.25rem !important;
+    box-sizing: border-box;
+}
+
+.ghl-comm-phone-mode .ch-dial-workspace--admin.ch-dial-workspace--compact,
+.ghl-comm-phone-mode .ghl-inbox-body-wide .ch-dial-workspace--admin.ch-dial-workspace--compact {
+    padding: 0.5rem clamp(1rem, 5vw, 2.5rem) !important;
+    margin: 0 !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    width: 100% !important;
+    max-width: none !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+}
+
+.ghl-comm-phone-mode .ghl-inbox-conversation-scroll--center:has(.ch-dial-workspace--admin),
+.ghl-comm-phone-mode .ghl-inbox-body-wide .ghl-inbox-conversation-scroll--center:has(.ch-dial-workspace--admin) {
+    padding: 0 !important;
+    margin: 0 !important;
+    justify-content: flex-start !important;
+    align-content: stretch !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    overflow: hidden !important;
+}
+
+.ch-dial-workspace--admin .ch-dial-workspace__toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.65rem;
+    flex-shrink: 0;
+    width: 100%;
+    min-width: 0;
+    margin: 0 0 0.55rem;
+    padding: 0.15rem 0;
+    flex-wrap: nowrap;
+}
+
+.ch-dial-workspace__nav,
+.ch-dial-workspace--admin .ch-dial-workspace__nav {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+    padding-bottom: 0.05rem;
+}
+
+.ch-dial-workspace--admin .ghl-comm-dial-mode {
+    display: inline-flex;
+    align-items: stretch;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    border-radius: 0.5rem;
+    background: #ffffff;
+    border: 1.5px solid #e2e8f0;
+    overflow: hidden;
+    flex: 0 0 auto;
+}
+
+.ch-dial-workspace--admin .ghl-comm-dial-mode__btn {
+    white-space: nowrap;
+}
+
+.ch-dial-workspace--admin .ghl-phone-panel-switch {
+    display: inline-flex;
+    width: auto;
+    max-width: none;
+    flex: 0 0 auto;
+    align-self: center;
+    justify-content: flex-start;
+    gap: 0.35rem;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    border: none;
+}
+
+.ch-dial-workspace--admin .ghl-phone-panel-switch__btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    padding: 0.5rem 0.9rem;
+    font-size: 0.875rem;
+}
+
+.ch-dial-workspace--admin .ch-auto-dial-countdown {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 20%;
+    min-width: 9.5rem;
+    max-width: 13rem;
+    margin: 0;
+    padding: 0.35rem 0.6rem;
+    border-radius: 0.5rem;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    color: #1d4ed8;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-align: center;
+    white-space: nowrap;
+    flex: 0 0 auto;
+}
+
+.ch-dial-workspace--admin .ch-auto-dial-countdown.hidden {
+    display: none !important;
+}
+
+.ch-dial-workspace--admin .ch-dial-workspace__grid--admin-split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: stretch;
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    gap: clamp(0.75rem, 2vw, 1.25rem);
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ch-dial-workspace__grid--phone-split,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ch-dial-workspace__grid--admin-split {
+    display: grid !important;
+    /* Content area is already side-padded on the workspace → equal columns ≈ 40% / 40% of full width */
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+    grid-template-rows: minmax(0, 1fr) !important;
+    align-items: stretch !important;
+    justify-content: stretch !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    width: 100% !important;
+    overflow: hidden !important;
+    gap: clamp(0.75rem, 2vw, 1.25rem) !important;
+    column-gap: clamp(0.75rem, 2vw, 1.25rem) !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+}
+
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-center-keypad--full,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-center-keypad--borderless {
+    display: flex !important;
+    flex-direction: column;
+    height: 100% !important;
+    max-height: 100% !important;
+    min-height: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    border-left: 0 !important;
+    padding: 0.35rem 0.35rem 0.45rem !important;
+    background: #fff !important;
+    border: 1.5px solid #e2e8f0 !important;
+    border-radius: 1rem !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+}
+
+.ch-dial-workspace--admin .ghl-dialer-center-keypad--full,
+.ch-dial-workspace--admin .ghl-phone-right-pane,
+.ch-dial-workspace--admin .ghl-phone-dial-pane {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    height: 100%;
+    justify-content: flex-start;
+    align-items: stretch;
+}
+
+.ch-dial-workspace--admin .ch-panel__body--phone,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ch-panel__body--phone,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-center-keypad--borderless .ch-panel__body--phone {
+    justify-content: flex-start !important;
+    align-items: stretch !important;
+    padding: 0.2rem 0.15rem 0.35rem !important;
+    height: 100% !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+}
+
+.ch-dial-workspace--admin .ghl-dialer-form--phone,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-form--phone {
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1 1 auto !important;
+    justify-content: flex-start !important;
+    margin-top: 0;
+    height: 100% !important;
+    min-height: 0 !important;
+    width: 100% !important;
+}
+
+.ch-dial-workspace--admin .ghl-dialer-phone-stage,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-phone-stage {
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: flex-start !important;
+    align-items: stretch !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    height: 100% !important;
+    width: 100% !important;
+    overflow: hidden;
+}
+
+/* Green phone surface fills the column; keypad stays pinned at the top. */
+.ch-dial-workspace--admin .ghl-dialer-form--phone .ghl-dialer-phone-frame,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-form--phone .ghl-dialer-phone-frame {
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: flex-start !important;
+    align-items: center !important;
+    flex: 1 1 auto !important;
+    height: 100% !important;
+    min-height: 100% !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+    background: #d1fae5 !important;
+    border: 1.5px solid #6ee7b7 !important;
+    border-radius: 1.35rem !important;
+}
+
+.ch-dial-workspace--admin .ghl-dialer-form--phone .ghl-dialer-phone-frame > .ghl-dialer-number-wrap,
+.ch-dial-workspace--admin .ghl-dialer-form--phone .ghl-dialer-phone-frame > .ghl-dialer-keypad,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-form--phone .ghl-dialer-phone-frame > .ghl-dialer-number-wrap,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-form--phone .ghl-dialer-phone-frame > .ghl-dialer-keypad {
+    flex: 0 0 auto;
+}
+
+/* Active call card fills the dialer column (no floating island in white space). */
+.ch-dial-workspace--admin .ghl-dialer-form--phone:has(.ghl-dialer-active-screen:not(.hidden)),
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-form--phone:has(.ghl-dialer-active-screen:not(.hidden)) {
+    flex: 1 1 auto !important;
+    height: 100% !important;
+    width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+.ch-dial-workspace--admin .ghl-dialer-active-screen:not(.hidden),
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-active-screen:not(.hidden) {
+    display: flex !important;
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    min-height: 0 !important;
+    height: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    border-radius: 0.75rem !important;
+    padding: 1rem 0.85rem 0.9rem !important;
+    justify-content: flex-start !important;
+    gap: 0.75rem !important;
+}
+
+.ch-dial-workspace--admin .ghl-dialer-form--phone:has(.ghl-dialer-active-screen:not(.hidden)) .ghl-dialer-phone-stage {
+    display: none !important;
+}
+
+/* Compact keypad so Call / Hang up stay on screen */
+.ch-dial-workspace--admin .ghl-dialer-keypad--round {
+    gap: 0.35rem !important;
+}
+
+.ch-dial-workspace--admin .ghl-dialer-key--round,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-key--round {
+    width: 3.1rem !important;
+    height: 3.1rem !important;
+    min-width: 3.1rem !important;
+    min-height: 3.1rem !important;
+    font-size: 1.05rem !important;
+}
+
+.ch-dial-workspace--admin .ghl-dialer-call-icon-btn,
+.ch-dial-workspace--admin .ghl-dialer-actions--phone .ghl-dialer-backspace-btn {
+    width: 3.25rem !important;
+    height: 3.25rem !important;
+}
+
+.ch-dial-workspace--admin .ch-dial-workspace__left-pane--admin {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+    height: 100%;
+}
+
+.ch-dial-workspace__left-pane:not(.ch-dial-workspace__left-pane--admin) {
+    display: contents;
+}
+
+.ch-dial-workspace--admin .ch-dial-workspace__left-pane--admin > aside.hidden,
+.ch-dial-workspace--admin .ch-dial-workspace__left-pane--admin > aside.hidden.ghl-dialer-center-logs--full,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ch-dial-workspace__left-pane--admin > aside.hidden,
+.ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view] .ch-dial-workspace__left-pane--admin > aside.hidden,
+.ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='dialer'] .ch-dial-workspace__left-pane--admin > aside.hidden.ghl-dialer-center-logs--full,
+.ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='logs'] .ch-dial-workspace__left-pane--admin > aside.hidden.ghl-dialer-center-logs--full,
+.ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='leads'] .ch-dial-workspace__left-pane--admin > aside.hidden.ghl-dialer-center-logs--full,
+.ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='recordings'] .ch-dial-workspace__left-pane--admin > aside.hidden.ghl-dialer-center-logs--full {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    max-height: 0 !important;
+    overflow: hidden !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+}
+
+.ch-dial-workspace--admin .ch-dial-workspace__left-pane--admin > aside:not(.hidden) {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+/* Only the active left pane should flex-fill; never stack all three. */
+.ch-dial-workspace--admin .ch-dial-workspace__left-pane--admin {
+    position: relative;
+}
+
+.ghl-dialer-recording-row {
+    display: grid;
+    grid-template-columns: 2.25rem minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.8rem 0.9rem;
+    border-bottom: 1px solid #eef2f7;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.ghl-dialer-recording-row:hover,
+.ghl-dialer-recording-row.is-active {
+    background: #f8fafc;
+}
+
+.ghl-dialer-recording-row.is-active {
+    box-shadow: inset 3px 0 0 #3b82f6;
+    background: #eff6ff;
+}
+
+.ghl-dialer-recording-icon {
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 0.65rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #f1f5f9;
+    color: #475569;
+}
+
+.ghl-dialer-recording-icon svg {
+    width: 1.05rem;
+    height: 1.05rem;
+}
+
+.ghl-dialer-recording-main {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+}
+
+.ghl-dialer-recording-name {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #64748b;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ghl-dialer-recording-number {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: #64748b;
+}
+
+.ghl-dialer-recording-meta {
+    font-size: 0.72rem;
+    color: #94a3b8;
+}
+
+.ghl-dialer-recording-actions {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.4rem;
+    flex-shrink: 0;
+}
+
+.ghl-dialer-recording-play {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+    min-height: 1.85rem;
+    border: 1.5px solid #6ee7b7;
+    border-radius: 0.5rem;
+    padding: 0.35rem 0.75rem;
+    background: #d1fae5;
+    color: #047857 !important;
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    text-decoration: none;
+    box-shadow: none;
+    transition:
+        background-color 0.12s ease,
+        border-color 0.12s ease,
+        color 0.12s ease;
+}
+
+.ghl-dialer-recording-play svg {
+    width: 0.75rem;
+    height: 0.75rem;
+    flex: 0 0 auto;
+    fill: currentColor;
+    color: #047857 !important;
+}
+
+.ghl-dialer-recording-play:hover {
+    background: #a7f3d0;
+    border-color: #34d399;
+    color: #065f46 !important;
+}
+
+.ghl-dialer-recording-play:hover svg {
+    color: #065f46 !important;
+}
+
+.ghl-dialer-recording-download {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+    min-height: 1.85rem;
+    padding: 0.35rem 0.7rem;
+    border: 1.5px solid #bbf7d0;
+    border-radius: 0.5rem;
+    background: #ffffff;
+    color: #059669 !important;
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    text-decoration: none;
+    transition:
+        background-color 0.12s ease,
+        border-color 0.12s ease,
+        color 0.12s ease;
+}
+
+.ghl-dialer-recording-download svg {
+    width: 0.85rem;
+    height: 0.85rem;
+    flex: 0 0 auto;
+    color: currentColor;
+}
+
+.ghl-dialer-recording-download:hover {
+    background: #ecfdf5;
+    border-color: #6ee7b7;
+    color: #047857 !important;
+}
+
+@media (max-width: 640px) {
+    .ghl-dialer-recording-row {
+        grid-template-columns: 2rem minmax(0, 1fr);
+        grid-template-rows: auto auto;
+    }
+
+    .ghl-dialer-recording-actions {
+        grid-column: 2 / -1;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+}
+
+.ghl-dialer-recording-pending {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #94a3b8;
+}
+
+.ghl-phone-panel-switch {
+    gap: 0.15rem;
+}
+
+.ghl-dialer-recent-agent {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: #1d4ed8;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 999px;
+    padding: 0.12rem 0.45rem;
+    max-width: 9rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ch-auto-dial-countdown {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 20%;
+    min-width: 9.5rem;
+    max-width: 12.5rem;
+    margin: 0;
+    padding: 0.4rem 0.65rem;
+    border-radius: 0.5rem;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    color: #1d4ed8;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.ch-auto-dial-countdown.hidden {
+    display: none !important;
+}
+
+.ch-auto-dial-countdown-wrap {
+    display: none;
+}
+
+.ghl-comm-dial-mode {
+    display: inline-flex;
+    align-items: stretch;
+    gap: 0;
+    margin-left: 0;
+    padding: 0;
+    border-radius: 0.5rem;
+    background: #ffffff;
+    border: 1.5px solid #e2e8f0;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.ghl-comm-dial-mode__btn {
+    border: 0;
+    border-right: 1.5px solid #e2e8f0;
+    background: transparent;
+    color: #64748b;
+    font-size: 0.875rem;
+    font-weight: 600;
+    min-height: 2.35rem;
+    padding: 0.55rem 1.05rem;
+    border-radius: 0;
+    cursor: pointer;
+    box-shadow: none;
+    transition: background 0.14s ease, color 0.14s ease;
+}
+
+.ghl-comm-dial-mode__btn:last-child {
+    border-right: 0;
+}
+
+.ghl-comm-dial-mode__btn:hover {
+    background: #ecfdf5;
+    color: #047857;
+}
+
+.ghl-comm-dial-mode__btn.is-active {
+    background: #d1fae5;
+    color: #047857;
+    box-shadow: none;
+}
+
+.ghl-comm-dial-mode__btn:focus-visible {
+    outline: 2px solid #6ee7b7;
+    outline-offset: -2px;
+    z-index: 1;
+}
+
+.ghl-dialer-leads-toolbar {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    padding: 0.75rem 0.9rem 0.85rem;
+    border-bottom: 1.5px solid #e2e8f0;
+    background: #f8fafc;
+}
+
+.ghl-dialer-leads-filters {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.55rem;
+}
+
+.ghl-dialer-leads-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 0;
+}
+
+.ghl-dialer-leads-label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #64748b !important;
+}
+
+.ghl-leads-select {
+    position: relative;
+    width: 100%;
+    min-width: 0;
+    z-index: 1;
+}
+
+.ghl-leads-select.is-open {
+    z-index: 40;
+}
+
+.ghl-leads-select__native {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.ghl-leads-select__trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    width: 100%;
+    min-height: 2.45rem;
+    padding: 0.5rem 0.75rem;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 0.5rem;
+    background: #ffffff;
+    color: #0f172a !important;
+    font-size: 0.8125rem;
+    font-weight: 600 !important;
+    line-height: 1.25;
+    text-align: left;
+    cursor: pointer;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.ghl-leads-select__trigger:hover {
+    border-color: #cbd5e1;
+    background: #fff;
+    color: #0f172a !important;
+}
+
+.ghl-leads-select.is-open .ghl-leads-select__trigger {
+    border-color: #6ee7b7;
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(167, 243, 208, 0.35);
+    color: #0f172a !important;
+}
+
+.ghl-leads-select__value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #0f172a !important;
+}
+
+.ghl-leads-select__chevron {
+    width: 0.95rem;
+    height: 0.95rem;
+    flex-shrink: 0;
+    color: #94a3b8;
+    transition: transform 0.15s ease, color 0.15s ease;
+}
+
+.ghl-leads-select.is-open .ghl-leads-select__chevron {
+    transform: rotate(180deg);
+    color: #64748b;
+}
+
+.ghl-leads-select__menu {
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    left: 0;
+    right: 0;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    max-height: 14rem;
+    padding: 0.35rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 0.75rem;
+    background: #fff;
+    box-shadow:
+        0 14px 30px rgba(148, 163, 184, 0.14),
+        0 2px 8px rgba(148, 163, 184, 0.08);
+    scrollbar-width: thin;
+    scrollbar-color: #e2e8f0 transparent;
+}
+
+.ghl-leads-select__menu[hidden] {
+    display: none !important;
+}
+
+.ghl-leads-select__option {
+    display: block;
+    width: 100%;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid transparent;
+    border-radius: 0.5rem;
+    background: transparent;
+    color: #64748b;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    transition:
+        background 0.12s ease,
+        border-color 0.12s ease,
+        color 0.12s ease;
+}
+
+.ghl-leads-select__option:hover {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+    color: #475569;
+}
+
+.ghl-leads-select__option.is-selected {
+    background: #f1f5f9;
+    border-color: #e2e8f0;
+    color: #475569;
+}
+
+.ghl-leads-select__option.is-selected:hover {
+    background: #e2e8f0;
+}
+
+.ghl-dialer-leads-toolbar .app-input {
+    width: 100%;
+    min-height: 2.35rem;
+    background: #fff !important;
+    color: #334155 !important;
+    border: 1.5px solid #e2e8f0 !important;
+    border-radius: 0.55rem !important;
+    font-size: 0.8125rem;
+    font-weight: 600;
+}
+
+.ghl-dialer-leads-toolbar .app-input:focus {
+    outline: none !important;
+    border-color: #64748b !important;
+    box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.25) !important;
+}
+
+.ghl-dialer-leads-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.45rem;
+}
+
+.ghl-auto-dial-btn {
+    width: 100%;
+    min-height: 2.5rem;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    border-radius: 0.5rem !important;
+}
+
+.ghl-auto-dial-btn.ch-btn--primary,
+button.ghl-auto-dial-btn[data-auto-dial-start] {
+    background: #d1fae5 !important;
+    color: #047857 !important;
+    border: 1.5px solid #6ee7b7 !important;
+}
+
+.ghl-auto-dial-btn.ch-btn--primary:hover:not(:disabled),
+button.ghl-auto-dial-btn[data-auto-dial-start]:hover:not(:disabled) {
+    background: #a7f3d0 !important;
+    border-color: #34d399 !important;
+    color: #065f46 !important;
+}
+
+.ghl-auto-dial-btn.ch-btn--secondary,
+button.ghl-auto-dial-btn[data-auto-dial-stop] {
+    background: #fff !important;
+    color: #059669 !important;
+    border: 1.5px solid #bbf7d0 !important;
+}
+
+.ghl-auto-dial-btn.ch-btn--secondary:hover:not(:disabled),
+button.ghl-auto-dial-btn[data-auto-dial-stop]:hover:not(:disabled) {
+    background: #ecfdf5 !important;
+    border-color: #6ee7b7 !important;
+    color: #047857 !important;
+}
+
+.ghl-auto-dial-btn.hidden,
+button.ghl-auto-dial-btn.hidden,
+.ghl-dialer-leads-actions .ghl-auto-dial-btn.hidden {
+    display: none !important;
+}
+
+.ghl-auto-dial-btn.is-running {
+    background: #475569 !important;
+    border-color: #475569 !important;
+    color: #ffffff !important;
+}
+
+.ghl-dialer-leads-status {
+    margin: 0.15rem 0 0;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #64748b;
+}
+
+.ghl-dialer-leads-status.hidden {
+    display: none;
+}
+
+.ghl-dialer-leads-status.is-active {
+    color: #475569;
+}
+
+.ghl-dialer-center-leads .ch-panel__header--slim {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.15rem;
+}
+
+.ghl-dialer-center-leads .ch-panel__title {
+    color: #64748b !important;
+    font-weight: 400 !important;
+}
+
+@media (min-width: 420px) {
+    .ghl-dialer-leads-filters {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+.ghl-dialer-lead-row {
+    display: grid;
+    grid-template-columns: 2.35rem minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.8rem 0.9rem;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.ghl-dialer-lead-row:hover {
+    background: #f0fdf4;
+    border-bottom-color: #bbf7d0;
+}
+
+.ghl-dialer-lead-row.is-dialing {
+    background: #ecfdf5 !important;
+    box-shadow: inset 3px 0 0 #34d399;
+    border-bottom-color: #bbf7d0;
+}
+
+.ghl-dialer-lead-row.is-dialing::after {
+    content: 'Dialing…';
+    grid-column: 1 / -1;
+    margin-top: -0.15rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #059669 !important;
+    letter-spacing: 0.02em;
+}
+
+.ghl-dialer-lead-row.is-dialing .ghl-dialer-lead-name,
+.ghl-dialer-lead-row.is-dialing .ghl-dialer-lead-number,
+.ghl-dialer-lead-row.is-dialing .ghl-dialer-lead-contact {
+    color: #047857 !important;
+}
+
+.ghl-dialer-lead-row.is-dialing .ghl-dialer-lead-avatar {
+    background: #d1fae5 !important;
+    border-color: #6ee7b7 !important;
+    color: #047857 !important;
+}
+
+.ghl-dialer-lead-avatar {
+    width: 2.35rem;
+    height: 2.35rem;
+    border-radius: 0.65rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    color: #64748b;
+    font-size: 0.85rem;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.ghl-dialer-lead-main {
+    display: flex;
+    flex-direction: column;
+    gap: 0.12rem;
+    min-width: 0;
+}
+
+.ghl-dialer-lead-name {
+    font-size: 0.9rem;
+    font-weight: 500 !important;
+    color: #64748b !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ghl-dialer-lead-contact {
+    font-size: 0.75rem;
+    font-weight: 400 !important;
+    color: #94a3b8 !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ghl-dialer-lead-number {
+    font-size: 0.8125rem;
+    font-weight: 500 !important;
+    color: #64748b !important;
+    font-variant-numeric: tabular-nums;
+}
+
+.ghl-dialer-lead-meta {
+    display: inline-flex;
+    align-self: flex-start;
+    margin-top: 0.15rem;
+    padding: 0.12rem 0.45rem;
+    border-radius: 999px;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    color: #64748b;
+    font-size: 0.68rem;
+    font-weight: 600;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ghl-dialer-lead-actions {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.ghl-dialer-lead-call-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border: 1.5px solid #6ee7b7;
+    border-radius: 0.5rem;
+    padding: 0.45rem 0.85rem;
+    background: #d1fae5;
+    color: #047857;
+    font-size: 0.75rem;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: none;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.12s ease;
+}
+
+.ghl-dialer-lead-call-btn svg {
+    width: 0.9rem;
+    height: 0.9rem;
+}
+
+.ghl-dialer-lead-call-btn:hover {
+    background: #a7f3d0;
+    border-color: #34d399;
+    color: #065f46;
+}
+
+.ghl-dialer-lead-call-btn:active {
+    transform: translateY(1px);
+}
+
+.ghl-dialer-lead-row.is-dialing .ghl-dialer-lead-call-btn {
+    background: #a7f3d0;
+    border-color: #34d399;
+    color: #065f46;
+    box-shadow: none;
+    pointer-events: none;
+}
+
+.ghl-dialer-center-leads .ghl-dialer-center-logs__scroll {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.ghl-dialer-center-leads .ghl-dialer-center-logs__scroll::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
+.ch-call-summary {
+    position: fixed;
+    inset: 0;
+    z-index: 10120;
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-end;
+    padding: 0.85rem 0.85rem 1rem;
+    pointer-events: none;
+}
+
+body.ch-call-summary-open {
+    overflow: hidden;
+}
+
+body > .ch-call-summary {
+    z-index: 10120;
+}
+
+.ch-call-summary.hidden {
+    display: none !important;
+}
+
+.ch-call-summary__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.42);
+    backdrop-filter: blur(2px);
+    pointer-events: auto;
+}
+
+.ch-call-summary__card {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    width: min(100%, 420px);
+    max-height: min(92vh, 720px);
+    overflow: hidden;
+    background: #fff;
+    border-radius: 1.15rem;
+    border: 1.5px solid #e2e8f0;
+    box-shadow:
+        0 24px 60px rgba(15, 23, 42, 0.18),
+        0 2px 8px rgba(15, 23, 42, 0.06);
+    padding: 0;
+    pointer-events: auto;
+    margin-top: 0.25rem;
+}
+
+.ch-call-summary__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-shrink: 0;
+    padding: 1.15rem 1.2rem 0.85rem;
+    border-bottom: 1.5px solid #e2e8f0;
+}
+
+.ch-call-summary__scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    padding: 0.85rem 1.2rem 0.5rem;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.ch-call-summary__scroll::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
+.ch-call-summary__title-wrap {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+}
+
+.ch-call-summary__icon {
+    width: 2.35rem;
+    height: 2.35rem;
+    border-radius: 0.75rem;
+    background: #f1f5f9;
+    color: #64748b;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    border: 1px solid #e2e8f0;
+}
+
+.ch-call-summary__icon svg {
+    width: 1.05rem;
+    height: 1.05rem;
+}
+
+.ch-call-summary__title {
+    margin: 0;
+    font-size: 1.0625rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: #64748b;
+}
+
+.ch-call-summary__lead {
+    margin: 0.2rem 0 0;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: #64748b;
+    font-variant-numeric: tabular-nums;
+}
+
+.ch-call-summary__close {
+    width: 2rem;
+    height: 2rem;
+    border: 0;
+    border-radius: 0.5rem;
+    background: transparent;
+    color: #94a3b8;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+}
+
+.ch-call-summary__close:hover {
+    background: #f8fafc;
+    color: #475569;
+}
+
+.ch-call-summary__close svg {
+    width: 1rem;
+    height: 1rem;
+}
+
+.ch-call-summary__meta-row {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem 0.75rem;
+    margin-top: 0;
+}
+
+.ch-call-summary__status {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    margin-top: 0;
+}
+
+.ch-call-summary__ended {
+    color: #64748b;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.ch-call-summary__badge {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: #475569;
+    background: #f1f5f9;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 999px;
+    padding: 0.25rem 0.6rem;
+    white-space: nowrap;
+}
+
+.ch-call-summary__duration {
+    margin: 0;
+    width: fit-content;
+    padding: 0.4rem 0.85rem;
+    border-radius: 999px;
+    border: 1.5px solid #e2e8f0;
+    background: #f1f5f9;
+    color: #475569;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.ch-call-summary__dispositions {
+    margin-top: 1rem;
+}
+
+.ch-call-summary__section-head h3 {
+    margin: 0;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #64748b;
+}
+
+.ch-call-summary__required {
+    display: inline-block;
+    margin-left: 0.35rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 999px;
+    background: #fef2f2;
+    color: #b91c1c;
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    vertical-align: middle;
+}
+
+.ch-call-summary__hint {
+    margin: 0.25rem 0 0;
+    font-size: 0.75rem;
+    color: #64748b;
+}
+
+.ch-call-summary__backdrop {
+    cursor: default;
+}
+
+.ch-call-summary__grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+.ch-call-summary__dispo-btn {
+    min-height: 2.35rem;
+    padding: 0.45rem 0.65rem;
+    border: 1.5px solid #bbf7d0;
+    border-radius: 0.5rem;
+    background: #fff;
+    color: #059669;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+        border-color 0.12s ease,
+        background 0.12s ease,
+        color 0.12s ease,
+        box-shadow 0.12s ease;
+}
+
+.ch-call-summary__dispo-btn:hover {
+    border-color: #6ee7b7;
+    background: #ecfdf5;
+    color: #047857;
+}
+
+.ch-call-summary__dispo-btn.is-selected {
+    border-color: #6ee7b7;
+    background: #d1fae5;
+    color: #047857;
+    box-shadow: none;
+}
+
+.ch-call-summary__dispo-btn:focus-visible {
+    outline: 2px solid #e2e8f0;
+    outline-offset: 1px;
+}
+
+.ch-call-summary__fields {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 0.95rem;
+}
+
+.ch-call-summary__field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.ch-call-summary__field-label,
+.ch-call-summary__notes-label {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #64748b;
+}
+
+.ch-call-summary__input,
+.ch-call-summary__notes {
+    width: 100%;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 0.65rem;
+    padding: 0.7rem 0.85rem;
+    font-size: 0.875rem;
+    color: #475569;
+    background: #fff;
+    box-sizing: border-box;
+}
+
+.ch-call-summary__input {
+    min-height: 2.55rem;
+}
+
+.ch-call-summary__notes {
+    resize: vertical;
+    min-height: 5rem;
+    white-space: pre-wrap;
+}
+
+.ch-call-summary__input:focus,
+.ch-call-summary__notes:focus {
+    outline: 2px solid #e2e8f0;
+    outline-offset: 1px;
+    border-color: #e2e8f0;
+}
+
+.ch-call-summary--manual .ch-call-summary__pause {
+    display: none !important;
+}
+
+.ch-call-summary--manual .ch-call-summary__footer {
+    grid-template-columns: 1fr 1.35fr;
+}
+
+.ch-call-summary__footer {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 0.55rem;
+    flex-shrink: 0;
+    margin-top: 0;
+    padding: 0.85rem 1.2rem 1.05rem;
+    border-top: 1.5px solid #e2e8f0;
+    background: #ffffff;
+}
+
+.ch-call-summary__redial,
+.ch-call-summary__pause {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    min-height: 2.55rem;
+    border-radius: 0.65rem;
+    cursor: pointer;
+    font-size: 0.8125rem;
+    font-weight: 650;
+}
+
+.ch-call-summary__redial {
+    padding: 0 0.9rem;
+    border: 1.5px solid #e2e8f0;
+    background: #fff;
+    color: #475569;
+}
+
+.ch-call-summary__redial:hover {
+    background: #f1f5f9;
+    border-color: #64748b;
+    color: #334155;
+}
+
+.ch-call-summary__redial svg,
+.ch-call-summary__pause svg {
+    width: 0.95rem;
+    height: 0.95rem;
+}
+
+.ch-call-summary__pause {
+    width: 2.55rem;
+    padding: 0;
+    border: 1.5px solid #e2e8f0;
+    background: #fff;
+    color: #475569;
+}
+
+.ch-call-summary__pause.is-paused {
+    background: #e2e8f0;
+    border-color: #64748b;
+    color: #334155;
+}
+
+.ch-call-summary__next {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    min-height: 2.55rem;
+    padding: 0 1rem;
+    border: 1.5px solid #6ee7b7;
+    border-radius: 0.5rem;
+    background: #d1fae5;
+    color: #047857;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: none;
+    transition:
+        background 0.12s ease,
+        border-color 0.12s ease,
+        color 0.12s ease;
+}
+
+.ch-call-summary__next:hover {
+    background: #a7f3d0;
+    border-color: #34d399;
+    color: #065f46;
+}
+
+.ch-call-summary__next span,
+.ch-call-summary__next svg {
+    display: inline-flex;
+}
+
+.ch-call-summary__next svg {
+    width: 0.95rem;
+    height: 0.95rem;
+}
+
+@media (max-width: 480px) {
+    .ch-call-summary {
+        padding: 0.65rem 0.65rem 0.85rem;
+        align-items: flex-start;
+        justify-content: flex-end;
+    }
+
+    .ch-call-summary__card {
+        width: min(100%, 100%);
+        max-height: min(90vh, 760px);
+        border-radius: 1rem;
+        margin-top: 0;
+    }
+
+    .ch-call-summary__header {
+        padding: 1rem 1rem 0.75rem;
+    }
+
+    .ch-call-summary__scroll {
+        padding: 0.75rem 1rem 0.35rem;
+    }
+
+    .ch-call-summary__meta-row {
+        flex-wrap: nowrap;
+        gap: 0.4rem;
+    }
+
+    .ch-call-summary__status {
+        gap: 0.35rem;
+        min-width: 0;
+    }
+
+    .ch-call-summary__duration {
+        padding: 0.35rem 0.65rem;
+        font-size: 0.75rem;
+    }
+
+    .ch-call-summary__grid {
+        grid-template-columns: 1fr;
+        gap: 0.45rem;
+    }
+
+    .ch-call-summary__footer {
+        grid-template-columns: 1fr;
+        padding: 0.75rem 1rem 1rem;
+        gap: 0.45rem;
+    }
+
+    .ch-call-summary--manual .ch-call-summary__footer {
+        grid-template-columns: 1fr;
+    }
+
+    .ch-call-summary__next {
+        order: -1;
+        width: 100%;
+    }
+
+    .ch-call-summary__redial {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .ch-call-summary__pause {
+        width: 100%;
+    }
+}
+
+.ghl-dialer-recent-disposition {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    margin-top: 0.35rem;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: #475569;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0;
+}
+
+.ghl-dialer-recent-result {
+    color: #64748b;
+    font-weight: 500;
+    text-transform: lowercase;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-dir,
+.ghl-comm-phone-mode .ghl-dialer-recent-dir.is-inbound {
+    color: #64748b;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-ext,
+.ghl-comm-phone-mode .ghl-dialer-recent-agent,
+.ghl-comm-phone-mode .ghl-dialer-recent-rec {
+    color: #64748b;
+    background: #f8fafc;
+    border-color: #e2e8f0;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-note-preview {
+    margin-top: 0.3rem;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: #64748b;
+    font-size: 0.75rem;
+    line-height: 1.4;
+}
+
+.ghl-dialer-recent-status {
+    display: none;
+}
+
+/* ── Enterprise dialer workspace (call logs + pad) ───────────────── */
+
+.ghl-comm-phone-mode .ghl-dialer-center-logs--full {
+    border: 1.5px solid #e2e8f0;
+    border-radius: 1rem;
+    background: #fff;
+    box-shadow: none;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-center-logs__header.ch-panel__header--slim {
+    padding: 0.85rem 1.05rem 0.75rem;
+    border-bottom: 1.5px solid #e2e8f0;
+    background: transparent;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-center-logs__header .ch-panel__title {
+    margin: 0;
+    font-size: 0.9375rem;
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    color: #64748b;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-center-logs__scroll {
+    padding: 0.75rem 0.85rem 0.9rem !important;
+    background: transparent;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-list--full [data-call-logs-items] {
+    display: flex !important;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.45rem !important;
+    max-width: none;
+    width: 100%;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-row,
+.ghl-dialer-recent-list--full .ghl-dialer-recent-row {
+    display: flex !important;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.45rem 0.55rem !important;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 0.7rem 0.8rem !important;
+    border: 1.5px solid #e2e8f0 !important;
+    border-radius: 0.65rem;
+    background: #ffffff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    box-sizing: border-box;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-row:hover,
+.ghl-dialer-recent-list--full .ghl-dialer-recent-row:hover {
+    border-color: #6ee7b7 !important;
+    background: #ffffff;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.12);
+    transform: none;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-row.is-active,
+.ghl-dialer-recent-list--full .ghl-dialer-recent-row.is-active {
+    border-color: #34d399 !important;
+    background: #f0fdf4;
+    box-shadow: 0 1px 4px rgba(16, 185, 129, 0.1);
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+    gap: 0.22rem !important;
+    padding-right: 0;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-actions {
+    display: inline-flex;
+    flex: 0 0 auto;
+    gap: 0.3rem;
+    align-self: flex-start;
+    margin-left: 0.5rem;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-notes {
+    flex: 1 1 100%;
+    width: 100%;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-row.is-notes-open {
+    flex-wrap: wrap;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-head {
+    gap: 0.4rem;
+    margin-bottom: 0.1rem;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-dir {
+    font-size: 0.625rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    color: #2563eb;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-dir.is-inbound {
+    color: #0f766e;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-ext {
+    font-size: 0.625rem;
+    font-weight: 700;
+    color: #64748b;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 9999px;
+    padding: 0.12rem 0.5rem;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-agent {
+    max-width: 8.5rem;
+    font-size: 0.625rem;
+    font-weight: 650;
+    color: #475569;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 9999px;
+    padding: 0.12rem 0.45rem;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-rec {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.5625rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #0f766e;
+    background: #ecfdf5;
+    border: 1px solid #a7f3d0;
+    border-radius: 9999px;
+    padding: 0.1rem 0.4rem;
+}
+
+.ghl-dialer-recent-meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.45rem 0.55rem;
+    margin-top: 0.15rem;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-meta {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    margin: 0;
+    font-size: 0.71875rem !important;
+    font-weight: 500;
+    color: #64748b !important;
+    white-space: nowrap;
+}
+
+.ghl-dialer-recent-meta__sep {
+    color: #cbd5e1;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-duration {
+    font-weight: 700;
+    color: #334155;
+    font-variant-numeric: tabular-nums;
+}
+
+.ghl-dialer-recent-status {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.16rem 0.55rem;
+    border-radius: 9999px;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    text-transform: lowercase;
+    border: 1px solid transparent;
+}
+
+.ghl-dialer-recent-status.is-success {
+    color: #047857;
+    background: #ecfdf5;
+    border-color: #a7f3d0;
+}
+
+.ghl-dialer-recent-status.is-warn {
+    color: #b45309;
+    background: #fffbeb;
+    border-color: #fde68a;
+}
+
+.ghl-dialer-recent-status.is-danger {
+    color: #b91c1c;
+    background: #fef2f2;
+    border-color: #fecaca;
+}
+
+.ghl-dialer-recent-status.is-info {
+    color: #1d4ed8;
+    background: #eff6ff;
+    border-color: #bfdbfe;
+}
+
+.ghl-dialer-recent-status.is-neutral {
+    color: #475569;
+    background: #f8fafc;
+    border-color: #e2e8f0;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-note-preview {
+    display: block;
+    margin-top: 0.25rem;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: #64748b;
+    font-size: 0.75rem;
+    line-height: 1.4;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-actions {
+    gap: 0.4rem;
+    align-self: flex-start;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-notes-btn {
+    width: 2.15rem;
+    height: 2.15rem;
+    border-radius: 0.55rem;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+    color: #64748b;
+    box-shadow: 0 1px 1px rgba(15, 23, 42, 0.03);
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-notes-btn:hover,
+.ghl-comm-phone-mode .ghl-dialer-recent-notes-btn.has-notes {
+    color: #1d4ed8;
+    border-color: #bfdbfe;
+    background: #eff6ff;
+}
+
+.ghl-dialer-recent-call-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.15rem;
+    padding: 0.4rem 0.9rem;
+    border: 1.5px solid #6ee7b7;
+    border-radius: 0.5rem;
+    background: #d1fae5;
+    color: #047857;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    box-shadow: none;
+    transition:
+        background 0.12s ease,
+        border-color 0.12s ease,
+        color 0.12s ease;
+}
+
+.ghl-dialer-recent-call-btn:hover {
+    background: #a7f3d0;
+    border-color: #34d399;
+    color: #065f46;
+    box-shadow: none;
+}
+
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-center-keypad--borderless,
+.ghl-comm-phone-mode .ghl-dialer-center-keypad--borderless {
+    border: 1.5px solid #e2e8f0 !important;
+    border-radius: 1rem !important;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%) !important;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+    padding: 0.65rem 0.7rem 0.85rem !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-form--phone .ghl-dialer-phone-frame {
+    max-width: 21.5rem;
+    margin-inline: auto;
+    padding: 1.35rem 1.1rem 1.45rem;
+    border-radius: 1.75rem;
+    border: 1.5px solid #6ee7b7;
+    background: #d1fae5;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.55),
+        0 8px 24px rgba(16, 185, 129, 0.08);
+}
+
+/* Admin dialer: fill the right column — no empty right gap beside the pad */
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-form--phone .ghl-dialer-phone-frame,
+.ch-dial-workspace--admin .ghl-dialer-form--phone .ghl-dialer-phone-frame {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin-inline: 0 !important;
+    box-sizing: border-box;
+}
+
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-phone-stage,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-form--phone,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-phone-dial-pane,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-phone-right-pane {
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-empty {
+    margin: 1.5rem 0;
+    padding: 1.25rem 1rem;
+    text-align: center;
+    border: 1px dashed #e2e8f0;
+    border-radius: 0.875rem;
+    background: #f8fafc;
+    color: #64748b;
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+
+@media (max-width: 1100px) {
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ch-dial-workspace__grid--phone-split,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ch-dial-workspace__grid--admin-split,
+    .ch-dial-workspace--admin .ch-dial-workspace__grid--admin-split {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+        gap: 0.65rem !important;
+        column-gap: 0.65rem !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-dialer-form--phone .ghl-dialer-phone-frame {
+        max-width: 19rem;
+        padding: 1.1rem 0.85rem 1.2rem;
+    }
+
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-form--phone .ghl-dialer-phone-frame {
+        max-width: 100% !important;
+    }
+}
+
+@media (max-width: 900px) {
+    .ghl-comm-phone-mode .ghl-dialer-recent-list--full [data-call-logs-items] {
+        gap: 0.45rem !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-dialer-recent-row,
+    .ghl-dialer-recent-list--full .ghl-dialer-recent-row {
+        padding: 0.85rem 0.95rem !important;
+        gap: 0.45rem 0.55rem !important;
+        border-radius: 0.65rem;
+        flex-wrap: nowrap;
+    }
+
+    .ghl-comm-phone-mode .ghl-dialer-recent-row.is-notes-open {
+        flex-wrap: wrap;
+    }
+
+    .ghl-comm-phone-mode .ghl-dialer-recent-number {
+        font-size: 0.875rem;
+    }
+
+    .ghl-comm-phone-mode .ghl-dialer-recent-head {
+        gap: 0.3rem;
+    }
+
+    .ghl-comm-phone-mode .ghl-dialer-recent-agent {
+        max-width: 6.5rem;
+    }
+
+    .ghl-comm-phone-mode .ghl-dialer-recent-actions {
+        align-self: flex-start;
+        margin-left: auto;
+    }
+
+    .ghl-dialer-recent-call-btn {
+        min-height: 1.9rem;
+        padding: 0.3rem 0.65rem;
+        font-size: 0.7rem;
+    }
+
+    .ghl-comm-phone-mode .ghl-dialer-recent-notes-btn {
+        width: 1.9rem;
+        height: 1.9rem;
+    }
+
+    .ghl-comm-phone-mode .ghl-dialer-center-logs__header.ch-panel__header--slim {
+        padding: 0.65rem 0.75rem 0.55rem;
+    }
+
+    .ghl-comm-phone-mode .ghl-dialer-center-logs__scroll {
+        padding: 0.65rem 0.7rem 0.75rem !important;
+    }
+
+    /* ── Mobile dialer chrome (topbar + tabs + keypad) ───────────── */
+    .ghl-comm-topbar--dialer,
+    .ghl-comm-phone-mode .ghl-comm-topbar.ghl-comm-topbar--dialer {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.4rem;
+        min-height: 0;
+        padding-top: 0.5rem !important;
+        padding-bottom: 0.5rem !important;
+        padding-left: 3.5rem !important;
+        padding-right: 3.5rem !important;
+        box-sizing: border-box;
+        overflow: hidden;
+    }
+
+    .ghl-comm-topbar--dialer .ghl-comm-topbar__left {
+        flex: 1 1 auto;
+        min-width: 0;
+        padding-left: 0.125rem;
+        overflow: hidden;
+    }
+
+    .ghl-comm-topbar--dialer .ghl-comm-topbar__title {
+        font-size: 0.8rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .ghl-comm-topbar--dialer .ghl-comm-topbar__actions,
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-topbar__actions {
+        display: flex !important;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 0.4rem;
+        width: auto !important;
+        max-width: 100%;
+        flex: 0 1 auto;
+        margin: 0 !important;
+        padding: 0 0.125rem 0 0 !important;
+        border-top: none !important;
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+
+    .ghl-comm-topbar--dialer .ghl-comm-topbar__actions::-webkit-scrollbar {
+        display: none;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-global-line--toolbar {
+        display: flex;
+        flex: 1 1 auto;
+        min-width: 0;
+        max-width: 100%;
+        gap: 0.35rem;
+        align-items: center;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-global-line__ext {
+        flex: 0 1 auto;
+        min-width: 0;
+        max-width: 17rem;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-global-line__ext .ghl-line-dropdown {
+        width: auto;
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-line-dropdown__trigger {
+        width: auto;
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-line-dropdown__trigger .ghl-line-dropdown__did {
+        display: inline-block;
+        max-width: 5.5rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-connect-strip,
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-connect-group {
+        flex: 0 0 auto;
+        min-width: 0;
+        max-width: 8.5rem;
+        width: auto;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-connect-group__main {
+        min-width: 0;
+        padding-inline: 0.45rem;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-connect-group__label {
+        font-size: 0.65rem;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-connect-group__phone,
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-live,
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-global-line__status {
+        display: none !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-topbar__notes {
+        flex: 0 0 auto;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-dialer-notes-toggle span:not(.ghl-dialer-notes-indicator) {
+        display: none;
+    }
+
+    .ch-dial-workspace--admin .ch-dial-workspace__toolbar {
+        flex-wrap: nowrap;
+        gap: 0.4rem;
+        margin: 0 0 0.45rem;
+        padding: 0 0.125rem; /* 2px */
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+        overflow: hidden;
+    }
+
+    .ch-dial-workspace--admin .ch-dial-workspace__nav {
+        display: flex;
+        flex-wrap: nowrap;
+        width: 100%;
+        max-width: 100%;
+        gap: 0.4rem;
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        padding-bottom: 0.15rem;
+    }
+
+    .ch-dial-workspace--admin .ch-dial-workspace__nav::-webkit-scrollbar {
+        display: none;
+    }
+
+    .ch-dial-workspace--admin .ghl-comm-dial-mode,
+    .ch-dial-workspace--admin .ghl-phone-panel-switch {
+        flex: 0 0 auto;
+        max-width: none;
+    }
+
+    .ch-dial-workspace--admin .ghl-comm-dial-mode__btn,
+    .ch-dial-workspace--admin .ghl-phone-panel-switch__btn {
+        padding: 0.35rem 0.6rem;
+        font-size: 0.7rem;
+        white-space: nowrap;
+    }
+
+    .ch-dial-workspace--admin .ch-auto-dial-countdown {
+        width: auto;
+        min-width: 0;
+        flex: 0 0 auto;
+        max-width: 100%;
+    }
+
+    /* Always show dial pad on mobile (stacked above logs/leads) */
+    .ch-dial-workspace--admin .ch-dial-workspace__grid--admin-split,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ch-dial-workspace__grid--admin-split,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ch-dial-workspace__grid--phone-split {
+        display: flex !important;
+        flex-direction: column !important;
+        grid-template-columns: unset !important;
+        grid-template-rows: unset !important;
+        gap: 0.55rem !important;
+        padding: 0 0.15rem;
+        height: auto !important;
+        max-height: none !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+    }
+
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-center-keypad--full,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-center-keypad--borderless,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='logs'] .ghl-dialer-center-keypad--borderless,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='logs'] .ghl-dialer-center-keypad--full,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='leads'] .ghl-dialer-center-keypad--borderless,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='leads'] .ghl-dialer-center-keypad--full,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='recordings'] .ghl-dialer-center-keypad--borderless,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='recordings'] .ghl-dialer-center-keypad--full {
+        display: flex !important;
+        order: -1 !important;
+        flex: 0 0 auto !important;
+        height: auto !important;
+        max-height: none !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+        padding: 0.45rem 0.35rem 0.55rem !important;
+        border: 1px solid #e2e8f0 !important;
+        border-radius: 0.85rem !important;
+        background: #fff !important;
+    }
+
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-phone-right-pane,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-phone-dial-pane {
+        display: flex !important;
+        flex: 0 0 auto !important;
+        height: auto !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+    }
+
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-phone-recording-pane:not(.hidden) ~ .ghl-phone-dial-pane,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-phone-dial-pane.hidden {
+        display: none !important;
+    }
+
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-center-logs--full,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ch-dial-workspace__left-pane {
+        flex: 1 1 auto !important;
+        min-height: 12rem;
+        max-height: none !important;
+        height: auto !important;
+        order: 0;
+    }
+
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='logs']:has([data-phone-recording-pane]:not(.hidden)) .ghl-dialer-center-logs--full {
+        display: none !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-dialer-form--phone .ghl-dialer-phone-frame {
+        max-width: min(18.5rem, 100%);
+        width: 100%;
+        margin-inline: auto;
+        padding: 1rem 0.75rem 1.1rem;
+    }
+
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ch-panel__body--phone {
+        padding: 0.15rem 0.1rem 0.25rem !important;
+        overflow: visible !important;
+        height: auto !important;
+    }
+
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-form--phone {
+        height: auto !important;
+        min-height: 0 !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-inbox-conversation-scroll--center:has(.ch-dial-workspace--admin) {
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        -webkit-overflow-scrolling: touch;
+        padding: 0.35rem 0.35rem 0.75rem !important;
+    }
+
+    .ghl-comm-phone-mode .ch-dial-workspace--admin.ch-dial-workspace--compact {
+        overflow: visible !important;
+        height: auto !important;
+        min-height: 0 !important;
+    }
+
+    .ghl-comm-dial-mode {
+        margin-left: 0;
+        margin-top: 0;
+    }
+}
+
+@media (max-width: 640px) {
+    .ghl-comm-topbar--dialer,
+    .ghl-comm-phone-mode .ghl-comm-topbar.ghl-comm-topbar--dialer {
+        padding-left: 3.5rem !important;
+        padding-right: 3.5rem !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-connect-group {
+        max-width: 7.25rem;
+    }
+
+    .ghl-comm-phone-mode .ghl-dialer-recent-row,
+    .ghl-dialer-recent-list--full .ghl-dialer-recent-row {
+        padding: 0.6rem 0.7rem !important;
+        gap: 0.4rem 0.5rem !important;
+        max-width: 100%;
+    }
+
+    .ghl-comm-phone-mode .ghl-dialer-recent-list--full [data-call-logs-items] {
+        gap: 0.4rem !important;
+        max-width: 100%;
+    }
+
+    .ghl-comm-phone-mode .ghl-dialer-recent-number {
+        font-size: 0.85rem;
+    }
+
+    .ghl-comm-phone-mode .ghl-dialer-recent-meta {
+        font-size: 0.65rem !important;
+        white-space: normal;
+    }
+
+    .ch-dial-workspace--admin .ghl-comm-dial-mode__btn,
+    .ch-dial-workspace--admin .ghl-phone-panel-switch__btn {
+        padding: 0.32rem 0.5rem;
+        font-size: 0.68rem;
+    }
+
+    .ghl-comm-phone-mode .ghl-dialer-keypad--iphone,
+    .ch-dial-workspace--admin .ghl-dialer-keypad--iphone {
+        max-width: 16.5rem !important;
+        gap: 0.55rem 0.65rem !important;
+        --ghl-dialer-key-size: 3.6rem;
+        --ghl-dialer-icon-svg-size: 1.45rem;
+    }
+}
+
+/* Kill leftover top gap under floating chrome in phone mode */
+body.ghl-comm-mode .app-content-shell:has(.ghl-comm-phone-mode) .app-main,
+body.ghl-comm-mode:has(.ch-dial-workspace--admin) .app-main {
+    padding-top: 0 !important;
+}
+
+/* Remove outer right gutter (scrollbar-gutter + residual padding) beside notify */
+body.ghl-comm-mode .app-main,
+body.ghl-comm-mode .app-content-shell:has(.ghl-comm-phone-mode) .app-main,
+.app-main:has(.ghl-comm-app),
+.app-main:has(.ghl-comm-phone-mode) {
+    padding: 0 !important;
+    margin: 0 !important;
+    scrollbar-gutter: auto !important;
+}
+
+body.ghl-comm-mode .app-content-shell,
+body.ghl-comm-mode .ghl-comm-app,
+body.ghl-comm-mode .ghl-inbox-card,
+body.ghl-comm-mode .ghl-inbox-body-wide,
+body.ghl-comm-mode .ghl-inbox-conversation {
+    width: 100% !important;
+    max-width: none !important;
+    margin-right: 0 !important;
+    padding-right: 0 !important;
+    box-sizing: border-box !important;
+}
+
+/* Dialer content: keep even left/right padding (not flush to the edge) */
+.ghl-comm-phone-mode .ch-dial-workspace--admin.ch-dial-workspace--compact,
+.ghl-comm-phone-mode .ghl-inbox-body-wide .ch-dial-workspace--admin.ch-dial-workspace--compact,
+.ghl-comm-phone-mode .ghl-dialer-center.ch-dial-workspace--admin.ch-dial-workspace--compact {
+    padding-left: clamp(1rem, 5vw, 2.5rem) !important;
+    padding-right: clamp(1rem, 5vw, 2.5rem) !important;
+    margin-right: 0 !important;
+}
+
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-center-keypad--borderless,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-center-keypad--full {
+    margin-right: 0 !important;
+    border-radius: 1rem !important;
+    border: 1.5px solid #e2e8f0 !important;
+}
+
+/* Dialer topbar: keep title clear of sidebar toggle + right chrome */
+body.ghl-comm-mode .ghl-comm-topbar--dialer {
+    padding-left: 2rem !important;
+    padding-right: 3.25rem !important;
+}
+
+@media (min-width: 1024px) {
+    body.ghl-comm-mode .ghl-comm-topbar--dialer {
+        /* Edge toggle overlaps ~1rem into content — leave room + 2px */
+        padding-left: 2.125rem !important;
+        padding-right: 3.25rem !important;
+    }
+
+    body.app-sidebar-collapsed.ghl-comm-mode .ghl-comm-topbar--dialer {
+        padding-left: 2.125rem !important;
+    }
+}
+
+@media (max-width: 1023px) {
+    body.ghl-comm-mode .ghl-comm-topbar--dialer {
+        padding-left: 3.5rem !important;
+        padding-right: 3.25rem !important;
+    }
+}
+
+/* Admin desktop: fill split pane without leaving white void */
+@media (min-width: 901px) {
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view] .ghl-dialer-center-keypad--borderless,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view] .ghl-dialer-center-keypad--full,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='dialer'] .ghl-dialer-center-keypad--borderless,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='dialer'] .ghl-dialer-center-keypad--full,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='logs'] .ghl-dialer-center-keypad--borderless,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='logs'] .ghl-dialer-center-keypad--full,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='leads'] .ghl-dialer-center-keypad--borderless,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view='leads'] .ghl-dialer-center-keypad--full {
+        flex: 1 1 auto !important;
+        height: 100% !important;
+        min-height: 0 !important;
+        max-height: 100% !important;
+    }
+
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view] .ghl-phone-right-pane,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view] .ghl-phone-dial-pane,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view] .ghl-dialer-form--phone,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin[data-phone-view] .ch-panel__body--phone {
+        flex: 1 1 auto !important;
+        height: 100% !important;
+        min-height: 0 !important;
+        width: 100% !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-inbox-conversation-scroll--center:has(.ch-dial-workspace--admin[data-phone-view='dialer']),
+    .ghl-comm-phone-mode .ghl-inbox-body-wide .ghl-inbox-conversation-scroll--center:has(.ch-dial-workspace--admin[data-phone-view='dialer']) {
+        flex: 1 1 auto !important;
+        height: 100% !important;
+        min-height: 0 !important;
+        justify-content: flex-start !important;
+        padding: 0 !important;
+    }
+}
+
+.ghl-comm-app .ghl-inbox-body-wide .ghl-inbox-conversation-scroll--center:has(.ch-dial-workspace--admin) {
+    padding: 0 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-center.ch-dial-workspace--admin.ch-dial-workspace--compact {
+    padding: 0.5rem clamp(1rem, 5vw, 2.5rem) !important;
+}
+
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
     .ghl-inbox-card,
@@ -673,4 +3220,1461 @@
     .ghl-inbox-icon-btn:hover {
         transform: none;
     }
+}
+
+/* In-call notes panel: dark theme to match active call screen */
+.ghl-dialer-active-notes {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    margin: 0.5rem 0 0;
+    padding: 0.75rem 0.8rem 0.8rem;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 0.65rem;
+    background: linear-gradient(180deg, #111827 0%, #0f172a 100%);
+    color: #e2e8f0;
+    text-align: left;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+}
+
+.ghl-dialer-active-notes.hidden {
+    display: none !important;
+}
+
+.ghl-dialer-active-notes__title {
+    margin: 0 0 0.55rem;
+    padding: 0;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #f1f5f9 !important;
+}
+
+.ghl-dialer-active-notes__label {
+    display: block;
+    margin: 0.5rem 0 0.3rem;
+    padding: 0;
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #94a3b8 !important;
+}
+
+.ghl-dialer-active-notes .ghl-dialer-active-notes-input {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+    padding: 0.55rem 0.65rem !important;
+    color: #f1f5f9 !important;
+    background: #1e293b !important;
+    border: 1px solid rgba(148, 163, 184, 0.35) !important;
+    border-radius: 0.5rem !important;
+    font-size: 0.8125rem !important;
+    line-height: 1.45 !important;
+}
+
+.ghl-dialer-active-notes .ghl-dialer-active-notes-input::placeholder {
+    color: #64748b !important;
+}
+
+.ghl-dialer-active-notes .ghl-dialer-active-notes-input:focus {
+    outline: none !important;
+    border-color: #e2e8f0 !important;
+    box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.2) !important;
+}
+
+.ghl-dialer-active-notes-actions {
+    margin-top: 0.55rem;
+    padding: 0.45rem 0 0;
+    border-top: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.ghl-dialer-active-notes-status {
+    color: #94a3b8 !important;
+}
+
+.ghl-dialer-active-notes .ch-btn--secondary {
+    border-color: rgba(148, 163, 184, 0.35) !important;
+    background: #1e293b !important;
+    color: #e2e8f0 !important;
+}
+
+.ghl-dialer-active-notes .ch-btn--secondary:hover {
+    border-color: #e2e8f0 !important;
+    background: #334155 !important;
+    color: #f8fafc !important;
+}
+
+.ghl-dialer-recent-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 0.18rem;
+    margin-top: 0.4rem;
+    padding-top: 0.35rem;
+    border-top: 1px solid #f1f5f9;
+}
+
+.ghl-dialer-recent-field {
+    margin: 0;
+    font-size: 0.6875rem;
+    line-height: 1.45;
+    color: #64748b;
+    word-break: break-word;
+}
+
+.ghl-dialer-recent-field__label {
+    font-weight: 600;
+    color: #94a3b8;
+}
+
+.ghl-dialer-recent-field__value {
+    color: #64748b;
+    white-space: pre-wrap;
+}
+
+.ghl-dialer-recent-field--disposition .ghl-dialer-recent-field__label {
+    color: #64748b;
+}
+
+.ghl-dialer-recent-field--disposition .ghl-dialer-recent-field__value {
+    color: #475569;
+    font-weight: 600;
+}
+
+/* ── Call logs + pad: clear borders + gray UI ───────────────────── */
+.ghl-comm-phone-mode .ch-dial-workspace--admin.ch-dial-workspace--compact {
+    background: #f1f5f9;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-center-logs--full {
+    border: 1.5px solid #e2e8f0 !important;
+    border-radius: 1rem !important;
+    background: #ffffff !important;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.ghl-comm-phone-mode .ghl-dialer-center-logs__header.ch-panel__header--slim {
+    padding: 0.9rem 1.1rem 0.8rem !important;
+    border-bottom: 1.5px solid #e2e8f0 !important;
+    background: #ffffff !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-center-logs__header .ch-panel__title {
+    color: #64748b !important;
+    font-weight: 400 !important;
+    letter-spacing: -0.01em;
+}
+
+/* Panel titles: Call logs / Imported leads / Call Recording — not bold */
+.ghl-comm-phone-mode .ghl-dialer-center-leads .ch-panel__title,
+body.ghl-comm-mode .ghl-dialer-center-leads .ch-panel__title,
+.ghl-comm-phone-mode .ghl-dialer-center-recordings .ch-panel__title,
+body.ghl-comm-mode .ghl-dialer-center-recordings .ch-panel__title,
+.ghl-comm-phone-mode .ghl-dialer-center-logs .ch-panel__title,
+body.ghl-comm-mode .ghl-dialer-center-logs .ch-panel__title {
+    color: #64748b !important;
+    font-weight: 400 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-leads-label,
+body.ghl-comm-mode .ghl-dialer-leads-label {
+    color: #64748b !important;
+}
+
+.ghl-comm-phone-mode .ghl-leads-select__trigger,
+.ghl-comm-phone-mode .ghl-leads-select__value,
+body.ghl-comm-mode .ghl-leads-select__trigger,
+body.ghl-comm-mode .ghl-leads-select__value {
+    color: #0f172a !important;
+}
+
+.ghl-comm-phone-mode .ghl-leads-select__option,
+body.ghl-comm-mode .ghl-leads-select__option {
+    color: #334155 !important;
+}
+
+.ghl-comm-phone-mode .ghl-leads-select__option.is-selected,
+body.ghl-comm-mode .ghl-leads-select__option.is-selected {
+    color: #047857 !important;
+    background: #ecfdf5 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-lead-name,
+body.ghl-comm-mode .ghl-dialer-lead-name {
+    color: #64748b !important;
+    font-weight: 500 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-lead-contact,
+body.ghl-comm-mode .ghl-dialer-lead-contact {
+    color: #94a3b8 !important;
+    font-weight: 400 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-lead-number,
+body.ghl-comm-mode .ghl-dialer-lead-number {
+    color: #64748b !important;
+    font-weight: 500 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-lead-meta,
+body.ghl-comm-mode .ghl-dialer-lead-meta {
+    color: #64748b !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-lead-avatar,
+body.ghl-comm-mode .ghl-dialer-lead-avatar {
+    color: #64748b !important;
+    background: #f1f5f9 !important;
+    font-weight: 600 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-lead-row:hover,
+body.ghl-comm-mode .ghl-dialer-lead-row:hover {
+    background: #f8fafc !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-lead-row.is-dialing,
+body.ghl-comm-mode .ghl-dialer-lead-row.is-dialing {
+    background: #ecfdf5 !important;
+    box-shadow: inset 3px 0 0 #34d399 !important;
+    border-color: #bbf7d0 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-lead-row.is-dialing .ghl-dialer-lead-name,
+.ghl-comm-phone-mode .ghl-dialer-lead-row.is-dialing .ghl-dialer-lead-number,
+.ghl-comm-phone-mode .ghl-dialer-lead-row.is-dialing .ghl-dialer-lead-contact,
+body.ghl-comm-mode .ghl-dialer-lead-row.is-dialing .ghl-dialer-lead-name,
+body.ghl-comm-mode .ghl-dialer-lead-row.is-dialing .ghl-dialer-lead-number,
+body.ghl-comm-mode .ghl-dialer-lead-row.is-dialing .ghl-dialer-lead-contact {
+    color: #047857 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-lead-row.is-dialing .ghl-dialer-lead-avatar,
+body.ghl-comm-mode .ghl-dialer-lead-row.is-dialing .ghl-dialer-lead-avatar {
+    background: #d1fae5 !important;
+    border-color: #6ee7b7 !important;
+    color: #047857 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-lead-row.is-dialing::after,
+body.ghl-comm-mode .ghl-dialer-lead-row.is-dialing::after {
+    color: #059669 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-center-logs__scroll {
+    background: #f8fafc !important;
+    padding: 0.7rem 0.8rem 0.85rem !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-row,
+.ghl-dialer-recent-list--full .ghl-dialer-recent-row {
+    border: 1.5px solid #e2e8f0 !important;
+    border-radius: 0.75rem !important;
+    background: #ffffff !important;
+    padding: 0.75rem 0.85rem !important;
+    box-shadow: none;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-row:hover,
+.ghl-dialer-recent-list--full .ghl-dialer-recent-row:hover {
+    border-color: #6ee7b7 !important;
+    background: #ffffff !important;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.12);
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-row.is-active,
+.ghl-dialer-recent-list--full .ghl-dialer-recent-row.is-active {
+    border-color: #34d399 !important;
+    background: #f0fdf4 !important;
+    box-shadow: 0 1px 4px rgba(16, 185, 129, 0.1);
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-number,
+.ghl-dialer-recent-list--full .ghl-dialer-recent-number {
+    color: #64748b !important;
+    font-weight: 500 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-name {
+    color: #64748b !important;
+    font-weight: 500 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recording-name,
+.ghl-comm-phone-mode .ghl-dialer-recording-number {
+    color: #64748b !important;
+    font-weight: 500 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-dir {
+    color: #94a3b8 !important;
+    font-weight: 700 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-dir.is-inbound {
+    color: #64748b !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-ext {
+    color: #64748b !important;
+    background: #f1f5f9 !important;
+    border-color: #e2e8f0 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-agent {
+    color: #64748b !important;
+    background: #f8fafc !important;
+    border-color: #e2e8f0 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-rec {
+    color: #059669 !important;
+    background: #ecfdf5 !important;
+    border-color: #d1fae5 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-meta,
+.ghl-comm-phone-mode .ghl-dialer-recent-meta * {
+    color: #94a3b8 !important;
+    font-weight: 500 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-duration {
+    color: #64748b !important;
+    font-weight: 600 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-result {
+    color: #94a3b8 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-fields {
+    border-top-color: #f1f5f9;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-field {
+    color: #64748b !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-field__label {
+    color: #94a3b8 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-field__value {
+    color: #64748b !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-notes-btn {
+    border-color: #e2e8f0 !important;
+    background: #f8fafc !important;
+    color: #94a3b8 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-notes-btn:hover,
+.ghl-comm-phone-mode .ghl-dialer-recent-notes-btn.has-notes {
+    color: #64748b !important;
+    border-color: #e2e8f0 !important;
+    background: #f1f5f9 !important;
+}
+
+.ghl-dialer-recent-call-btn {
+    border: 1.5px solid #6ee7b7 !important;
+    background: #d1fae5 !important;
+    color: #047857 !important;
+    border-radius: 0.5rem !important;
+    box-shadow: none !important;
+}
+
+.ghl-dialer-recent-call-btn:hover {
+    background: #a7f3d0 !important;
+    border-color: #34d399 !important;
+    color: #065f46 !important;
+    box-shadow: none !important;
+}
+
+/* Dial pad column */
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-center-keypad--borderless,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-center-keypad--full {
+    background: #ffffff !important;
+    border: 1.5px solid #e2e8f0 !important;
+    border-radius: 1rem !important;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+    padding: 0.65rem 0.55rem 0.75rem !important;
+}
+
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-form--phone .ghl-dialer-phone-frame,
+.ch-dial-workspace--admin .ghl-dialer-form--phone .ghl-dialer-phone-frame {
+    background: #d1fae5 !important;
+    border: 1.5px solid #6ee7b7 !important;
+    box-shadow: none !important;
+    border-radius: 1.35rem !important;
+    padding: 1.15rem 1rem 1.25rem !important;
+    /* Fill remaining column height; pad content stays at top */
+    flex: 1 1 auto !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    justify-content: flex-start !important;
+}
+
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-phone-display,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-phone-number,
+.ghl-comm-phone-mode .ch-dial-workspace--admin [data-dialer-display],
+.ch-dial-workspace--admin .ghl-dialer-phone-display,
+.ch-dial-workspace--admin .ghl-dialer-display {
+    color: #0f172a !important;
+}
+
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-display--center,
+.ch-dial-workspace--admin .ghl-dialer-display--center {
+    color: #0f172a !important;
+    background: #ffffff !important;
+    border: 1.5px solid #34d399 !important;
+    border-radius: 0.5rem !important; /* rounded-lg */
+}
+
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-display--center::placeholder {
+    color: #94a3b8 !important;
+}
+
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-line-meta__badge,
+.ch-dial-workspace--admin .ghl-dialer-line-meta__badge {
+    border-radius: 0.5rem !important; /* rounded-lg */
+    background: #ffffff !important;
+    border: 1.5px solid #34d399 !important;
+    color: #047857 !important;
+}
+
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-line-meta__did,
+.ch-dial-workspace--admin .ghl-dialer-line-meta__did {
+    display: inline-flex !important;
+    align-items: center;
+    padding: 0.2rem 0.55rem;
+    border-radius: 0.5rem !important; /* rounded-lg */
+    background: #ffffff !important;
+    border: 1.5px solid #34d399 !important;
+    color: #0f172a !important;
+    font-weight: 600 !important;
+}
+
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-line-meta__sep,
+.ch-dial-workspace--admin .ghl-dialer-line-meta__sep {
+    display: none !important;
+}
+
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-key--round,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-key--iphone {
+    background: #ffffff !important;
+    border: 1px solid #e2e8f0 !important;
+    color: #64748b !important;
+    box-shadow: 0 1px 1px rgba(15, 23, 42, 0.03);
+}
+
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-key--round:hover,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-key--iphone:hover {
+    background: #f8fafc !important;
+    border-color: #e2e8f0 !important;
+    color: #475569 !important;
+}
+
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-key--round small,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-key--iphone small,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-key__letters {
+    color: #94a3b8 !important;
+}
+
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-ext,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-phone-meta,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-phone-hint {
+    color: #94a3b8 !important;
+}
+
+/* -- Final border + responsive lock for dialer panels ------------- */
+.ghl-comm-phone-mode .ghl-dialer-center-logs--full,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-center-keypad--borderless,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-center-keypad--full {
+    border: 1.5px solid #e2e8f0 !important;
+    border-radius: 1rem !important;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.ghl-comm-phone-mode .ghl-dialer-center-logs__header.ch-panel__header--slim {
+    border-bottom: 1.5px solid #e2e8f0 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-row,
+.ghl-dialer-recent-list--full .ghl-dialer-recent-row {
+    border: 1.5px solid #e2e8f0 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-row:hover,
+.ghl-dialer-recent-list--full .ghl-dialer-recent-row:hover {
+    border-color: #6ee7b7 !important;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.1);
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-row.is-active,
+.ghl-dialer-recent-list--full .ghl-dialer-recent-row.is-active {
+    border-color: #34d399 !important;
+    box-shadow: 0 1px 4px rgba(16, 185, 129, 0.08);
+}
+
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-form--phone .ghl-dialer-phone-frame,
+.ch-dial-workspace--admin .ghl-dialer-form--phone .ghl-dialer-phone-frame {
+    border: 1.5px solid #6ee7b7 !important;
+    background: #d1fae5 !important;
+}
+
+/* Keep Call Recording panel layout untouched; only dial pad fills its column. */
+.ghl-comm-phone-mode .ghl-dialer-center-recordings.ghl-dialer-center-logs--full {
+    background: #ffffff !important;
+}
+
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-key--round,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-key--iphone {
+    border: 1.5px solid #e2e8f0 !important;
+}
+
+@media (max-width: 900px) {
+    .ghl-comm-phone-mode .ch-dial-workspace--admin.ch-dial-workspace--compact,
+    .ghl-comm-phone-mode .ghl-dialer-center.ch-dial-workspace--admin.ch-dial-workspace--compact {
+        padding-left: 0.75rem !important;
+        padding-right: 0.75rem !important;
+        overflow: auto !important;
+        height: auto !important;
+        max-height: none !important;
+    }
+
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ch-dial-workspace__grid--phone-split,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ch-dial-workspace__grid--admin-split {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 0.75rem !important;
+        height: auto !important;
+        max-height: none !important;
+        overflow: visible !important;
+    }
+
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-center-keypad--borderless,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-center-keypad--full {
+        order: -1 !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        height: auto !important;
+        border: 1.5px solid #e2e8f0 !important;
+    }
+
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-center-logs--full,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ch-dial-workspace__left-pane--admin {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-height: 14rem;
+        border: 1.5px solid #e2e8f0 !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-dialer-recent-row,
+    .ghl-dialer-recent-list--full .ghl-dialer-recent-row {
+        border: 1.5px solid #e2e8f0 !important;
+    }
+}
+
+/* ── Dialer toolbar: line / extension picker ─────────────────────── */
+
+.ghl-comm-topbar--dialer .ghl-comm-topbar__actions {
+    margin-left: auto;
+    justify-content: flex-end;
+    flex: 0 1 auto;
+    width: auto;
+}
+
+.ghl-comm-topbar--dialer .ghl-comm-global-line--toolbar,
+.ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-global-line--toolbar,
+.ghl-comm-topbar--dialer .ghl-comm-topbar__actions .ghl-comm-global-line--toolbar {
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: nowrap;
+    flex: 0 1 auto;
+    width: auto;
+    max-width: 100%;
+    justify-content: flex-end;
+}
+
+.ghl-line-dropdown.is-open .ghl-line-dropdown__menu {
+    /* JS sets fixed coordinates so the menu stays inside the viewport */
+    z-index: 10150;
+}
+
+.ghl-comm-topbar--dialer .ghl-comm-global-line__ext {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: none;
+}
+
+.ghl-comm-topbar--dialer .ghl-dialer-ext-field--toolbar {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: 0;
+    min-width: 0;
+    flex: 0 1 auto;
+}
+
+.ghl-comm-topbar--dialer .ghl-dialer-ext-field--toolbar .ghl-dialer-ext-field__label {
+    display: none !important;
+}
+
+.ghl-comm-topbar--dialer .ghl-comm-live,
+.ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-live,
+body.ghl-comm-mode .ghl-comm-live,
+.ghl-comm-phone-mode .ghl-comm-live {
+    border-radius: 0.125rem !important;
+}
+
+body.ghl-comm-mode .ghl-comm-topbar--dialer .ghl-comm-topbar__title,
+.ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-topbar__title {
+    font-size: 1.25rem !important;
+    font-weight: 400 !important;
+    color: #64748b !important;
+}
+
+/* Nav tabs: Manual/Auto share one border; other 3 each have own border */
+.ch-dial-workspace--admin .ch-dial-workspace__nav,
+body.ghl-comm-mode .ch-dial-workspace__nav {
+    gap: 0.75rem !important;
+}
+
+/* Visual separator between dial mode group and panel tabs */
+.ch-dial-workspace--admin .ghl-comm-dial-mode + .ghl-phone-panel-switch,
+body.ghl-comm-mode .ghl-comm-dial-mode + .ghl-phone-panel-switch {
+    margin-left: 0.35rem;
+    padding-left: 0.75rem;
+    border-left: 1.5px solid #e2e8f0;
+}
+
+.ch-dial-workspace--admin .ghl-comm-dial-mode,
+body.ghl-comm-mode .ghl-comm-dial-mode,
+.ghl-comm-phone-mode .ghl-comm-dial-mode {
+    background: #ffffff !important;
+    border: 1.5px solid #e2e8f0 !important;
+    padding: 0 !important;
+    gap: 0 !important;
+    border-radius: 0.5rem !important;
+    overflow: hidden !important;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+}
+
+.ch-dial-workspace--admin .ghl-comm-dial-mode__btn,
+body.ghl-comm-mode .ghl-comm-dial-mode__btn,
+.ghl-comm-phone-mode .ghl-comm-dial-mode__btn {
+    border: 0 !important;
+    border-right: 1.5px solid #e2e8f0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: #64748b !important;
+    box-shadow: none !important;
+    outline: none !important;
+    font-size: 0.875rem !important;
+    font-weight: 600 !important;
+    min-height: 2.35rem !important;
+    padding: 0.55rem 1.05rem !important;
+}
+
+.ch-dial-workspace--admin .ghl-comm-dial-mode__btn:last-child,
+body.ghl-comm-mode .ghl-comm-dial-mode__btn:last-child,
+.ghl-comm-phone-mode .ghl-comm-dial-mode__btn:last-child {
+    border-right: 0 !important;
+}
+
+.ch-dial-workspace--admin .ghl-comm-dial-mode__btn:hover,
+body.ghl-comm-mode .ghl-comm-dial-mode__btn:hover,
+.ghl-comm-phone-mode .ghl-comm-dial-mode__btn:hover {
+    background: #ecfdf5 !important;
+    color: #047857 !important;
+}
+
+.ch-dial-workspace--admin .ghl-comm-dial-mode__btn.is-active,
+body.ghl-comm-mode .ghl-comm-dial-mode__btn.is-active,
+.ghl-comm-phone-mode .ghl-comm-dial-mode__btn.is-active {
+    background: #d1fae5 !important;
+    border-color: #e2e8f0 !important;
+    color: #047857 !important;
+    box-shadow: none !important;
+}
+
+.ch-dial-workspace--admin .ghl-phone-panel-switch,
+body.ghl-comm-mode .ghl-phone-panel-switch {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    gap: 0.45rem !important;
+    border-radius: 0 !important;
+}
+
+.ch-dial-workspace--admin .ghl-phone-panel-switch__btn,
+body.ghl-comm-mode .ghl-phone-panel-switch__btn,
+.ghl-comm-phone-mode .ghl-phone-panel-switch__btn {
+    border: 1.5px solid #e2e8f0 !important;
+    border-radius: 0.5rem !important;
+    background: #ffffff !important;
+    color: #64748b !important;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03) !important;
+    outline: none !important;
+    font-size: 0.875rem !important;
+    font-weight: 400 !important;
+    min-height: 2.35rem !important;
+    padding: 0.55rem 1.05rem !important;
+    transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease !important;
+}
+
+.ch-dial-workspace--admin .ghl-phone-panel-switch__btn:hover,
+body.ghl-comm-mode .ghl-phone-panel-switch__btn:hover,
+.ghl-comm-phone-mode .ghl-phone-panel-switch__btn:hover {
+    background: #ecfdf5 !important;
+    border-color: #6ee7b7 !important;
+    color: #64748b !important;
+}
+
+.ch-dial-workspace--admin .ghl-phone-panel-switch__btn.is-active,
+body.ghl-comm-mode .ghl-phone-panel-switch__btn.is-active,
+.ghl-comm-phone-mode .ghl-phone-panel-switch__btn.is-active {
+    background: #d1fae5 !important;
+    border-color: #6ee7b7 !important;
+    color: #64748b !important;
+    box-shadow: none !important;
+}
+
+.ch-dial-workspace--admin .ghl-phone-panel-switch__btn:focus-visible,
+body.ghl-comm-mode .ghl-phone-panel-switch__btn:focus-visible,
+.ghl-comm-phone-mode .ghl-phone-panel-switch__btn:focus-visible {
+    outline: 2px solid #6ee7b7 !important;
+    outline-offset: 1px !important;
+}
+
+.ghl-comm-topbar--dialer .ghl-line-dropdown--toolbar {
+    flex: 0 1 auto;
+    min-width: 11rem;
+    max-width: 17rem;
+    width: auto;
+}
+
+.ghl-line-dropdown--toolbar .ghl-line-dropdown__trigger {
+    min-height: 2rem;
+    padding: 0.32rem 0.55rem;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 0.5rem;
+    background: #fff;
+    box-shadow: none;
+}
+
+.ghl-line-dropdown--toolbar .ghl-line-dropdown__trigger:hover:not(:disabled) {
+    border-color: #e2e8f0;
+    background: #f8fafc;
+}
+
+.ghl-line-dropdown--toolbar.is-open .ghl-line-dropdown__trigger {
+    border-color: #e2e8f0;
+    box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.18);
+    background: #fff;
+}
+
+.ghl-line-dropdown--toolbar .ghl-line-dropdown__trigger-content {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    min-width: 0;
+    flex: 1;
+}
+
+.ghl-line-dropdown--toolbar .ghl-line-dropdown__ext-value {
+    flex: 0 0 auto;
+    padding-right: 0.45rem;
+    margin-right: 0.45rem;
+    border-right: 1px solid #e2e8f0;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    color: #64748b;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    line-height: 1.2;
+}
+
+.ghl-line-dropdown--toolbar .ghl-line-dropdown__did {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: #475569;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ghl-line-dropdown--toolbar .ghl-line-dropdown__chevron {
+    margin-left: 0.25rem;
+    color: #94a3b8;
+}
+
+.ghl-line-dropdown--toolbar.is-open .ghl-line-dropdown__chevron {
+    color: #64748b;
+}
+
+@media (max-width: 768px) {
+    .ghl-comm-topbar--dialer .ghl-dialer-ext-field--toolbar .ghl-dialer-ext-field__label {
+        display: none;
+    }
+
+    .ghl-comm-topbar--dialer .ghl-line-dropdown--toolbar {
+        min-width: 9rem;
+        max-width: 13rem;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-global-line__ext {
+        flex: 0 1 auto;
+        max-width: 13rem;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-line-dropdown--toolbar .ghl-line-dropdown__did {
+        max-width: 6.5rem;
+    }
+}
+
+/* Force visible gray borders on dialer panels + rows */
+.ghl-comm-phone-mode .ghl-dialer-center-logs--full,
+.ghl-comm-phone-mode .ghl-dialer-center-leads.ghl-dialer-center-logs--full,
+.ghl-comm-phone-mode .ghl-dialer-center-recordings.ghl-dialer-center-logs--full,
+.ghl-comm-phone-mode .ghl-dialer-center-keypad--borderless,
+.ghl-comm-phone-mode .ghl-dialer-center-keypad--full,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-center-keypad--borderless,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-center-keypad--full {
+    border: 1.5px solid #e2e8f0 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-row,
+.ghl-dialer-recent-list--full .ghl-dialer-recent-row,
+.ghl-comm-phone-mode .ghl-dialer-lead-row {
+    border: 1.5px solid #e2e8f0 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-form--phone .ghl-dialer-phone-frame,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-form--phone .ghl-dialer-phone-frame {
+    border: 1.5px solid #6ee7b7 !important;
+    background: #d1fae5 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-key--round,
+.ghl-comm-phone-mode .ghl-dialer-key--iphone,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-key--round,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-key--iphone {
+    border: 1.5px solid #e2e8f0 !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-call-btn,
+.ghl-dialer-recent-call-btn {
+    border: 1.5px solid #6ee7b7 !important;
+    background: #d1fae5 !important;
+    color: #047857 !important;
+    border-radius: 0.5rem !important;
+    box-shadow: none !important;
+}
+
+.ghl-comm-phone-mode .ghl-dialer-recent-call-btn:hover,
+.ghl-dialer-recent-call-btn:hover {
+    border-color: #34d399 !important;
+    background: #a7f3d0 !important;
+    color: #065f46 !important;
+}
+
+/* ── Mobile-only dialer topbar (desktop unchanged) ───────────────── */
+@media (max-width: 768px) {
+    body.ghl-comm-mode .ghl-comm-topbar--dialer,
+    .ghl-comm-phone-mode .ghl-comm-topbar.ghl-comm-topbar--dialer {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        align-items: center !important;
+        justify-content: flex-end !important;
+        gap: 0.35rem !important;
+        min-height: 2.75rem !important;
+        padding: 0.4rem 3.25rem 0.4rem 3.25rem !important;
+        overflow: visible !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-topbar__left {
+        display: none !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-topbar__actions {
+        display: flex !important;
+        flex: 1 1 auto !important;
+        flex-wrap: nowrap !important;
+        align-items: center !important;
+        justify-content: flex-end !important;
+        gap: 0.35rem !important;
+        width: auto !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: visible !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-global-line--toolbar {
+        display: flex !important;
+        flex: 1 1 auto !important;
+        flex-wrap: nowrap !important;
+        align-items: center !important;
+        justify-content: flex-end !important;
+        gap: 0.3rem !important;
+        min-width: 0 !important;
+        max-width: calc(100% - 2.5rem) !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-global-line__ext {
+        flex: 0 1 auto !important;
+        min-width: 0 !important;
+        max-width: 7.5rem !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-dialer-ext-field--toolbar {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-dialer-ext-field--toolbar .ghl-dialer-ext-field__label,
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-line-dropdown--toolbar .ghl-line-dropdown__did,
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-line-dropdown__trigger .ghl-line-dropdown__did {
+        display: none !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-line-dropdown--toolbar {
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 7.5rem !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-line-dropdown--toolbar .ghl-line-dropdown__trigger {
+        width: 100% !important;
+        min-height: 2rem !important;
+        padding: 0.25rem 0.45rem !important;
+        border: 1.5px solid #e2e8f0 !important;
+        border-radius: 0.55rem !important;
+        gap: 0.25rem !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-line-dropdown--toolbar .ghl-line-dropdown__trigger .ghl-line-dropdown__ext-value,
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-line-dropdown--toolbar .ghl-line-dropdown__trigger .ghl-line-dropdown__ext-badge {
+        margin: 0 !important;
+        padding: 0 !important;
+        border: 0 !important;
+        background: transparent !important;
+        font-size: 0.75rem !important;
+        font-weight: 700 !important;
+        color: #64748b !important;
+        white-space: nowrap !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-line-dropdown__menu .ghl-line-dropdown__ext-badge {
+        margin: 0 !important;
+        padding: 0.12rem 0.45rem !important;
+        border: 1px solid #e2e8f0 !important;
+        background: #f1f5f9 !important;
+        font-size: 0.625rem !important;
+        font-weight: 700 !important;
+        color: #64748b !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-line-dropdown__menu .ghl-line-dropdown__option-did {
+        text-align: left !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-connect-strip,
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-connect-group {
+        flex: 0 0 auto !important;
+        width: auto !important;
+        min-width: 0 !important;
+        max-width: none !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-connect-group {
+        min-width: 0 !important;
+        border: 1.5px solid #e2e8f0 !important;
+        border-radius: 0.55rem !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-connect-group__main {
+        min-height: 2rem !important;
+        padding: 0.25rem 0.5rem !important;
+        font-size: 0.6875rem !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-connect-group__label {
+        max-width: 4.75rem !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        white-space: nowrap !important;
+        font-size: 0.6875rem !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-connect-group__phone,
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-live,
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-global-line__status {
+        display: none !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-connect-group__delete {
+        width: 2rem !important;
+        min-height: 2rem !important;
+        flex-shrink: 0 !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-topbar__notes {
+        flex: 0 0 auto !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-dialer-notes-toggle {
+        width: 2rem !important;
+        height: 2rem !important;
+        min-width: 2rem !important;
+        padding: 0 !important;
+        border: 1.5px solid #e2e8f0 !important;
+        border-radius: 0.55rem !important;
+        background: #fff !important;
+        justify-content: center !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-dialer-notes-toggle span:not(.ghl-dialer-notes-indicator) {
+        display: none !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-line-dropdown--toolbar.is-open .ghl-line-dropdown__menu {
+        /* positionLineDropdownMenu() pins this with fixed coords */
+        max-width: calc(100vw - 1rem) !important;
+    }
+}
+
+@media (max-width: 480px) {
+    body.ghl-comm-mode .ghl-comm-topbar--dialer,
+    .ghl-comm-phone-mode .ghl-comm-topbar.ghl-comm-topbar--dialer {
+        padding: 0.35rem 3.1rem 0.35rem 3.1rem !important;
+        gap: 0.3rem !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-global-line--toolbar {
+        gap: 0.25rem !important;
+        max-width: calc(100% - 2.25rem) !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-global-line__ext,
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-line-dropdown--toolbar {
+        max-width: 5.75rem !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-connect-group__label {
+        max-width: 3.85rem !important;
+        font-size: 0.625rem !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-comm-connect-group__delete {
+        width: 1.85rem !important;
+        min-height: 1.85rem !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar--dialer .ghl-dialer-notes-toggle {
+        width: 1.85rem !important;
+        height: 1.85rem !important;
+        min-width: 1.85rem !important;
+    }
+}
+
+/* ── Communications Hub: light green buttons + rounded-lg ─────────
+   Primary  = light green (#d1fae5) + emerald text
+   Secondary = white + soft green border + emerald text
+   Radius   = 0.5rem (Tailwind rounded-lg)
+─────────────────────────────────────────────────────────────────── */
+
+body.ghl-comm-mode,
+.ghl-comm-phone-mode,
+.ghl-comm-app {
+    --ch-btn-primary: #d1fae5;
+    --ch-btn-primary-hover: #a7f3d0;
+    --ch-btn-primary-text: #047857;
+    --ch-btn-secondary-bg: #ffffff;
+    --ch-btn-secondary-border: #bbf7d0;
+    --ch-btn-secondary-text: #059669;
+    --ch-btn-radius: 0.5rem;
+}
+
+body.ghl-comm-mode .ch-btn,
+.ghl-comm-app .ch-btn,
+.ghl-comm-phone-mode .ch-btn,
+body.ghl-comm-mode .ghl-comm-btn,
+.ghl-comm-app .ghl-comm-btn,
+.ghl-comm-phone-mode .ghl-comm-btn,
+body.ghl-comm-mode .ghl-dialer-recording-play,
+body.ghl-comm-mode .ghl-dialer-recording-download,
+body.ghl-comm-mode .ghl-phone-recording-play,
+body.ghl-comm-mode .ghl-phone-recording-download,
+body.ghl-comm-mode .ghl-dialer-recent-call-btn,
+body.ghl-comm-mode .ghl-dialer-lead-call-btn,
+body.ghl-comm-mode .ghl-auto-dial-btn,
+body.ghl-comm-mode .ch-call-summary__dispo-btn,
+body.ghl-comm-mode .ch-call-summary__next,
+body.ghl-comm-mode .ch-call-summary__skip,
+body.ghl-comm-mode .ghl-dialer-notes-toggle,
+body.ghl-comm-mode .ghl-comm-connect-group__main,
+body.ghl-comm-mode .ghl-comm-connect-group__delete,
+body.ghl-comm-mode .ghl-line-dropdown__trigger,
+body.ghl-comm-mode .ghl-phone-panel-switch__btn,
+body.ghl-comm-mode .ghl-leads-select__trigger,
+body.ghl-comm-mode .ghl-dialer-recent-notes-btn,
+.ghl-comm-phone-mode .ghl-dialer-recording-play,
+.ghl-comm-phone-mode .ghl-dialer-recording-download,
+.ghl-comm-phone-mode .ghl-phone-recording-play,
+.ghl-comm-phone-mode .ghl-phone-recording-download,
+.ghl-comm-phone-mode .ghl-dialer-recent-call-btn,
+.ghl-comm-phone-mode .ghl-dialer-lead-call-btn,
+.ghl-comm-phone-mode .ghl-auto-dial-btn,
+.ghl-comm-phone-mode .ch-call-summary__dispo-btn,
+.ghl-comm-phone-mode .ch-call-summary__next,
+.ghl-comm-phone-mode .ch-call-summary__skip,
+.ghl-comm-phone-mode .ghl-dialer-notes-toggle,
+.ghl-comm-phone-mode .ghl-comm-connect-group__main,
+.ghl-comm-phone-mode .ghl-comm-connect-group__delete,
+.ghl-comm-phone-mode .ghl-line-dropdown__trigger,
+.ghl-comm-phone-mode .ghl-phone-panel-switch__btn,
+.ghl-comm-phone-mode .ghl-leads-select__trigger,
+.ghl-comm-phone-mode .ghl-dialer-recent-notes-btn {
+    border-radius: 0.5rem !important;
+}
+
+/* Primary actions — light green */
+body.ghl-comm-mode .ch-btn--primary,
+.ghl-comm-app .ch-btn--primary,
+.ghl-comm-phone-mode .ch-btn--primary,
+body.ghl-comm-mode .ghl-comm-btn--primary,
+.ghl-comm-phone-mode .ghl-comm-btn--primary,
+body.ghl-comm-mode .ch-btn--call,
+.ghl-comm-phone-mode .ch-btn--call,
+body.ghl-comm-mode .ghl-dialer-recording-play,
+.ghl-comm-phone-mode .ghl-dialer-recording-play,
+body.ghl-comm-mode .ghl-phone-recording-play,
+.ghl-comm-phone-mode .ghl-phone-recording-play,
+body.ghl-comm-mode .ghl-dialer-recent-call-btn,
+.ghl-comm-phone-mode .ghl-dialer-recent-call-btn,
+body.ghl-comm-mode .ghl-dialer-lead-call-btn,
+.ghl-comm-phone-mode .ghl-dialer-lead-call-btn,
+body.ghl-comm-mode .ch-call-summary__next,
+.ghl-comm-phone-mode .ch-call-summary__next,
+body.ghl-comm-mode .ghl-auto-dial-btn.ch-btn--primary,
+.ghl-comm-phone-mode .ghl-auto-dial-btn.ch-btn--primary,
+body.ghl-comm-mode button.ghl-auto-dial-btn[data-auto-dial-start],
+.ghl-comm-phone-mode button.ghl-auto-dial-btn[data-auto-dial-start] {
+    background: #d1fae5 !important;
+    border: 1.5px solid #6ee7b7 !important;
+    color: #047857 !important;
+    box-shadow: none !important;
+}
+
+body.ghl-comm-mode .ch-btn--primary:hover:not(:disabled),
+.ghl-comm-app .ch-btn--primary:hover:not(:disabled),
+.ghl-comm-phone-mode .ch-btn--primary:hover:not(:disabled),
+body.ghl-comm-mode .ghl-comm-btn--primary:hover,
+.ghl-comm-phone-mode .ghl-comm-btn--primary:hover,
+body.ghl-comm-mode .ch-btn--call:hover:not(:disabled),
+.ghl-comm-phone-mode .ch-btn--call:hover:not(:disabled),
+body.ghl-comm-mode .ghl-dialer-recording-play:hover,
+.ghl-comm-phone-mode .ghl-dialer-recording-play:hover,
+body.ghl-comm-mode .ghl-phone-recording-play:hover,
+.ghl-comm-phone-mode .ghl-phone-recording-play:hover,
+body.ghl-comm-mode .ghl-dialer-recent-call-btn:hover,
+.ghl-comm-phone-mode .ghl-dialer-recent-call-btn:hover,
+body.ghl-comm-mode .ghl-dialer-lead-call-btn:hover,
+.ghl-comm-phone-mode .ghl-dialer-lead-call-btn:hover,
+body.ghl-comm-mode .ch-call-summary__next:hover,
+.ghl-comm-phone-mode .ch-call-summary__next:hover,
+body.ghl-comm-mode .ghl-auto-dial-btn.ch-btn--primary:hover:not(:disabled),
+.ghl-comm-phone-mode .ghl-auto-dial-btn.ch-btn--primary:hover:not(:disabled),
+body.ghl-comm-mode button.ghl-auto-dial-btn[data-auto-dial-start]:hover:not(:disabled),
+.ghl-comm-phone-mode button.ghl-auto-dial-btn[data-auto-dial-start]:hover:not(:disabled) {
+    background: #a7f3d0 !important;
+    border-color: #34d399 !important;
+    color: #065f46 !important;
+}
+
+body.ghl-comm-mode .ghl-dialer-recording-play svg,
+.ghl-comm-phone-mode .ghl-dialer-recording-play svg,
+body.ghl-comm-mode .ghl-phone-recording-play svg,
+.ghl-comm-phone-mode .ghl-phone-recording-play svg {
+    color: #047857 !important;
+    fill: currentColor;
+}
+
+/* Secondary actions — white + soft green */
+body.ghl-comm-mode .ch-btn--secondary,
+.ghl-comm-app .ch-btn--secondary,
+.ghl-comm-phone-mode .ch-btn--secondary,
+body.ghl-comm-mode .ghl-comm-btn:not(.ghl-comm-btn--primary),
+.ghl-comm-phone-mode .ghl-comm-btn:not(.ghl-comm-btn--primary),
+body.ghl-comm-mode .ghl-dialer-recording-download,
+.ghl-comm-phone-mode .ghl-dialer-recording-download,
+body.ghl-comm-mode .ghl-phone-recording-download,
+.ghl-comm-phone-mode .ghl-phone-recording-download,
+body.ghl-comm-mode .ch-call-summary__skip,
+.ghl-comm-phone-mode .ch-call-summary__skip,
+body.ghl-comm-mode .ghl-auto-dial-btn.ch-btn--secondary,
+.ghl-comm-phone-mode .ghl-auto-dial-btn.ch-btn--secondary,
+body.ghl-comm-mode button.ghl-auto-dial-btn[data-auto-dial-stop],
+.ghl-comm-phone-mode button.ghl-auto-dial-btn[data-auto-dial-stop],
+body.ghl-comm-mode .ghl-dialer-notes-toggle,
+.ghl-comm-phone-mode .ghl-dialer-notes-toggle,
+body.ghl-comm-mode .ghl-dialer-recent-notes-btn,
+.ghl-comm-phone-mode .ghl-dialer-recent-notes-btn {
+    background: #ffffff !important;
+    border: 1.5px solid #bbf7d0 !important;
+    color: #059669 !important;
+    box-shadow: none !important;
+}
+
+body.ghl-comm-mode .ch-btn--secondary:hover:not(:disabled),
+.ghl-comm-app .ch-btn--secondary:hover:not(:disabled),
+.ghl-comm-phone-mode .ch-btn--secondary:hover:not(:disabled),
+body.ghl-comm-mode .ghl-comm-btn:not(.ghl-comm-btn--primary):hover,
+.ghl-comm-phone-mode .ghl-comm-btn:not(.ghl-comm-btn--primary):hover,
+body.ghl-comm-mode .ghl-dialer-recording-download:hover,
+.ghl-comm-phone-mode .ghl-dialer-recording-download:hover,
+body.ghl-comm-mode .ghl-phone-recording-download:hover,
+.ghl-comm-phone-mode .ghl-phone-recording-download:hover,
+body.ghl-comm-mode .ch-call-summary__skip:hover,
+.ghl-comm-phone-mode .ch-call-summary__skip:hover,
+body.ghl-comm-mode .ghl-auto-dial-btn.ch-btn--secondary:hover:not(:disabled),
+.ghl-comm-phone-mode .ghl-auto-dial-btn.ch-btn--secondary:hover:not(:disabled),
+body.ghl-comm-mode button.ghl-auto-dial-btn[data-auto-dial-stop]:hover:not(:disabled),
+.ghl-comm-phone-mode button.ghl-auto-dial-btn[data-auto-dial-stop]:hover:not(:disabled),
+body.ghl-comm-mode .ghl-dialer-notes-toggle:hover,
+.ghl-comm-phone-mode .ghl-dialer-notes-toggle:hover,
+body.ghl-comm-mode .ghl-dialer-recent-notes-btn:hover,
+.ghl-comm-phone-mode .ghl-dialer-recent-notes-btn:hover {
+    background: #ecfdf5 !important;
+    border-color: #6ee7b7 !important;
+    color: #047857 !important;
+}
+
+/* Keep circular dial-pad keys round (not rectangular buttons). */
+body.ghl-comm-mode .ghl-dialer-key--round,
+body.ghl-comm-mode .ghl-dialer-key--iphone,
+body.ghl-comm-mode .ghl-dialer-call-icon-btn,
+body.ghl-comm-mode .ghl-dialer-backspace-btn,
+.ghl-comm-phone-mode .ghl-dialer-key--round,
+.ghl-comm-phone-mode .ghl-dialer-key--iphone,
+.ghl-comm-phone-mode .ghl-dialer-call-icon-btn,
+.ghl-comm-phone-mode .ghl-dialer-backspace-btn {
+    border-radius: 9999px !important;
+}
+
+/* ── Notes popover: polished card ───────────────────────────────── */
+.ghl-dialer-notes-drawer,
+.ghl-comm-topbar__notes .ghl-dialer-notes-drawer {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    width: min(22rem, calc(100vw - 1.5rem)) !important;
+    padding: 0 !important;
+    border: 1.5px solid #e2e8f0 !important;
+    border-radius: 0.75rem !important;
+    background: #ffffff !important;
+    box-shadow:
+        0 10px 28px rgba(15, 23, 42, 0.1),
+        0 2px 8px rgba(15, 23, 42, 0.05) !important;
+    overflow: hidden;
+}
+
+.ghl-dialer-notes-drawer__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin: 0 !important;
+    padding: 0.85rem 0.95rem 0.75rem;
+    background: linear-gradient(180deg, #ecfdf5 0%, #ffffff 100%);
+    border-bottom: 1.5px solid #e2e8f0;
+}
+
+.ghl-dialer-notes-drawer__head-main {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65rem;
+    min-width: 0;
+}
+
+.ghl-dialer-notes-drawer__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    flex-shrink: 0;
+    border-radius: 0.5rem;
+    background: #d1fae5;
+    border: 1.5px solid #bbf7d0;
+    color: #047857;
+}
+
+.ghl-dialer-notes-drawer__icon svg {
+    width: 1rem;
+    height: 1rem;
+}
+
+.ghl-dialer-notes-drawer__titles {
+    min-width: 0;
+}
+
+.ghl-dialer-notes-drawer__title {
+    margin: 0 !important;
+    font-size: 0.9375rem !important;
+    font-weight: 700 !important;
+    color: #0f172a !important;
+    letter-spacing: -0.01em;
+}
+
+.ghl-dialer-notes-drawer__phone {
+    margin: 0.15rem 0 0 !important;
+    font-size: 0.75rem !important;
+    font-weight: 500;
+    color: #059669 !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ghl-dialer-notes-drawer__close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.85rem;
+    height: 1.85rem;
+    flex-shrink: 0;
+    padding: 0;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 0.5rem;
+    background: #ffffff;
+    color: #64748b;
+    cursor: pointer;
+    position: relative;
+    z-index: 2;
+    pointer-events: auto;
+}
+
+.ghl-dialer-notes-drawer__close svg {
+    width: 0.9rem;
+    height: 0.9rem;
+    pointer-events: none;
+}
+
+.ghl-dialer-notes-drawer__close:hover {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+    color: #334155;
+}
+
+.ghl-dialer-notes-drawer__label {
+    display: block;
+    margin: 0.85rem 0.95rem 0.35rem;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #94a3b8;
+}
+
+.ghl-dialer-notes-drawer .ghl-dialer-notes-input {
+    width: calc(100% - 1.9rem) !important;
+    margin: 0 0.95rem;
+    min-height: 8.5rem !important;
+    resize: vertical;
+    border: 1.5px solid #e2e8f0 !important;
+    border-radius: 0.5rem !important;
+    padding: 0.75rem 0.85rem !important;
+    font-size: 0.875rem !important;
+    line-height: 1.5 !important;
+    color: #0f172a !important;
+    background: #f8fafc !important;
+    box-shadow: none !important;
+    transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+}
+
+.ghl-dialer-notes-drawer .ghl-dialer-notes-input::placeholder {
+    color: #94a3b8 !important;
+}
+
+.ghl-dialer-notes-drawer .ghl-dialer-notes-input:focus {
+    outline: none !important;
+    border-color: #6ee7b7 !important;
+    background: #ffffff !important;
+    box-shadow: 0 0 0 3px rgba(167, 243, 208, 0.45) !important;
+}
+
+.ghl-dialer-notes-drawer__actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.65rem;
+    margin: 0 !important;
+    padding: 0.75rem 0.95rem 0.9rem;
+    background: #ffffff;
+}
+
+.ghl-dialer-notes-status {
+    font-size: 0.75rem !important;
+    font-weight: 500;
+    color: #64748b !important;
+}
+
+.ghl-dialer-notes-status[data-tone='success'] {
+    color: #059669 !important;
+}
+
+.ghl-dialer-notes-status[data-tone='error'] {
+    color: #dc2626 !important;
+}
+
+.ghl-dialer-notes-save,
+.ghl-dialer-notes-drawer [data-dialer-notes-save] {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.15rem;
+    padding: 0.4rem 1rem;
+    border: 1.5px solid #6ee7b7 !important;
+    border-radius: 0.5rem !important;
+    background: #d1fae5 !important;
+    color: #047857 !important;
+    font-size: 0.8125rem !important;
+    font-weight: 700 !important;
+    cursor: pointer;
+    box-shadow: none !important;
+    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.ghl-dialer-notes-save:hover,
+.ghl-dialer-notes-drawer [data-dialer-notes-save]:hover {
+    background: #a7f3d0 !important;
+    border-color: #34d399 !important;
+    color: #065f46 !important;
+}
+
+.ghl-comm-topbar__notes .ghl-dialer-notes-toggle {
+    border: 1.5px solid #bbf7d0 !important;
+    border-radius: 0.5rem !important;
+    background: #ffffff !important;
+    color: #059669 !important;
+}
+
+.ghl-comm-topbar__notes .ghl-dialer-notes-toggle:hover,
+.ghl-comm-topbar__notes .ghl-dialer-notes-panel.is-open .ghl-dialer-notes-toggle {
+    border-color: #6ee7b7 !important;
+    background: #d1fae5 !important;
+    color: #047857 !important;
 }

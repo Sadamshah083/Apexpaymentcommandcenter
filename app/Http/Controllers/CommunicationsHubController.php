@@ -20,6 +20,10 @@ use App\Services\Communications\CommunicationsCallRecordingService;
 
 use App\Services\Communications\CommunicationsPhoneNotesService;
 
+use App\Services\Communications\DialerImportedLeadsService;
+
+use App\Services\Communications\CommunicationsAccessService;
+
 use App\Services\Communications\ZoomClickToCallService;
 
 use App\Services\Integrations\ZoomApiService;
@@ -51,9 +55,13 @@ class CommunicationsHubController extends Controller
 
         protected CommunicationsPhoneNotesService $phoneNotes,
 
+        protected DialerImportedLeadsService $importedLeads,
+
         protected CommunicationsCallHistoryService $callHistory,
 
         protected WorkspaceContextService $workspaceContext,
+
+        protected CommunicationsAccessService $access,
 
     ) {}
 
@@ -71,6 +79,9 @@ class CommunicationsHubController extends Controller
     public function dialerCallLogs(Request $request)
     {
         $filters = $this->inbox->dialerCallLogFilters($this->filters($request));
+        if ($request->boolean('recordings_only')) {
+            $filters['recordings_only'] = true;
+        }
         $offset = max(0, (int) $request->query('offset', 0));
         $perPage = min(50, max(1, (int) $request->query(
             'per_page',
@@ -101,6 +112,193 @@ class CommunicationsHubController extends Controller
                 'has_more' => false,
             ], 500);
         }
+    }
+
+    public function dialerImportedLeads(Request $request)
+    {
+        if (! auth()->check()) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        $user = auth()->user();
+        $routePrefix = $this->routePrefix();
+        if (! $this->access->canAutoDial($user, $routePrefix)) {
+            return response()->json(['message' => 'Auto dial is not available for this account.'], 403);
+        }
+
+        $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
+        if (! $workspace) {
+            return response()->json(['message' => 'Workspace not found.'], 404);
+        }
+
+        $offset = max(0, (int) $request->query('offset', 0));
+        $perPage = min(100, max(1, (int) $request->query('per_page', 25)));
+        $filters = [
+            'campaign_id' => $request->query('campaign_id'),
+            'pool' => $request->query('pool', 'callable'),
+            'search' => $request->query('search'),
+        ];
+
+        if ($this->access->tierFor($user, $routePrefix) === 'agent') {
+            $filters['assigned_user_id'] = (int) $user->id;
+            if (! in_array((string) $filters['pool'], ['assigned', 'callable', 'all'], true)) {
+                $filters['pool'] = 'assigned';
+            }
+        }
+
+        try {
+            $payload = $this->importedLeads->paginate($workspace, $filters, $offset, $perPage);
+            $payload['campaigns'] = $this->importedLeads->campaignOptions($workspace);
+
+            return response()->json($payload);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => $this->zoom->humanizeError($e->getMessage()),
+                'leads' => [],
+                'next_offset' => $offset,
+                'has_more' => false,
+                'total' => 0,
+                'campaigns' => [],
+            ], 500);
+        }
+    }
+
+    public function dialerDispositionSave(Request $request)
+    {
+        if (! auth()->check()) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        $user = auth()->user();
+        $routePrefix = $this->routePrefix();
+        if (! $this->access->canAutoDial($user, $routePrefix)) {
+            return response()->json(['message' => 'Auto dial is not available for this account.'], 403);
+        }
+
+        $validated = $request->validate([
+            'disposition' => ['required', 'string', 'max:120'],
+            'call_uuid' => ['nullable', 'string', 'max:128'],
+            'lead_id' => ['nullable', 'integer', 'exists:workflow_leads,id'],
+            'phone' => ['nullable', 'string', 'max:32'],
+            'note' => ['nullable', 'string', 'max:5000'],
+            'in_call_notes' => ['nullable', 'string', 'max:5000'],
+            'duration_sec' => ['nullable', 'integer', 'min:0', 'max:86400'],
+        ]);
+
+        $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
+        if (! $workspace) {
+            return response()->json(['message' => 'Workspace not found.'], 404);
+        }
+
+        $disposition = trim((string) $validated['disposition']);
+        $note = filled($validated['note'] ?? null) ? trim((string) $validated['note']) : null;
+        $inCallNotes = filled($validated['in_call_notes'] ?? null) ? trim((string) $validated['in_call_notes']) : null;
+        $uuid = trim((string) ($validated['call_uuid'] ?? ''));
+        $phone = trim((string) ($validated['phone'] ?? ''));
+        $durationSec = (int) ($validated['duration_sec'] ?? 0);
+        $leadId = filled($validated['lead_id'] ?? null) ? (int) $validated['lead_id'] : null;
+
+        if ($uuid !== '') {
+            try {
+                $this->zoom->dispositionCall($uuid, [
+                    'disposition' => $disposition,
+                    'note' => $note,
+                    'update_lead' => false,
+                ]);
+            } catch (\Throwable) {
+                // Local disposition history is still recorded below.
+            }
+        }
+
+        $callLog = $this->callHistory->recordDialerDisposition($workspace, [
+            'call_uuid' => $uuid !== '' ? $uuid : null,
+            'phone' => $phone !== '' ? $phone : null,
+            'disposition' => $disposition,
+            'note' => $note,
+            'in_call_notes' => $inCallNotes,
+            'duration_sec' => $durationSec > 0 ? $durationSec : null,
+            'user' => $user,
+            'lead_id' => $leadId,
+        ]);
+
+        $leadPayload = null;
+        $lead = null;
+        if ($leadId) {
+            $leadQuery = \App\Models\WorkflowLead::query()
+                ->whereKey($leadId)
+                ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspace->id));
+
+            if ($this->access->tierFor($user, $routePrefix) === 'agent') {
+                $leadQuery->where('assigned_user_id', (int) $user->id);
+            }
+
+            $lead = $leadQuery->first();
+        }
+
+        if (! $lead && $phone !== '') {
+            $lead = \App\Models\WorkflowLead::query()
+                ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspace->id))
+                ->where(function ($q) use ($phone) {
+                    $digits = preg_replace('/\D+/', '', $phone) ?? '';
+                    $q->where('normalized_phone', $phone)
+                        ->orWhere('direct_phone', $phone)
+                        ->orWhere('input_phone', $phone);
+                    if (strlen($digits) >= 10) {
+                        $q->orWhere('normalized_phone', 'like', '%'.substr($digits, -10))
+                            ->orWhere('direct_phone', 'like', '%'.substr($digits, -10))
+                            ->orWhere('input_phone', 'like', '%'.substr($digits, -10));
+                    }
+                })
+                ->when(
+                    $this->access->tierFor($user, $routePrefix) === 'agent',
+                    fn ($q) => $q->where('assigned_user_id', (int) $user->id)
+                )
+                ->whereNull('last_contacted_at')
+                ->orderByDesc('id')
+                ->first();
+        }
+
+        if ($lead) {
+            $setterStatus = $this->importedLeads->dispositionToSetterStatus($disposition);
+            $updates = [
+                'last_contacted_at' => now(),
+                'contact_attempts' => max(1, (int) ($lead->contact_attempts ?? 0) + 1),
+            ];
+
+            if ($setterStatus) {
+                $updates['setter_status'] = $setterStatus;
+            }
+
+            if ($note) {
+                $updates['notes'] = trim(((string) ($lead->notes ?? ''))."\n".$note);
+            }
+
+            $lead->update($updates);
+            $leadPayload = [
+                'id' => (int) $lead->id,
+                'removed' => true,
+            ];
+        }
+
+        CommunicationsInboxService::bumpDialerLogsCacheVersion();
+
+        $hubLog = $this->callHistory->toHubLogPublic($callLog);
+        if ($workspace) {
+            $enriched = $this->inbox->enrichDialerCallLogsWithNotes($workspace, [$hubLog]);
+            $enriched = $this->inbox->enrichDialerCallLogsWithLeadLabels($workspace, $enriched);
+            $hubLog = $enriched[0] ?? $hubLog;
+        }
+        $formatted = $this->inbox->formatDialerCallLogForApi($hubLog, $routePrefix);
+
+        return response()->json([
+            'saved' => true,
+            'disposition' => $disposition,
+            'lead' => $leadPayload,
+            'lead_removed' => true,
+            'call_log' => $formatted,
+        ]);
     }
 
     public function dialerPhoneNoteShow(Request $request)
@@ -176,6 +374,7 @@ class CommunicationsHubController extends Controller
             'call_uuid' => ['nullable', 'string', 'max:128'],
             'phone' => ['nullable', 'string', 'max:32'],
             'note' => ['nullable', 'string', 'max:5000'],
+            'in_call_notes' => ['nullable', 'string', 'max:5000'],
             'save_phone_note' => ['nullable', 'boolean'],
         ]);
 
@@ -186,12 +385,26 @@ class CommunicationsHubController extends Controller
 
         $user = auth()->user();
         $note = $validated['note'] ?? null;
+        $inCallNotes = array_key_exists('in_call_notes', $validated)
+            ? trim((string) ($validated['in_call_notes'] ?? ''))
+            : null;
         $log = null;
 
         if (filled($validated['call_log_ref'] ?? null)) {
             $log = $this->callHistory->updateCallNote($workspace, (string) $validated['call_log_ref'], $note, $user);
         } elseif (filled($validated['call_uuid'] ?? null)) {
             $log = $this->callHistory->updateCallNoteByUuid($workspace, (string) $validated['call_uuid'], $note, $user);
+        }
+
+        if ($log && $inCallNotes !== null) {
+            $meta = $log->meta ?? [];
+            if ($inCallNotes === '') {
+                unset($meta['in_call_notes']);
+            } else {
+                $meta['in_call_notes'] = $inCallNotes;
+            }
+            $log->update(['meta' => $meta]);
+            $log = $log->fresh() ?? $log;
         }
 
         if (filled($validated['phone'] ?? null) && ($validated['save_phone_note'] ?? false)) {
@@ -211,6 +424,7 @@ class CommunicationsHubController extends Controller
         return response()->json([
             'call_log_ref' => $log?->morpheus_call_uuid ?: ($log ? 'local:'.$log->id : ($validated['call_log_ref'] ?? null)),
             'call_note' => (string) ($log?->note ?? $note ?? ''),
+            'in_call_notes' => (string) data_get($log?->meta, 'in_call_notes', $inCallNotes ?? ''),
             'phone_note' => filled($validated['phone'] ?? null)
                 ? $this->phoneNotes->bodyForPhone($workspace, (string) $validated['phone'])
                 : null,

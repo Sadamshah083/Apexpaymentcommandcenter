@@ -50,15 +50,70 @@
     );
     $durationLabel = \App\Services\Communications\CommunicationsInboxService::formatDialerCallDuration($durationSeconds);
     $displayNote = $callNote;
+    $leadName = trim((string) ($log['lead_name'] ?? ''));
+    $leadContact = trim((string) ($log['lead_contact'] ?? ''));
+    $agentName = trim((string) ($log['agent_name'] ?? data_get($log, 'raw.user.name') ?? ''));
+    $phoneDisplay = trim((string) ($log['phone_display'] ?? ''));
+    if ($phoneDisplay === '') {
+        $phoneDisplay = \App\Services\Communications\CommunicationsLeadLookupService::formatPhoneDisplay($callbackPhone)
+            ?? ($callbackPhone ?? '—');
+    }
+    $directionRaw = strtolower((string) ($log['direction'] ?? 'call'));
+    $resultLabel = trim((string) ($log['result'] ?? ''));
+    $dispositionLabel = trim((string) (
+        $log['disposition']
+        ?? data_get($log, 'raw.disposition')
+        ?? data_get($log, 'raw.meta.disposition')
+        ?? data_get($log, 'meta.disposition')
+        ?? ''
+    ));
+    $resultAsDispositionSkip = ['—', '-', 'Completed', 'completed', 'Initiated', 'initiated', 'connected', 'Connected', 'answered', 'Answered', 'no-answer', 'No Answer', 'busy', 'Busy', 'failed', 'Failed', 'missed', 'Missed', 'unknown', 'Unknown'];
+    if ($dispositionLabel !== '' && in_array($dispositionLabel, $resultAsDispositionSkip, true)) {
+        $dispositionLabel = '';
+    }
+    if ($dispositionLabel === '' && $resultLabel !== '' && ! in_array($resultLabel, $resultAsDispositionSkip, true)) {
+        $dispositionLabel = $resultLabel;
+    }
+
+    // Collapse repeated disposition/status text saved into notes (e.g. "No AnswerNo Answer…").
+    $displayNote = trim(preg_replace("/[ \t]+/", ' ', $displayNote) ?? $displayNote);
+    if ($displayNote !== '') {
+        $compactNote = preg_replace('/\s+/', '', $displayNote) ?? $displayNote;
+        if (preg_match('/^(NoAnswer)+$/i', $compactNote)) {
+            $displayNote = 'No Answer';
+        } elseif ($dispositionLabel !== '') {
+            $compactDispo = preg_replace('/\s+/', '', $dispositionLabel) ?? $dispositionLabel;
+            if ($compactDispo !== '' && preg_match('/^('.preg_quote($compactDispo, '/').')+$/i', $compactNote)) {
+                $displayNote = $dispositionLabel;
+            }
+        }
+    }
+
+    $statusLikeNotes = ['no answer', 'no-answer', 'busy', 'connected', 'answered', 'failed', 'missed', 'completed', 'initiated'];
+    $noteLooksLikeStatus = $displayNote !== '' && in_array(strtolower($displayNote), $statusLikeNotes, true);
+    $inCallNotes = trim((string) (
+        $log['in_call_notes']
+        ?? data_get($log, 'raw.meta.in_call_notes')
+        ?? data_get($log, 'meta.in_call_notes')
+        ?? ''
+    ));
+    $showDispositionPreview = $dispositionLabel !== '';
+    $showNotePreview = $hasNotes && $displayNote !== '' && ! $noteLooksLikeStatus
+        && strcasecmp($displayNote, $dispositionLabel) !== 0;
+    $showInCallNotesPreview = $inCallNotes !== ''
+        && strcasecmp($inCallNotes, $dispositionLabel) !== 0;
 @endphp
 
 <div class="ghl-dialer-recent-row" data-phone-log-row tabindex="0"
     data-log-direction="{{ $log['direction'] ?? 'call' }}"
     data-log-phone="{{ $callbackPhone ?? '' }}"
     data-log-extension="{{ $logExtension ?? '' }}"
+    data-log-agent="{{ e($agentName) }}"
     data-log-result="{{ $log['result'] ?? '—' }}"
     data-log-time="{{ $timeLabel }}"
     data-log-call-ref="{{ $callLogRef }}"
+    data-log-lead-name="{{ e($leadName) }}"
+    data-log-phone-display="{{ e($phoneDisplay) }}"
     data-log-call-note="{{ e($callNote) }}"
     data-log-phone-note="{{ e($phoneNote) }}"
     data-has-notes="{{ $hasNotes ? '1' : '0' }}"
@@ -68,17 +123,59 @@
     data-download-url="{{ $downloadUrl }}">
     <div class="ghl-dialer-recent-main">
         <div class="ghl-dialer-recent-head">
-            <span class="ghl-dialer-recent-dir">{{ ucfirst($log['direction'] ?? 'call') }}</span>
+            <span class="ghl-dialer-recent-dir is-{{ $directionRaw }}">{{ ucfirst($log['direction'] ?? 'call') }}</span>
             @if ($logExtension)
                 <span class="ghl-dialer-recent-ext">Ext {{ $logExtension }}</span>
             @endif
+            @if ($agentName !== '')
+                <span class="ghl-dialer-recent-agent" title="{{ $agentName }}">{{ $agentName }}</span>
+            @endif
+            @if ($hasRecording)
+                <button type="button" class="ghl-dialer-recent-rec" data-recording-play
+                    title="Play recording" aria-label="Play call recording">Rec</button>
+            @endif
         </div>
-        <span class="ghl-dialer-recent-number">{{ $callbackPhone ?? '—' }}</span>
-        <span class="ghl-dialer-recent-meta">
-            {{ $timeAgo }} · {{ $durationLabel }} · {{ $log['result'] ?? '—' }}
-        </span>
-        @if ($hasNotes && $displayNote !== '')
-            <span class="ghl-dialer-recent-note-preview" data-log-note-preview>{{ $displayNote }}</span>
+        <div class="ghl-dialer-recent-contact">
+            @if ($leadName !== '')
+                <span class="ghl-dialer-recent-name">{{ $leadName }}</span>
+                @if ($leadContact !== '')
+                    <span class="ghl-dialer-recent-contact-name">{{ $leadContact }}</span>
+                @endif
+            @endif
+            <span class="ghl-dialer-recent-number">{{ $phoneDisplay }}</span>
+        </div>
+        <div class="ghl-dialer-recent-meta-row">
+            <span class="ghl-dialer-recent-meta">
+                <span class="ghl-dialer-recent-meta__time">{{ $timeAgo }}</span>
+                <span class="ghl-dialer-recent-meta__sep" aria-hidden="true">·</span>
+                <span class="ghl-dialer-recent-duration">{{ $durationLabel }}</span>
+                @if ($resultLabel !== '' && $resultLabel !== '—')
+                    <span class="ghl-dialer-recent-meta__sep" aria-hidden="true">·</span>
+                    <span class="ghl-dialer-recent-result">{{ $resultLabel }}</span>
+                @endif
+            </span>
+        </div>
+        @if ($showDispositionPreview || $showNotePreview || $showInCallNotesPreview)
+            <div class="ghl-dialer-recent-fields" data-log-fields>
+                @if ($showInCallNotesPreview)
+                    <p class="ghl-dialer-recent-field" data-log-notes-line>
+                        <span class="ghl-dialer-recent-field__label">Notes:</span>
+                        <span class="ghl-dialer-recent-field__value" data-log-notes-preview>{{ $inCallNotes }}</span>
+                    </p>
+                @endif
+                @if ($showNotePreview)
+                    <p class="ghl-dialer-recent-field" data-log-comment-line>
+                        <span class="ghl-dialer-recent-field__label">Comment:</span>
+                        <span class="ghl-dialer-recent-field__value" data-log-note-preview>{{ $displayNote }}</span>
+                    </p>
+                @endif
+                @if ($showDispositionPreview)
+                    <p class="ghl-dialer-recent-field ghl-dialer-recent-field--disposition" data-log-disposition-line>
+                        <span class="ghl-dialer-recent-field__label">Disposition:</span>
+                        <span class="ghl-dialer-recent-field__value" data-log-disposition>{{ $dispositionLabel }}</span>
+                    </p>
+                @endif
+            </div>
         @endif
     </div>
     <div class="ghl-dialer-recent-actions">
@@ -93,7 +190,7 @@
                     <line x1="16" y1="17" x2="8" y2="17" />
                 </svg>
             </button>
-            <button type="button" class="ch-btn ch-btn--secondary ch-btn--sm"
+            <button type="button" class="ghl-dialer-recent-call-btn"
                 data-dial-number="{{ $callbackPhone }}">Call</button>
         @endif
     </div>

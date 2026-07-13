@@ -25,8 +25,11 @@ const ACTION_COPY = {
         tone: 'warning',
         confirmLabel: 'Update role',
         message: (name, form) => {
-            const select = form?.querySelector('[name="role"]');
-            const label = select?.selectedOptions?.[0]?.textContent?.trim() || 'the new role';
+            const select = form?.querySelector('[name="role"], [data-member-role-select]');
+            const label =
+                form?.dataset.pendingRoleLabel ||
+                select?.selectedOptions?.[0]?.textContent?.trim() ||
+                'the new role';
 
             return `Change ${name}'s role to ${label}?`;
         },
@@ -115,6 +118,20 @@ function openConfirmModal(form) {
         return;
     }
 
+    if (action === 'role') {
+        const select = form.querySelector('[name="role"], [data-member-role-select]');
+        if (select?.value) {
+            if (!form.dataset.originalRole) {
+                form.dataset.originalRole = select.dataset.initialRole || select.value;
+            }
+            form.dataset.pendingRole = form.dataset.pendingRole || select.value;
+            form.dataset.pendingRoleLabel =
+                form.dataset.pendingRoleLabel ||
+                select.selectedOptions?.[0]?.textContent?.trim() ||
+                select.value;
+        }
+    }
+
     const name = form.dataset.memberName || 'this member';
     pendingForm = form;
 
@@ -128,10 +145,25 @@ function openConfirmModal(form) {
     document.body.classList.add('member-confirm-open');
 }
 
-function closeConfirmModal() {
+function closeConfirmModal({ revertRole = true } = {}) {
     const modal = getModal();
     if (!modal) {
         return;
+    }
+
+    // If user cancels a role change, restore the previously saved role on the row.
+    if (revertRole && pendingForm?.dataset.memberAction === 'role') {
+        const select = pendingForm.querySelector('[name="role"], [data-member-role-select]');
+        const original = pendingForm.dataset.originalRole;
+        if (select && original) {
+            select.value = original;
+            Array.from(select.options).forEach((option) => {
+                option.selected = option.value === original;
+            });
+            syncRoleDropdownFromSelect(select);
+        }
+        delete pendingForm.dataset.pendingRole;
+        delete pendingForm.dataset.pendingRoleLabel;
     }
 
     modal.hidden = true;
@@ -154,7 +186,25 @@ function flashMemberRow(form) {
 async function submitMemberForm(form) {
     const name = form.dataset.memberName || 'Member';
     const row = form.closest('.member-row');
-    const method = (form.querySelector('[name="_method"]')?.value || form.method || 'POST').toUpperCase();
+    const methodInput = form.querySelector('[name="_method"]');
+    const formData = new FormData(form);
+
+    // Always POST when method-spoofing so role/password updates hit Laravel reliably.
+    const fetchMethod = methodInput ? 'POST' : (form.method || 'POST').toUpperCase();
+
+    if (form.dataset.memberAction === 'role') {
+        const select = form.querySelector('[name="role"], [data-member-role-select]');
+        const roleValue = form.dataset.pendingRole || select?.value || '';
+        if (roleValue) {
+            formData.set('role', roleValue);
+            if (select) {
+                select.value = roleValue;
+                Array.from(select.options).forEach((option) => {
+                    option.selected = option.value === roleValue;
+                });
+            }
+        }
+    }
 
     if (row) {
         row.classList.add('member-row-busy');
@@ -164,8 +214,8 @@ async function submitMemberForm(form) {
 
     try {
         const response = await fetch(form.action, {
-            method: method === 'GET' ? 'POST' : method,
-            body: new FormData(form),
+            method: fetchMethod === 'GET' ? 'POST' : fetchMethod,
+            body: formData,
             headers: {
                 Accept: 'application/json',
                 'X-Requested-With': 'XMLHttpRequest',
@@ -189,6 +239,14 @@ async function submitMemberForm(form) {
         }
 
         if (form.dataset.memberAction === 'role') {
+            const select = form.querySelector('[name="role"], [data-member-role-select]');
+            if (select) {
+                select.dataset.initialRole = form.dataset.pendingRole || select.value;
+            }
+            delete form.dataset.pendingRole;
+            delete form.dataset.pendingRoleLabel;
+            delete form.dataset.originalRole;
+            showToast(payload.message || `${name} updated.`, 'success');
             window.setTimeout(() => window.location.reload(), 500);
             row?.classList.remove('member-row-busy');
             return;
@@ -591,6 +649,11 @@ function filterModuleTickItems(form, role) {
         } else {
             input.disabled = false;
         }
+    });
+
+    list.querySelectorAll('.um-module-section').forEach((section) => {
+        const hasVisibleItems = section.querySelector('.um-module-tick-item:not(.hidden)');
+        section.classList.toggle('hidden', !hasVisibleItems);
     });
 
     syncModuleAccessModeInput(form);
@@ -1042,7 +1105,7 @@ function bindConfirmModal() {
 
         pendingForm.dataset.confirmed = '1';
         const form = pendingForm;
-        closeConfirmModal();
+        closeConfirmModal({ revertRole: false });
         submitMemberForm(form);
     });
 
@@ -1158,6 +1221,65 @@ function syncRoleDropdownFromSelect(select) {
     });
 }
 
+function clearRoleDropdownMenuPosition(menu) {
+    if (!menu) {
+        return;
+    }
+
+    menu.style.position = '';
+    menu.style.top = '';
+    menu.style.left = '';
+    menu.style.right = '';
+    menu.style.width = '';
+    menu.style.minWidth = '';
+    menu.style.maxWidth = '';
+    menu.style.zIndex = '';
+    menu.style.transform = '';
+}
+
+function positionRoleDropdownMenu(wrapper) {
+    const trigger = wrapper?.querySelector('.um-role-dropdown-trigger');
+    const menu = wrapper?.querySelector('.um-role-dropdown-menu');
+    if (!trigger || !menu || menu.hidden) {
+        return;
+    }
+
+    const gap = 6;
+    const edge = 8;
+    const triggerRect = trigger.getBoundingClientRect();
+    const preferredWidth = Math.min(Math.max(triggerRect.width, 220), window.innerWidth - edge * 2);
+
+    menu.style.position = 'fixed';
+    menu.style.zIndex = '12150';
+    menu.style.width = `${preferredWidth}px`;
+    menu.style.minWidth = `${Math.min(preferredWidth, 200)}px`;
+    menu.style.maxWidth = `calc(100vw - ${edge * 2}px)`;
+    menu.style.transform = 'none';
+    menu.style.right = 'auto';
+
+    let left = triggerRect.left;
+    if (left + preferredWidth > window.innerWidth - edge) {
+        left = Math.max(edge, window.innerWidth - edge - preferredWidth);
+    }
+    if (left < edge) {
+        left = edge;
+    }
+
+    let top = triggerRect.bottom + gap;
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+
+    requestAnimationFrame(() => {
+        const menuRect = menu.getBoundingClientRect();
+        if (menuRect.bottom > window.innerHeight - edge) {
+            const upTop = triggerRect.top - menuRect.height - gap;
+            if (upTop >= edge) {
+                menu.style.top = `${Math.round(upTop)}px`;
+            }
+        }
+    });
+}
+
 function closeRoleDropdown(wrapper) {
     if (!wrapper) {
         return;
@@ -1168,6 +1290,7 @@ function closeRoleDropdown(wrapper) {
     const menu = wrapper.querySelector('.um-role-dropdown-menu');
     if (menu) {
         menu.hidden = true;
+        clearRoleDropdownMenuPosition(menu);
     }
 }
 
@@ -1177,6 +1300,22 @@ function closeAllRoleDropdowns(except = null) {
             closeRoleDropdown(wrapper);
         }
     });
+}
+
+function applyRoleOptionSelection(select, nextValue) {
+    if (!select || !nextValue) {
+        return false;
+    }
+
+    const previousValue = select.value;
+    select.value = nextValue;
+    Array.from(select.options).forEach((option) => {
+        option.selected = option.value === nextValue;
+    });
+    syncRoleDropdownFromSelect(select);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+
+    return previousValue !== nextValue;
 }
 
 function bindRoleDropdowns() {
@@ -1195,6 +1334,10 @@ function bindRoleDropdowns() {
             return;
         }
 
+        if (!select.dataset.initialRole) {
+            select.dataset.initialRole = select.value;
+        }
+
         syncRoleDropdownFromSelect(select);
 
         trigger.addEventListener('click', (event) => {
@@ -1207,15 +1350,37 @@ function bindRoleDropdowns() {
             wrapper.classList.toggle('is-open', willOpen);
             trigger.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
             menu.hidden = !willOpen;
+
+            if (willOpen) {
+                positionRoleDropdownMenu(wrapper);
+            } else {
+                clearRoleDropdownMenuPosition(menu);
+            }
         });
 
         menu.querySelectorAll('[data-role-option]').forEach((button) => {
             button.addEventListener('click', (event) => {
                 event.preventDefault();
-                select.value = button.dataset.value || select.value;
-                syncRoleDropdownFromSelect(select);
+                event.stopPropagation();
+
+                const nextValue = button.dataset.value || '';
+                const previousValue = select.value;
+                const changed = applyRoleOptionSelection(select, nextValue);
                 closeRoleDropdown(wrapper);
-                select.dispatchEvent(new Event('change', { bubbles: true }));
+
+                if (!changed) {
+                    return;
+                }
+
+                const form = select.closest('form[data-member-action="role"]');
+                if (!form) {
+                    return;
+                }
+
+                form.dataset.originalRole = previousValue;
+                form.dataset.pendingRole = nextValue;
+                form.dataset.pendingRoleLabel = button.textContent.trim() || nextValue;
+                openConfirmModal(form);
             });
         });
     });
@@ -1232,6 +1397,18 @@ function bindRoleDropdowns() {
         }
 
         closeAllRoleDropdowns();
+    });
+
+    window.addEventListener('scroll', () => {
+        document.querySelectorAll('[data-role-dropdown].is-open').forEach((wrapper) => {
+            positionRoleDropdownMenu(wrapper);
+        });
+    }, true);
+
+    window.addEventListener('resize', () => {
+        document.querySelectorAll('[data-role-dropdown].is-open').forEach((wrapper) => {
+            positionRoleDropdownMenu(wrapper);
+        });
     });
 
     if (document.body.dataset.accessModeDropdownGlobalBound !== '1') {

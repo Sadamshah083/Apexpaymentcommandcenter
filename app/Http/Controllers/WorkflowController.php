@@ -163,6 +163,7 @@ class WorkflowController extends Controller
 
         return view('workflows.show', $this->workflowService->buildShowData($workflow, $workspace, [
             'refresh_enrichment' => request()->boolean('refresh_enrichment'),
+            'pool' => request()->input('pool'),
         ]));
     }
 
@@ -235,10 +236,14 @@ class WorkflowController extends Controller
         $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
         $this->workspaceContext->ensureWorkflowBelongsToWorkspace($workflow, $workspace);
 
-        $data = $request->validate([
-            'team_lead_id' => 'required|integer|exists:users,id',
-            'lead_count' => 'required|integer|min:1|max:500',
-        ]);
+        try {
+            $data = $request->validate([
+                'team_lead_id' => 'required|integer|exists:users,id',
+                'lead_count' => 'required|integer|min:1|max:5000',
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            return $this->assignLeadsResponse($request, false, $exception->getMessage(), $exception->errors());
+        }
 
         $teamLead = $workspace->users()
             ->where('users.id', $data['team_lead_id'])
@@ -247,35 +252,91 @@ class WorkflowController extends Controller
             ->first();
 
         if (! $teamLead) {
-            return redirect()->back()->withErrors(['team_lead_id' => 'Selected user is not an active team lead in this workspace.']);
+            return $this->assignLeadsResponse($request, false, 'Selected user is not an active team lead in this workspace.', [
+                'team_lead_id' => 'Selected user is not an active team lead in this workspace.',
+            ]);
         }
 
         if ($teamLead->getWorkspaceRole($workspace->id) !== WorkflowAssignmentRoles::setterTeamLeadRole()) {
-            return redirect()->back()->withErrors([
+            return $this->assignLeadsResponse($request, false, 'Enriched import leads must be assigned to an Appointment Setter Team Lead.', [
                 'team_lead_id' => 'Enriched import leads must be assigned to an Appointment Setter Team Lead. Closers Team Lead handles settled appointments.',
+            ]);
+        }
+
+        $setterCount = $workspace->users()
+            ->wherePivot('role', 'appointment_setter')
+            ->wherePivot('status', 'active')
+            ->count();
+
+        if ($setterCount === 0) {
+            return $this->assignLeadsResponse($request, false, 'No active appointment setters are available in this workspace.', [
+                'lead_count' => 'Add at least one active appointment setter before assigning leads.',
             ]);
         }
 
         $available = $this->setterDistribution->unassignedWorkflowLeadCount($workflow);
         if ($available === 0) {
-            return redirect()->back()->withErrors(['lead_count' => 'No unassigned enriched leads remain in this import.']);
+            return $this->assignLeadsResponse($request, false, 'No unassigned enriched leads remain in this import.', [
+                'lead_count' => 'No unassigned enriched leads remain in this import.',
+            ]);
         }
 
+        $requested = min((int) $data['lead_count'], $available);
         $assigned = $this->setterDistribution->assignWorkflowLeadsToTeamLead(
             $workspace,
             $workflow,
             $teamLead,
-            (int) $data['lead_count'],
+            $requested,
             Auth::user(),
         );
 
         if ($assigned === 0) {
-            return redirect()->back()->withErrors(['lead_count' => 'No leads could be assigned. Ensure active appointment setters exist on this team.']);
+            return $this->assignLeadsResponse($request, false, 'No leads could be assigned.', [
+                'lead_count' => 'No leads could be assigned. Ensure active appointment setters exist on this team.',
+            ]);
         }
 
-        return redirect()
-            ->back()
-            ->with('success', "Assigned {$assigned} lead(s) to {$teamLead->name}'s setter team.");
+        return $this->assignLeadsResponse(
+            $request,
+            true,
+            "Assigned {$assigned} lead(s) to {$teamLead->name}'s setter team.",
+            [],
+            $assigned,
+            $available - $assigned,
+        );
+    }
+
+    /**
+     * @param  array<string, string|list<string>>  $errors
+     */
+    protected function assignLeadsResponse(
+        Request $request,
+        bool $success,
+        string $message,
+        array $errors = [],
+        int $assigned = 0,
+        ?int $remaining = null,
+    ) {
+        if ($request->expectsJson()) {
+            if ($success) {
+                return response()->json([
+                    'message' => $message,
+                    'assigned' => $assigned,
+                    'remaining' => $remaining,
+                ]);
+            }
+
+            return response()->json([
+                'message' => $message,
+                'errors' => $errors,
+            ], 422);
+        }
+
+        if ($success) {
+            return redirect()->back()->with('success', $message);
+        }
+
+        return redirect()->back()->withErrors($errors);
     }
 
     public function pause(Workflow $workflow)

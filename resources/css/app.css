@@ -1,17 +1,15 @@
 @import 'tailwindcss';
-@import './communications-inbox.css';
-@import './comm-hub-atomic.css';
-@import './comm-hub-ui-polish.css';
-@import './comm-hub-ghl-theme.css';
 
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
 @source '../views/**/*.blade.php';
 
 @theme {
+    /* Windows 11 system typography (Segoe UI Variable) with cross-platform fallbacks */
     --font-sans:
-        'Instrument Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif, 'Apple Color Emoji',
-        'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+        'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont,
+        'Helvetica Neue', Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+        'Noto Color Emoji';
 
     --color-cream-50: #ffffff;
     --color-cream-100: #ffffff;
@@ -54,8 +52,8 @@
 
 .app-page-title {
     font-size: 1.625rem;
-    font-weight: 700;
-    color: #0f172a;
+    font-weight: 600;
+    color: #64748b;
     letter-spacing: -0.025em;
     line-height: 1.2;
 }
@@ -1315,10 +1313,10 @@ body.app-sidebar-collapsed .app-sidebar-edge-toggle {
     overflow-y: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
-    padding: 0.75rem 0.625rem;
+    padding: 0.5rem 0.625rem;
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: 0.15rem;
     transition: padding var(--app-sidebar-duration) var(--app-sidebar-ease);
 }
 
@@ -1335,14 +1333,14 @@ body.app-sidebar-collapsed .app-sidebar-edge-toggle {
 .sidebar-section-links {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: 0.1rem;
 }
 
 .sidebar-link {
     display: flex;
     align-items: center;
     gap: 0.65rem;
-    padding: 0.58rem 0.7rem;
+    padding: 0.4rem 0.7rem;
     border-radius: 0.625rem;
     border: 1px solid transparent;
     font-size: 0.8125rem;
@@ -1350,6 +1348,7 @@ body.app-sidebar-collapsed .app-sidebar-edge-toggle {
     line-height: 1.25;
     color: #64748b;
     text-decoration: none;
+    cursor: pointer;
     transition:
         background-color 0.15s ease,
         color 0.15s ease,
@@ -1365,10 +1364,17 @@ body.app-sidebar-collapsed .app-sidebar-edge-toggle {
     background: #f0fdf4;
     color: #047857;
     border-color: #bbf7d0;
+    cursor: pointer;
 }
 
 .sidebar-link:hover .sidebar-link-icon {
     transform: scale(1.04);
+    color: #047857;
+    background: #ecfdf5;
+}
+
+.sidebar-link:hover .sidebar-link-label {
+    color: #047857;
 }
 
 .sidebar-link:focus-visible {
@@ -1795,6 +1801,32 @@ body.app-sidebar-collapsed .app-sidebar-header {
         margin-inline: auto;
         padding: 0.5rem;
         gap: 0;
+        position: relative;
+        cursor: pointer;
+    }
+
+    /* Show label text beside icon on hover when sidebar is collapsed */
+    body.app-sidebar-collapsed .sidebar-link:hover .sidebar-link-label,
+    body.app-sidebar-collapsed .sidebar-link:focus-visible .sidebar-link-label {
+        opacity: 1;
+        max-width: 12rem;
+        min-height: auto;
+        pointer-events: none;
+        position: absolute;
+        left: calc(100% + 0.55rem);
+        top: 50%;
+        transform: translateY(-50%);
+        margin: 0;
+        padding: 0.4rem 0.65rem;
+        border-radius: 0.5rem;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 6px 18px rgba(15, 23, 42, 0.1);
+        color: #64748b;
+        font-size: 0.75rem;
+        font-weight: 600;
+        white-space: nowrap;
+        z-index: 80;
     }
 
     body.app-sidebar-collapsed .sidebar-link-icon {
@@ -2404,13 +2436,13 @@ html.sidebar-transitions-ready .app-main {
     position: fixed;
     top: 0;
     left: 0;
-    height: 2px;
-    background: linear-gradient(90deg, #6366f1, #3b82f6, #22d3ee);
+    height: 3px;
+    background: linear-gradient(90deg, #122e53, #3b82f6, #22d3ee);
     z-index: 10000;
     transition:
-        width 80ms linear,
-        opacity 160ms ease-in;
-    box-shadow: 0 0 10px rgba(99, 102, 241, 0.4);
+        width 50ms linear,
+        opacity 120ms ease-in;
+    box-shadow: 0 0 8px rgba(59, 130, 246, 0.35);
 }
 
 html {
@@ -5068,6 +5100,384 @@ body.member-confirm-open {
     transform: rotate(90deg);
 }
 
+/* Import leads create page */
+.import-create-page {
+    color: #64748b;
+}
+
+.import-create-page .app-page-title {
+    font-weight: 400 !important;
+    color: #64748b !important;
+}
+
+.import-campaign-dropdown {
+    position: relative;
+    width: 100%;
+}
+
+.import-campaign-dropdown__native {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.import-campaign-dropdown__trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    width: 100%;
+    min-height: 2.85rem;
+    padding: 0.7rem 0.95rem;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 0.5rem;
+    background: #ffffff;
+    color: #64748b;
+    font-size: 0.875rem;
+    font-weight: 400;
+    line-height: 1.3;
+    text-align: left;
+    cursor: pointer;
+    transition:
+        border-color 0.14s ease,
+        box-shadow 0.14s ease,
+        background-color 0.14s ease;
+}
+
+.import-campaign-dropdown__trigger:hover {
+    border-color: #6ee7b7;
+    background: #f0fdf4;
+}
+
+.import-campaign-dropdown.is-open .import-campaign-dropdown__trigger {
+    border-color: #34d399;
+    background: #ffffff;
+    box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18);
+}
+
+.import-campaign-dropdown__value {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.import-campaign-dropdown__chevron {
+    width: 1.05rem;
+    height: 1.05rem;
+    flex-shrink: 0;
+    color: #047857;
+    transition: transform 0.15s ease;
+}
+
+.import-campaign-dropdown.is-open .import-campaign-dropdown__chevron {
+    transform: rotate(180deg);
+}
+
+.import-campaign-dropdown__menu {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    max-height: 16rem;
+    overflow-y: auto;
+    padding: 0.4rem;
+    border: 1.5px solid #6ee7b7;
+    border-radius: 0.65rem;
+    background: #ffffff;
+    box-shadow:
+        0 10px 28px rgba(15, 23, 42, 0.08),
+        0 2px 6px rgba(16, 185, 129, 0.08);
+}
+
+.import-campaign-dropdown__menu[hidden] {
+    display: none !important;
+}
+
+.import-campaign-dropdown__option {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-height: 2.35rem;
+    padding: 0.55rem 0.75rem;
+    border: none;
+    border-radius: 0.45rem;
+    background: transparent;
+    color: #64748b;
+    font-size: 0.875rem;
+    font-weight: 400;
+    text-align: left;
+    cursor: pointer;
+    transition:
+        background-color 0.12s ease,
+        color 0.12s ease;
+}
+
+.import-campaign-dropdown__option:hover {
+    background: #ecfdf5;
+    color: #065f46;
+}
+
+.import-campaign-dropdown__option.is-selected {
+    background: #d1fae5;
+    color: #047857;
+    font-weight: 500;
+}
+
+.import-campaign-dropdown__option.is-selected:hover {
+    background: #a7f3d0;
+}
+
+.import-campaign-dropdown__option--create {
+    margin-top: 0.15rem;
+    border-top: 1px solid #e2e8f0;
+    border-radius: 0 0 0.45rem 0.45rem;
+    color: #047857;
+}
+
+.import-campaign-dropdown__option--create:hover,
+.import-campaign-dropdown__option--create.is-selected {
+    background: #ecfdf5;
+    color: #065f46;
+}
+
+.import-campaign-dropdown__option-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.import-create-page .app-input {
+    border: 1.5px solid #e2e8f0 !important;
+    border-radius: 0.5rem !important;
+    min-height: 2.65rem;
+    color: #64748b !important;
+    font-weight: 400 !important;
+    background-color: #ffffff !important;
+}
+
+.import-create-page .app-input:hover {
+    border-color: #6ee7b7 !important;
+}
+
+.import-create-page .app-input:focus {
+    border-color: #34d399 !important;
+    box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18) !important;
+    outline: none !important;
+}
+
+.import-upload-zone {
+    border: 1.5px dashed #cbd5e1 !important;
+    border-radius: 0.5rem !important;
+    background: #f8fafc !important;
+}
+
+.import-upload-zone:hover {
+    border-color: #6ee7b7 !important;
+    background: #ecfdf5 !important;
+}
+
+.import-upload-zone__title {
+    margin: 0;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #64748b;
+}
+
+.import-upload-zone__hint {
+    margin: 0;
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: #94a3b8;
+}
+
+.app-shell .import-create-page .app-btn-primary,
+.import-create-page .app-btn-primary {
+    background: #d1fae5 !important;
+    border: 1.5px solid #6ee7b7 !important;
+    color: #047857 !important;
+    border-radius: 0.5rem !important;
+    font-weight: 500 !important;
+    box-shadow: none !important;
+    min-height: 2.75rem;
+}
+
+.app-shell .import-create-page .app-btn-primary:hover:not(:disabled),
+.import-create-page .app-btn-primary:hover:not(:disabled) {
+    background: #a7f3d0 !important;
+    border-color: #34d399 !important;
+    color: #065f46 !important;
+}
+
+/* Pretty custom selects (mapping + reusable) */
+.pretty-select {
+    position: relative;
+    width: 100%;
+}
+
+.pretty-select__native {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+}
+
+.pretty-select__trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.65rem;
+    width: 100%;
+    min-height: 2.65rem;
+    padding: 0.55rem 0.85rem;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 0.5rem;
+    background: #ffffff;
+    color: #64748b;
+    font-size: 0.875rem;
+    font-weight: 400;
+    text-align: left;
+    cursor: pointer;
+    transition:
+        border-color 0.14s ease,
+        box-shadow 0.14s ease,
+        background-color 0.14s ease;
+}
+
+.pretty-select__trigger:hover {
+    border-color: #6ee7b7;
+    background: #f0fdf4;
+}
+
+.pretty-select.is-open .pretty-select__trigger {
+    border-color: #34d399;
+    box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18);
+    background: #ffffff;
+}
+
+.pretty-select__value {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pretty-select__chevron {
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+    color: #047857;
+    transition: transform 0.15s ease;
+}
+
+.pretty-select.is-open .pretty-select__chevron {
+    transform: rotate(180deg);
+}
+
+.pretty-select__menu {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    max-height: 15rem;
+    overflow-y: auto;
+    padding: 0.35rem;
+    border: 1.5px solid #6ee7b7;
+    border-radius: 0.65rem;
+    background: #ffffff;
+    box-shadow:
+        0 10px 28px rgba(15, 23, 42, 0.08),
+        0 2px 6px rgba(16, 185, 129, 0.08);
+}
+
+.pretty-select__menu[hidden] {
+    display: none !important;
+}
+
+.pretty-select__option {
+    display: block;
+    width: 100%;
+    min-height: 2.2rem;
+    padding: 0.45rem 0.7rem;
+    border: none;
+    border-radius: 0.4rem;
+    background: transparent;
+    color: #64748b;
+    font-size: 0.8125rem;
+    font-weight: 400;
+    text-align: left;
+    cursor: pointer;
+}
+
+.pretty-select__option:hover {
+    background: #ecfdf5;
+    color: #065f46;
+}
+
+.pretty-select__option.is-selected {
+    background: #d1fae5;
+    color: #047857;
+    font-weight: 500;
+}
+
+.pretty-select__option.is-selected:hover {
+    background: #a7f3d0;
+}
+
+/* Workflow show / mapping page green buttons */
+.workflow-show-page .app-page-title {
+    font-weight: 400 !important;
+    color: #64748b !important;
+}
+
+.app-shell .workflow-show-page .app-btn-primary,
+.workflow-show-page .app-btn-primary {
+    background: #d1fae5 !important;
+    border: 1.5px solid #6ee7b7 !important;
+    color: #047857 !important;
+    border-radius: 0.5rem !important;
+    font-weight: 500 !important;
+    box-shadow: none !important;
+}
+
+.app-shell .workflow-show-page .app-btn-primary:hover:not(:disabled),
+.workflow-show-page .app-btn-primary:hover:not(:disabled) {
+    background: #a7f3d0 !important;
+    border-color: #34d399 !important;
+    color: #065f46 !important;
+}
+
+.app-shell .workflow-show-page .app-btn-secondary,
+.workflow-show-page .app-btn-secondary {
+    background: #ffffff !important;
+    border: 1.5px solid #6ee7b7 !important;
+    color: #047857 !important;
+    border-radius: 0.5rem !important;
+    font-weight: 500 !important;
+}
+
+.app-shell .workflow-show-page .app-btn-secondary:hover,
+.workflow-show-page .app-btn-secondary:hover {
+    background: #ecfdf5 !important;
+    border-color: #34d399 !important;
+    color: #065f46 !important;
+}
+
+.workflow-show-page .app-progress-fill {
+    background: linear-gradient(90deg, #6ee7b7, #34d399) !important;
+}
+
 /* Import workflows — responsive table + mobile cards */
 .import-workflows-page {
     color: #64748b;
@@ -5160,6 +5570,17 @@ body.member-confirm-open {
 
 .import-workflow-stat-warning {
     color: #b45309;
+}
+
+.import-workflow-unassigned-link {
+    color: #b45309;
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.import-workflow-unassigned-link:hover {
+    color: #92400e;
 }
 
 .import-workflow-progress-text {
@@ -7148,6 +7569,47 @@ body.member-confirm-open {
     text-align: left;
 }
 
+#um-add-member-modal .um-add-member-panel {
+    display: flex;
+    flex-direction: column;
+    width: min(calc(100vw - 2rem), 36rem);
+    max-height: min(90dvh, 44rem);
+    overflow: hidden;
+    text-align: left;
+}
+
+#um-add-member-modal .um-add-member-form {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+#um-add-member-modal .um-add-member-form-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding-right: 0.125rem;
+}
+
+#um-add-member-modal .um-add-member-panel-header,
+#um-add-member-modal .um-add-member-actions {
+    flex-shrink: 0;
+}
+
+#um-add-member-modal .um-module-tick-list {
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+}
+
+#um-add-member-modal .create-member-modules {
+    margin-bottom: 0;
+}
+
 .um-add-member-panel-header {
     display: flex;
     align-items: flex-start;
@@ -7299,11 +7761,21 @@ html {
     scrollbar-gutter: stable;
 }
 
+body.ghl-comm-mode {
+    scrollbar-gutter: auto;
+}
+
+body.ghl-comm-mode html,
+html:has(body.ghl-comm-mode) {
+    scrollbar-gutter: auto;
+}
+
 .app-shell,
 .app-shell .app-content-shell,
 .app-shell .app-main {
     font-family: var(--font-sans);
     font-weight: 400;
+    font-synthesis: none;
     color: #64748b;
 }
 
@@ -7641,8 +8113,8 @@ html {
 }
 
 .um-role-dropdown.is-open .um-role-dropdown-trigger {
-    border-color: #93c5fd;
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+    border-color: #6ee7b7;
+    box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18);
     background: #ffffff;
 }
 
@@ -7665,7 +8137,7 @@ html {
 
 .um-role-dropdown.is-open .um-role-dropdown-chevron {
     transform: rotate(180deg);
-    color: #2563eb;
+    color: #047857;
 }
 
 .um-role-dropdown-menu {
@@ -7680,7 +8152,7 @@ html {
     max-height: 14rem;
     overflow-y: auto;
     padding: 0.25rem;
-    border: 1px solid #e2e8f0;
+    border: 1.5px solid #6ee7b7;
     border-radius: 0.5rem;
     background: #ffffff;
     box-shadow:
@@ -7711,17 +8183,17 @@ html {
 }
 
 .um-role-dropdown-option:hover {
-    background: #f1f5f9;
-    color: #334155;
+    background: #ecfdf5;
+    color: #065f46;
 }
 
 .um-role-dropdown-option.is-selected {
-    background: #eff6ff;
-    color: #2563eb;
+    background: #d1fae5;
+    color: #047857;
 }
 
 .um-role-dropdown-option.is-selected:hover {
-    background: #dbeafe;
+    background: #a7f3d0;
 }
 
 .um-members-table tr:has(.um-role-dropdown.is-open) {
@@ -8070,6 +8542,46 @@ html {
 
     #um-module-access-modal .um-module-check-desc {
         font-size: 0.6875rem;
+    }
+}
+
+@media (max-width: 1023px) {
+    #um-add-member-modal.member-confirm-modal {
+        align-items: flex-end;
+        padding: 0;
+    }
+
+    #um-add-member-modal .um-add-member-panel {
+        width: 100%;
+        max-width: none;
+        max-height: 92dvh;
+        border-radius: 1.25rem 1.25rem 0 0;
+        border-bottom: none;
+    }
+}
+
+@media (max-width: 639px) {
+    #um-add-member-modal .um-add-member-panel {
+        padding: 1.25rem 1rem;
+        max-height: 96dvh;
+    }
+
+    #um-add-member-modal .um-add-member-form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    #um-add-member-modal .um-add-member-actions {
+        flex-direction: column-reverse;
+        gap: 0.5rem;
+    }
+
+    #um-add-member-modal .um-add-member-actions .member-confirm-cancel,
+    #um-add-member-modal .um-add-member-actions .member-confirm-submit {
+        width: 100%;
+    }
+
+    #um-add-member-modal .um-module-tick-item {
+        padding: 0.5rem 0.625rem;
     }
 }
 
@@ -8967,6 +9479,142 @@ a.admin-dash-row:hover .admin-dash-row-label {
     font-size: 0.8125rem;
 }
 
+.campaigns-page .app-page-title {
+    font-weight: 400 !important;
+    color: #64748b !important;
+}
+
+.campaigns-page .app-btn,
+.campaigns-page .app-btn-primary,
+.campaigns-page .app-btn-secondary,
+.app-shell .campaigns-page .app-btn,
+.app-shell .campaigns-page .app-btn-primary,
+.app-shell .campaigns-page .app-btn-secondary {
+    border-radius: 0.5rem !important;
+    font-weight: 500 !important;
+    box-shadow: none !important;
+}
+
+.app-shell .campaigns-page .app-btn-primary,
+.campaigns-page .app-btn-primary {
+    background: #d1fae5 !important;
+    border: 1.5px solid #6ee7b7 !important;
+    color: #047857 !important;
+}
+
+.app-shell .campaigns-page .app-btn-primary:hover:not(:disabled),
+.campaigns-page .app-btn-primary:hover:not(:disabled) {
+    background: #a7f3d0 !important;
+    border-color: #34d399 !important;
+    color: #065f46 !important;
+}
+
+.app-shell .campaigns-page .app-btn-secondary,
+.campaigns-page .app-btn-secondary {
+    background: #ffffff !important;
+    border: 1.5px solid #6ee7b7 !important;
+    color: #047857 !important;
+}
+
+.app-shell .campaigns-page .app-btn-secondary:hover,
+.campaigns-page .app-btn-secondary:hover {
+    background: #ecfdf5 !important;
+    border-color: #34d399 !important;
+    color: #065f46 !important;
+}
+
+.campaigns-page .app-input:focus {
+    border-color: #6ee7b7 !important;
+    box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18) !important;
+}
+
+.campaigns-table-wrap {
+    border: 1px solid #e2e8f0;
+    border-radius: 0.75rem;
+    background: #ffffff;
+    overflow: hidden;
+}
+
+.campaigns-table-wrap .app-data-table-header {
+    padding: 0.85rem 1.05rem;
+    border-bottom: 1px solid #e2e8f0;
+    background: #ffffff;
+}
+
+.campaigns-table-wrap .app-data-table-title {
+    margin: 0;
+    font-size: 0.875rem;
+    font-weight: 400;
+    color: #64748b;
+}
+
+.campaigns-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.campaigns-table thead th {
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+    border-right: 1px solid #e2e8f0;
+    color: #64748b;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.65rem 0.85rem;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.campaigns-table thead th:last-child,
+.campaigns-table tbody td:last-child {
+    border-right: none;
+}
+
+.campaigns-table tbody td {
+    border-bottom: 1px solid #e2e8f0;
+    border-right: 1px solid #e2e8f0;
+    padding: 0.75rem 0.85rem;
+    font-size: 0.8125rem;
+    font-weight: 400;
+    color: #64748b;
+    vertical-align: middle;
+}
+
+.campaigns-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.campaigns-table tbody tr:hover {
+    background: #f8fafc;
+}
+
+.campaigns-table-name {
+    color: #64748b;
+    font-weight: 500;
+    text-decoration: none;
+}
+
+.campaigns-table-name:hover {
+    color: #047857;
+    text-decoration: underline;
+}
+
+.campaigns-table .col-leads,
+.campaigns-table .col-imports,
+.campaigns-table .col-enriched,
+.campaigns-table .col-assigned,
+.campaigns-table .col-failed {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.campaigns-table .col-action {
+    width: 1%;
+    white-space: nowrap;
+}
+
 .campaign-chip {
     display: inline-flex;
     align-items: center;
@@ -9003,8 +9651,8 @@ a.campaign-chip:hover {
 }
 
 .campaign-card:hover {
-    border-color: color-mix(in srgb, var(--color-brand-navy, #1e3a5f) 30%, #e2e8f0);
-    box-shadow: 0 4px 12px rgb(15 23 42 / 0.06);
+    border-color: #6ee7b7;
+    box-shadow: 0 4px 12px rgb(16 185 129 / 0.08);
 }
 
 .campaign-card-head {
@@ -9017,13 +9665,13 @@ a.campaign-chip:hover {
 
 .campaign-card-name {
     font-size: 0.9375rem;
-    font-weight: 700;
-    color: #0f172a;
+    font-weight: 500;
+    color: #64748b;
 }
 
 .campaign-card-count {
     font-size: 0.6875rem;
-    font-weight: 600;
+    font-weight: 500;
     color: #64748b;
     white-space: nowrap;
 }
@@ -9046,8 +9694,8 @@ a.campaign-chip:hover {
 .campaign-card-stats dd {
     margin: 0;
     font-size: 0.875rem;
-    font-weight: 700;
-    color: #334155;
+    font-weight: 500;
+    color: #64748b;
 }
 
 /* Server Monitoring */
@@ -9870,4 +10518,111 @@ a.admin-dash-stat-card:hover .admin-dash-stat-chevron {
 
 .dash-focus-clear:hover {
     background: rgba(255, 255, 255, 0.2);
+}
+
+/* ── User Management (/admin/workspaces) — match Communications Hub greens ── */
+#workspace-member-management .um-btn,
+body:has(#workspace-member-management) .member-confirm-modal .um-btn,
+body:has(#workspace-member-management) .member-confirm-modal .member-confirm-submit,
+body:has(#workspace-member-management) .member-confirm-modal .member-confirm-cancel {
+    border-radius: 0.5rem !important;
+    font-weight: 500 !important;
+    box-shadow: none !important;
+}
+
+/* Primary — light green fill + green border */
+#workspace-member-management .um-btn-primary,
+#workspace-member-management .um-btn-dark,
+#workspace-member-management .um-role-cell-form .um-btn.um-manage-btn,
+body:has(#workspace-member-management) .member-confirm-modal .member-confirm-submit,
+body:has(#workspace-member-management) .member-confirm-modal .um-btn-primary {
+    background: #d1fae5 !important;
+    border: 1.5px solid #6ee7b7 !important;
+    color: #047857 !important;
+}
+
+#workspace-member-management .um-btn-primary:hover,
+#workspace-member-management .um-btn-dark:hover,
+#workspace-member-management .um-role-cell-form .um-btn.um-manage-btn:hover,
+body:has(#workspace-member-management) .member-confirm-modal .member-confirm-submit:hover,
+body:has(#workspace-member-management) .member-confirm-modal .um-btn-primary:hover {
+    background: #a7f3d0 !important;
+    border-color: #34d399 !important;
+    color: #065f46 !important;
+}
+
+#workspace-member-management .um-role-cell-form .um-manage-btn-icon {
+    color: #047857 !important;
+}
+
+/* Secondary / ghost / soft — white + green border */
+#workspace-member-management .um-btn-ghost,
+#workspace-member-management .um-btn-soft,
+body:has(#workspace-member-management) .member-confirm-modal .member-confirm-cancel,
+body:has(#workspace-member-management) .member-confirm-modal .um-btn-ghost {
+    background: #ffffff !important;
+    border: 1.5px solid #6ee7b7 !important;
+    color: #047857 !important;
+}
+
+#workspace-member-management .um-btn-ghost:hover,
+#workspace-member-management .um-btn-soft:hover,
+body:has(#workspace-member-management) .member-confirm-modal .member-confirm-cancel:hover,
+body:has(#workspace-member-management) .member-confirm-modal .um-btn-ghost:hover {
+    background: #ecfdf5 !important;
+    border-color: #34d399 !important;
+    color: #065f46 !important;
+}
+
+/* Status action chips keep tint but use green-family borders where soft */
+#workspace-member-management .um-btn-warning-text {
+    background: #fffbeb !important;
+    border: 1.5px solid #fcd34d !important;
+    color: #b45309 !important;
+}
+
+#workspace-member-management .um-btn-success-text {
+    background: #ecfdf5 !important;
+    border: 1.5px solid #6ee7b7 !important;
+    color: #047857 !important;
+}
+
+#workspace-member-management .um-btn-danger-text {
+    background: #fff1f2 !important;
+    border: 1.5px solid #fecdd3 !important;
+    color: #be123c !important;
+}
+
+#workspace-member-management .um-manage-btn:hover,
+#workspace-member-management .um-manage-actions .um-details-inline > summary.um-btn:hover {
+    background: #ecfdf5 !important;
+    border-color: #34d399 !important;
+}
+
+/* Inputs / role triggers — soft green focus border */
+#workspace-member-management .um-input,
+#workspace-member-management .um-search-input,
+#workspace-member-management .um-role-dropdown-trigger,
+#workspace-member-management .um-module-picker-trigger {
+    border: 1.5px solid #e2e8f0 !important;
+    border-radius: 0.5rem !important;
+}
+
+#workspace-member-management .um-input:focus,
+#workspace-member-management .um-search-input:focus,
+#workspace-member-management .um-role-dropdown.is-open .um-role-dropdown-trigger,
+#workspace-member-management .um-module-picker.is-open .um-module-picker-trigger {
+    border-color: #6ee7b7 !important;
+    outline: none !important;
+    box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18) !important;
+}
+
+body:has(#workspace-member-management) .member-confirm-modal .um-input {
+    border: 1.5px solid #e2e8f0 !important;
+    border-radius: 0.5rem !important;
+}
+
+body:has(#workspace-member-management) .member-confirm-modal .um-input:focus {
+    border-color: #6ee7b7 !important;
+    box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18) !important;
 }

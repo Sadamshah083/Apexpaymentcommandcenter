@@ -327,9 +327,8 @@ class WorkspaceSyncService
                 ])
                 ->withCount([
                     'leads as assigned_leads_count' => fn ($query) => $query->whereNotNull('assigned_user_id'),
-                    'leads as ready_to_assign_count' => fn ($query) => $query
-                        ->where('status', 'enriched')
-                        ->whereNull('assigned_user_id'),
+                    'leads as enriched_leads_count' => fn ($query) => $query->where('status', 'enriched'),
+                    'leads as ready_to_assign_count' => fn ($query) => $query->readyToAssign(),
                 ])
                 ->limit((int) config('pagination.workflows_per_page', 8))
                 ->get();
@@ -338,9 +337,8 @@ class WorkspaceSyncService
         return $query
             ->withCount([
                 'leads as assigned_leads_count' => fn ($query) => $query->whereNotNull('assigned_user_id'),
-                'leads as ready_to_assign_count' => fn ($query) => $query
-                    ->where('status', 'enriched')
-                    ->whereNull('assigned_user_id'),
+                'leads as enriched_leads_count' => fn ($query) => $query->where('status', 'enriched'),
+                'leads as ready_to_assign_count' => fn ($query) => $query->readyToAssign(),
                 'leads as pending_verification_count' => fn ($query) => $query->where('status', 'pending_verification'),
                 'leads as imported_leads_count' => fn ($query) => $query->where('status', 'imported'),
                 'leads as extracting_leads_count' => fn ($query) => $query->where('status', 'extracting'),
@@ -655,7 +653,7 @@ class WorkspaceSyncService
 
     protected function serializeWorkflow(Workflow $workflow, bool $light = false): array
     {
-        $enriched = (int) ($workflow->enriched_leads ?? 0);
+        $enriched = (int) ($workflow->enriched_leads_count ?? $workflow->enriched_leads ?? 0);
         $failed = (int) ($workflow->failed_leads ?? 0);
         $attempted = $enriched + $failed;
 
@@ -668,6 +666,7 @@ class WorkspaceSyncService
             'processed_leads' => $workflow->processed_leads,
             'failed_leads' => $failed,
             'enriched_leads' => $enriched,
+            'enriched_leads_count' => $enriched,
             'attempted_leads' => $attempted,
             'completion_pct' => $workflow->total_leads > 0
                 ? (int) round(($attempted / $workflow->total_leads) * 100)

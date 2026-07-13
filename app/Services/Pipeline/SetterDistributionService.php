@@ -108,9 +108,7 @@ class SetterDistributionService
 
         $leads = WorkflowLead::query()
             ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspace->id))
-            ->where('status', 'enriched')
-            ->where('pipeline_phase', 'enriched')
-            ->whereNull('assigned_user_id')
+            ->readyToAssign()
             ->orderBy('row_number')
             ->limit($toAssign)
             ->get();
@@ -141,9 +139,7 @@ class SetterDistributionService
         $availableSlots = max(0, $cap - $this->setterActiveLoad($workspace, $setter->id));
         $poolSize = WorkflowLead::query()
             ->where('workflow_id', $workflow->id)
-            ->where('status', 'enriched')
-            ->where('pipeline_phase', 'enriched')
-            ->whereNull('assigned_user_id')
+            ->readyToAssign()
             ->count();
 
         $toAssign = min($count, $availableSlots, $poolSize);
@@ -153,9 +149,7 @@ class SetterDistributionService
 
         $leads = WorkflowLead::query()
             ->where('workflow_id', $workflow->id)
-            ->where('status', 'enriched')
-            ->where('pipeline_phase', 'enriched')
-            ->whereNull('assigned_user_id')
+            ->readyToAssign()
             ->orderBy('row_number')
             ->limit($toAssign)
             ->get();
@@ -181,6 +175,8 @@ class SetterDistributionService
             return 0;
         }
 
+        WorkflowLead::normalizeUnassignedForWorkflow($workflow->id);
+
         $setters = $workspace->users()
             ->wherePivot('role', 'appointment_setter')
             ->wherePivot('status', 'active')
@@ -199,9 +195,7 @@ class SetterDistributionService
 
         $leads = WorkflowLead::query()
             ->where('workflow_id', $workflow->id)
-            ->where('status', 'enriched')
-            ->where('pipeline_phase', 'enriched')
-            ->whereNull('assigned_user_id')
+            ->readyToAssign()
             ->orderBy('row_number')
             ->limit($toAssign)
             ->get();
@@ -243,9 +237,7 @@ class SetterDistributionService
         $query = WorkflowLead::query()
             ->where('campaign_id', $campaignId)
             ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspace->id))
-            ->where('status', 'enriched')
-            ->where('pipeline_phase', 'enriched')
-            ->whereNull('assigned_user_id');
+            ->readyToAssign();
 
         if ($workflowId) {
             $query->where('workflow_id', $workflowId);
@@ -273,11 +265,11 @@ class SetterDistributionService
 
     public function unassignedWorkflowLeadCount(Workflow $workflow): int
     {
+        WorkflowLead::normalizeUnassignedForWorkflow($workflow->id);
+
         return WorkflowLead::query()
             ->where('workflow_id', $workflow->id)
-            ->where('status', 'enriched')
-            ->where('pipeline_phase', 'enriched')
-            ->whereNull('assigned_user_id')
+            ->readyToAssign()
             ->count();
     }
 
@@ -285,9 +277,7 @@ class SetterDistributionService
     {
         return WorkflowLead::query()
             ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspace->id))
-            ->where('status', 'enriched')
-            ->where('pipeline_phase', 'enriched')
-            ->whereNull('assigned_user_id')
+            ->readyToAssign()
             ->count();
     }
 
@@ -298,9 +288,7 @@ class SetterDistributionService
                 $locked = WorkflowLead::lockForUpdate()->find($lead->id);
                 if (
                     ! $locked
-                    || $locked->assigned_user_id
-                    || $locked->pipeline_phase !== 'enriched'
-                    || $locked->status !== 'enriched'
+                    || ! WorkflowLead::query()->whereKey($locked->id)->readyToAssign()->exists()
                 ) {
                     return false;
                 }
@@ -504,9 +492,7 @@ class SetterDistributionService
 
         $remaining = WorkflowLead::query()
             ->where('workflow_id', $workflow->id)
-            ->where('status', 'enriched')
-            ->where('pipeline_phase', 'enriched')
-            ->whereNull('assigned_user_id')
+            ->readyToAssign()
             ->count();
 
         if ($remaining === 0) {

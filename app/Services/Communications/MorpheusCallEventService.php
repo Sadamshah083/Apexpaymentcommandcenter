@@ -80,7 +80,13 @@ class MorpheusCallEventService
         );
 
         $hangup = $this->payloadIndicatesHangup($payload, $eventName);
-        if (! $hangup && $bridgedTo !== null) {
+
+        // Real-time bridge/answer: bridged B-leg or explicit answer event.
+        if (! $hangup && $bridgedTo !== null && ($billsec >= 1 || $this->eventLooksLikeAnswer($eventName))) {
+            $destinationAnswered = true;
+        }
+
+        if (! $hangup && ! $destinationAnswered && $this->eventLooksLikeAnswer($eventName) && strlen($destinationDigits) >= 10) {
             $destinationAnswered = true;
         }
 
@@ -209,14 +215,22 @@ class MorpheusCallEventService
                 'hangup_cause' => $this->stringOrNull($state['hangup_cause'] ?? null),
                 'billsec' => isset($state['billsec']) ? (int) $state['billsec'] : null,
                 'destination_connected' => false,
+                'updated_at' => $state['updated_at'] ?? null,
                 'source' => 'webhook',
                 'webhook_event' => $state['event'] ?? null,
             ], fn ($value) => $value !== null);
         }
 
         $bridgedLive = $live && ! empty($state['bridged_to']);
-        if (! ($state['destination_answered'] ?? false) && ! $bridgedLive) {
-            return [];
+        // Only overlay "connected" when destination was actually answered — not merely bridged.
+        if (! ($state['destination_answered'] ?? false) && ! ($state['destination_connected'] ?? false)) {
+            return $bridgedLive ? array_filter([
+                'bridged_to' => $state['bridged_to'] ?? null,
+                'live' => true,
+                'outcome' => 'ringing',
+                'source' => 'webhook',
+                'webhook_event' => $state['event'] ?? null,
+            ], fn ($value) => $value !== null) : [];
         }
 
         return array_filter([
@@ -227,6 +241,7 @@ class MorpheusCallEventService
             'live' => true,
             'billsec' => $state['billsec'] ?? null,
             'bridged_to' => $state['bridged_to'] ?? null,
+            'updated_at' => $state['updated_at'] ?? null,
             'source' => 'webhook',
             'webhook_event' => $state['event'] ?? null,
         ], fn ($value) => $value !== null);
@@ -398,19 +413,21 @@ class MorpheusCallEventService
             }
         }
 
-        if ($sipCode === 200 && strlen($destinationDigits) >= 10) {
+        if ($sipCode === 200 && strlen($destinationDigits) >= 10 && $billsec >= 1) {
             return true;
         }
 
-        if ($billsec >= 1 && strlen($destinationDigits) >= 10) {
+        if ($billsec >= 1 && strlen($destinationDigits) >= 10 && $this->eventLooksLikeAnswer($eventName)) {
+            return true;
+        }
+
+        if ($billsec >= 2 && strlen($destinationDigits) >= 10) {
             return true;
         }
 
         if ($eventName !== '' && strlen($destinationDigits) >= 10) {
-            foreach (['answered', 'connected', 'bridge', 'active', 'talking', 'established', 'pickup', 'pick_up'] as $needle) {
-                if (str_contains($eventName, $needle) && ! str_contains($eventName, 'unanswered')) {
-                    return true;
-                }
+            if ($this->eventLooksLikeAnswer($eventName)) {
+                return true;
             }
 
             if (str_contains($eventName, 'ring_wait') || str_contains($eventName, 'ringing')) {
@@ -426,6 +443,26 @@ class MorpheusCallEventService
 
         if (in_array($callState, ['CONNECTED', 'ANSWERED', 'BRIDGED', 'ACTIVE', 'TALKING'], true)) {
             return true;
+        }
+
+        return false;
+    }
+
+    protected function eventLooksLikeAnswer(string $eventName): bool
+    {
+        $eventName = strtolower(trim($eventName));
+        if ($eventName === '') {
+            return false;
+        }
+
+        if (str_contains($eventName, 'unanswered') || str_contains($eventName, 'no_answer') || str_contains($eventName, 'ring')) {
+            return false;
+        }
+
+        foreach (['channel_answer', 'channel_bridge', 'answered', 'connected', 'bridged', 'active', 'talking', 'established', 'pickup', 'pick_up', 'callee_answer', 'destination_answer'] as $needle) {
+            if (str_contains($eventName, $needle)) {
+                return true;
+            }
         }
 
         return false;

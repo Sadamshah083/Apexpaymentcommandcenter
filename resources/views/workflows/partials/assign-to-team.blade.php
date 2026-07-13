@@ -2,7 +2,7 @@
     use App\Support\SalesOps;
     use App\Support\WorkflowAssignmentRoles;
 
-    $readyCount = $readyToDistribute ?? 0;
+    $readyCount = (int) ($workflow->ready_to_assign_count ?? $workflow->ready_to_distribute_count ?? $readyToDistribute ?? 0);
     $totalLeads = (int) ($workflow->total_leads ?? 0);
     $assignedCount = (int) ($workflow->assigned_leads_count ?? max(0, $totalLeads - $readyCount));
     $teamLeads = $teamLeads ?? collect();
@@ -36,7 +36,7 @@
                     <p class="text-lg font-bold text-emerald-700">{{ number_format($assignedCount) }}</p>
                 </div>
                 <div class="rounded-lg bg-white/80 border border-indigo-100 px-3 py-2">
-                    <p class="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Remaining</p>
+                    <p class="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Unassigned</p>
                     <p class="text-lg font-bold text-amber-700">{{ number_format($readyCount) }}</p>
                 </div>
             </div>

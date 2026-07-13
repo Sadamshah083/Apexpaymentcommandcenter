@@ -1,8 +1,10 @@
 import { Inviter, Registerer, RegistererState, SessionState, UserAgent } from 'sip.js';
 import { hideLoadingOverlay } from './form-loading.js';
-import { showToast, showCommToast } from './toast.js';
+import { showToast, showCommToast, usesCallSummaryFlow } from './toast.js';
 
 const STORAGE_KEY = 'communications.webphone_extension';
+/** Auto-end unanswered outbound rings and open Call Summary after 1 min 10 sec. */
+const RING_NO_ANSWER_TIMEOUT_MS = 70_000;
 
 let singleton = null;
 
@@ -159,6 +161,9 @@ class ApexWebphone {
         this.audioContext = null;
         this.ringtoneInterval = null;
         this.ringbackInterval = null;
+        this._activeRingNodes = [];
+        this._ringtoneStopped = true;
+        this._ringbackStopped = true;
         this.outboundWaitingActive = false;
         this.currentCallDirection = null;
         this.currentCallPeer = '';
@@ -179,11 +184,17 @@ class ApexWebphone {
         this.outboundDialInProgress = false;
         this.customerFirstOutbound = false;
         this.outboundDialStartedAt = 0;
+        this.agentLegEstablishedAt = 0;
         this.callOnHold = false;
         this._lastPollSnapshot = '';
         this._lastSeenPstnBillsec = 0;
         this._remoteAnswerWatcher = null;
+        this._callEndedDispatched = false;
+        this._pendingCallEndMeta = null;
+        this._ringNoAnswerTimeoutFired = false;
+        this._rtpGrowthFrames = 0;
         this._liveTrackWatcher = null;
+        this._voiceEnergyWatcher = null;
         this._remoteAnswerAnalyser = null;
         this._remoteAnswerSource = null;
         this._voiceEnergyFrames = 0;
@@ -330,13 +341,12 @@ class ApexWebphone {
     }
 
     startRingtone() {
-        if (this.ringtoneInterval) {
-            return;
-        }
+        this.stopRingtone();
+        this.stopRingback();
 
         const playBurst = async () => {
             const context = await this.ensureAudioContext();
-            if (!context) {
+            if (!context || this._ringtoneStopped) {
                 return;
             }
 
@@ -345,6 +355,7 @@ class ApexWebphone {
             gain.gain.exponentialRampToValueAtTime(0.42, context.currentTime + 0.03);
             gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.95);
             gain.connect(context.destination);
+            this._activeRingNodes.push(gain);
 
             [880, 988, 1175].forEach((frequency, index) => {
                 const oscillator = context.createOscillator();
@@ -353,9 +364,11 @@ class ApexWebphone {
                 oscillator.connect(gain);
                 oscillator.start(context.currentTime + index * 0.18);
                 oscillator.stop(context.currentTime + 0.95);
+                this._activeRingNodes.push(oscillator);
             });
         };
 
+        this._ringtoneStopped = false;
         playBurst().catch(() => {});
         this.ringtoneInterval = window.setInterval(() => {
             playBurst().catch(() => {});
@@ -363,28 +376,30 @@ class ApexWebphone {
     }
 
     stopRingtone() {
-        if (!this.ringtoneInterval) {
-            return;
+        this._ringtoneStopped = true;
+
+        if (this.ringtoneInterval) {
+            window.clearInterval(this.ringtoneInterval);
+            this.ringtoneInterval = null;
         }
 
-        window.clearInterval(this.ringtoneInterval);
-        this.ringtoneInterval = null;
+        this.stopActiveRingNodes();
     }
 
     startRingback() {
-        if (this.ringbackInterval) {
-            return;
-        }
+        this.stopRingtone();
+        this.stopRingback();
 
         this.outboundWaitingActive = true;
+        this._ringbackStopped = false;
 
         const playOutboundRing = async () => {
-            if (!this.outboundWaitingActive) {
+            if (!this.outboundWaitingActive || this._ringbackStopped) {
                 return;
             }
 
             const context = await this.ensureAudioContext();
-            if (!context) {
+            if (!context || this._ringbackStopped) {
                 return;
             }
 
@@ -395,8 +410,9 @@ class ApexWebphone {
             master.gain.setValueAtTime(0.3, start + 1.95);
             master.gain.exponentialRampToValueAtTime(0.0001, start + 2.05);
             master.connect(context.destination);
+            this._activeRingNodes.push(master);
 
-            // Classic phone ringback (iPhone-style waiting tone): 440 Hz + 480 Hz, 2s on / 4s off.
+            // Classic phone ringback: 440 Hz + 480 Hz, 2s on / 4s off.
             [440, 480].forEach((frequency) => {
                 const osc = context.createOscillator();
                 osc.type = 'sine';
@@ -404,6 +420,7 @@ class ApexWebphone {
                 osc.connect(master);
                 osc.start(start);
                 osc.stop(start + 2.05);
+                this._activeRingNodes.push(osc);
             });
         };
 
@@ -415,18 +432,47 @@ class ApexWebphone {
 
     stopRingback() {
         this.outboundWaitingActive = false;
+        this._ringbackStopped = true;
 
-        if (!this.ringbackInterval) {
-            return;
+        if (this.ringbackInterval) {
+            window.clearInterval(this.ringbackInterval);
+            this.ringbackInterval = null;
         }
 
-        window.clearInterval(this.ringbackInterval);
-        this.ringbackInterval = null;
+        this.stopActiveRingNodes();
+    }
+
+    stopActiveRingNodes() {
+        const nodes = this._activeRingNodes || [];
+        this._activeRingNodes = [];
+        nodes.forEach((node) => {
+            try {
+                if (typeof node.stop === 'function') {
+                    node.stop();
+                }
+            } catch {
+                // already stopped
+            }
+            try {
+                node.disconnect?.();
+            } catch {
+                // already disconnected
+            }
+        });
     }
 
     stopAllLocalRingers() {
         this.stopRingtone();
         this.stopRingback();
+    }
+
+    setRemoteAudioMuted(muted) {
+        const remoteAudio = this.ui?.remoteAudio;
+        if (!remoteAudio) {
+            return;
+        }
+
+        remoteAudio.muted = Boolean(muted);
     }
 
     peerDigits(value) {
@@ -435,7 +481,9 @@ class ApexWebphone {
 
     destinationMatchesPeer(data) {
         const peerDigits = this.peerDigits(this.currentCallPeer);
-        const snapDigits = this.peerDigits(data?.destination_number || data?.to || '');
+        const snapDigits = this.peerDigits(
+            data?.destination_number || data?.phone_number || data?.to || '',
+        );
 
         if (peerDigits.length < 10 || snapDigits.length < 10) {
             return false;
@@ -475,24 +523,43 @@ class ApexWebphone {
         const billsec = Number(data.billsec ?? 0);
         const destMatches = this.destinationMatchesPeer(data);
         const answeredState = ['CONNECTED', 'ANSWERED', 'BRIDGED', 'ACTIVE'].includes(remoteState);
-        const hasAnswerTime = Boolean(data.answer_time);
+        const hasAnswerTime = Boolean(data.answer_time || data.answered_at || data.destination_answer_time);
+        const fromActiveDestProbe =
+            String(data.source || '') === 'active_calls_destination'
+            || String(data.source || '') === 'active_calls';
 
         if (billsec > this._lastSeenPstnBillsec) {
             this._lastSeenPstnBillsec = billsec;
         }
 
+        // Only promote on clear destination signals — never on agent-leg billsec alone.
         const destinationConnected =
             data.destination_connected === true
             || data.destination_answered === true
             || data.outcome === 'connected'
-            || (remoteState === 'ACTIVE' && data.live !== false && (destMatches || this.awaitingDestinationBridge))
-            || (answeredState && (destMatches || this.awaitingDestinationBridge))
-            || (this.awaitingDestinationBridge && data.live !== false && billsec >= 1 && !data.hangup_cause)
-            || (data.live && destMatches && hasAnswerTime && billsec >= 1)
-            || (data.live && destMatches && billsec >= 2 && !data.hangup_cause)
-            || (data.live && destMatches && this._lastSeenPstnBillsec >= 2 && !data.hangup_cause);
+            || (fromActiveDestProbe && answeredState && data.live !== false && !data.hangup_cause)
+            || (answeredState && destMatches && billsec >= 1 && data.live !== false && !data.hangup_cause)
+            || (data.live && destMatches && hasAnswerTime && billsec >= 1 && !data.hangup_cause)
+            || (
+                answeredState
+                && data.live !== false
+                && !data.hangup_cause
+                && Boolean(data.phone_number || data.destination_number)
+                && (
+                    destMatches
+                    || this.peerDigits(data.phone_number || data.destination_number || '').length >= 10
+                )
+                && fromActiveDestProbe
+            );
 
         if (destinationConnected) {
+            this._serverConfirmedDestination = true;
+            if (!this.currentCallPeer && (data.to || data.destination_number || data.phone_number)) {
+                this.setCallContext(
+                    this.currentCallDirection || 'outbound',
+                    data.to || data.destination_number || data.phone_number,
+                );
+            }
             this.markDestinationConnected({ source });
 
             return true;
@@ -506,38 +573,77 @@ class ApexWebphone {
             return false;
         }
 
+        const cause = data.hangup_cause ? String(data.hangup_cause) : '';
+        const billsec = Number(data.billsec ?? 0);
+        const elapsed = Date.now() - (this.outboundDialStartedAt || Date.now());
+        const bridging = this.awaitingDestinationBridge || this.clickToCallActive;
+        const connectedAlready =
+            this._serverConfirmedDestination
+            && (
+                this.timerPhase === 'connected'
+                || (this.state === 'in-call' && !this.awaitingDestinationBridge)
+            );
+
+        // After both sides connected — honor remote hangup immediately.
+        if (connectedAlready) {
+            if (data.call_ended === true || data.outcome === 'ended') {
+                return true;
+            }
+            if (data.live === false || (cause && data.live === false)) {
+                return true;
+            }
+            if (!data.live && cause) {
+                return true;
+            }
+
+            return false;
+        }
+
+        // Still waiting for destination to pick up: keep ringing.
+        // Agent-leg CDR/webhooks often report NORMAL_CLEARING / call_ended while
+        // Morpheus is still dialing the PSTN B-leg — hanging up here kills the ring.
+        // Also treat UI-only "connected" (webrtc false positive) as still bridging.
+        const stillBridging =
+            bridging
+            || this.clickToCallActive
+            || (
+                this.currentCallDirection === 'outbound'
+                && !this.directDialActive
+                && !this._serverConfirmedDestination
+                && ['dialing', 'ringing', 'in-call'].includes(this.state)
+            );
+
+        if (stillBridging) {
+            const hardFail = ['UNALLOCATED_NUMBER', 'NO_ROUTE_DESTINATION', 'SUBSCRIBER_ABSENT'];
+            const softFail = ['USER_BUSY', 'NO_ANSWER', 'NO_USER_RESPONSE', 'CALL_REJECTED'];
+
+            if (hardFail.includes(cause) && elapsed >= 2500) {
+                return true;
+            }
+
+            // Soft fails only after the destination had time to actually ring.
+            if (softFail.includes(cause) && elapsed >= 12_000) {
+                return true;
+            }
+
+            // Real PSTN talk time then hangup.
+            if ((data.call_ended === true || data.live === false) && billsec >= 15) {
+                return true;
+            }
+
+            // Absolute bridge timeout.
+            if (elapsed >= 90_000 && (data.call_ended === true || data.live === false || cause)) {
+                return true;
+            }
+
+            return false;
+        }
+
         if (data.call_ended === true || data.outcome === 'ended') {
             return true;
         }
 
-        if (!data.live && data.hangup_cause) {
-            const cause = String(data.hangup_cause);
-            const billsec = Number(data.billsec ?? 0);
-            const elapsed = Date.now() - (this.outboundDialStartedAt || Date.now());
-
-            if (this.state === 'in-call' && !this.awaitingDestinationBridge) {
-                return billsec >= 1 || cause === 'NORMAL_CLEARING';
-            }
-
-            if (this.awaitingDestinationBridge || this.clickToCallActive) {
-                const transientCauses = [
-                    'NO_ROUTE_DESTINATION',
-                    'NO_USER_RESPONSE',
-                    'ORIGINATOR_CANCEL',
-                    'USER_BUSY',
-                    'CALL_REJECTED',
-                ];
-
-                if (
-                    this.clickToCallActive
-                    && billsec < 15
-                    && elapsed < 120_000
-                    && (this.customerFirstOutbound || transientCauses.includes(cause) || cause === 'NORMAL_CLEARING')
-                ) {
-                    return false;
-                }
-            }
-
+        if (!data.live && cause) {
             return true;
         }
 
@@ -549,16 +655,57 @@ class ApexWebphone {
             return;
         }
 
-        this.remoteHangupHandled = true;
-        this.userInitiatedHangup = true;
+        const hangupCause = data.hangup_cause ? String(data.hangup_cause) : '';
+        const bridgingOutbound =
+            !this.directDialActive
+            && this.currentCallDirection === 'outbound'
+            && (
+                this.awaitingDestinationBridge
+                || this.clickToCallActive
+                || this.pendingClickToCall
+            )
+            && !this._serverConfirmedDestination
+            && !this.userInitiatedHangup;
 
+        // False "ended" while Morpheus is still connecting the agent / dialing PSTN.
+        // Destroying the SIP session here is what stopped the destination from ringing.
+        if (bridgingOutbound && source !== 'user' && !String(source).includes('hangup-btn') && source !== 'end-call-btn') {
+            this.logPhone('info', 'Ignored remote hangup while destination bridge in progress', {
+                source,
+                hangup_cause: hangupCause || null,
+                uuid: this.originateCallUuid,
+                state: this.state,
+            });
+
+            return;
+        }
+
+        this.remoteHangupHandled = true;
+        const wasOnCall = ['dialing', 'ringing', 'in-call'].includes(this.state);
+        const endedPhone = this.currentCallPeer || this.lastDialedDestination || '';
+        const endedUuid = this.hangupCallUuid();
+
+        // Instantly restore dial pad so the UI never stays stuck on the ringing card.
         this.flushCallUiInstant();
+        this.restoreDialerAfterCall();
+        const wasConnected = this.timerPhase === 'connected' || this.state === 'in-call' || this._serverConfirmedDestination;
+        const durationSec = wasConnected && this.callStartedAt && this.timerPhase === 'connected'
+            ? Math.max(0, Math.floor((Date.now() - this.callStartedAt) / 1000))
+            : 0;
+        this._pendingCallEndMeta = {
+            connected: wasConnected,
+            result: wasConnected ? 'Connected' : 'No answer',
+            durationSec,
+        };
+        // Disposition popup must open immediately — do not wait for Morpheus hangup APIs.
+        this.dispatchCallEndedOnce({ phone: endedPhone, callUuid: endedUuid || '' });
 
         this.logPhone('info', 'Remote party hung up', {
             source,
-            hangup_cause: data.hangup_cause ?? null,
+            hangup_cause: hangupCause || null,
             originateCallUuid: this.originateCallUuid,
             state: this.state,
+            wasConnected,
         });
 
         this.stopDestinationPoll();
@@ -591,17 +738,41 @@ class ApexWebphone {
             });
         }
 
-        if (this.timerPhase === 'connected' || this.state === 'in-call') {
-            const cause = data.hangup_cause
-                ? String(data.hangup_cause).replace(/_/g, ' ').toLowerCase()
-                : '';
+        if (wasOnCall && !usesCallSummaryFlow()) {
             showCommToast(
-                cause ? humanCallEndMessage(data.hangup_cause) : 'Other party hung up.',
+                wasConnected
+                    ? (hangupCause ? humanCallEndMessage(hangupCause) : 'Other party hung up.')
+                    : (hangupCause ? humanCallEndMessage(hangupCause, { outbound: true }) : 'Call ended.'),
                 'info',
             );
         }
 
         this.clearSession();
+        this.restoreDialerAfterCall();
+    }
+
+    restoreDialerAfterCall() {
+        this.resetDialerCallUi();
+        document.querySelectorAll('.ghl-dialer-call-icon-btn').forEach((btn) => {
+            delete btn.dataset.webphoneDialState;
+            btn.classList.remove('is-hangup-mode');
+            btn.setAttribute('aria-label', 'Place call');
+            btn.setAttribute('title', 'Call');
+            btn.removeAttribute('disabled');
+            btn.classList.remove('opacity-50', 'cursor-not-allowed');
+            btn.removeAttribute('aria-disabled');
+        });
+        document.querySelectorAll('[data-dialer-active-screen]').forEach((screen) => {
+            screen.classList.add('hidden');
+            screen.setAttribute('aria-hidden', 'true');
+            screen.classList.remove('is-ringing', 'is-connected');
+        });
+        document.querySelectorAll('[data-dialer-phone-stage]').forEach((stage) => {
+            stage.classList.remove('is-hidden-during-call');
+        });
+        document.querySelectorAll('[data-dialer-call-actions]').forEach((row) => {
+            row.classList.add('hidden');
+        });
     }
 
     stopRemoteAnswerWatcher() {
@@ -611,6 +782,7 @@ class ApexWebphone {
         }
 
         this.stopLiveTrackWatcher();
+        this.stopRemoteVoiceEnergyWatcher();
 
         if (this._remoteAnswerSource) {
             try {
@@ -626,101 +798,130 @@ class ApexWebphone {
     }
 
     startRemoteAnswerWatcher(session) {
-        if (!this.awaitingDestinationBridge || this._remoteAnswerWatcher) {
+        // After the agent leg is up: poll Morpheus aggressively + watch RTP growth
+        // (ringback is bursty; sustained inbound packets after ~2.5s means answered).
+        if (this._remoteAnswerWatcher) {
             return;
         }
 
-        const pc = session?.sessionDescriptionHandler?.peerConnection;
-        const remoteAudio = this.ui?.remoteAudio;
-        if (!pc || !remoteAudio) {
+        if (!session || !this.awaitingDestinationBridge) {
             return;
         }
 
+        this.startLiveTrackWatcher(session);
+        this._lastInboundAudioPackets = 0;
+        this._rtpGrowthFrames = 0;
         const startedAt = Date.now();
-        this._voiceEnergyFrames = 0;
-
-        this._remoteAnswerWatcher = window.setInterval(async () => {
-            if (!this.awaitingDestinationBridge) {
+        this._remoteAnswerWatcher = window.setInterval(() => {
+            if (!this.awaitingDestinationBridge || this.hangupInFlight || this.remoteHangupHandled) {
                 this.stopRemoteAnswerWatcher();
 
                 return;
             }
 
-            if (Date.now() - startedAt < 2000) {
+            if (Date.now() - startedAt > 120_000) {
+                this.stopRemoteAnswerWatcher();
+
                 return;
             }
 
-            try {
-                const context = await this.ensureAudioContext();
-                if (!context) {
-                    return;
-                }
-
-                const stream = remoteAudio.srcObject;
-                if (!(stream instanceof MediaStream) || stream.getAudioTracks().length === 0) {
-                    return;
-                }
-
-                if (!this._remoteAnswerAnalyser) {
-                    this._remoteAnswerSource = context.createMediaStreamSource(stream);
-                    this._remoteAnswerAnalyser = context.createAnalyser();
-                    this._remoteAnswerAnalyser.fftSize = 512;
-                    this._remoteAnswerSource.connect(this._remoteAnswerAnalyser);
-                }
-
-                const bins = new Uint8Array(this._remoteAnswerAnalyser.frequencyBinCount);
-                this._remoteAnswerAnalyser.getByteTimeDomainData(bins);
-                let sum = 0;
-                for (let i = 0; i < bins.length; i += 1) {
-                    const centered = (bins[i] - 128) / 128;
-                    sum += centered * centered;
-                }
-                const rms = Math.sqrt(sum / bins.length);
-
-                if (rms > 0.02) {
-                    this._voiceEnergyFrames += 1;
-                    if (this._voiceEnergyFrames >= 4) {
-                        this.markDestinationConnected({ source: 'remote-audio' });
-                        this.stopRemoteAnswerWatcher();
-                    }
-                } else {
-                    this._voiceEnergyFrames = 0;
-                }
-            } catch {
-                // Keep polling fallback active.
+            // After agent is up briefly: hear real carrier audio (ringback → talk).
+            // Local ringback stops so we do not double-ring.
+            if (this.agentLegEstablishedAt > 0 && Date.now() - this.agentLegEstablishedAt >= 2000) {
+                this.stopRingback();
+                this.setRemoteAudioMuted(false);
             }
-        }, 250);
+
+            // Nudge the status poll so Connected flips quickly after answer.
+            if (this.agentLegEstablishedAt > 0 && Date.now() - this.agentLegEstablishedAt >= 800) {
+                void this.pollDestinationOnce();
+            }
+
+            void this.detectAnswerFromWebRtcStats(session);
+        }, 400);
+    }
+
+    startRemoteVoiceEnergyWatcher(session) {
+        // Disabled: ringback early-media looked like talk audio and caused
+        // premature Connected + Morpheus hangup (destination never rang).
+        return;
+    }
+
+    stopRemoteVoiceEnergyWatcher() {
+        if (this._voiceEnergyWatcher) {
+            window.clearInterval(this._voiceEnergyWatcher);
+            this._voiceEnergyWatcher = null;
+        }
+        this._remoteAnswerAnalyser = null;
+        this._voiceEnergyFrames = 0;
+    }
+
+    async detectAnswerFromWebRtcStats(session) {
+        if (!this.awaitingDestinationBridge || this._serverConfirmedDestination) {
+            return;
+        }
+
+        if (!this.agentLegEstablishedAt || Date.now() - this.agentLegEstablishedAt < 2500) {
+            return;
+        }
+
+        const pc = session?.sessionDescriptionHandler?.peerConnection;
+        if (!pc || typeof pc.getStats !== 'function') {
+            return;
+        }
+
+        try {
+            const stats = await pc.getStats();
+            let packets = 0;
+            stats.forEach((report) => {
+                if (report.type === 'inbound-rtp' && (report.kind === 'audio' || report.mediaType === 'audio')) {
+                    packets += Number(report.packetsReceived || 0);
+                }
+            });
+
+            if (packets <= 0) {
+                this._rtpGrowthFrames = 0;
+                this._lastInboundAudioPackets = packets;
+
+                return;
+            }
+
+            if (packets > this._lastInboundAudioPackets) {
+                this._rtpGrowthFrames = (this._rtpGrowthFrames || 0) + 1;
+            } else {
+                this._rtpGrowthFrames = 0;
+            }
+
+            this._lastInboundAudioPackets = packets;
+
+            // ~1.6s of continuous inbound RTP growth after agent is up = destination talking.
+            // Ring cadence usually has multi-second silence gaps that reset the counter.
+            if ((this._rtpGrowthFrames || 0) >= 4) {
+                this.logPhone('info', 'Destination answer inferred from sustained RTP', {
+                    packets,
+                    frames: this._rtpGrowthFrames,
+                });
+                this._serverConfirmedDestination = true;
+                this.markDestinationConnected({ source: 'webrtc-rtp-confirmed' });
+            }
+        } catch {
+            // Stats not available yet.
+        }
     }
 
     startLiveTrackWatcher(session) {
+        // Live tracks exist during early media / ringing — never treat that as
+        // both-sides-connected. Keep a lightweight watcher only for cleanup.
         if (!this.awaitingDestinationBridge || this._liveTrackWatcher) {
             return;
         }
 
         const startedAt = Date.now();
         this._liveTrackWatcher = window.setInterval(() => {
-            if (!this.awaitingDestinationBridge) {
-                this.stopLiveTrackWatcher();
-
-                return;
-            }
-
-            const pc = session?.sessionDescriptionHandler?.peerConnection;
-            const hasLiveAudio = Boolean(
-                pc?.getReceivers?.().some(
-                    (receiver) => receiver.track?.kind === 'audio' && receiver.track.readyState === 'live',
-                ),
-            );
-
-            if (!hasLiveAudio) {
-                return;
-            }
-
-            if (Date.now() - startedAt >= 2000) {
-                this.markDestinationConnected({ source: 'live-track' });
+            if (!this.awaitingDestinationBridge || Date.now() - startedAt > 180_000) {
                 this.stopLiveTrackWatcher();
             }
-        }, 400);
+        }, 2000);
     }
 
     stopLiveTrackWatcher() {
@@ -931,6 +1132,10 @@ class ApexWebphone {
     }
 
     async showPstnLegFailedToast(uuid, peer) {
+        if (usesCallSummaryFlow()) {
+            return;
+        }
+
         const template = this.callStatusUrlTemplate();
         let hangupHint = '';
 
@@ -978,6 +1183,7 @@ class ApexWebphone {
         if (this.ui?.remoteAudio) {
             this.ui.remoteAudio.srcObject = null;
         }
+        this.flushCallUiInstant();
 
         const deadline = Date.now() + 45_000;
         let connected = false;
@@ -1035,6 +1241,15 @@ class ApexWebphone {
             await this.showPstnLegFailedToast(uuid, peer);
         }
 
+        const durationSec = connected
+            ? Math.max(1, Number(this._lastSeenPstnBillsec || 0))
+            : 0;
+        this._pendingCallEndMeta = {
+            connected,
+            result: connected ? 'Connected' : 'No answer',
+            durationSec,
+        };
+
         this.clearSession();
     }
 
@@ -1074,8 +1289,8 @@ class ApexWebphone {
                 ? `Ringing ${normalized} — answer within 90 seconds. Keep Connect line on.`
                 : 'Ringing your phone — answer within 90 seconds. Keep Connect line on.')
             : (normalized
-                ? `Connecting your line… ${normalized} will ring once your browser phone answers.`
-                : 'Connecting your line… the destination will ring once your browser phone answers.');
+                ? `Ringing ${normalized}… waiting for answer.`
+                : 'Ringing destination… waiting for answer.');
         this.updateCallCard({
             title: 'Outgoing call',
             subtitle: ringingCopy,
@@ -1088,7 +1303,7 @@ class ApexWebphone {
             subtitle: ringingCopy,
             detail: routeDetail,
             visible: true,
-            statusLabel: customerFirst ? 'Ringing' : 'Connecting',
+            statusLabel: 'Ringing',
             showRingingVisual: true,
             showConnectedTimer: false,
             timerLabel: 'Ringing time',
@@ -1100,7 +1315,12 @@ class ApexWebphone {
         this.startRingTimer();
         this.setState('dialing');
         this.markClickToCallPending();
-        this.startDestinationPoll();
+        // Do not poll Morpheus until the agent SIP leg is up — early polls on a
+        // 404 uuid were slow and could tear down the session before INVITE/answer.
+        // Polling starts from SessionState.Established (startDestinationPoll).
+        if (this.session?.state === SessionState.Established) {
+            this.startDestinationPoll();
+        }
     }
 
     activeCallUuid() {
@@ -1169,25 +1389,77 @@ class ApexWebphone {
                     return;
                 }
 
-                if (this.applyRemoteCallStatus(data, { source: 'webhook-stream' })) {
+                // Live SSE/WebSocket path: stop ring + start connected timer as soon
+                // as Morpheus reports the destination answered.
+                // Real-time: server/webhook confirmed answer → stop ring + start timer NOW.
+                const serverConfirmed =
+                    data.destination_connected === true
+                    || data.destination_answered === true
+                    || data.outcome === 'connected';
+
+                const agentReady =
+                    this.agentLegEstablishedAt > 0
+                    && Date.now() - this.agentLegEstablishedAt >= 800;
+
+                const connectedNow =
+                    serverConfirmed
+                    || (
+                        agentReady
+                        && Number(data.billsec ?? 0) >= 2
+                        && data.live !== false
+                        && !data.hangup_cause
+                        && this.destinationMatchesPeer(data)
+                    );
+
+                if (connectedNow && (this.awaitingDestinationBridge || this.state === 'dialing' || this.timerPhase !== 'connected')) {
+                    if (serverConfirmed) {
+                        this._serverConfirmedDestination = true;
+                    }
+                    this.stopAllLocalRingers();
+                    this.markDestinationConnected({ source: serverConfirmed ? 'websocket-confirmed' : 'websocket-stream' });
                     if (data.billsec) {
                         this.syncCallTimerFromBillsec(Number(data.billsec));
                     }
                     if (this.isRemoteCallEnded(data)) {
+                        void this.handleRemotePartyHangup(data, { source: 'websocket-stream' });
                         this.stopCallEventsStream();
                     }
 
                     return;
                 }
 
+                // Real-time hangup from webhook/SSE.
                 if (this.isRemoteCallEnded(data)) {
-                    void this.handleRemotePartyHangup(data, { source: 'webhook-stream' });
+                    void this.handleRemotePartyHangup(data, { source: 'websocket-stream' });
                     this.stopCallEventsStream();
+
+                    return;
+                }
+
+                if (this.applyRemoteCallStatus(data, { source: 'websocket-stream' })) {
+                    if (data.billsec && this.timerPhase === 'connected') {
+                        this.syncCallTimerFromBillsec(Number(data.billsec));
+                    }
                 }
             };
 
             source.onerror = () => {
                 this.stopCallEventsStream();
+                // Keep listening for answer + remote hangup for the whole call.
+                const keepListening =
+                    this._callMonitorActive
+                    && ['dialing', 'ringing', 'in-call'].includes(this.state);
+                if (keepListening) {
+                    window.setTimeout(() => {
+                        if (
+                            this._callMonitorActive
+                            && !this.callEventsSource
+                            && ['dialing', 'ringing', 'in-call'].includes(this.state)
+                        ) {
+                            this.subscribeCallEvents();
+                        }
+                    }, 600);
+                }
             };
 
             this.logPhone('info', 'Subscribed to call events stream', {
@@ -1336,7 +1608,10 @@ class ApexWebphone {
         await this.pollDestinationOnce();
 
         if (this._callMonitorActive && this.activeCallUuid()) {
-            const delayMs = this.state === 'in-call' ? 450 : 550;
+            // Poll faster while waiting for destination answer so ring stops promptly.
+            const delayMs = this.awaitingDestinationBridge || this.state === 'dialing'
+                ? 200
+                : (this.state === 'in-call' ? 350 : 500);
             this.scheduleCallMonitor(delayMs);
         }
     }
@@ -1346,6 +1621,11 @@ class ApexWebphone {
         const template = this.callStatusUrlTemplate();
 
         if (!uuid || !template || !this._callMonitorActive) {
+            return;
+        }
+
+        // Never stack slow Morpheus polls — that kept the UI stuck on Ringing.
+        if (this._statusPollInFlight) {
             return;
         }
 
@@ -1371,6 +1651,24 @@ class ApexWebphone {
             url.searchParams.set('customer_first', '1');
         }
 
+        this._statusPollInFlight = true;
+        if (this._statusPollAbort) {
+            try {
+                this._statusPollAbort.abort();
+            } catch {
+                // ignore
+            }
+        }
+        const abort = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        this._statusPollAbort = abort;
+        const timeoutId = window.setTimeout(() => {
+            try {
+                abort?.abort();
+            } catch {
+                // ignore
+            }
+        }, 4000);
+
         try {
             const response = await fetch(url.toString(), {
                 headers: {
@@ -1378,6 +1676,7 @@ class ApexWebphone {
                     'X-Requested-With': 'XMLHttpRequest',
                 },
                 credentials: 'same-origin',
+                signal: abort?.signal,
             });
 
             const data = await response.json().catch(() => ({}));
@@ -1401,11 +1700,15 @@ class ApexWebphone {
 
             if (
                 (this.awaitingDestinationBridge || this.state === 'dialing')
-                && Number(data.billsec ?? 0) >= 1
-                && data.live !== false
-                && !data.hangup_cause
+                && (
+                    data.destination_connected === true
+                    || data.destination_answered === true
+                    || data.outcome === 'connected'
+                )
             ) {
-                this.markDestinationConnected({ source: 'poll-billsec' });
+                this._serverConfirmedDestination = true;
+                this.stopAllLocalRingers();
+                this.markDestinationConnected({ source: 'poll-confirmed' });
 
                 return;
             }
@@ -1420,11 +1723,13 @@ class ApexWebphone {
                 this.awaitingDestinationBridge
                 && data.live
                 && Number(data.billsec ?? 0) >= 1
+                && Number(data.billsec ?? 0) < 2
                 && !this.destinationMatchesPeer(data)
+                && data.destination_connected !== true
             ) {
                 const ringingCopy = this.currentCallPeer
-                    ? `Your cell ${this.currentCallPeer} is ringing — check your phone now.`
-                    : 'Destination is ringing — check your phone now.';
+                    ? `Ringing ${this.currentCallPeer}… waiting for answer.`
+                    : 'Destination is ringing — waiting for answer.';
                 this.updateCallCard({
                     title: 'Outgoing call',
                     subtitle: ringingCopy,
@@ -1483,8 +1788,16 @@ class ApexWebphone {
                 );
                 this.clearSession();
             }
-        } catch {
-            // Keep polling while the SIP leg is still active.
+        } catch (error) {
+            if (error?.name !== 'AbortError') {
+                // Keep polling while the SIP leg is still active.
+            }
+        } finally {
+            window.clearTimeout(timeoutId);
+            this._statusPollInFlight = false;
+            if (this._statusPollAbort === abort) {
+                this._statusPollAbort = null;
+            }
         }
     }
 
@@ -1493,10 +1806,7 @@ class ApexWebphone {
             this.awaitingDestinationBridge || this.state === 'dialing' || this.state === 'connecting';
 
         if (!promoting && this.state === 'in-call') {
-            this.stopAllLocalRingers();
-            if (!this.callTimer || !this.callStartedAt) {
-                this.startCallTimer({ restart: true });
-            }
+            this.enterBothSidesConnected({ source, restartTimer: !this.callTimer || !this.callStartedAt });
 
             return;
         }
@@ -1517,29 +1827,52 @@ class ApexWebphone {
             this.morpheusCallUuid = this.pstnPollUuid;
         }
         this.stopRemoteAnswerWatcher();
-        this.stopAllLocalRingers();
         if (!this._callMonitorActive) {
             this.startDestinationPoll();
         }
-        // Keep morpheusCallUuid for hold/transfer/hangup until the user ends the call.
 
         if (this.session) {
             this.attachRemoteAudio(this.session);
         }
 
-        this.startCallTimer({ restart: true });
+        this.enterBothSidesConnected({ source, restartTimer: true });
+    }
+
+    /**
+     * Both legs are up: stop ringing and start the connected call timer.
+     */
+    enterBothSidesConnected({ source = 'unknown', restartTimer = true } = {}) {
+        this.awaitingDestinationBridge = false;
+        this.clickToCallActive = false;
+        this._serverConfirmedDestination = true;
+        this.agentLegEstablishedAt = this.agentLegEstablishedAt || Date.now();
+        this.stopAllLocalRingers();
+        this.setRemoteAudioMuted(false);
+
+        if (!this.currentCallPeer && this.lastDialedDestination) {
+            this.currentCallPeer = normalizeDialTarget(this.lastDialedDestination) || this.lastDialedDestination;
+        }
+
+        if (restartTimer || this.timerPhase !== 'connected') {
+            this.startCallTimer({ restart: true });
+        }
+
+        const peer = this.currentCallPeer || this.lastDialedDestination || '';
+        const detail = peer
+            ? (this.currentCallDirection === 'outbound' ? `To: ${peer}` : `Caller: ${peer}`)
+            : '';
 
         this.updateCallCard({
-            title: 'Call live',
-            subtitle: 'Destination answered — two-way audio is active.',
-            detail: this.currentCallPeer ? `To: ${this.currentCallPeer}` : '',
+            title: peer || 'Call live',
+            subtitle: 'Both sides connected — timer started.',
+            detail,
             visible: true,
             timer: '00:00',
         });
         this.updateFloatingPopup({
-            title: 'Call live',
-            subtitle: 'Destination answered — two-way audio is active.',
-            detail: this.currentCallPeer ? `To: ${this.currentCallPeer}` : '',
+            title: peer || 'Call live',
+            subtitle: 'Both sides connected — timer started.',
+            detail,
             visible: true,
             timer: '00:00',
             timerLabel: 'Connected time',
@@ -1549,17 +1882,20 @@ class ApexWebphone {
             showAnswer: false,
             showHangup: true,
             showRecord: true,
-            showHold: Boolean(this.morpheusCallUuid),
-            showTransfer: Boolean(this.morpheusCallUuid),
+            showHold: Boolean(this.morpheusCallUuid || this.activeCallUuid?.()),
+            showTransfer: Boolean(this.morpheusCallUuid || this.activeCallUuid?.()),
             state: 'in-call',
         });
         this.setCallControlsVisible(true, {
             showRecord: true,
             showEndCall: true,
-            showHold: Boolean(this.morpheusCallUuid),
-            showTransfer: Boolean(this.morpheusCallUuid),
+            showHold: Boolean(this.morpheusCallUuid || this.activeCallUuid?.()),
+            showTransfer: Boolean(this.morpheusCallUuid || this.activeCallUuid?.()),
         });
         this.setState('in-call');
+        this.refreshDialerCallOverlay?.('in-call');
+
+        this.logPhone('info', 'Both sides connected', { source, peer });
     }
 
     async releaseExtensionCalls() {
@@ -1743,7 +2079,11 @@ class ApexWebphone {
 
     setCallContext(direction, peer = '') {
         this.currentCallDirection = direction;
-        this.currentCallPeer = peer;
+        const normalized = peer ? (normalizeDialTarget(peer) || String(peer)) : '';
+        this.currentCallPeer = normalized;
+        if (normalized) {
+            this.lastDialedDestination = normalized;
+        }
     }
 
     syncSelectedExtension() {
@@ -1928,10 +2268,27 @@ class ApexWebphone {
     } = {}) {
         const phoneMode = isPhoneDialerMode();
         const onCall = visible && phoneMode;
-        const connected = state === 'in-call' && this.timerPhase === 'connected';
+        const connected =
+            statusLabel === 'Connected'
+            || this._serverConfirmedDestination
+            || (state === 'in-call' && this.timerPhase === 'connected');
         const statusText =
-            statusLabel ||
-            (connected ? 'Connected' : state === 'ringing' || state === 'dialing' ? 'Ringing…' : 'Connecting…');
+            connected
+                ? 'Connected'
+                : (
+                    statusLabel === 'Connecting' && (state === 'dialing' || state === 'ringing')
+                        ? 'Ringing'
+                        : (
+                            statusLabel
+                            || (state === 'ringing' || state === 'dialing' ? 'Ringing' : 'Connecting')
+                        )
+                );
+        const displayPeer = normalizeDialTarget(peer)
+            || normalizeDialTarget(this.currentCallPeer)
+            || normalizeDialTarget(this.lastDialedDestination)
+            || peer
+            || this.currentCallPeer
+            || '—';
 
         document.querySelectorAll('[data-dialer-active-screen]').forEach((screen) => {
             screen.classList.toggle('hidden', !onCall);
@@ -1941,7 +2298,7 @@ class ApexWebphone {
 
             const peerEl = screen.querySelector('[data-dialer-active-peer]');
             if (peerEl) {
-                peerEl.textContent = peer || '—';
+                peerEl.textContent = displayPeer;
             }
 
             const statusEl = screen.querySelector('[data-dialer-active-status]');
@@ -1976,34 +2333,41 @@ class ApexWebphone {
             this.clickToCallActive ||
             this.pendingClickToCall ||
             this.directDialActive;
+        // Ringback / ring timer means the destination is being rung — show Ringing,
+        // not Connecting (Connecting used to stick until SIP Established even while audio played).
+        const isRingingUi =
+            this.timerPhase === 'ringing'
+            || this.outboundWaitingActive
+            || (outboundActive && (this.awaitingDestinationBridge || state === 'dialing' || state === 'ringing'));
         const statusLabel =
-            state === 'in-call'
+            this.timerPhase === 'connected' || this._serverConfirmedDestination || state === 'in-call'
                 ? 'Connected'
-                : state === 'ringing'
+                : isRingingUi
                   ? 'Ringing'
-                  : outboundActive && this.awaitingDestinationBridge
+                  : state === 'ringing' || state === 'dialing'
                     ? 'Ringing'
-                    : state === 'dialing'
-                      ? 'Connecting'
-                      : 'Ringing';
+                    : 'Connecting';
         const timerEl = document.querySelector('[data-dialer-call-timer]');
+        const isConnectedUi = statusLabel === 'Connected';
 
         this.updateFloatingPopup({
-            title: state === 'in-call' ? 'Call live' : 'Outgoing call',
-            subtitle: peer ? `Ringing ${peer}…` : 'Ringing destination…',
+            title: isConnectedUi ? 'Call live' : 'Outgoing call',
+            subtitle: isConnectedUi
+                ? 'Both sides connected — timer started.'
+                : (peer ? `Ringing ${peer}…` : 'Ringing destination…'),
             detail: peer ? `To: ${peer}` : '',
             visible: true,
             timer: timerEl?.textContent || '00:00',
-            timerLabel: state === 'in-call' ? 'Connected time' : 'Ringing time',
+            timerLabel: isConnectedUi ? 'Connected time' : 'Ringing time',
             statusLabel,
-            showRingingVisual: state !== 'in-call',
-            showConnectedTimer: state === 'in-call' && this.timerPhase === 'connected',
+            showRingingVisual: !isConnectedUi,
+            showConnectedTimer: isConnectedUi,
             showAnswer: state === 'ringing' && !outboundActive,
             showHangup: true,
             showRecord: true,
-            showHold: state === 'in-call' && Boolean(this.morpheusCallUuid),
-            showTransfer: state === 'in-call' && Boolean(this.morpheusCallUuid),
-            state,
+            showHold: isConnectedUi && Boolean(this.morpheusCallUuid),
+            showTransfer: isConnectedUi && Boolean(this.morpheusCallUuid),
+            state: isConnectedUi ? 'in-call' : state,
         });
     }
 
@@ -2011,21 +2375,17 @@ class ApexWebphone {
         this.stopCallTimer();
         this.updateCallCard({ visible: false });
         this.updateFloatingPopup({ visible: false });
+        this.resetDialerCallUi();
+        document.querySelectorAll('.ghl-dialer-call-icon-btn').forEach((btn) => {
+            delete btn.dataset.webphoneDialState;
+            btn.classList.remove('is-hangup-mode');
+            btn.setAttribute('aria-label', 'Place call');
+            btn.setAttribute('title', 'Call');
+        });
         if (this.ui?.remoteAudio) {
             this.ui.remoteAudio.srcObject = null;
             this.ui.remoteAudio.pause?.();
         }
-    }
-
-    startRingTimer() {
-        this.stopCallTimer();
-        this.timerPhase = 'ringing';
-        this.callStartedAt = Date.now();
-        document.querySelectorAll('[data-dialer-call-timer], [data-dialer-active-timer]').forEach((timerEl) => {
-            timerEl.classList.add('hidden');
-            timerEl.textContent = '00:00';
-        });
-        this.callTimer = null;
     }
 
     startCallTimer({ restart = false } = {}) {
@@ -2050,10 +2410,92 @@ class ApexWebphone {
             timerEl.classList.remove('hidden');
             timerEl.dataset.timerLabel = 'Connected time';
         });
+        document.querySelectorAll('[data-webphone-floating-timer-label]').forEach((label) => {
+            label.textContent = 'Connected time';
+        });
+        document.querySelectorAll('[data-webphone-floating-timer-row]').forEach((row) => {
+            row.classList.remove('hidden');
+        });
 
         this.tickCallTimer();
         this.callTimer = window.setInterval(() => this.tickCallTimer(), 1000);
         this.refreshDialerCallOverlay('in-call');
+    }
+
+    startRingTimer() {
+        this.stopCallTimer();
+        this.timerPhase = 'ringing';
+        this.callStartedAt = Date.now();
+        this._ringNoAnswerTimeoutFired = false;
+        document.querySelectorAll('[data-dialer-call-layer]').forEach((layer) => {
+            layer.classList.add('is-ringing');
+            layer.classList.remove('is-connected');
+            const badge = layer.querySelector('[data-dialer-call-badge]');
+            if (badge) {
+                badge.textContent = 'Ringing';
+                badge.classList.add('is-ringing');
+                badge.classList.remove('is-connected');
+            }
+        });
+        // Show ringing timer so agents see time advancing while waiting for answer.
+        document.querySelectorAll('[data-dialer-call-timer], [data-dialer-active-timer]').forEach((timerEl) => {
+            timerEl.classList.remove('hidden');
+            timerEl.dataset.timerLabel = 'Ringing time';
+            timerEl.textContent = '00:00';
+        });
+        document.querySelectorAll('[data-webphone-floating-timer-row]').forEach((row) => {
+            row.classList.remove('hidden');
+        });
+        document.querySelectorAll('[data-webphone-floating-timer-label]').forEach((label) => {
+            label.textContent = 'Ringing time';
+        });
+        this.tickRingTimer();
+        this.callTimer = window.setInterval(() => this.tickRingTimer(), 1000);
+        this.refreshDialerCallOverlay(this.state === 'in-call' ? 'dialing' : this.state);
+    }
+
+    tickRingTimer() {
+        if (!this.callStartedAt || this.timerPhase !== 'ringing') {
+            return;
+        }
+
+        const elapsed = Math.max(0, Math.floor((Date.now() - this.callStartedAt) / 1000));
+        const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+        const ss = String(elapsed % 60).padStart(2, '0');
+        const text = `${mm}:${ss}`;
+        document.querySelectorAll('[data-dialer-call-timer], [data-dialer-active-timer], [data-webphone-floating-timer]').forEach((el) => {
+            el.textContent = text;
+        });
+
+        // After 1:10 of ringing with no answer — hang up and open Call Summary.
+        if (
+            !this._ringNoAnswerTimeoutFired
+            && elapsed >= Math.floor(RING_NO_ANSWER_TIMEOUT_MS / 1000)
+            && (this.awaitingDestinationBridge || this.clickToCallActive || this.state === 'dialing' || this.state === 'ringing')
+            && !this._serverConfirmedDestination
+            && this.timerPhase === 'ringing'
+        ) {
+            this._ringNoAnswerTimeoutFired = true;
+            void this.endRingNoAnswerTimeout();
+        }
+    }
+
+    async endRingNoAnswerTimeout() {
+        if (this.hangupInFlight || this.remoteHangupHandled) {
+            return;
+        }
+
+        // Still connected / answered — do not force hangup.
+        if (this.timerPhase === 'connected' || this._serverConfirmedDestination || this.state === 'in-call') {
+            return;
+        }
+
+        this.logPhone('info', 'Ring timeout — no answer after 1:10', {
+            peer: this.currentCallPeer || this.lastDialedDestination || '',
+            uuid: this.hangupCallUuid(),
+        });
+
+        await this.hangup('ring-no-answer-timeout');
     }
 
     syncCallTimerFromBillsec(billsec) {
@@ -2219,8 +2661,17 @@ class ApexWebphone {
         document.querySelectorAll('.ghl-dialer-call-icon-btn').forEach((btn) => {
             if (onActiveCall) {
                 btn.dataset.webphoneDialState = state;
+                btn.classList.add('is-hangup-mode');
+                btn.setAttribute('aria-label', 'End call');
+                btn.setAttribute('title', 'End call');
+                btn.removeAttribute('disabled');
+                btn.classList.remove('opacity-50', 'cursor-not-allowed');
+                btn.removeAttribute('aria-disabled');
             } else {
                 delete btn.dataset.webphoneDialState;
+                btn.classList.remove('is-hangup-mode');
+                btn.setAttribute('aria-label', 'Place call');
+                btn.setAttribute('title', 'Call');
             }
         });
         const outboundActive =
@@ -2995,16 +3446,22 @@ class ApexWebphone {
 
         if (isOutboundLeg) {
             this.clickToCallActive = true;
-            this.pendingClickToCall = false;
+            // Keep pendingClickToCall until SIP Established so the leg stays classified
+            // as click-to-call (destination dial starts only after agent answers).
 
             if (this.config?.auto_answer_click_to_call) {
+                const tryAnswer = () => {
+                    this.answer().catch(() => {
+                        window.setTimeout(() => {
+                            this.answer().catch(() => {
+                                showToast('Could not auto-connect your line — click Answer, or End and try again.', 'warning');
+                            });
+                        }, 500);
+                    });
+                };
                 this.ensureAudioContext()
                     .catch(() => {})
-                    .finally(() => {
-                        this.answer().catch(() => {
-                            showToast('Could not auto-connect your line — click End and try again.', 'warning');
-                        });
-                    });
+                    .finally(tryAnswer);
 
                 return;
             }
@@ -3089,7 +3546,11 @@ class ApexWebphone {
                 const isTrackedOriginatedOutbound =
                     this.currentCallDirection === 'outbound'
                     && !this.directDialActive
-                    && Boolean(this.activeCallUuid());
+                    && (
+                        Boolean(this.activeCallUuid())
+                        || this.awaitingDestinationBridge
+                        || this.clickToCallActive
+                    );
 
                 if (isTrackedOriginatedOutbound && this.state === 'in-call') {
                     this.attachRemoteAudio(session);
@@ -3099,8 +3560,11 @@ class ApexWebphone {
 
                 if (isTrackedOriginatedOutbound && this.awaitingDestinationBridge) {
                     this.clickToCallActive = true;
+                    this.pendingClickToCall = false;
+                    this.agentLegEstablishedAt = Date.now();
                     this._lastSeenPstnBillsec = 0;
-                    this.stopAllLocalRingers();
+                    this.stopRingtone();
+                    this.startRingback();
                     const routeDetail = this.buildCallRouteDetail(this.currentCallPeer);
                     const cellRingCopy = this.currentCallPeer
                         ? `Your line is connected — ringing ${this.currentCallPeer} now. Stay on this tab.`
@@ -3129,6 +3593,7 @@ class ApexWebphone {
                     this.startRingTimer();
                     this.startDestinationPoll();
                     this.attachRemoteAudio(session);
+                    this.setRemoteAudioMuted(true);
                     this.startRemoteAnswerWatcher(session);
 
                     return;
@@ -3141,40 +3606,8 @@ class ApexWebphone {
                     return;
                 }
 
-                this.stopRingback();
-                this.startCallTimer();
-                this.updateCallCard({
-                    title: 'Call live',
-                    subtitle: 'Two-way audio is active.',
-                    detail:
-                        this.currentCallDirection === 'outbound'
-                            ? `To: ${this.currentCallPeer}`
-                            : this.currentCallPeer
-                              ? `Caller: ${this.currentCallPeer}`
-                              : '',
-                    visible: true,
-                    timer: '00:00',
-                });
-                this.updateFloatingPopup({
-                    title: 'Call live',
-                    subtitle: 'Two-way audio is active.',
-                    detail:
-                        this.currentCallDirection === 'outbound'
-                            ? `To: ${this.currentCallPeer}`
-                            : this.currentCallPeer
-                              ? `Caller: ${this.currentCallPeer}`
-                              : '',
-                    visible: true,
-                    timer: '00:00',
-                    statusLabel: 'Connected',
-                    showRingingVisual: false,
-                    showConnectedTimer: false,
-                    showAnswer: false,
-                    showHangup: true,
-                    showRecord: true,
-                    state: 'in-call',
-                });
-                this.setState('in-call');
+                // Direct dial / inbound answer: SIP Established means both sides are up.
+                this.enterBothSidesConnected({ source: 'sip-established-direct' });
                 this.attachRemoteAudio(session);
             }
 
@@ -3189,7 +3622,7 @@ class ApexWebphone {
                     wasOutboundRinging &&
                     !this.directDialActive &&
                     stillRegistered &&
-                    this.clickToCallActive &&
+                    (this.clickToCallActive || this.awaitingDestinationBridge) &&
                     statusUuid &&
                     !this.userInitiatedHangup;
 
@@ -3200,21 +3633,31 @@ class ApexWebphone {
                 } else if (wasOutboundRinging && !this.directDialActive && !this.userInitiatedHangup) {
                     const digits = peer.replace(/\D/g, '');
 
-                    if (stillRegistered && this.clickToCallActive && digits.length >= 10) {
-                        void this.showPstnLegFailedToast(statusUuid, peer);
-                    } else if (digits.length >= 10) {
-                        showCommToast(
-                            humanCallEndMessage('NO_ANSWER', { outbound: true }),
-                            'warning',
-                        );
+                    if (stillRegistered && this.clickToCallActive && digits.length >= 10 && statusUuid) {
+                        void this.finalizeClickToCallAfterBye(statusUuid, peer);
                     } else {
-                        showCommToast('Call ended before the destination answered.', 'warning');
+                        this.flushCallUiInstant();
+                        this._pendingCallEndMeta = {
+                            connected: false,
+                            result: 'No answer',
+                            durationSec: 0,
+                        };
+                        if (!usesCallSummaryFlow()) {
+                            if (digits.length >= 10) {
+                                showCommToast(
+                                    humanCallEndMessage('NO_ANSWER', { outbound: true }),
+                                    'warning',
+                                );
+                            } else {
+                                showCommToast('Call ended before the destination answered.', 'warning');
+                            }
+                        }
+                        this.clearSession();
                     }
-                    this.clearSession();
                 } else if (wasOutboundRinging && this.directDialActive) {
                     if (this.suppressTerminateToast || this.outboundDialInProgress) {
                         this.suppressTerminateToast = false;
-                    } else {
+                    } else if (!usesCallSummaryFlow()) {
                         const rejectDetail = this.lastInviteReject || this.outboundTerminateDetail;
                         const detailSuffix = rejectDetail ? ` (${rejectDetail})` : '';
                         const message = this.sawOutboundRinging
@@ -3225,6 +3668,13 @@ class ApexWebphone {
                 }
 
                 if (statusUuid && !this.userInitiatedHangup && !clickToCallDrop) {
+                    // Never hang up Morpheus while the destination is still supposed to ring.
+                    if (this.awaitingDestinationBridge || this.clickToCallActive) {
+                        void this.finalizeClickToCallAfterBye(statusUuid, peer);
+
+                        return;
+                    }
+
                     if (this.state === 'in-call') {
                         void this.handleRemotePartyHangup(
                             { hangup_cause: 'NORMAL_CLEARING' },
@@ -3261,7 +3711,15 @@ class ApexWebphone {
             }
 
             remoteAudio.srcObject = stream;
-            remoteAudio.muted = false;
+            // Keep remote muted while local ringback/ringtone is playing so the
+            // carrier early-media ring does not stack on top of our local tone.
+            const keepLocalRing =
+                Boolean(this.ringtoneInterval)
+                || Boolean(this.ringbackInterval)
+                || this.outboundWaitingActive
+                || this.state === 'dialing'
+                || this.state === 'ringing';
+            remoteAudio.muted = keepLocalRing;
             remoteAudio.autoplay = true;
             remoteAudio.play().catch(() => {});
         };
@@ -3269,7 +3727,9 @@ class ApexWebphone {
         pc.ontrack = (event) => {
             const stream = event.streams?.[0] || new MediaStream([event.track]);
             bindStream(stream);
-            this.stopAllLocalRingers();
+            // Do not stop local ringers on early media — that caused a gap or
+            // double tone when carrier ringback also arrived. Local ringers stop
+            // when the call is established / answered.
             if (this.awaitingDestinationBridge) {
                 this.startRemoteAnswerWatcher(session);
                 this.startLiveTrackWatcher(session);
@@ -3280,16 +3740,14 @@ class ApexWebphone {
             pc._commHubHangupBound = true;
             pc.addEventListener('connectionstatechange', () => {
                 const connectionState = pc.connectionState;
-                if (
-                    this.awaitingDestinationBridge
-                    && connectionState === 'connected'
-                    && pc.getReceivers?.().some((receiver) => receiver.track?.readyState === 'live')
-                ) {
-                    this.markDestinationConnected({ source: 'webrtc-connected' });
-                }
+                // Do NOT promote to connected on WebRTC "connected" while still
+                // awaiting the destination — that is agent-leg early media only.
+                // Both-sides connect is confirmed by Morpheus poll / SIP Established
+                // after awaitingDestinationBridge clears.
 
                 if (
                     this.state === 'in-call'
+                    && !this.awaitingDestinationBridge
                     && !this.hangupInFlight
                     && !this.remoteHangupHandled
                     && (connectionState === 'disconnected' || connectionState === 'failed' || connectionState === 'closed')
@@ -3310,7 +3768,11 @@ class ApexWebphone {
         });
         if (stream.getTracks().length > 0) {
             bindStream(stream);
-            this.stopAllLocalRingers();
+            // Keep local ringback while destination is still ringing; stop only
+            // when enterBothSidesConnected / markDestinationConnected runs.
+            if (!this.awaitingDestinationBridge && this.state === 'in-call') {
+                this.stopAllLocalRingers();
+            }
             if (this.awaitingDestinationBridge) {
                 this.startRemoteAnswerWatcher(session);
                 this.startLiveTrackWatcher(session);
@@ -3357,9 +3819,25 @@ class ApexWebphone {
         }
         this.hangupInFlight = true;
         const morpheusUuid = this.hangupCallUuid();
+        const wasLiveCall =
+            this.state === 'dialing' || this.state === 'ringing' || this.state === 'in-call';
+        const endedPhone = this.currentCallPeer || this.lastDialedDestination || '';
+        const endedUuid = morpheusUuid || '';
+
+        const wasConnected = this.timerPhase === 'connected' || this.state === 'in-call' || this._serverConfirmedDestination;
+        const durationSec = wasConnected && this.callStartedAt && this.timerPhase === 'connected'
+            ? Math.max(0, Math.floor((Date.now() - this.callStartedAt) / 1000))
+            : 0;
 
         this.userInitiatedHangup = true;
         this.flushCallUiInstant();
+        this._pendingCallEndMeta = {
+            connected: wasConnected,
+            result: wasConnected ? 'Connected' : 'No answer',
+            durationSec,
+        };
+        // Show disposition popup immediately on hangup (before API/SIP cleanup).
+        this.dispatchCallEndedOnce({ phone: endedPhone, callUuid: endedUuid });
 
         this.logPhone('info', 'Hangup requested', {
             reason,
@@ -3367,7 +3845,7 @@ class ApexWebphone {
             bridgedCallUuid: this.bridgedCallUuid,
             sessionState: this.session?.state ?? null,
             awaitingDestinationBridge: this.awaitingDestinationBridge,
-            peer: this.currentCallPeer,
+            peer: endedPhone,
         });
 
         this.stopDestinationPoll();
@@ -3401,21 +3879,53 @@ class ApexWebphone {
         } finally {
             this.pendingClickToCall = false;
             this.hangupInFlight = false;
+            if (wasLiveCall && !usesCallSummaryFlow()) {
+                showCommToast('Call ended.', 'info');
+            }
             this.clearSession();
         }
     }
 
-    clearSession() {
-        const endedPhone = this.currentCallPeer || '';
-        const endedUuid = this.hangupCallUuid();
-        if (endedPhone || endedUuid) {
-            window.dispatchEvent(new CustomEvent('comm:call-ended', {
-                detail: {
-                    phone: endedPhone,
-                    callUuid: endedUuid || '',
-                },
-            }));
+    dispatchCallEndedOnce({ phone = '', callUuid = '', result = '', connected = null, durationSec = null } = {}) {
+        if (this._callEndedDispatched) {
+            return;
         }
+
+        if (!phone && !callUuid) {
+            return;
+        }
+
+        const pending = this._pendingCallEndMeta || {};
+        this._pendingCallEndMeta = null;
+        const wasConnected = connected ?? pending.connected ?? (
+            this.timerPhase === 'connected' || this._serverConfirmedDestination
+        );
+        const resolvedDuration = Number.isFinite(durationSec)
+            ? Math.max(0, Number(durationSec))
+            : (Number.isFinite(pending.durationSec)
+                ? Math.max(0, Number(pending.durationSec))
+                : (wasConnected && this.callStartedAt && this.timerPhase === 'connected'
+                    ? Math.max(0, Math.floor((Date.now() - this.callStartedAt) / 1000))
+                    : 0));
+        const callResult = String(result || pending.result || '').trim()
+            || (wasConnected ? 'Connected' : 'No answer');
+
+        this._callEndedDispatched = true;
+        window.dispatchEvent(new CustomEvent('comm:call-ended', {
+            detail: {
+                phone,
+                callUuid,
+                result: callResult,
+                connected: wasConnected,
+                durationSec: wasConnected ? resolvedDuration : 0,
+            },
+        }));
+    }
+
+    clearSession() {
+        const endedPhone = this.currentCallPeer || this.lastDialedDestination || '';
+        const endedUuid = this.hangupCallUuid();
+        this.dispatchCallEndedOnce({ phone: endedPhone, callUuid: endedUuid || '' });
 
         this.session = null;
         this.stopAllLocalRingers();
@@ -3436,6 +3946,14 @@ class ApexWebphone {
         this.clickToCallActive = false;
         this.awaitingDestinationBridge = false;
         this._lastSeenPstnBillsec = 0;
+        this._statusPollInFlight = false;
+        this._statusPollAbort = null;
+        this._lastInboundAudioPackets = 0;
+        this._rtpGrowthFrames = 0;
+        this._serverConfirmedDestination = false;
+        this._callEndedDispatched = false;
+        this._ringNoAnswerTimeoutFired = false;
+        this.agentLegEstablishedAt = 0;
         this.hangupInFlight = false;
         this.userInitiatedHangup = false;
         this.remoteHangupHandled = false;
@@ -3446,6 +3964,7 @@ class ApexWebphone {
 
         this.updateCallCard({ visible: false });
         this.updateFloatingPopup({ visible: false });
+        this.restoreDialerAfterCall();
 
         if (this.ui?.remoteAudio) {
             this.ui.remoteAudio.srcObject = null;
@@ -3453,6 +3972,7 @@ class ApexWebphone {
 
         if (this.ui?.bridgePanel && !this.ui.bridgePanel.classList.contains('hidden')) {
             this.setState('registered', 'Embedded phone');
+            this.restoreDialerAfterCall();
 
             return;
         }
@@ -3462,6 +3982,7 @@ class ApexWebphone {
         } else {
             this.setState('offline');
         }
+        this.restoreDialerAfterCall();
     }
 
     async disconnect(resetUi = true) {

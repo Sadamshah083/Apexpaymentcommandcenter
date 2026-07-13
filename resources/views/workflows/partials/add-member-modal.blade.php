@@ -30,39 +30,41 @@
         <form method="POST" action="{{ route('admin.workspaces.members.store', $activeWorkspace->id) }}"
             class="um-add-member-form" data-workspace-create-member>
             @csrf
-            <div class="um-form-grid">
-                <div class="um-field">
-                    <label class="um-label" for="create-username">Username</label>
-                    <input id="create-username" type="text" name="username" required placeholder="e.g. setter_ag_k8z"
-                        value="{{ old('username') }}" class="um-input" autocomplete="off">
+            <div class="um-add-member-form-body">
+                <div class="um-form-grid um-add-member-form-grid">
+                    <div class="um-field">
+                        <label class="um-label" for="create-username">Username</label>
+                        <input id="create-username" type="text" name="username" required placeholder="e.g. setter_ag_k8z"
+                            value="{{ old('username') }}" class="um-input" autocomplete="off">
+                    </div>
+                    <div class="um-field">
+                        <label class="um-label" for="create-role">Role</label>
+                        <select id="create-role" name="role" class="um-input um-select" data-create-member-role>
+                            @foreach (SalesOps::creatableAgentRoles() as $value => $label)
+                                <option value="{{ $value }}"
+                                    {{ old('role', 'appointment_setter') === $value ? 'selected' : '' }}>
+                                    {{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <div class="um-field">
+                        <label class="um-label" for="create-password">Password</label>
+                        <input id="create-password" type="password" name="password" required minlength="6"
+                            placeholder="Min. 6 characters" class="um-input" autocomplete="new-password">
+                    </div>
+                    <div class="um-field">
+                        <label class="um-label" for="create-password-confirm">Confirm password</label>
+                        <input id="create-password-confirm" type="password" name="password_confirmation" required
+                            minlength="6" placeholder="Repeat password" class="um-input" autocomplete="new-password">
+                    </div>
                 </div>
-                <div class="um-field">
-                    <label class="um-label" for="create-role">Role</label>
-                    <select id="create-role" name="role" class="um-input um-select" data-create-member-role>
-                        @foreach (SalesOps::creatableAgentRoles() as $value => $label)
-                            <option value="{{ $value }}"
-                                {{ old('role', 'appointment_setter') === $value ? 'selected' : '' }}>
-                                {{ $label }}</option>
-                        @endforeach
-                    </select>
-                </div>
-                <div class="um-field">
-                    <label class="um-label" for="create-password">Password</label>
-                    <input id="create-password" type="password" name="password" required minlength="6"
-                        placeholder="Min. 6 characters" class="um-input" autocomplete="new-password">
-                </div>
-                <div class="um-field">
-                    <label class="um-label" for="create-password-confirm">Confirm password</label>
-                    <input id="create-password-confirm" type="password" name="password_confirmation" required
-                        minlength="6" placeholder="Repeat password" class="um-input" autocomplete="new-password">
-                </div>
-            </div>
 
-            <div class="create-member-modules um-module-panel hidden" data-create-member-modules>
-                @include('workflows.partials.member-module-access-fields', [
-                    'prefix' => 'create',
-                    'activeWorkspace' => $activeWorkspace,
-                ])
+                <div class="create-member-modules um-module-panel hidden" data-create-member-modules>
+                    @include('workflows.partials.member-module-access-fields', [
+                        'prefix' => 'create',
+                        'activeWorkspace' => $activeWorkspace,
+                    ])
+                </div>
             </div>
 
             <div class="member-confirm-actions um-add-member-actions">

@@ -39,15 +39,19 @@ class WorkflowService
     ): Workflow {
         $storedPath = $file->store('workflows');
         $sheets = [];
+        $extension = strtolower((string) $file->getClientOriginalExtension());
 
-        try {
-            $sheets = $this->aiMapper->getFileSheets(Storage::disk('local')->path($storedPath));
-        } catch (\Throwable $e) {
-            Log::debug('Workflow upload has no spreadsheet sheets', [
-                'workspace_id' => $workspace->id,
-                'filename' => $file->getClientOriginalName(),
-                'error' => $e->getMessage(),
-            ]);
+        // CSV/TXT are single-sheet — skip PhpSpreadsheet sheet discovery for faster uploads.
+        if (! in_array($extension, ['csv', 'txt'], true)) {
+            try {
+                $sheets = $this->aiMapper->getFileSheets(Storage::disk('local')->path($storedPath));
+            } catch (\Throwable $e) {
+                Log::debug('Workflow upload has no spreadsheet sheets', [
+                    'workspace_id' => $workspace->id,
+                    'filename' => $file->getClientOriginalName(),
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
         return Workflow::create([
@@ -79,20 +83,13 @@ class WorkflowService
         }
 
         try {
-            $autoMap = $this->aiMapper->autoMap(
+            // Fast heuristic map on upload — no Gemini round-trip (keeps import snappy).
+            $autoMap = $this->aiMapper->fastMap(
                 Storage::disk('local')->path($workflow->file_path),
                 $workflow->selected_sheet
             );
 
             $resolvedMapping = $autoMap['mapping'] ?? [];
-
-            if (empty($resolvedMapping['business_name']) && ! empty($autoMap['headers'])) {
-                $resolvedMapping = $this->aiMapper->mergeMappings(
-                    $this->aiMapper->heuristicMap($autoMap['headers']),
-                    $resolvedMapping,
-                    $autoMap['headers']
-                );
-            }
 
             if (! empty(array_filter($resolvedMapping))) {
                 $workflow->update([
@@ -100,7 +97,7 @@ class WorkflowService
                 ]);
             }
         } catch (\Throwable $e) {
-            Log::warning('Workflow auto-mapping failed', [
+            Log::warning('Workflow fast auto-mapping failed', [
                 'workflow_id' => $workflow->id,
                 'error' => $e->getMessage(),
             ]);
@@ -134,13 +131,21 @@ class WorkflowService
             'leads as pending_verification_count' => fn ($query) => $query->where('status', 'pending_verification'),
             'leads as imported_leads_count' => fn ($query) => $query->where('status', 'imported'),
             'leads as enriched_leads_count' => fn ($query) => $query->where('status', 'enriched'),
-            'leads as ready_to_distribute_count' => fn ($query) => $query->where('status', 'enriched')->whereNull('assigned_user_id'),
+            'leads as ready_to_distribute_count' => fn ($query) => $query->readyToAssign(),
+            'leads as ready_to_assign_count' => fn ($query) => $query->readyToAssign(),
         ]);
 
         $perPage = min(max((int) ($options['per_page'] ?? config('pagination.pipeline_leads_per_page', 25)), 5), 100);
+        $pool = $options['pool'] ?? null;
 
-        $leads = $workflow->leads()
-            ->with(['campaign', 'leadList'])
+        $leadsQuery = $workflow->leads()
+            ->with(['campaign', 'leadList']);
+
+        if ($pool === 'unassigned') {
+            $leadsQuery->readyToAssign();
+        }
+
+        $leads = $leadsQuery
             ->orderByRaw("CASE WHEN status = 'pending_verification' THEN 0 WHEN status = 'extracting' THEN 1 WHEN status = 'completed' THEN 2 WHEN status = 'failed' THEN 3 ELSE 4 END ASC")
             ->orderBy('researched_at', 'desc')
             ->orderBy('row_number', 'asc')

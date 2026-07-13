@@ -191,6 +191,8 @@ Route::prefix('admin')->name('admin.')->middleware([
         Route::put('/dialer/notes/phone', [CommunicationsHubController::class, 'dialerPhoneNoteSave'])->name('dialer.notes.phone.save');
         Route::put('/dialer/notes/call', [CommunicationsHubController::class, 'dialerCallNoteSave'])->name('dialer.notes.call.save');
         Route::post('/dialer/call-logs/recording/sync', [CommunicationsHubController::class, 'dialerSyncCallRecording'])->name('dialer.recording.sync');
+        Route::get('/dialer/imported-leads', [CommunicationsHubController::class, 'dialerImportedLeads'])->name('dialer.imported-leads');
+        Route::post('/dialer/disposition', [CommunicationsHubController::class, 'dialerDispositionSave'])->name('dialer.disposition');
         Route::get('/contacts/{contactKey}', [CommunicationsHubController::class, 'showContact'])->name('contacts.show')->where('contactKey', '.*');
         Route::get('/zoom/export/logs', [CommunicationsHubController::class, 'exportLogs'])->name('zoom.export.logs');
         Route::get('/zoom/recordings/{recordingId}/media', [CommunicationsHubController::class, 'recordingMedia'])->name('zoom.recordings.media');
@@ -273,6 +275,8 @@ Route::prefix('portal')->name('portal.')->middleware([\App\Http\Middleware\Marke
         Route::put('/dialer/notes/phone', [CommunicationsHubController::class, 'dialerPhoneNoteSave'])->name('dialer.notes.phone.save');
         Route::put('/dialer/notes/call', [CommunicationsHubController::class, 'dialerCallNoteSave'])->name('dialer.notes.call.save');
         Route::post('/dialer/call-logs/recording/sync', [CommunicationsHubController::class, 'dialerSyncCallRecording'])->name('dialer.recording.sync');
+        Route::get('/dialer/imported-leads', [CommunicationsHubController::class, 'dialerImportedLeads'])->name('dialer.imported-leads');
+        Route::post('/dialer/disposition', [CommunicationsHubController::class, 'dialerDispositionSave'])->name('dialer.disposition');
         Route::get('/contacts/{contactKey}', [CommunicationsHubController::class, 'showContact'])->name('contacts.show')->where('contactKey', '.*');
         Route::get('/zoom/export/logs', [CommunicationsHubController::class, 'exportLogs'])->name('zoom.export.logs');
         Route::get('/zoom/recordings/{recordingId}/media', [CommunicationsHubController::class, 'recordingMedia'])->name('zoom.recordings.media');

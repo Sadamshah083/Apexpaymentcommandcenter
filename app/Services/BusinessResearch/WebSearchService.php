@@ -227,7 +227,7 @@ class WebSearchService
                     ]);
                 }
             }
-            usleep(250000);
+            usleep(100000);
         }
 
         if ($website) {

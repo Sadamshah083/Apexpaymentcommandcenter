@@ -4,6 +4,7 @@
 
     $teamLeads = $setterTeamLeads ?? $teamLeads ?? collect();
     $setterTeamLeadRole = WorkflowAssignmentRoles::setterTeamLeadRole();
+    $activeSetterCount = (int) ($activeSetterCount ?? 0);
 @endphp
 
 <div
@@ -51,6 +52,14 @@
 
         <div id="import-assign-stats" class="grid grid-cols-3 gap-2 mb-4 text-center text-xs"></div>
 
+        <div id="import-assign-alert" class="hidden mb-4 rounded-lg border px-3 py-2 text-sm" role="alert"></div>
+
+        @if ($activeSetterCount === 0)
+            <div class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                No active appointment setters in this workspace. Add setter accounts under User Management before assigning leads.
+            </div>
+        @endif
+
         <form id="import-assign-form" method="POST" action="#" class="space-y-4 text-left">
             @csrf
             <div class="app-field">
@@ -73,11 +82,11 @@
             </div>
             <div class="app-field">
                 <label for="import-assign-count" class="app-label">Number of leads</label>
-                <input type="number" name="lead_count" id="import-assign-count" class="app-input w-full" min="1" max="500" value="1" required>
+                <input type="number" name="lead_count" id="import-assign-count" class="app-input w-full" min="1" value="1" required>
             </div>
             <div class="member-confirm-actions !justify-end">
                 <button type="button" class="member-confirm-cancel" data-import-assign-dismiss>Cancel</button>
-                <button type="submit" class="member-confirm-submit">Assign leads</button>
+                <button type="submit" class="member-confirm-submit" id="import-assign-submit" @disabled($teamLeads->isEmpty() || $activeSetterCount === 0)>Assign leads</button>
             </div>
         </form>
     </div>
@@ -96,8 +105,40 @@
     const assignStats = document.getElementById('import-assign-stats');
     const assignCount = document.getElementById('import-assign-count');
     const assignTeamLead = document.getElementById('import-assign-team-lead');
+    const assignAlert = document.getElementById('import-assign-alert');
+    const assignSubmit = document.getElementById('import-assign-submit');
+    const activeSetterCount = Number(@json($activeSetterCount));
     const assignBase = @json(url('/admin/workflows'));
     const setterTeamLeadRole = @json($setterTeamLeadRole);
+    let activeWorkflowId = null;
+
+    function showAssignAlert(message, type = 'error') {
+        if (!assignAlert) {
+            return;
+        }
+
+        assignAlert.textContent = message;
+        assignAlert.classList.remove('hidden', 'border-rose-200', 'bg-rose-50', 'text-rose-800', 'border-emerald-200', 'bg-emerald-50', 'text-emerald-800');
+
+        if (type === 'success') {
+            assignAlert.classList.add('border-emerald-200', 'bg-emerald-50', 'text-emerald-800');
+        } else {
+            assignAlert.classList.add('border-rose-200', 'bg-rose-50', 'text-rose-800');
+        }
+    }
+
+    function hideAssignAlert() {
+        assignAlert?.classList.add('hidden');
+    }
+
+    function updateAssignButtonState(remaining) {
+        if (!assignSubmit) {
+            return;
+        }
+
+        const canSubmit = remaining > 0 && activeSetterCount > 0 && Boolean(assignTeamLead?.value);
+        assignSubmit.disabled = !canSubmit;
+    }
 
     function openDeleteModal(button) {
         if (!deleteModal || !deleteForm) return;
@@ -135,18 +176,21 @@
         const total = Number(button.dataset.workflowTotal || 0);
         const assigned = Number(button.dataset.workflowAssigned || 0);
         const remaining = Number(button.dataset.workflowRemaining || 0);
+        activeWorkflowId = id;
+        hideAssignAlert();
         assignForm.action = `${assignBase}/${id}/assign-leads`;
         assignTitle.textContent = `Assign: ${name}`;
         assignDesc.textContent = remaining > 0
-            ? `${remaining.toLocaleString()} lead(s) ready to assign. Choose an Appointment Setter Team Lead — leads are split across their setters.`
+            ? `${remaining.toLocaleString()} unassigned lead(s) ready to assign. Choose an Appointment Setter Team Lead — leads are split across their setters.`
             : 'No unassigned leads remain in this import.';
         assignStats.innerHTML = `
             <div class="rounded-lg border border-zinc-200 px-2 py-2"><span class="block text-zinc-500">Total</span><strong>${total.toLocaleString()}</strong></div>
             <div class="rounded-lg border border-zinc-200 px-2 py-2"><span class="block text-zinc-500">Assigned</span><strong class="text-emerald-700">${assigned.toLocaleString()}</strong></div>
-            <div class="rounded-lg border border-zinc-200 px-2 py-2"><span class="block text-zinc-500">Remaining</span><strong class="text-amber-700">${remaining.toLocaleString()}</strong></div>`;
+            <div class="rounded-lg border border-zinc-200 px-2 py-2"><span class="block text-zinc-500">Unassigned</span><strong class="text-amber-700" id="import-assign-remaining-value">${remaining.toLocaleString()}</strong></div>`;
         assignCount.max = Math.max(1, remaining);
         assignCount.value = remaining > 0 ? remaining : 1;
         syncAssignTeamLeadDefault();
+        updateAssignButtonState(remaining);
         assignModal.hidden = false;
         assignModal.setAttribute('aria-hidden', 'false');
         document.body.classList.add('member-confirm-open');
@@ -158,7 +202,112 @@
         assignModal.hidden = true;
         assignModal.setAttribute('aria-hidden', 'true');
         document.body.classList.remove('member-confirm-open');
+        activeWorkflowId = null;
+        hideAssignAlert();
     }
+
+    function patchAssignRowStats(workflowId, assignedDelta, remaining) {
+        const row = document.querySelector(`tr[data-workflow-id="${workflowId}"]`);
+        if (!row || !row.cells[6] || !row.cells[7]) {
+            return;
+        }
+
+        const assignedCell = row.cells[6];
+        const remainingCell = row.cells[7];
+        const currentAssigned = Number((assignedCell.textContent || '0').replace(/,/g, '')) || 0;
+        assignedCell.textContent = (currentAssigned + assignedDelta).toLocaleString();
+        remainingCell.textContent = Math.max(0, remaining).toLocaleString();
+
+        const assignBtn = row.querySelector('[data-import-assign-open]');
+        if (assignBtn) {
+            assignBtn.dataset.workflowAssigned = String(currentAssigned + assignedDelta);
+            assignBtn.dataset.workflowRemaining = String(Math.max(0, remaining));
+        }
+
+        if (remaining <= 0) {
+            const assignCell = row.cells[8];
+            if (assignCell) {
+                assignCell.innerHTML = '<span class="import-assign-empty">&mdash;</span>';
+            }
+        }
+    }
+
+    assignForm?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        hideAssignAlert();
+
+        if (!assignForm.action || assignForm.action.endsWith('#')) {
+            showAssignAlert('Choose an import before assigning leads.');
+            return;
+        }
+
+        if (activeSetterCount === 0) {
+            showAssignAlert('Add at least one active appointment setter before assigning leads.');
+            return;
+        }
+
+        const submitButton = assignSubmit;
+        const originalText = submitButton?.textContent || 'Assign leads';
+        if (submitButton) {
+            submitButton.disabled = true;
+            submitButton.textContent = 'Assigning…';
+        }
+
+        try {
+            const response = await fetch(assignForm.action, {
+                method: 'POST',
+                body: new FormData(assignForm),
+                headers: {
+                    Accept: 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                credentials: 'same-origin',
+            });
+
+            const payload = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+                const message = payload.message
+                    || Object.values(payload.errors || {}).flat().join(' ')
+                    || 'Could not assign leads.';
+                showAssignAlert(message, 'error');
+                window.showToast?.(message, 'error');
+                return;
+            }
+
+            const assigned = Number(payload.assigned ?? 0);
+            const remaining = Number(payload.remaining ?? 0);
+            const message = payload.message || `Assigned ${assigned} lead(s).`;
+            showAssignAlert(message, 'success');
+            window.showToast?.(message, 'success');
+
+            if (activeWorkflowId) {
+                patchAssignRowStats(activeWorkflowId, assigned, remaining);
+            }
+
+            const remainingEl = document.getElementById('import-assign-remaining-value');
+            if (remainingEl) {
+                remainingEl.textContent = Math.max(0, remaining).toLocaleString();
+            }
+
+            assignCount.max = Math.max(1, remaining);
+            assignCount.value = remaining > 0 ? Math.min(remaining, Number(assignCount.value || 1)) : 1;
+            updateAssignButtonState(remaining);
+
+            if (remaining <= 0) {
+                window.setTimeout(() => closeAssignModal(), 900);
+            }
+        } catch {
+            const message = 'Network error while assigning leads.';
+            showAssignAlert(message, 'error');
+            window.showToast?.(message, 'error');
+        } finally {
+            if (submitButton) {
+                submitButton.textContent = originalText;
+                updateAssignButtonState(Number(document.getElementById('import-assign-remaining-value')?.textContent?.replace(/,/g, '') || 0));
+            }
+        }
+    });
 
     document.addEventListener('click', (event) => {
         const deleteBtn = event.target.closest('[data-import-delete-open]');

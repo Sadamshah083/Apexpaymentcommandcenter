@@ -8,10 +8,11 @@
     <meta name="auth-login-paths" content="{{ json_encode([route('admin.login', [], false), route('portal.login', [], false), '/login']) }}">
     <title>@yield('title', 'Dashboard') - {{ config('app.name') }}</title>
     @include('layouts.partials.favicon')
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
+    @include('layouts.partials.vite-assets')
+    @stack('head')
 </head>
 
-<body class="app-shell min-h-screen font-sans antialiased" data-turbo-prefetch="false"
+<body class="app-shell min-h-screen font-sans antialiased" data-turbo-prefetch="hover"
     @auth
 data-workspace-id="{{ auth()->user()->current_workspace_id }}"
         data-workspace-sync-scope="{{ request()->routeIs('admin.dashboard*') ? 'list' : (request()->routeIs('admin.lists.*', 'admin.deliverability.*', 'admin.content.*', 'admin.reputation.*', 'admin.communications.*') ? 'lite' : 'full') }}"

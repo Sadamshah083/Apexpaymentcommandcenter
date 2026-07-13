@@ -112,6 +112,14 @@ class CommunicationsAccessService
         return $this->tierFor($user, $routePrefix) !== 'guest';
     }
 
+    /**
+     * Auto-dial + imported leads queue: admins, managers, team leads, and agents.
+     */
+    public function canAutoDial(?User $user, string $routePrefix): bool
+    {
+        return in_array($this->tierFor($user, $routePrefix), ['admin', 'supervisor', 'team_lead', 'agent'], true);
+    }
+
     public function canAccessHub(?User $user, string $routePrefix): bool
     {
         if ($routePrefix === 'portal.') {
@@ -218,6 +226,7 @@ class CommunicationsAccessService
             'canConfigure' => $this->canConfigure($user, $routePrefix),
             'canManageTelephony' => $this->canManageTelephony($user, $routePrefix),
             'canDial' => $this->canDial($user, $routePrefix),
+            'canAutoDial' => $this->canAutoDial($user, $routePrefix),
             'roleLabel' => $this->roleLabel($tier),
         ];
     }

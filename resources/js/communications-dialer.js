@@ -1,5 +1,5 @@
 import { hideLoadingOverlay } from './form-loading.js';
-import { showToast } from './toast.js';
+import { showToast, usesCallSummaryFlow } from './toast.js';
 import {
     cancelPendingWebphoneConnect,
     ensureWebphoneReady,
@@ -312,7 +312,9 @@ async function originateViaJson(form, dialBtn) {
                     ? 'Your phone is ringing — answer within 90 seconds. Keep Connect line on.'
                     : 'Connecting your line… the destination will ring once your browser phone answers.';
 
-        showToast(data.warning || successMessage, data.warning ? 'warning' : 'success');
+        if (!usesCallSummaryFlow()) {
+            showToast(data.warning || successMessage, data.warning ? 'warning' : 'success');
+        }
 
         return true;
     } catch (error) {
@@ -436,6 +438,15 @@ function syncLineDropdownFromSelect(select) {
         return;
     }
 
+    const triggerStyle = wrapper.dataset.lineTriggerStyle || 'default';
+    if (triggerStyle === 'toolbar') {
+        content.innerHTML = `
+            <span class="ghl-line-dropdown__ext-value">Ext ${selected.extension}</span>
+            ${selected.did ? `<span class="ghl-line-dropdown__did">${selected.did}</span>` : ''}
+        `;
+        return;
+    }
+
     content.innerHTML = `
         <span class="ghl-line-dropdown__ext-badge">Ext ${selected.extension}</span>
         ${selected.did ? `<span class="ghl-line-dropdown__did">${selected.did}</span>` : ''}
@@ -455,6 +466,14 @@ function closeLineDropdown(wrapper) {
     trigger?.setAttribute('aria-expanded', 'false');
     if (menu) {
         menu.hidden = true;
+        menu.style.position = '';
+        menu.style.top = '';
+        menu.style.left = '';
+        menu.style.right = '';
+        menu.style.width = '';
+        menu.style.minWidth = '';
+        menu.style.maxWidth = '';
+        menu.style.transform = '';
     }
     if (search) {
         search.value = '';
@@ -462,6 +481,54 @@ function closeLineDropdown(wrapper) {
             button.classList.remove('is-hidden');
         });
     }
+}
+
+function positionLineDropdownMenu(wrapper) {
+    const trigger = wrapper?.querySelector('.ghl-line-dropdown__trigger');
+    const menu = wrapper?.querySelector('.ghl-line-dropdown__menu');
+    if (!trigger || !menu || menu.hidden) {
+        return;
+    }
+
+    const gap = 6;
+    const edge = 8;
+    const triggerRect = trigger.getBoundingClientRect();
+    const preferredWidth = Math.min(Math.max(triggerRect.width, 280), window.innerWidth - edge * 2);
+
+    menu.style.position = 'fixed';
+    menu.style.zIndex = '10150';
+    menu.style.width = `${preferredWidth}px`;
+    menu.style.minWidth = `${Math.min(preferredWidth, 240)}px`;
+    menu.style.maxWidth = `calc(100vw - ${edge * 2}px)`;
+    menu.style.transform = 'none';
+    menu.style.right = 'auto';
+
+    // Prefer aligning to the right edge of the trigger so menus near the right stay on-screen.
+    let left = triggerRect.right - preferredWidth;
+    if (left < edge) {
+        left = edge;
+    }
+    if (left + preferredWidth > window.innerWidth - edge) {
+        left = Math.max(edge, window.innerWidth - edge - preferredWidth);
+    }
+
+    let top = triggerRect.bottom + gap;
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+
+    // After paint, flip upward if it would overflow the bottom.
+    requestAnimationFrame(() => {
+        const menuRect = menu.getBoundingClientRect();
+        if (menuRect.bottom > window.innerHeight - edge) {
+            const upTop = triggerRect.top - menuRect.height - gap;
+            if (upTop >= edge) {
+                menu.style.top = `${Math.round(upTop)}px`;
+            }
+        }
+        if (menuRect.left < edge) {
+            menu.style.left = `${edge}px`;
+        }
+    });
 }
 
 function closeAllLineDropdowns(except = null) {
@@ -522,8 +589,20 @@ function initLineDropdowns(root = document) {
             trigger.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
             menu.hidden = !willOpen;
 
-            if (willOpen && search) {
-                search.focus();
+            if (willOpen) {
+                positionLineDropdownMenu(wrapper);
+                if (search) {
+                    search.focus();
+                }
+            } else {
+                menu.style.position = '';
+                menu.style.top = '';
+                menu.style.left = '';
+                menu.style.right = '';
+                menu.style.width = '';
+                menu.style.minWidth = '';
+                menu.style.maxWidth = '';
+                menu.style.transform = '';
             }
         });
 
@@ -571,6 +650,18 @@ function initLineDropdowns(root = document) {
             closeAllLineDropdowns();
         }
     });
+
+    window.addEventListener('resize', () => {
+        document.querySelectorAll('[data-line-dropdown].is-open').forEach((wrapper) => {
+            positionLineDropdownMenu(wrapper);
+        });
+    });
+
+    window.addEventListener('scroll', () => {
+        document.querySelectorAll('[data-line-dropdown].is-open').forEach((wrapper) => {
+            positionLineDropdownMenu(wrapper);
+        });
+    }, true);
 }
 
 function initGlobalExtensionSync(root = document) {
@@ -658,6 +749,17 @@ function attachDialerForm(form) {
     form.addEventListener('submit', async (event) => {
         syncHiddenExtensionFields();
         numberInput.value = normalizePhone(numberInput.value) || numberInput.value;
+
+        const webphone = getWebphone();
+        const phoneState = webphone?.state || '';
+        if (['dialing', 'ringing', 'in-call'].includes(phoneState)) {
+            event.preventDefault();
+            event.stopPropagation();
+            hideLoadingOverlay();
+            webphone.hangup('dialer-call-btn').catch(() => {});
+
+            return;
+        }
 
         if (form.dataset.webphoneChecked === '1') {
             form.dataset.webphoneChecked = '';
@@ -931,8 +1033,9 @@ function setPhoneWorkspaceView(workspace, view) {
         return;
     }
 
-    const nextView = view === 'logs' ? 'logs' : 'dialer';
-    workspace.dataset.phoneView = nextView;
+    const isAdminSplit = workspace.classList.contains('ch-dial-workspace--admin');
+    const nextView = ['logs', 'leads', 'recordings', 'dialer'].includes(view) ? view : 'dialer';
+    workspace.dataset.phoneView = isAdminSplit && nextView === 'dialer' ? 'logs' : nextView;
 
     const switcher = workspace.querySelector('[data-phone-panel-switch]');
     switcher?.querySelectorAll('[data-phone-panel-view]').forEach((btn) => {
@@ -940,6 +1043,39 @@ function setPhoneWorkspaceView(workspace, view) {
         btn.classList.toggle('is-active', active);
         btn.setAttribute('aria-selected', active ? 'true' : 'false');
     });
+
+    const logsPane = workspace.querySelector('[data-phone-logs-pane]');
+    const leadsPane = workspace.querySelector('[data-phone-leads-pane]');
+    const recordingsPane = workspace.querySelector('[data-phone-recordings-pane]');
+    const dialPaneWrap = workspace.querySelector('[data-phone-dial-pane-wrap]');
+
+    if (isAdminSplit) {
+        const showLogs = nextView === 'logs';
+        const showLeads = nextView === 'leads';
+        const showRecordings = nextView === 'recordings';
+        logsPane?.classList.toggle('hidden', !showLogs);
+        logsPane?.classList.toggle('is-visible', showLogs);
+        logsPane?.setAttribute('aria-hidden', showLogs ? 'false' : 'true');
+        leadsPane?.classList.toggle('hidden', !showLeads);
+        leadsPane?.classList.toggle('is-visible', showLeads);
+        leadsPane?.setAttribute('aria-hidden', showLeads ? 'false' : 'true');
+        recordingsPane?.classList.toggle('hidden', !showRecordings);
+        recordingsPane?.classList.toggle('is-visible', showRecordings);
+        recordingsPane?.setAttribute('aria-hidden', showRecordings ? 'false' : 'true');
+        dialPaneWrap?.classList.remove('hidden');
+        dialPaneWrap?.classList.add('is-visible');
+    } else {
+        const showLogs = nextView === 'logs';
+        const showRecordings = nextView === 'recordings';
+        const showDialer = nextView === 'dialer';
+        logsPane?.classList.toggle('hidden', !showLogs);
+        logsPane?.classList.toggle('is-visible', showLogs);
+        leadsPane?.classList.add('hidden');
+        recordingsPane?.classList.toggle('hidden', !showRecordings);
+        recordingsPane?.classList.toggle('is-visible', showRecordings);
+        dialPaneWrap?.classList.toggle('hidden', !(showDialer || showRecordings));
+        dialPaneWrap?.classList.toggle('is-visible', showDialer || showRecordings);
+    }
 
     stabilizeCallLogsScroll(workspace);
 }
@@ -974,11 +1110,22 @@ function initPhonePanelSwitch(root = document) {
             event.preventDefault();
             setPhoneWorkspaceView(workspace, btn.dataset.phonePanelView);
             initCallLogsInfiniteScroll(workspace);
+            if (btn.dataset.phonePanelView === 'leads') {
+                window.initImportedLeadsList?.(workspace);
+            }
+            if (btn.dataset.phonePanelView === 'recordings') {
+                initCallRecordingsList(workspace);
+            }
         });
 
-        if (!workspace.dataset.phoneView) {
-            setPhoneWorkspaceView(workspace, 'dialer');
-        }
+        // Always sync pane visibility on init (HTML may set data-phone-view
+        // before JS runs; admin split must hide inactive left panes).
+        const initialView = workspace.classList.contains('ch-dial-workspace--admin')
+            ? (workspace.dataset.phoneView && workspace.dataset.phoneView !== 'dialer'
+                ? workspace.dataset.phoneView
+                : 'logs')
+            : (workspace.dataset.phoneView || 'dialer');
+        setPhoneWorkspaceView(workspace, initialView);
 
         bindCallLogsScrollResize(workspace);
         stabilizeCallLogsScroll(workspace);
@@ -1000,17 +1147,85 @@ function initPhoneLogRecording(root = document) {
 
     const metaEl = recordingPane.querySelector('[data-phone-recording-meta]');
     const audioEl = recordingPane.querySelector('[data-phone-recording-audio]');
+    const playerEl = recordingPane.querySelector('[data-phone-recording-player]');
     const emptyEl = recordingPane.querySelector('[data-phone-recording-empty]');
     const actionsEl = recordingPane.querySelector('[data-phone-recording-actions]');
     const downloadEl = recordingPane.querySelector('[data-phone-recording-download]');
+    const playBtnEl = recordingPane.querySelector('[data-phone-recording-play]');
     const backBtn = recordingPane.querySelector('[data-phone-back-dialer]');
     let objectUrl = null;
     let activeRow = null;
+    let activeDownloadUrl = '';
 
     const revokeObjectUrl = () => {
         if (objectUrl) {
             URL.revokeObjectURL(objectUrl);
             objectUrl = null;
+        }
+    };
+
+    const bindDownloadHref = (url) => {
+        activeDownloadUrl = String(url || '').trim();
+        if (!downloadEl) {
+            return;
+        }
+        if (activeDownloadUrl) {
+            downloadEl.href = activeDownloadUrl;
+            downloadEl.setAttribute('download', '');
+            downloadEl.classList.remove('is-disabled');
+            downloadEl.removeAttribute('aria-disabled');
+        } else {
+            downloadEl.href = '#';
+            downloadEl.classList.add('is-disabled');
+            downloadEl.setAttribute('aria-disabled', 'true');
+        }
+    };
+
+    const triggerDownload = async (event) => {
+        if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+
+        const url = activeDownloadUrl || downloadEl?.getAttribute('href') || '';
+        if (!url || url === '#') {
+            return false;
+        }
+
+        // Prefer already-loaded blob so download works even if streaming URL is flaky.
+        if (objectUrl) {
+            const link = document.createElement('a');
+            link.href = objectUrl;
+            link.download = `call-recording-${Date.now()}.mp3`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            return true;
+        }
+
+        try {
+            const response = await fetch(url, {
+                credentials: 'same-origin',
+                headers: { Accept: 'audio/*,*/*' },
+            });
+            if (!response.ok) {
+                throw new Error(`Download failed (${response.status})`);
+            }
+            const blob = await response.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = blobUrl;
+            link.download = `call-recording-${Date.now()}.mp3`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1500);
+            return true;
+        } catch (error) {
+            console.warn('[dialer] recording download failed', error);
+            // Fallback: navigate with cookies.
+            window.location.assign(url);
+            return false;
         }
     };
 
@@ -1021,14 +1236,15 @@ function initPhoneLogRecording(root = document) {
         if (audioEl) {
             audioEl.pause();
             audioEl.removeAttribute('src');
-            audioEl.classList.add('hidden');
         }
+        playerEl?.classList.add('hidden');
         revokeObjectUrl();
+        bindDownloadHref('');
         activeRow?.classList.remove('is-active');
         activeRow = null;
     };
 
-    const showRecording = async (row) => {
+    const showRecording = async (row, autoPlay = false) => {
         activeRow?.classList.remove('is-active');
         activeRow = row;
         row.classList.add('is-active');
@@ -1043,20 +1259,30 @@ function initPhoneLogRecording(root = document) {
         let downloadUrl = row.dataset.downloadUrl || '';
         let recordingStatus = row.dataset.recordingStatus || 'none';
         const callLogRef = row.dataset.logCallRef || '';
+        const directionLabel = direction.charAt(0).toUpperCase() + direction.slice(1);
 
         if (metaEl) {
             metaEl.innerHTML = `
-                <p class="ghl-phone-recording-meta__line"><strong>${direction.charAt(0).toUpperCase() + direction.slice(1)}</strong>${extension ? ` · Ext ${extension}` : ''}</p>
+                <p class="ghl-phone-recording-meta__line">${directionLabel}${extension ? ` · Ext ${extension}` : ''}</p>
                 <p class="ghl-phone-recording-meta__number">${phone}</p>
                 <p class="ghl-phone-recording-meta__sub">${time} · ${result}</p>
             `;
         }
 
-        setPhoneWorkspaceView(dialPane.closest('[data-phone-workspace]'), 'dialer');
+        // Prefer staying on Call Recording tab when opened from that list.
+        const workspace = dialPane.closest('[data-phone-workspace]');
+        if (row.closest('[data-phone-recordings-pane]')) {
+            setPhoneWorkspaceView(workspace, 'recordings');
+        } else if (workspace?.classList.contains('ch-dial-workspace--admin')) {
+            setPhoneWorkspaceView(workspace, 'logs');
+        } else {
+            setPhoneWorkspaceView(workspace, 'dialer');
+        }
 
         dialPane.classList.add('hidden');
         recordingPane.classList.remove('hidden');
         recordingPane.hidden = false;
+        bindDownloadHref(downloadUrl);
 
         const setEmptyMessage = (message) => {
             if (emptyEl) {
@@ -1068,7 +1294,8 @@ function initPhoneLogRecording(root = document) {
             const showPlayer = hasRecording && playUrl;
             emptyEl?.classList.toggle('hidden', showPlayer);
             actionsEl?.classList.toggle('hidden', !showPlayer);
-            audioEl?.classList.toggle('hidden', !showPlayer);
+            playerEl?.classList.toggle('hidden', !showPlayer);
+            bindDownloadHref(downloadUrl || row.dataset.downloadUrl || '');
 
             if (!showPlayer) {
                 if (recordingStatus === 'pending' || recordingStatus === 'none') {
@@ -1134,7 +1361,10 @@ function initPhoneLogRecording(root = document) {
             if (!response.ok) {
                 emptyEl?.classList.remove('hidden');
                 audioEl.classList.add('hidden');
-                actionsEl?.classList.add('hidden');
+                // Keep download available if we still have a URL.
+                actionsEl?.classList.toggle('hidden', !downloadUrl);
+                playerEl?.classList.add('hidden');
+                bindDownloadHref(downloadUrl);
                 return;
             }
 
@@ -1142,27 +1372,48 @@ function initPhoneLogRecording(root = document) {
             if (!blob.size) {
                 emptyEl?.classList.remove('hidden');
                 audioEl.classList.add('hidden');
-                actionsEl?.classList.add('hidden');
+                actionsEl?.classList.toggle('hidden', !downloadUrl);
+                playerEl?.classList.add('hidden');
+                bindDownloadHref(downloadUrl);
                 return;
             }
 
             objectUrl = URL.createObjectURL(blob);
+            audioEl.autoplay = false;
             audioEl.src = objectUrl;
             audioEl.classList.remove('hidden');
-            await audioEl.play().catch(() => {});
+            playerEl?.classList.remove('hidden');
+            emptyEl?.classList.add('hidden');
+            actionsEl?.classList.remove('hidden');
+            bindDownloadHref(downloadUrl || playUrl);
+            // Load only — autoplay only when requested via Play / Rec button.
+            audioEl.pause();
+            try {
+                audioEl.currentTime = 0;
+            } catch {
+                // Ignore if metadata not ready yet.
+            }
+            audioEl.load();
+
+            if (autoPlay) {
+                try {
+                    await audioEl.play();
+                } catch {
+                    // Browser blocked play without gesture; controls remain available.
+                }
+            }
         } catch {
             emptyEl?.classList.remove('hidden');
             audioEl.classList.add('hidden');
-            actionsEl?.classList.add('hidden');
-        }
-
-        if (downloadEl && (row.dataset.downloadUrl || downloadUrl)) {
-            downloadEl.href = row.dataset.downloadUrl || downloadUrl;
+            actionsEl?.classList.toggle('hidden', !downloadUrl);
+            playerEl?.classList.add('hidden');
+            bindDownloadHref(downloadUrl);
         }
     };
 
-    scope.querySelectorAll('[data-call-logs-list]').forEach((list) => {
+    scope.querySelectorAll('[data-call-logs-list], [data-call-recordings-list]').forEach((list) => {
         list.addEventListener('click', (event) => {
+            const playBtn = event.target.closest('[data-recording-play]');
             const row = event.target.closest('[data-phone-log-row]');
             if (!row || !list.contains(row)) {
                 return;
@@ -1173,7 +1424,14 @@ function initPhoneLogRecording(root = document) {
             if (event.target.closest('[data-log-notes-toggle], [data-log-notes-panel], [data-log-notes-save]')) {
                 return;
             }
-            showRecording(row);
+            if (event.target.closest('a[download], .ghl-dialer-recording-download, [data-phone-recording-download]')) {
+                return;
+            }
+            if (list.matches('[data-call-recordings-list]') && !playBtn && !row.dataset.playUrl) {
+                return;
+            }
+            // Rec / Play button starts audio; plain row click opens panel without autoplay.
+            showRecording(row, Boolean(playBtn));
         });
 
         list.addEventListener('keydown', (event) => {
@@ -1181,17 +1439,43 @@ function initPhoneLogRecording(root = document) {
             if (!row || !list.contains(row)) {
                 return;
             }
-            if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                if (event.target.closest('[data-dial-number]')) {
-                    return;
-                }
-                if (event.target.closest('[data-log-notes-toggle], [data-log-notes-panel], [data-log-notes-save]')) {
-                    return;
-                }
-                showRecording(row);
+            if (event.key !== 'Enter' && event.key !== ' ') {
+                return;
             }
+
+            // Let agents type spaces and newlines inside note fields.
+            if (event.target.closest('textarea, input, [contenteditable="true"]')) {
+                return;
+            }
+            if (event.target.closest('[data-dial-number]')) {
+                return;
+            }
+            if (event.target.closest('[data-log-notes-toggle], [data-log-notes-panel], [data-log-notes-save]')) {
+                return;
+            }
+
+            event.preventDefault();
+            const playBtn = event.target.closest('[data-recording-play]');
+            showRecording(row, Boolean(playBtn));
         });
+    });
+
+    downloadEl?.addEventListener('click', (event) => {
+        void triggerDownload(event);
+    });
+
+    playBtnEl?.addEventListener('click', async () => {
+        if (!audioEl?.src) {
+            if (activeRow) {
+                await showRecording(activeRow, true);
+            }
+            return;
+        }
+        try {
+            await audioEl.play();
+        } catch {
+            // Controls remain available if autoplay is blocked.
+        }
     });
 
     backBtn?.addEventListener('click', showDialer);
@@ -1205,23 +1489,202 @@ function escapeHtml(value) {
         .replace(/"/g, '&quot;');
 }
 
+function buildRecordingRow(log) {
+    const direction = escapeHtml(log.direction || 'call');
+    const directionLabel = direction.charAt(0).toUpperCase() + direction.slice(1);
+    const phone = escapeHtml(log.phone_display || log.phone || '—');
+    const leadName = escapeHtml(String(log.lead_name || '').trim());
+    const agentName = escapeHtml(String(log.agent_name || '').trim());
+    const result = escapeHtml(log.disposition || log.result || '—');
+    const timeAgo = escapeHtml(log.time_ago || '—');
+    const durationLabel = escapeHtml(log.duration_label || '0s');
+    const callLogRef = escapeHtml(log.call_log_ref || log.id || '');
+    const hasRecording = Boolean(log.has_recording);
+    const recordingStatus = escapeHtml(log.recording_status || (hasRecording ? 'ready' : 'none'));
+    const playUrl = escapeHtml(log.play_url || '');
+    const downloadUrl = escapeHtml(log.download_url || '');
+    const agentMeta = agentName ? ` · ${agentName}` : '';
+    const metaExtra = result && result !== '—' ? ` · ${result}` : '';
+
+    return `
+        <div class="ghl-dialer-recording-row" data-phone-log-row data-recording-row tabindex="0"
+            data-log-direction="${direction}"
+            data-log-phone="${escapeHtml(log.phone || '')}"
+            data-log-result="${result}"
+            data-log-time="${escapeHtml(log.time_label || '—')}"
+            data-log-call-ref="${callLogRef}"
+            data-log-lead-name="${leadName}"
+            data-log-phone-display="${phone}"
+            data-has-recording="${hasRecording ? '1' : '0'}"
+            data-recording-status="${recordingStatus}"
+            data-play-url="${playUrl}"
+            data-download-url="${downloadUrl}">
+            <div class="ghl-dialer-recording-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                    <line x1="12" y1="19" x2="12" y2="23"/>
+                    <line x1="8" y1="23" x2="16" y2="23"/>
+                </svg>
+            </div>
+            <div class="ghl-dialer-recording-main">
+                ${leadName ? `<span class="ghl-dialer-recording-name">${leadName}</span>` : ''}
+                <span class="ghl-dialer-recording-number">${phone}</span>
+                <span class="ghl-dialer-recording-meta">${directionLabel} · ${timeAgo} · ${durationLabel}${agentMeta}${metaExtra}</span>
+            </div>
+            <div class="ghl-dialer-recording-actions">
+                ${hasRecording
+                    ? `<button type="button" class="ghl-dialer-recording-play" data-recording-play title="Play recording">
+                        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        Play
+                    </button>
+                    ${downloadUrl ? `<a class="ghl-dialer-recording-download" href="${downloadUrl}" download title="Download recording">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="7 10 12 15 17 10"/>
+                            <line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                        <span>Download</span>
+                    </a>` : ''}`
+                    : `<span class="ghl-dialer-recording-pending">${recordingStatus === 'pending' ? 'Saving…' : 'Unavailable'}</span>`}
+            </div>
+        </div>
+    `;
+}
+
+function initCallRecordingsList(root = document) {
+    const scope = root === document ? document : root;
+    const lists = scope.querySelectorAll('[data-call-recordings-list]');
+
+    lists.forEach((list) => {
+        if (list.dataset.callRecordingsInit === '1') {
+            return;
+        }
+        list.dataset.callRecordingsInit = '1';
+
+        const items = list.querySelector('[data-call-recordings-items]');
+        const loading = list.querySelector('[data-call-recordings-loading]');
+        const sentinel = list.querySelector('[data-call-recordings-sentinel]');
+        const url = list.dataset.callLogsUrl;
+        if (!url || !items) {
+            return;
+        }
+
+        let fetching = false;
+
+        const fetchMore = async () => {
+            if (fetching || list.dataset.callRecordingsHasMore === '0') {
+                return;
+            }
+
+            fetching = true;
+            loading?.classList.remove('hidden');
+
+            try {
+                const offset = Number.parseInt(list.dataset.callRecordingsOffset || '0', 10) || 0;
+                const params = new URLSearchParams({
+                    offset: String(offset),
+                    per_page: '20',
+                    recordings_only: '1',
+                });
+                const response = await fetch(`${url}?${params.toString()}`, {
+                    headers: { Accept: 'application/json' },
+                    credentials: 'same-origin',
+                });
+                const payload = await response.json();
+                if (!response.ok) {
+                    throw new Error(payload.message || 'Could not load recordings.');
+                }
+
+                const logs = payload.logs || [];
+                items.querySelector('[data-call-recordings-empty]')?.remove();
+
+                if (logs.length === 0 && offset === 0) {
+                    items.innerHTML = '<p class="ghl-dialer-recent-empty" data-call-recordings-empty>No call recordings yet.</p>';
+                } else {
+                    const wrapper = document.createElement('div');
+                    wrapper.innerHTML = logs.map((log) => buildRecordingRow(log)).join('');
+                    wrapper.childNodes.forEach((node) => {
+                        if (node.nodeType === Node.ELEMENT_NODE) {
+                            items.appendChild(node);
+                        }
+                    });
+                }
+
+                list.dataset.callRecordingsOffset = String(payload.next_offset ?? offset + logs.length);
+                list.dataset.callRecordingsHasMore = payload.has_more ? '1' : '0';
+            } catch (error) {
+                console.warn('[dialer] recordings fetch failed', error);
+            } finally {
+                loading?.classList.add('hidden');
+                fetching = false;
+            }
+        };
+
+        if (sentinel && 'IntersectionObserver' in window) {
+            const observer = new IntersectionObserver((entries) => {
+                if (entries.some((entry) => entry.isIntersecting)) {
+                    void fetchMore();
+                }
+            }, { root: list, rootMargin: '120px' });
+            observer.observe(sentinel);
+        }
+    });
+}
+
 function buildCallLogRow(log) {
     const direction = escapeHtml(log.direction || 'call');
     const directionLabel = direction.charAt(0).toUpperCase() + direction.slice(1);
     const extension = log.extension ? `<span class="ghl-dialer-recent-ext">Ext ${escapeHtml(log.extension)}</span>` : '';
-    const phone = escapeHtml(log.phone || '—');
+    const agentName = escapeHtml(String(log.agent_name || '').trim());
+    const agent = agentName ? `<span class="ghl-dialer-recent-agent">${agentName}</span>` : '';
+    const phone = escapeHtml(log.phone_display || log.phone || '—');
+    const leadName = escapeHtml(String(log.lead_name || '').trim());
+    const leadContact = escapeHtml(String(log.lead_contact || '').trim());
+    const leadNameBlock = leadName
+        ? `<span class="ghl-dialer-recent-name">${leadName}</span>${leadContact ? `<span class="ghl-dialer-recent-contact-name">${leadContact}</span>` : ''}`
+        : '';
     const result = escapeHtml(log.result || '—');
+    const statusLikeDispositions = ['', '—', '-', 'completed', 'initiated', 'connected', 'answered', 'no-answer', 'no answer', 'busy', 'failed', 'missed', 'unknown'];
+    let rawDisposition = String(log.disposition || '').trim();
+    if (rawDisposition && statusLikeDispositions.includes(rawDisposition.toLowerCase())) {
+        rawDisposition = '';
+    }
+    const disposition = escapeHtml(rawDisposition);
     const timeAgo = escapeHtml(log.time_ago || '—');
     const durationLabel = escapeHtml(log.duration_label || '0s');
     const callLogRef = escapeHtml(log.call_log_ref || log.id || '');
     const callNote = escapeHtml(log.call_note || '');
     const phoneNote = escapeHtml(log.phone_note || '');
+    let displayNoteRaw = String(log.call_note || '').trim().replace(/[ \t]+/g, ' ');
+    const compactNote = displayNoteRaw.replace(/\s+/g, '');
+    if (/^(NoAnswer)+$/i.test(compactNote)) {
+        displayNoteRaw = 'No Answer';
+    } else if (rawDisposition) {
+        const compactDispo = rawDisposition.replace(/\s+/g, '');
+        if (compactDispo && new RegExp(`^(${compactDispo.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')})+$`, 'i').test(compactNote)) {
+            displayNoteRaw = rawDisposition;
+        }
+    }
+    const displayNote = escapeHtml(displayNoteRaw);
     const hasNotes = Boolean(log.call_note && String(log.call_note).trim());
-    const displayNote = escapeHtml(String(log.call_note || '').trim());
     const hasRecording = Boolean(log.has_recording);
     const recordingStatus = escapeHtml(log.recording_status || (hasRecording ? 'ready' : 'none'));
-    const notePreview = displayNote
-        ? `<span class="ghl-dialer-recent-note-preview" data-log-note-preview>${displayNote}</span>`
+    const statusLikeNotes = ['no answer', 'no-answer', 'busy', 'connected', 'answered', 'failed', 'missed', 'completed', 'initiated'];
+    const noteLooksLikeStatus = displayNoteRaw && statusLikeNotes.includes(displayNoteRaw.toLowerCase());
+    const notePreview = displayNote && !noteLooksLikeStatus && displayNoteRaw.toLowerCase() !== rawDisposition.toLowerCase()
+        ? `<p class="ghl-dialer-recent-field" data-log-comment-line><span class="ghl-dialer-recent-field__label">Comment:</span> <span class="ghl-dialer-recent-field__value" data-log-note-preview>${displayNote}</span></p>`
+        : '';
+    const inCallNotesRaw = String(log.in_call_notes || '').trim();
+    const inCallNotes = escapeHtml(inCallNotesRaw);
+    const notesPreview = inCallNotesRaw
+        ? `<p class="ghl-dialer-recent-field" data-log-notes-line><span class="ghl-dialer-recent-field__label">Notes:</span> <span class="ghl-dialer-recent-field__value" data-log-notes-preview>${inCallNotes}</span></p>`
+        : '';
+    const dispositionPreview = disposition
+        ? `<p class="ghl-dialer-recent-field ghl-dialer-recent-field--disposition" data-log-disposition-line><span class="ghl-dialer-recent-field__label">Disposition:</span> <span class="ghl-dialer-recent-field__value" data-log-disposition>${disposition}</span></p>`
+        : '';
+    const fieldsBlock = (notesPreview || notePreview || dispositionPreview)
+        ? `<div class="ghl-dialer-recent-fields" data-log-fields>${notesPreview}${notePreview}${dispositionPreview}</div>`
         : '';
     const notesBtn = log.phone
         ? `<button type="button" class="ghl-dialer-recent-notes-btn ${hasNotes ? 'has-notes' : ''}"
@@ -1235,7 +1698,7 @@ function buildCallLogRow(log) {
         </button>`
         : '';
     const callBtn = log.phone
-        ? `<button type="button" class="ch-btn ch-btn--secondary ch-btn--sm" data-dial-number="${escapeHtml(log.phone)}">Call</button>`
+        ? `<button type="button" class="ghl-dialer-recent-call-btn" data-dial-number="${escapeHtml(log.phone)}">Call</button>`
         : '';
     const notesPanel = log.phone
         ? `<div class="ghl-dialer-recent-notes hidden" data-log-notes-panel>
@@ -1247,15 +1710,21 @@ function buildCallLogRow(log) {
             </div>
         </div>`
         : '';
+    const recBadge = hasRecording
+        ? `<button type="button" class="ghl-dialer-recent-rec" data-recording-play title="Play recording" aria-label="Play call recording">Rec</button>`
+        : '';
 
     return `
         <div class="ghl-dialer-recent-row" data-phone-log-row tabindex="0"
             data-log-direction="${direction}"
             data-log-phone="${escapeHtml(log.phone || '')}"
             data-log-extension="${escapeHtml(log.extension || '')}"
+            data-log-agent="${agentName}"
             data-log-result="${result}"
             data-log-time="${escapeHtml(log.time_label || '—')}"
             data-log-call-ref="${callLogRef}"
+            data-log-lead-name="${leadName}"
+            data-log-phone-display="${phone}"
             data-log-call-note="${callNote}"
             data-log-phone-note="${phoneNote}"
             data-has-notes="${hasNotes ? '1' : '0'}"
@@ -1267,10 +1736,22 @@ function buildCallLogRow(log) {
                 <div class="ghl-dialer-recent-head">
                     <span class="ghl-dialer-recent-dir">${directionLabel}</span>
                     ${extension}
+                    ${agent}
+                    ${recBadge}
                 </div>
-                <span class="ghl-dialer-recent-number">${phone}</span>
-                <span class="ghl-dialer-recent-meta">${timeAgo} · ${durationLabel} · ${result}</span>
-                ${notePreview}
+                <div class="ghl-dialer-recent-contact">
+                    ${leadNameBlock}
+                    <span class="ghl-dialer-recent-number">${phone}</span>
+                </div>
+                <div class="ghl-dialer-recent-meta-row">
+                    <span class="ghl-dialer-recent-meta">
+                        <span class="ghl-dialer-recent-meta__time">${timeAgo}</span>
+                        <span class="ghl-dialer-recent-meta__sep" aria-hidden="true">·</span>
+                        <span class="ghl-dialer-recent-duration">${durationLabel}</span>
+                        ${result && result !== '—' ? `<span class="ghl-dialer-recent-meta__sep" aria-hidden="true">·</span><span class="ghl-dialer-recent-result">${result}</span>` : ''}
+                    </span>
+                </div>
+                ${fieldsBlock}
             </div>
             <div class="ghl-dialer-recent-actions">
                 ${notesBtn}
@@ -1397,6 +1878,49 @@ function initCallLogsInfiniteScroll(root = document) {
 }
 
 // Backwards compatibility for any inline callers still present in cached pages.
+export { buildCallLogRow };
+if (typeof window !== 'undefined') {
+    window.buildCallLogRow = buildCallLogRow;
+}
+
+export async function placeOutboundCall(phone, meta = {}) {
+    const form = getActiveDialerForm();
+    const numberInput = getDialerFormNumberInput(form);
+    const dialBtn = form?.querySelector('button[type="submit"]');
+
+    if (!form || !numberInput) {
+        showToast('Dialer is not ready yet.', 'error');
+
+        return false;
+    }
+
+    const destination = normalizePhone(phone);
+    if (!destination || !isValidPstnDestination(destination)) {
+        showToast('This lead does not have a valid phone number.', 'error');
+
+        return false;
+    }
+
+    numberInput.value = destination;
+    if (meta?.id) {
+        form.dataset.dialLeadId = String(meta.id);
+    }
+    if (meta?.name) {
+        form.dataset.dialLeadName = String(meta.name);
+    }
+    form.dataset.dialLeadPhone = destination;
+    handleDialerNumberChange(form);
+
+    if (document.querySelector('[data-webphone-panel]')) {
+        return originateViaJson(form, dialBtn);
+    }
+
+    form.requestSubmit?.();
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+
+    return true;
+}
+
 window.initGhlDialer = function initGhlDialer(config) {
     const numberInput = document.getElementById(config.numberInputId);
     const form = numberInput?.closest('.ghl-dialer-originate-form');

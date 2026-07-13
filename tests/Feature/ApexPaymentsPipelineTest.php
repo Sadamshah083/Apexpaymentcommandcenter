@@ -308,4 +308,108 @@ class ApexPaymentsPipelineTest extends TestCase
             ->assertViewHas('leads')
             ->assertViewHas('teamMetrics');
     }
+
+    public function test_admin_can_assign_import_leads_to_setter_team_lead(): void
+    {
+        $setterTl = $this->attachUser('setter_tl', 'appointment_setter_team_lead');
+        $workflow = Workflow::create([
+            'workspace_id' => $this->workspace->id,
+            'name' => 'result',
+            'status' => 'extracting',
+            'processing_mode' => 'full_pipeline',
+            'enriched_leads' => 3,
+            'total_leads' => 3,
+        ]);
+
+        foreach (range(1, 3) as $row) {
+            WorkflowLead::create([
+                'workflow_id' => $workflow->id,
+                'row_number' => $row,
+                'business_name' => "Lead {$row}",
+                'status' => 'enriched',
+                'pipeline_phase' => 'enriched',
+            ]);
+        }
+
+        $response = $this->actingAs($this->admin)
+            ->postJson(route('admin.workflows.assign-leads', $workflow), [
+                'team_lead_id' => $setterTl->id,
+                'lead_count' => 2,
+            ]);
+
+        $response->assertOk()
+            ->assertJsonPath('assigned', 2)
+            ->assertJsonPath('remaining', 1);
+
+        $this->assertSame(2, WorkflowLead::query()->where('workflow_id', $workflow->id)->whereNotNull('assigned_user_id')->count());
+        $this->assertSame(1, app(SetterDistributionService::class)->unassignedWorkflowLeadCount($workflow));
+    }
+
+    public function test_assign_import_leads_requires_active_setters(): void
+    {
+        $setterTl = $this->attachUser('setter_tl_only', 'appointment_setter_team_lead');
+        $workflow = Workflow::create([
+            'workspace_id' => $this->workspace->id,
+            'name' => 'No setters',
+            'status' => 'extracting',
+            'processing_mode' => 'full_pipeline',
+            'enriched_leads' => 1,
+            'total_leads' => 1,
+        ]);
+
+        WorkflowLead::create([
+            'workflow_id' => $workflow->id,
+            'row_number' => 1,
+            'business_name' => 'Lead 1',
+            'status' => 'enriched',
+            'pipeline_phase' => 'enriched',
+        ]);
+
+        $this->workspace->users()->detach($this->setter->id);
+
+        $this->actingAs($this->admin)
+            ->postJson(route('admin.workflows.assign-leads', $workflow), [
+                'team_lead_id' => $setterTl->id,
+                'lead_count' => 1,
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.lead_count', 'Add at least one active appointment setter before assigning leads.');
+    }
+
+    public function test_normalize_unassigned_leads_with_stale_pipeline_phase(): void
+    {
+        $setterTl = $this->attachUser('setter_tl_norm', 'appointment_setter_team_lead');
+        $workflow = Workflow::create([
+            'workspace_id' => $this->workspace->id,
+            'name' => 'Stale phase',
+            'status' => 'completed',
+            'processing_mode' => 'full_pipeline',
+            'enriched_leads' => 2,
+            'total_leads' => 2,
+        ]);
+
+        WorkflowLead::create([
+            'workflow_id' => $workflow->id,
+            'row_number' => 1,
+            'business_name' => 'Lead 1',
+            'status' => 'enriched',
+            'pipeline_phase' => 'imported',
+        ]);
+        WorkflowLead::create([
+            'workflow_id' => $workflow->id,
+            'row_number' => 2,
+            'business_name' => 'Lead 2',
+            'status' => 'enriched',
+            'pipeline_phase' => 'enriching',
+        ]);
+
+        $this->actingAs($this->admin)
+            ->postJson(route('admin.workflows.assign-leads', $workflow), [
+                'team_lead_id' => $setterTl->id,
+                'lead_count' => 2,
+            ])
+            ->assertOk()
+            ->assertJsonPath('assigned', 2)
+            ->assertJsonPath('remaining', 0);
+    }
 }

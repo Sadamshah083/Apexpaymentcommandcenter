@@ -49,7 +49,22 @@ const COMM_TOAST_DURATION = {
     info: 3500,
 };
 
+export function dismissAllToasts() {
+    document.querySelectorAll('.app-toast').forEach((toast) => {
+        toast.classList.remove('is-visible');
+        toast.remove();
+    });
+}
+
+export function usesCallSummaryFlow() {
+    return Boolean(document.querySelector('[data-call-summary-modal]'));
+}
+
 export function showCommToast(message, type = 'info', options = {}) {
+    if (usesCallSummaryFlow() && document.body.classList.contains('ch-call-summary-open')) {
+        return () => {};
+    }
+
     const toastType = TOAST_TITLES[type] ? type : 'info';
 
     return showToast(message, toastType, {
@@ -61,6 +76,10 @@ export function showCommToast(message, type = 'info', options = {}) {
 }
 
 export function showToast(message, type = 'success', options = {}) {
+    if (options.suppressWhenSummary !== false && usesCallSummaryFlow() && document.body.classList.contains('ch-call-summary-open')) {
+        return () => {};
+    }
+
     const container = getContainer();
     const toastType = TOAST_TITLES[type] ? type : 'info';
     const duration = options.duration ?? TOAST_DURATION[toastType] ?? 5000;

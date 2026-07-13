@@ -7,6 +7,7 @@ use App\Models\Workflow;
 use App\Models\WorkflowLead;
 use App\Models\Workspace;
 use App\Services\Workflow\WorkflowAiMapper;
+use App\Services\Pipeline\CampaignService;
 use App\Services\Pipeline\LeadSegmentationService;
 use App\Services\Pipeline\PipelineLeadReleaseService;
 use App\Services\Workflow\WorkflowProviderStatusService;
@@ -38,6 +39,7 @@ class WorkflowServiceTest extends TestCase
             $sync ?? Mockery::mock(WorkspaceSyncService::class),
             new WorkflowProviderStatusService,
             app(LeadSegmentationService::class),
+            app(CampaignService::class),
             app(PipelineLeadReleaseService::class),
         );
     }
@@ -405,5 +407,68 @@ class WorkflowServiceTest extends TestCase
         $this->assertEquals(['Sheet1', 'Sheet2'], $workflow->sheets);
         $this->assertEquals('Sheet1', $workflow->selected_sheet);
         $this->assertNotNull($workflow->file_path);
+    }
+
+    public function test_create_from_upload_skips_sheet_discovery_for_csv(): void
+    {
+        Storage::fake('local');
+
+        $mapper = Mockery::mock(WorkflowAiMapper::class);
+        $mapper->shouldReceive('getFileSheets')->never();
+
+        $admin = User::create([
+            'name' => 'Admin CSV',
+            'email' => 'admin-csv@example.com',
+            'password' => bcrypt('password'),
+        ]);
+
+        $workspace = Workspace::create(['name' => 'Sales', 'admin_id' => $admin->id]);
+        $file = UploadedFile::fake()->create('leads.csv', 5, 'text/csv');
+
+        $service = $this->makeService(Mockery::mock(WorkspaceSyncService::class), $mapper);
+        $workflow = $service->createFromUpload($workspace, 'CSV Leads', $file);
+
+        $this->assertEquals('CSV Leads', $workflow->name);
+        $this->assertEquals('mapping', $workflow->status);
+        $this->assertNull($workflow->sheets);
+        $this->assertNull($workflow->selected_sheet);
+    }
+
+    public function test_apply_auto_mapping_uses_fast_map_not_gemini(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('workflows/sample.csv', "Business Name,Phone\nAcme,555\n");
+
+        $mapper = Mockery::mock(WorkflowAiMapper::class);
+        $mapper->shouldReceive('autoMap')->never();
+        $mapper->shouldReceive('fastMap')
+            ->once()
+            ->andReturn([
+                'headers' => ['Business Name', 'Phone'],
+                'mapping' => [
+                    'business_name' => 'Business Name',
+                    'input_phone' => 'Phone',
+                ],
+            ]);
+
+        $admin = User::create([
+            'name' => 'Admin Fast',
+            'email' => 'admin-fast@example.com',
+            'password' => bcrypt('password'),
+        ]);
+
+        $workspace = Workspace::create(['name' => 'Sales', 'admin_id' => $admin->id]);
+        $workflow = Workflow::create([
+            'workspace_id' => $workspace->id,
+            'name' => 'Fast Map',
+            'status' => 'mapping',
+            'file_path' => 'workflows/sample.csv',
+        ]);
+
+        $service = $this->makeService(Mockery::mock(WorkspaceSyncService::class), $mapper);
+        $updated = $service->applyAutoMappingIfNeeded($workflow);
+
+        $this->assertEquals('Business Name', $updated->column_mapping['business_name']);
+        $this->assertEquals('Phone', $updated->column_mapping['input_phone']);
     }
 }

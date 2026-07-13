@@ -10,7 +10,7 @@
                 <p class="app-page-subtitle">Look up a single business with AI web research. For bulk lists, use Import
                     Leads.</p>
             </div>
-            <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-secondary shrink-0">Import leads</a>
+            <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-secondary shrink-0" data-turbo-preload data-import-file-nav>Import leads</a>
         </div>
 
         <div class="business-research-panels grid gap-4 lg:grid-cols-2">

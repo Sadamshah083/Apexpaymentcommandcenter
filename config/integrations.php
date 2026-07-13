@@ -44,6 +44,17 @@ return [
         'default_outbound_did' => env('COMMUNICATIONS_DEFAULT_OUTBOUND_DID'),
         'default_caller_id_name' => env('COMMUNICATIONS_DEFAULT_CALLER_ID_NAME', 'ApexOne Payments'),
         'default_dial_destination' => env('COMMUNICATIONS_DEFAULT_DIAL_DESTINATION'),
+        'dialer_leads_page_size' => (int) env('COMMUNICATIONS_DIALER_LEADS_PAGE_SIZE', 25),
+        'dispositions' => [
+            'No Answer',
+            'Voicemail',
+            'Follow Up',
+            'Requested Appointment',
+            'Not Interested',
+            'Incorrect Number',
+            'Not Available',
+            'Call me Later',
+        ],
     ],
 
 ];

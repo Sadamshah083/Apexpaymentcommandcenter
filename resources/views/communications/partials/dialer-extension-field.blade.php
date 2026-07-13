@@ -50,11 +50,14 @@
     $selectedOption = $lineOptions->first(
         fn ($line) => (string) $defaultExtension === (string) $line['extension'],
     ) ?? $lineOptions->first();
+    $triggerStyle = $triggerStyle ?? 'default';
+    $isToolbarTrigger = $triggerStyle === 'toolbar';
 @endphp
 
-<div class="ghl-dialer-ext-field">
+<div class="ghl-dialer-ext-field {{ $isToolbarTrigger ? 'ghl-dialer-ext-field--toolbar' : '' }}">
     <label class="ghl-dialer-ext-field__label" for="{{ $callerSelectId }}">Line</label>
-    <div class="ghl-line-dropdown" data-line-dropdown>
+    <div class="ghl-line-dropdown {{ $isToolbarTrigger ? 'ghl-line-dropdown--toolbar' : '' }}"
+        data-line-dropdown data-line-trigger-style="{{ $triggerStyle }}">
         <select id="{{ $callerSelectId }}" name="from_extension"
             class="ghl-line-dropdown__native" @if ($formId) form="{{ $formId }}" @endif required
             @disabled($lineOptions->isEmpty()) aria-label="Select phone line">
@@ -71,9 +74,16 @@
             aria-expanded="false" @disabled($lineOptions->isEmpty())>
             <span class="ghl-line-dropdown__trigger-content">
                 @if ($selectedOption)
-                    <span class="ghl-line-dropdown__ext-badge">Ext {{ $selectedOption['extension'] }}</span>
-                    @if ($selectedOption['did'] !== '')
-                        <span class="ghl-line-dropdown__did">{{ $selectedOption['did'] }}</span>
+                    @if ($isToolbarTrigger)
+                        <span class="ghl-line-dropdown__ext-value">Ext {{ $selectedOption['extension'] }}</span>
+                        @if ($selectedOption['did'] !== '')
+                            <span class="ghl-line-dropdown__did">{{ $selectedOption['did'] }}</span>
+                        @endif
+                    @else
+                        <span class="ghl-line-dropdown__ext-badge">Ext {{ $selectedOption['extension'] }}</span>
+                        @if ($selectedOption['did'] !== '')
+                            <span class="ghl-line-dropdown__did">{{ $selectedOption['did'] }}</span>
+                        @endif
                     @endif
                 @else
                     <span class="ghl-line-dropdown__placeholder">Select line</span>

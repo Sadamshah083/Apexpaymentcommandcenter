@@ -5,9 +5,9 @@ return [
     |--------------------------------------------------------------------------
     | Lead import pipeline enrichment
     |--------------------------------------------------------------------------
-    | Quality-first defaults: Gemini Google Search + multiple DDG queries.
-    | Tighten WORKFLOW_WEB_SEARCH_QUERIES or disable WORKFLOW_GEMINI_GOOGLE_SEARCH
-    | only when you need to minimize API spend.
+    | Speed-first defaults for bulk imports: Gemini Google Search only (no DDG
+    | prefetch), no follow-up pass. Raise WORKFLOW_WEB_SEARCH_QUERIES / enable
+    | follow-up when you need maximum research depth.
     */
 
     'gemini_model' => env('WORKFLOW_GEMINI_MODEL', 'gemini-2.5-flash'),
@@ -23,11 +23,11 @@ return [
 
     'gemini_google_search_enabled' => filter_var(env('WORKFLOW_GEMINI_GOOGLE_SEARCH', true), FILTER_VALIDATE_BOOLEAN),
 
-    'gemini_timeout' => (int) env('WORKFLOW_GEMINI_TIMEOUT', 120),
+    'gemini_timeout' => (int) env('WORKFLOW_GEMINI_TIMEOUT', 90),
 
-    'web_search_queries' => (int) env('WORKFLOW_WEB_SEARCH_QUERIES', 8),
+    'web_search_queries' => (int) env('WORKFLOW_WEB_SEARCH_QUERIES', 0),
 
-    'follow_up_enabled' => filter_var(env('WORKFLOW_FOLLOW_UP_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
+    'follow_up_enabled' => filter_var(env('WORKFLOW_FOLLOW_UP_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
 
     'follow_up_min_score' => (int) env('WORKFLOW_FOLLOW_UP_MIN_SCORE', 3),
 

@@ -45,10 +45,7 @@ class CampaignBatchService
             'total' => (clone $base)->count(),
             'imported' => (clone $base)->where('workflow_leads.status', 'imported')->count(),
             'enriched' => (clone $base)->where('workflow_leads.status', 'enriched')->count(),
-            'ready_to_distribute' => (clone $base)
-                ->where('workflow_leads.status', 'enriched')
-                ->whereNull('workflow_leads.assigned_user_id')
-                ->count(),
+            'ready_to_distribute' => (clone $base)->readyToAssign()->count(),
             'failed' => (clone $base)->where('workflow_leads.status', 'failed')->count(),
             'assigned' => (clone $base)->whereNotNull('workflow_leads.assigned_user_id')->count(),
         ];

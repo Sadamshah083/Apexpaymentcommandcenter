@@ -2,7 +2,7 @@
     use App\Support\MemberModuleAccess;
 
     $workspaceId = $activeWorkspace->id ?? auth()->user()?->current_workspace_id;
-    $memberRole = old('role', 'admin');
+    $memberRole = old('role', 'appointment_setter');
 @endphp
 
 @include('workflows.partials.module-access-form-fields', [

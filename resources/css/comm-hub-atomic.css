@@ -4,10 +4,10 @@
  */
 
 :root {
-    --ch-brand: #122e53;
-    --ch-brand-hover: #0e243f;
-    --ch-brand-soft: #eff6ff;
-    --ch-brand-muted: #dbeafe;
+    --ch-brand: #10b981;
+    --ch-brand-hover: #059669;
+    --ch-brand-soft: #ecfdf5;
+    --ch-brand-muted: #d1fae5;
     --ch-success: #059669;
     --ch-success-soft: #ecfdf5;
     --ch-warning: #d97706;
@@ -22,10 +22,11 @@
     --ch-text: #0f172a;
     --ch-text-secondary: #475569;
     --ch-text-muted: #64748b;
+    /* Tailwind rounded-lg */
     --ch-radius-sm: 0.5rem;
     --ch-radius-md: 0.75rem;
-    --ch-radius-lg: 1rem;
-    --ch-radius-xl: 1.25rem;
+    --ch-radius-lg: 0.5rem;
+    --ch-radius-xl: 1rem;
     --ch-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
     --ch-shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
     --ch-font-xs: 0.6875rem;
@@ -65,12 +66,15 @@
 }
 
 .ch-btn--primary {
-    background: var(--ch-brand);
-    color: #fff;
+    background: #d1fae5;
+    border-color: #6ee7b7;
+    color: #047857;
 }
 
 .ch-btn--primary:hover:not(:disabled) {
-    background: var(--ch-brand-hover);
+    background: #a7f3d0;
+    border-color: #34d399;
+    color: #065f46;
 }
 
 .ch-btn--secondary {
@@ -86,15 +90,18 @@
 .ch-btn--call {
     min-height: 2.75rem;
     padding: 0.625rem 1.25rem;
-    border-radius: var(--ch-radius-md);
-    background: linear-gradient(180deg, #16a34a 0%, #15803d 100%);
-    color: #fff;
+    border-radius: var(--ch-radius-lg);
+    border: 1px solid #6ee7b7;
+    background: #d1fae5;
+    color: #047857;
     font-size: var(--ch-font-base);
-    box-shadow: 0 4px 14px rgba(22, 163, 74, 0.25);
+    box-shadow: none;
 }
 
 .ch-btn--call:hover:not(:disabled) {
-    filter: brightness(1.05);
+    background: #a7f3d0;
+    border-color: #34d399;
+    color: #065f46;
 }
 
 .ch-btn--sm {

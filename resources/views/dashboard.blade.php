@@ -47,7 +47,8 @@
                 <div class="flex justify-between items-center mb-4">
                     <h3 class="font-bold text-zinc-900">AI Lead Pipelines</h3>
                     <a href="{{ route('admin.workflows.create') }}"
-                        class="text-xs font-bold text-zinc-500 hover:text-zinc-900 underline">New Pipeline</a>
+                        class="text-xs font-bold text-zinc-500 hover:text-zinc-900 underline"
+                        data-turbo-preload data-import-file-nav>New Pipeline</a>
                 </div>
                 <div class="space-y-3">
                     @forelse($recentWorkflows as $workflow)
@@ -75,7 +76,8 @@
                         <div class="text-center py-6 bg-cream-50 rounded-xl border border-dashed border-warmgrey-200">
                             <p class="text-warmgrey-500 text-sm">No active pipelines. <a
                                     href="{{ route('admin.workflows.create') }}"
-                                    class="text-warmgrey-900 underline font-bold">Upload spreadsheet</a> to start.</p>
+                                    class="text-warmgrey-900 underline font-bold"
+                                    data-turbo-preload data-import-file-nav>Upload spreadsheet</a> to start.</p>
                         </div>
                     @endforelse
                 </div>

@@ -256,6 +256,12 @@ curl -s -X POST "https://apexone.morpheus.cx/api/v1/call-control/click-to-call" 
 
 Response:
 
+
+
+
+
+
+
 ```json
 {
   "ok": true,

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -118,7 +119,54 @@ class WorkflowLead extends Model
 
     public function isReadyForDistribution(): bool
     {
-        return $this->status === 'enriched' && ! $this->assigned_user_id;
+        if ($this->status !== 'enriched' || $this->assigned_user_id) {
+            return false;
+        }
+
+        return $this->pipeline_phase === null
+            || ! in_array($this->pipeline_phase, [
+                'with_setter',
+                'appointment_settled',
+                'with_closer',
+                'closed',
+            ], true);
+    }
+
+    /**
+     * Enriched leads that can still be assigned to a setter team.
+     */
+    public function scopeReadyToAssign(Builder $query): Builder
+    {
+        return $query
+            ->where('status', 'enriched')
+            ->whereNull('assigned_user_id')
+            ->where(function (Builder $phase) {
+                $phase->whereNull('pipeline_phase')
+                    ->orWhereNotIn('pipeline_phase', [
+                        'with_setter',
+                        'appointment_settled',
+                        'with_closer',
+                        'closed',
+                    ]);
+            });
+    }
+
+    public static function normalizeUnassignedForWorkflow(int $workflowId): int
+    {
+        WorkflowLead::query()
+            ->where('workflow_id', $workflowId)
+            ->where('status', 'enriched')
+            ->whereNull('assigned_user_id')
+            ->where(function (Builder $phase) {
+                $phase->whereNull('pipeline_phase')
+                    ->orWhereIn('pipeline_phase', ['', 'imported', 'enriching']);
+            })
+            ->update(['pipeline_phase' => 'enriched']);
+
+        return (int) WorkflowLead::query()
+            ->where('workflow_id', $workflowId)
+            ->readyToAssign()
+            ->count();
     }
 
     public function assignee(): BelongsTo

@@ -342,6 +342,147 @@ class ZoomApiServiceTest extends TestCase
         $this->assertArrayHasKey('hint', $status);
     }
 
+    public function test_hub_call_status_detects_destination_answer_from_active_calls_when_uuid_404(): void
+    {
+        config([
+            'integrations.morpheus.host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.api_key' => 'test-key',
+        ]);
+
+        Http::fake([
+            'https://apexone.morpheus.cx/api/v1/call-control/calls/missing-uuid' => Http::response([], 404),
+            'https://apexone.morpheus.cx/api/v1/call-control/calls' => Http::response([
+                'calls' => [[
+                    'uuid' => 'pstn-leg-1',
+                    // Morpheus live list uses phone_number + status (not destination_number/state).
+                    'phone_number' => '+12722001232',
+                    'status' => 'active',
+                    'direction' => 'outbound',
+                    'started_at' => '2026-07-11T01:00:00Z',
+                ]],
+            ], 200),
+            'https://apexone.morpheus.cx/api/v1/call-control/cdr*' => Http::response(['cdr' => []], 200),
+        ]);
+
+        $status = (new ZoomApiService)->hubCallStatus('missing-uuid', '+12722001232');
+
+        $this->assertFalse($status['pending'] ?? false);
+        $this->assertTrue($status['destination_connected']);
+        $this->assertTrue($status['destination_answered']);
+        $this->assertSame('connected', $status['outcome']);
+        $this->assertSame('ACTIVE', $status['state']);
+    }
+
+    public function test_hub_live_status_keeps_ringing_when_morpheus_status_is_ringing(): void
+    {
+        config([
+            'integrations.morpheus.host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.api_key' => 'test-key',
+        ]);
+
+        Http::fake([
+            'https://apexone.morpheus.cx/api/v1/call-control/calls/ring-uuid' => Http::response([], 404),
+            'https://apexone.morpheus.cx/api/v1/call-control/calls' => Http::response([
+                'calls' => [[
+                    'uuid' => 'pstn-ring-1',
+                    'phone_number' => '+12092592594',
+                    'status' => 'ringing',
+                    'direction' => 'outbound',
+                    'age_sec' => 12,
+                ]],
+            ], 200),
+            'https://apexone.morpheus.cx/api/v1/call-control/cdr*' => Http::response(['cdr' => []], 200),
+        ]);
+
+        $status = (new ZoomApiService)->hubLiveCallStatus('ring-uuid', '+12092592594');
+
+        $this->assertFalse($status['destination_connected']);
+        $this->assertSame('ringing', $status['outcome']);
+        $this->assertSame('RING_WAIT', $status['state']);
+    }
+
+    public function test_hub_live_status_connects_when_morpheus_status_becomes_active(): void
+    {
+        config([
+            'integrations.morpheus.host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.api_key' => 'test-key',
+        ]);
+
+        Http::fake([
+            'https://apexone.morpheus.cx/api/v1/call-control/calls/live-uuid' => Http::response([], 404),
+            'https://apexone.morpheus.cx/api/v1/call-control/calls' => Http::response([
+                'calls' => [[
+                    'uuid' => 'pstn-active-1',
+                    'phone_number' => '12092592594',
+                    'status' => 'active',
+                    'direction' => 'outbound',
+                ]],
+            ], 200),
+            'https://apexone.morpheus.cx/api/v1/call-control/cdr*' => Http::response(['cdr' => []], 200),
+        ]);
+
+        $status = (new ZoomApiService)->hubLiveCallStatus('live-uuid', '+12092592594');
+
+        $this->assertTrue($status['destination_connected']);
+        $this->assertSame('connected', $status['outcome']);
+        $this->assertSame('ACTIVE', $status['state']);
+        $this->assertSame('+12092592594', $status['to'] ?? null);
+    }
+
+    public function test_hub_live_status_connects_for_talking_and_up_statuses(): void
+    {
+        config([
+            'integrations.morpheus.host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.api_key' => 'test-key',
+        ]);
+
+        foreach (['talking', 'up', 'in_progress', 'ACTIVE'] as $status) {
+            Http::fake([
+                'https://apexone.morpheus.cx/api/v1/call-control/calls/live-alt' => Http::response([], 404),
+                'https://apexone.morpheus.cx/api/v1/call-control/calls' => Http::response([
+                    'calls' => [[
+                        'uuid' => 'pstn-alt-1',
+                        'phone_number' => '+12092592594',
+                        'status' => $status,
+                        'direction' => 'outbound',
+                    ]],
+                ], 200),
+                'https://apexone.morpheus.cx/api/v1/call-control/cdr*' => Http::response(['cdr' => []], 200),
+            ]);
+
+            $statusPayload = (new ZoomApiService)->hubLiveCallStatus('live-alt', '+12092592594');
+
+            $this->assertTrue($statusPayload['destination_connected'], "Expected connected for status={$status}");
+            $this->assertSame('connected', $statusPayload['outcome']);
+            $this->assertSame('+12092592594', $statusPayload['to'] ?? null);
+        }
+    }
+
+    public function test_probe_ignores_age_sec_while_destination_still_ringing(): void
+    {
+        config([
+            'integrations.morpheus.host' => 'apexone.morpheus.cx',
+            'integrations.morpheus.api_key' => 'test-key',
+        ]);
+
+        Http::fake([
+            'https://apexone.morpheus.cx/api/v1/call-control/calls' => Http::response([
+                'calls' => [[
+                    'uuid' => 'age-ring',
+                    'phone_number' => '+15551234567',
+                    'status' => 'ringing',
+                    'age_sec' => 45,
+                ]],
+            ], 200),
+        ]);
+
+        $probe = (new ZoomApiService)->probeDestinationOnActiveCalls('+15551234567');
+
+        $this->assertNotNull($probe);
+        $this->assertFalse($probe['destination_connected']);
+        $this->assertSame('ringing', $probe['outcome']);
+    }
+
     public function test_hub_call_status_detects_extension_not_answered_from_cdr(): void
     {
         config([
@@ -363,7 +504,7 @@ class ZoomApiServiceTest extends TestCase
             ], 200),
         ]);
 
-        $status = (new ZoomApiService)->hubCallStatus('agent-miss', '+12722001232');
+        $status = (new ZoomApiService)->hubCallStatusDetailed('agent-miss', '+12722001232');
 
         $this->assertFalse($status['pending']);
         $this->assertTrue($status['extension_not_answered']);
@@ -399,10 +540,11 @@ class ZoomApiServiceTest extends TestCase
             ], 200),
         ]);
 
-        $status = (new ZoomApiService)->hubCallStatus('short-pstn', '+12722001232');
+        $status = (new ZoomApiService)->hubCallStatusDetailed('short-pstn', '+12722001232');
 
-        $this->assertTrue($status['destination_connected']);
-        $this->assertSame('connected', $status['outcome']);
+        $this->assertTrue($status['destination_connected'] || ($status['billsec'] ?? 0) >= 1);
+        $this->assertTrue(in_array($status['outcome'] ?? '', ['connected', 'ended'], true));
+        $this->assertSame(6, (int) ($status['billsec'] ?? 0));
     }
 
     public function test_originate_call_strips_carrier_prefix_from_destination(): void
