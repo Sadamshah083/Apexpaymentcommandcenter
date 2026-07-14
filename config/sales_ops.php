@@ -7,10 +7,10 @@ return [
         'super_admin' => 'Super Admin',
         'admin' => 'Admin',
         'manager' => 'Manager',
-        'appointment_setter_team_lead' => 'Appointment Setter Team Lead',
-        'appointment_setter' => 'Appointment Setter',
-        'closers_team_lead' => 'Closers Team Lead',
-        'closer' => 'Closer',
+        'appointment_setter_team_lead' => 'B2B Fronter Team Lead',
+        'appointment_setter' => 'B2B Fronter',
+        'closers_team_lead' => 'B2B Closer Team Lead',
+        'closer' => 'B2B Closer',
     ],
 
     'portal_roles' => [

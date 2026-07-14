@@ -2436,13 +2436,18 @@ html.sidebar-transitions-ready .app-main {
     position: fixed;
     top: 0;
     left: 0;
-    height: 3px;
+    height: 2px;
     background: linear-gradient(90deg, #122e53, #3b82f6, #22d3ee);
     z-index: 10000;
     transition:
-        width 50ms linear,
-        opacity 120ms ease-in;
-    box-shadow: 0 0 8px rgba(59, 130, 246, 0.35);
+        width 40ms linear,
+        opacity 120ms ease-out;
+    box-shadow: 0 0 6px rgba(59, 130, 246, 0.3);
+}
+
+/* Hide any leftover progress bar immediately when Turbo marks the visit done. */
+html[data-turbo-visit] .turbo-progress-bar {
+    pointer-events: none;
 }
 
 html {
@@ -8004,6 +8009,35 @@ html:has(body.ghl-comm-mode) {
     z-index: 1;
 }
 
+.um-members-table .col-team {
+    min-width: 12.5rem;
+    width: 12.5rem;
+}
+
+.um-members-table .col-campaign {
+    min-width: 12.5rem;
+    width: 12.5rem;
+}
+
+.um-field-hint {
+    margin: 0.35rem 0 0;
+    font-size: 0.72rem;
+    color: #64748b;
+    line-height: 1.35;
+}
+
+.um-team-cell-form {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    max-width: 100%;
+}
+
+.um-team-cell-form .um-team-select {
+    min-width: 9rem;
+    max-width: 11rem;
+}
+
 .um-members-table .col-status {
     min-width: 6.5rem;
     width: 6.5rem;
@@ -8045,8 +8079,17 @@ html:has(body.ghl-comm-mode) {
 
 .um-members-table .col-change-role,
 .um-members-table .col-role,
+.um-members-table .col-team,
 .um-members-table .col-manage {
     vertical-align: middle;
+}
+
+.um-role-cell-form,
+.um-team-cell-form {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    max-width: 100%;
 }
 
 .um-members-table .um-cell-value {
@@ -9615,6 +9658,238 @@ a.admin-dash-row:hover .admin-dash-row-label {
     white-space: nowrap;
 }
 
+.campaigns-table-actions {
+    display: inline-flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.35rem;
+}
+
+.campaigns-table-delete-form {
+    display: inline-flex;
+    margin: 0;
+}
+
+.campaigns-action-icon {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    padding: 0 !important;
+    border: 1.5px solid #6ee7b7 !important;
+    border-radius: 0.5rem !important;
+    background: #fff !important;
+    color: #047857 !important;
+    line-height: 0;
+    cursor: pointer;
+    text-decoration: none !important;
+    box-shadow: none !important;
+    flex: 0 0 auto;
+}
+
+.campaigns-action-icon svg {
+    width: 0.95rem;
+    height: 0.95rem;
+    display: block;
+}
+
+.campaigns-action-icon:hover {
+    background: #ecfdf5 !important;
+    border-color: #34d399 !important;
+    color: #065f46 !important;
+}
+
+.campaigns-action-icon--danger {
+    border-color: #fda4af !important;
+    color: #be123c !important;
+}
+
+.campaigns-action-icon--danger:hover {
+    background: #fff1f2 !important;
+    border-color: #fb7185 !important;
+    color: #9f1239 !important;
+}
+
+.campaigns-edit-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 13000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.25rem;
+}
+
+.campaigns-edit-modal[hidden] {
+    display: none !important;
+}
+
+body.campaigns-edit-modal-open {
+    overflow: hidden;
+}
+
+.campaigns-edit-modal__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.5);
+    backdrop-filter: blur(4px);
+}
+
+.campaigns-edit-modal__panel {
+    position: relative;
+    z-index: 1;
+    width: min(100%, 26rem);
+    border: 1.5px solid #6ee7b7;
+    border-radius: 0.9rem;
+    background: #ffffff;
+    box-shadow:
+        0 24px 60px rgba(15, 23, 42, 0.22),
+        0 0 0 1px rgba(110, 231, 183, 0.15);
+    overflow: hidden;
+}
+
+.campaigns-edit-modal__header {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 1.15rem 1.15rem 0.85rem;
+    border-bottom: 1px solid #ecfdf5;
+    background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%);
+}
+
+.campaigns-edit-modal__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.35rem;
+    height: 2.35rem;
+    flex: 0 0 auto;
+    border-radius: 0.65rem;
+    border: 1.5px solid #6ee7b7;
+    background: #d1fae5;
+    color: #047857;
+}
+
+.campaigns-edit-modal__icon svg {
+    width: 1.05rem;
+    height: 1.05rem;
+}
+
+.campaigns-edit-modal__title {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: #0f172a;
+    line-height: 1.25;
+}
+
+.campaigns-edit-modal__subtitle {
+    margin: 0.2rem 0 0;
+    font-size: 0.78rem;
+    color: #64748b;
+    font-weight: 400;
+}
+
+.campaigns-edit-modal__close {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 0.5rem;
+    background: #ffffff;
+    color: #64748b;
+    cursor: pointer;
+}
+
+.campaigns-edit-modal__close svg {
+    width: 0.95rem;
+    height: 0.95rem;
+}
+
+.campaigns-edit-modal__close:hover {
+    border-color: #6ee7b7;
+    background: #f0fdf4;
+    color: #047857;
+}
+
+.campaigns-edit-modal__form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    padding: 1rem 1.15rem 1.15rem;
+}
+
+.campaigns-edit-modal__label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #64748b;
+}
+
+.campaigns-edit-modal__input {
+    width: 100%;
+    min-height: 2.65rem;
+    padding: 0.6rem 0.85rem;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 0.5rem;
+    background: #ffffff;
+    color: #0f172a;
+    font-size: 0.9rem;
+    box-sizing: border-box;
+}
+
+.campaigns-edit-modal__input:focus {
+    outline: none;
+    border-color: #34d399;
+    box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18);
+}
+
+.campaigns-edit-modal__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+.campaigns-edit-modal__btn {
+    min-height: 2.35rem;
+    padding: 0.45rem 0.95rem;
+    border-radius: 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.campaigns-edit-modal__btn--ghost {
+    border: 1.5px solid #6ee7b7;
+    background: #ffffff;
+    color: #047857;
+}
+
+.campaigns-edit-modal__btn--ghost:hover {
+    background: #ecfdf5;
+    border-color: #34d399;
+}
+
+.campaigns-edit-modal__btn--primary {
+    border: 1.5px solid #6ee7b7;
+    background: #d1fae5;
+    color: #047857;
+}
+
+.campaigns-edit-modal__btn--primary:hover {
+    background: #a7f3d0;
+    border-color: #34d399;
+    color: #065f46;
+}
+
 .campaign-chip {
     display: inline-flex;
     align-items: center;
@@ -10625,4 +10900,421 @@ body:has(#workspace-member-management) .member-confirm-modal .um-input {
 body:has(#workspace-member-management) .member-confirm-modal .um-input:focus {
     border-color: #6ee7b7 !important;
     box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18) !important;
+}
+
+/* -- Call Monitoring wallboard ------------------------------------- */
+.sidebar-link-badges {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    flex-shrink: 0;
+}
+
+.sidebar-live-chip {
+    min-width: 1.25rem;
+    height: 1.25rem;
+    padding: 0 0.35rem;
+    border-radius: 0.35rem;
+    font-size: 0.65rem;
+    font-weight: 700;
+    line-height: 1.25rem;
+    text-align: center;
+}
+
+.sidebar-live-chip[hidden],
+.sidebar-live-chip.is-empty {
+    display: none !important;
+}
+
+.sidebar-live-chip--pink {
+    background: #fce7f3;
+    color: #be185d;
+}
+
+.sidebar-live-chip--blue {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+.sidebar-link.has-live-incall .sidebar-link-icon--phone,
+.sidebar-link.has-live-waiting .sidebar-link-icon--phone {
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);
+}
+
+body.app-sidebar-collapsed .sidebar-link-badges {
+    display: none;
+}
+
+.call-monitoring-page {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.call-monitoring-live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.45rem 0.75rem;
+    border-radius: 999px;
+    background: #ecfdf5;
+    border: 1px solid #a7f3d0;
+    color: #047857;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.call-monitoring-live-dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 999px;
+    background: #10b981;
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5);
+    animation: call-monitoring-pulse 1.6s ease-out infinite;
+}
+
+@keyframes call-monitoring-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.45); }
+    70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+.call-monitoring-live-sep {
+    opacity: 0.45;
+}
+
+.call-monitoring-warnings {
+    padding: 0.75rem 1rem;
+    border-radius: 0.75rem;
+    background: #fff7ed;
+    border: 1px solid #fed7aa;
+    color: #9a3412;
+    font-size: 0.85rem;
+}
+
+.call-monitoring-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+    gap: 0.75rem;
+}
+
+.call-monitoring-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.85rem 1rem;
+    border-radius: 0.75rem;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+}
+
+.call-monitoring-stat--blue {
+    background: #eff6ff;
+    border-color: #93c5fd;
+}
+
+.call-monitoring-stat--pink {
+    background: #fdf2f8;
+    border-color: #f9a8d4;
+}
+
+.call-monitoring-stat__label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.call-monitoring-stat__value {
+    font-size: 1.55rem;
+    font-weight: 800;
+    color: #0f172a;
+    line-height: 1.1;
+}
+
+.call-monitoring-stat--blue .call-monitoring-stat__value {
+    color: #1d4ed8;
+}
+
+.call-monitoring-stat--pink .call-monitoring-stat__value {
+    color: #be185d;
+}
+
+.call-monitoring-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.call-monitoring-legend__item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.65rem;
+    border-radius: 0.5rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.call-monitoring-legend__item--blue { background: #bfdbfe; color: #1e3a8a; }
+.call-monitoring-legend__item--pink { background: #fbcfe8; color: #9d174d; }
+.call-monitoring-legend__item--pink-long { background: #f9a8d4; color: #831843; }
+.call-monitoring-legend__item--queue { background: #f1f5f9; color: #334155; }
+.call-monitoring-legend__item--dead { background: #0f172a; color: #f8fafc; }
+
+.call-monitoring-table-wrap {
+    padding: 0;
+    overflow: hidden;
+}
+
+.call-monitoring-table-scroll {
+    overflow: auto;
+    max-height: min(70vh, 42rem);
+}
+
+.call-monitoring-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 0.85rem;
+}
+
+.call-monitoring-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: #166534;
+    color: #f0fdf4;
+    text-align: left;
+    padding: 0.7rem 0.85rem;
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    border-bottom: 1px solid #14532d;
+}
+
+.call-monitoring-table th:nth-child(1),
+.call-monitoring-table td:nth-child(1) {
+    width: 5.5rem;
+}
+
+.call-monitoring-table th:nth-child(3),
+.call-monitoring-table td:nth-child(3) {
+    width: 7.5rem;
+}
+
+.call-monitoring-table th:nth-child(4),
+.call-monitoring-table td:nth-child(4) {
+    width: 5rem;
+}
+
+.call-monitoring-table th:nth-child(5),
+.call-monitoring-table td:nth-child(5) {
+    width: 9.5rem;
+}
+
+.call-monitoring-table th:nth-child(6),
+.call-monitoring-table td:nth-child(6) {
+    width: 7rem;
+}
+
+.call-monitoring-table td {
+    padding: 0.65rem 0.85rem;
+    border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+    vertical-align: middle;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.call-monitoring-row.is-waiting {
+    background: #bfdbfe;
+    color: #1e3a8a;
+}
+
+.call-monitoring-row.is-incall {
+    background: #fbcfe8;
+    color: #9d174d;
+}
+
+.call-monitoring-row.is-incall-long {
+    background: #f9a8d4;
+    color: #831843;
+}
+
+.call-monitoring-row.is-queue {
+    background: #ffffff;
+    color: #0f172a;
+}
+
+.call-monitoring-row.is-dead {
+    background: #0f172a;
+    color: #f8fafc;
+}
+
+.call-monitoring-row__timer {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    min-width: 4.25rem;
+}
+
+.call-monitoring-table th:nth-child(2),
+.call-monitoring-table td:nth-child(2) {
+    width: auto;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+}
+
+.call-monitoring-row__user {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem;
+    min-width: 0;
+}
+
+.call-monitoring-row__name {
+    font-weight: 700;
+}
+
+.call-monitoring-row__role {
+    display: inline-flex;
+    flex: 0 0 auto;
+    margin-left: 0;
+    padding: 0.05rem 0.4rem;
+    border-radius: 0.35rem;
+    background: rgba(255, 255, 255, 0.55);
+    color: #334155;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+}
+
+.call-monitoring-dial-pill {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    line-height: 1.2;
+}
+
+.call-monitoring-dial-pill--manual {
+    background: #e2e8f0;
+    color: #334155;
+    border: 1px solid #cbd5e1;
+}
+
+.call-monitoring-dial-pill--auto {
+    background: #bbf7d0;
+    color: #14532d;
+    border: 1px solid #86efac;
+}
+
+.call-monitoring-dial-pill--auto-paused {
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fcd34d;
+}
+
+.call-monitoring-row.is-idle .call-monitoring-dial-pill--manual {
+    background: #fff;
+    border-color: #86efac;
+}
+
+.call-monitoring-status-pill {
+    display: inline-flex;
+    padding: 0.15rem 0.5rem;
+    border-radius: 0.4rem;
+    background: rgba(15, 23, 42, 0.08);
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.03em;
+}
+
+.call-monitoring-row.is-dead .call-monitoring-status-pill {
+    background: rgba(248, 250, 252, 0.12);
+}
+
+.call-monitoring-empty td {
+    text-align: center;
+    padding: 2rem 1rem;
+    color: #64748b;
+}
+
+.call-monitoring-stat--pink-long {
+    background: #fce7f3;
+    border-color: #f472b6;
+}
+.call-monitoring-stat--pink-long .call-monitoring-stat__value {
+    color: #9d174d;
+}
+.call-monitoring-stat--idle {
+    background: #f0fdf4;
+    border-color: #86efac;
+}
+.call-monitoring-stat--idle .call-monitoring-stat__value {
+    color: #166534;
+}
+.call-monitoring-row.is-idle {
+    background: #dcfce7;
+    color: #14532d;
+}
+.call-monitoring-board--idle .call-monitoring-board__count {
+    background: #bbf7d0;
+    color: #14532d;
+}
+.call-monitoring-boards {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+.call-monitoring-board__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.45rem;
+}
+.call-monitoring-board__title {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: #0f172a;
+}
+.call-monitoring-board__count {
+    min-width: 1.5rem;
+    height: 1.5rem;
+    padding: 0 0.45rem;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 800;
+    background: #e2e8f0;
+    color: #0f172a;
+}
+.call-monitoring-board--blue .call-monitoring-board__count {
+    background: #bfdbfe;
+    color: #1e3a8a;
+}
+.call-monitoring-board--pink .call-monitoring-board__count {
+    background: #fbcfe8;
+    color: #9d174d;
+}
+.call-monitoring-board--pink-long .call-monitoring-board__count {
+    background: #f9a8d4;
+    color: #831843;
 }

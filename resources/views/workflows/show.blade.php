@@ -261,7 +261,7 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
             @if($importedCount > 0 && ! $workflow->isProcessing() && ($enrichmentConfigured ?? false))
                 <div class="app-alert app-alert-warning flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
-                        <p class="app-alert-title">{{ number_format($importedCount) }} leads imported ΓÇö enrichment not started</p>
+                        <p class="app-alert-title">{{ number_format($importedCount) }} leads imported — enrichment not started</p>
                         <p class="app-alert-desc">Run AI enrichment when you're ready. Distribution to setters is a separate step after enrichment.</p>
                     </div>
                     @if($enrichmentConfigured ?? false)
@@ -305,7 +305,7 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                 </div>
             @elseif(($enrichmentStatus['gemini']['state'] ?? '') === 'depleted')
                 <div class="app-alert app-alert-warning">
-                    <p class="app-alert-title">Gemini credits depleted ΓÇö using OpenRouter fallback</p>
+                    <p class="app-alert-title">Gemini credits depleted — using OpenRouter fallback</p>
                     <p class="app-alert-desc">Enrichment will skip Gemini and use OpenRouter until credits are restored.</p>
                 </div>
             @endif
@@ -376,10 +376,10 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                                         @endif
                                         @include('partials.campaign-chip', ['campaign' => $lead->campaign, 'compact' => true])
                                     </td>
-                                    <td class="text-sm text-zinc-600">{{ LeadContactDisplay::cell($display['owner']) ?: 'ΓÇö' }}</td>
-                                    <td class="text-sm text-zinc-600">{{ LeadContactDisplay::cell($display['email']) ?: 'ΓÇö' }}</td>
-                                    <td class="text-sm text-zinc-600">{{ LeadContactDisplay::cell($display['social_media']) ?: 'ΓÇö' }}</td>
-                                    <td class="text-sm text-zinc-600">{{ LeadContactDisplay::cell($display['phone']) ?: 'ΓÇö' }}</td>
+                                    <td class="text-sm text-zinc-600">{{ LeadContactDisplay::cell($display['owner']) ?: '—' }}</td>
+                                    <td class="text-sm text-zinc-600">{{ LeadContactDisplay::cell($display['email']) ?: '—' }}</td>
+                                    <td class="text-sm text-zinc-600">{{ LeadContactDisplay::cell($display['social_media']) ?: '—' }}</td>
+                                    <td class="text-sm text-zinc-600">{{ LeadContactDisplay::cell($display['phone']) ?: '—' }}</td>
                                     <td>
                                         <x-lead-pipeline-badge :status="$lead->status" />
                                         @if($lead->status === 'failed' && $lead->error_message)

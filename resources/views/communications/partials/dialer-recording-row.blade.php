@@ -48,6 +48,7 @@
     }
     $disposition = trim((string) ($log['disposition'] ?? $log['result'] ?? ''));
     $agentName = trim((string) ($log['agent_name'] ?? data_get($log, 'raw.user.name') ?? ''));
+    $agentRoleLabel = trim((string) ($log['agent_role_label'] ?? ''));
 @endphp
 
 <div class="ghl-dialer-recording-row" data-phone-log-row data-recording-row tabindex="0"
@@ -79,6 +80,9 @@
             {{ ucfirst($log['direction'] ?? 'call') }} · {{ $timeAgo }} · {{ $durationLabel }}
             @if ($agentName !== '')
                 · {{ $agentName }}
+            @endif
+            @if ($agentRoleLabel !== '')
+                · <span class="ghl-dialer-recording-role">{{ $agentRoleLabel }}</span>
             @endif
             @if ($disposition !== '' && $disposition !== '—')
                 · {{ $disposition }}

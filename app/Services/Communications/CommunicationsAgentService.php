@@ -66,6 +66,36 @@ class CommunicationsAgentService
             ->all();
     }
 
+    /**
+     * Workspace agents by extension from DB only (no Morpheus HTTP).
+     * Used by Call Monitoring light polls so role badges stay stable.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function listLocalExtensionDirectory(Workspace $workspace): array
+    {
+        return $workspace->users()
+            ->wherePivot('status', 'active')
+            ->orderBy('name')
+            ->get()
+            ->map(function (User $user) {
+                $pivot = $user->pivot;
+                $ext = trim((string) ($pivot->morpheus_extension_num ?? ''));
+
+                return [
+                    'user_id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'role' => $pivot->role,
+                    'role_label' => \App\Support\SalesOps::roleLabel($pivot->role),
+                    'morpheus_extension_num' => $ext !== '' ? $ext : null,
+                ];
+            })
+            ->filter(fn (array $agent) => filled($agent['morpheus_extension_num'] ?? null))
+            ->values()
+            ->all();
+    }
+
     public function suggestExtensionNum(): string
     {
         $nums = collect($this->hub->extensions())
@@ -264,7 +294,12 @@ class CommunicationsAgentService
 
             $extNum = $default;
         } else {
-            $extNum = $this->extensionForUser($user, $workspace->id) ?: $default;
+            // Agents/team leads must use their assigned line — never fall back to a shared default
+            // (that caused 403 on webphone/config for unassigned users defaulting to 1020).
+            $extNum = $this->extensionForUser($user, $workspace->id);
+            if (! filled($extNum)) {
+                return [];
+            }
         }
 
         return [$this->formatDialerExtension([

@@ -11,10 +11,18 @@
     @include('layouts.partials.vite-assets')
 </head>
 
-<body class="app-shell min-h-screen font-sans antialiased" data-turbo-prefetch="hover"
+<body class="app-shell min-h-screen font-sans antialiased" data-turbo-prefetch="false"
     @auth
 data-workspace-id="{{ auth()->user()->current_workspace_id }}"
-        data-workspace-sync-scope="{{ request()->routeIs('portal.lists.*', 'portal.deliverability.*', 'portal.content.*', 'portal.reputation.*', 'portal.communications.*') ? 'lite' : 'full' }}"
+        data-workspace-sync-scope="{{
+            request()->routeIs('portal.communications.*')
+                ? 'off'
+                : (request()->routeIs('portal.lists.*', 'portal.deliverability.*', 'portal.content.*', 'portal.reputation.*')
+                    ? 'lite'
+                    : (request()->routeIs('portal.setter.*', 'portal.closer.*', 'portal.setter-team.*', 'portal.closer-team.*', 'portal.pipeline*', 'portal.performance*', 'portal.leads*')
+                        ? 'full'
+                        : 'off'))
+        }}"
         data-workspace-sync-url="{{ route('portal.sync.poll') }}"
         data-workspace-sync-stream-url="{{ route('portal.sync.stream') }}"
         @if(app()->environment('local')) data-workspace-sync-use-poll="1" @endif

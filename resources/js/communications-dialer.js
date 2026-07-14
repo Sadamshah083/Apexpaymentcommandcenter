@@ -88,6 +88,20 @@ function handleDialerNumberChange(form) {
     refreshBackspaceVisibility(numberInput, backspace);
 }
 
+/** Clear the pad number field (lead context can stay on form dataset until hangup). */
+export function clearDialerDestinationInput() {
+    document.querySelectorAll('.ghl-dialer-originate-form [name="destination"]').forEach((input) => {
+        if (!input || input.value === '') {
+            return;
+        }
+        input.value = '';
+        const form = input.closest('.ghl-dialer-originate-form');
+        if (form) {
+            handleDialerNumberChange(form);
+        }
+    });
+}
+
 function updateDialerRouteSummary(callerSelect) {
     const summary = document.querySelector('[data-dialer-from-did]');
     const extBadge = document.querySelector('[data-dialer-line-ext]');
@@ -761,6 +775,16 @@ function attachDialerForm(form) {
             return;
         }
 
+        // Auto dial mode: place calls via Start auto dial, not the pad phone icon.
+        if (document.body.classList.contains('ch-dial-auto-mode')
+            || document.querySelector('[data-auto-dial-hub]')?.classList.contains('ch-dial-workspace--auto-mode')) {
+            event.preventDefault();
+            event.stopPropagation();
+            hideLoadingOverlay();
+            showToast('Auto dial mode — use Start auto dial. Switch to Manual dial for keypad calls.', 'info');
+            return;
+        }
+
         if (form.dataset.webphoneChecked === '1') {
             form.dataset.webphoneChecked = '';
             form.dataset.dialerConnectPending = '0';
@@ -1028,7 +1052,7 @@ function bindCallLogsScrollResize(workspace) {
     }
 }
 
-function setPhoneWorkspaceView(workspace, view) {
+function setPhoneWorkspaceView(workspace, view, recordingRole = null) {
     if (!workspace) {
         return;
     }
@@ -1037,12 +1061,32 @@ function setPhoneWorkspaceView(workspace, view) {
     const nextView = ['logs', 'leads', 'recordings', 'dialer'].includes(view) ? view : 'dialer';
     workspace.dataset.phoneView = isAdminSplit && nextView === 'dialer' ? 'logs' : nextView;
 
+    if (recordingRole !== null) {
+        workspace.dataset.recordingRole = recordingRole;
+    } else if (nextView !== 'recordings') {
+        workspace.dataset.recordingRole = '';
+    }
+
+    const activeRecordingRole = workspace.dataset.recordingRole || '';
+
     const switcher = workspace.querySelector('[data-phone-panel-switch]');
     switcher?.querySelectorAll('[data-phone-panel-view]').forEach((btn) => {
-        const active = btn.dataset.phonePanelView === nextView;
-        btn.classList.toggle('is-active', active);
-        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+        const sameView = btn.dataset.phonePanelView === nextView;
+        const btnRole = btn.dataset.recordingRole ?? '';
+        const exactRoleMatch = sameView && (
+            nextView !== 'recordings'
+            || (btn.hasAttribute('data-recording-role') && btnRole === activeRecordingRole)
+        );
+        btn.classList.toggle('is-active', exactRoleMatch);
+        btn.setAttribute('aria-selected', exactRoleMatch ? 'true' : 'false');
     });
+
+    const titleEl = workspace.querySelector('[data-phone-recordings-title]');
+    if (titleEl) {
+        titleEl.textContent = activeRecordingRole === 'agent'
+            ? 'Agent recordings'
+            : (activeRecordingRole === 'team_lead' ? 'Team lead recordings' : 'Call Recording');
+    }
 
     const logsPane = workspace.querySelector('[data-phone-logs-pane]');
     const leadsPane = workspace.querySelector('[data-phone-leads-pane]');
@@ -1108,13 +1152,17 @@ function initPhonePanelSwitch(root = document) {
             }
 
             event.preventDefault();
-            setPhoneWorkspaceView(workspace, btn.dataset.phonePanelView);
+            const view = btn.dataset.phonePanelView;
+            const recordingRole = btn.hasAttribute('data-recording-role')
+                ? (btn.dataset.recordingRole || '')
+                : null;
+            setPhoneWorkspaceView(workspace, view, recordingRole);
             initCallLogsInfiniteScroll(workspace);
-            if (btn.dataset.phonePanelView === 'leads') {
+            if (view === 'leads') {
                 window.initImportedLeadsList?.(workspace);
             }
-            if (btn.dataset.phonePanelView === 'recordings') {
-                initCallRecordingsList(workspace);
+            if (view === 'recordings') {
+                reloadCallRecordingsList(workspace, workspace.dataset.recordingRole || '');
             }
         });
 
@@ -1495,6 +1543,7 @@ function buildRecordingRow(log) {
     const phone = escapeHtml(log.phone_display || log.phone || '—');
     const leadName = escapeHtml(String(log.lead_name || '').trim());
     const agentName = escapeHtml(String(log.agent_name || '').trim());
+    const agentRoleLabel = escapeHtml(String(log.agent_role_label || '').trim());
     const result = escapeHtml(log.disposition || log.result || '—');
     const timeAgo = escapeHtml(log.time_ago || '—');
     const durationLabel = escapeHtml(log.duration_label || '0s');
@@ -1504,6 +1553,7 @@ function buildRecordingRow(log) {
     const playUrl = escapeHtml(log.play_url || '');
     const downloadUrl = escapeHtml(log.download_url || '');
     const agentMeta = agentName ? ` · ${agentName}` : '';
+    const roleMeta = agentRoleLabel ? ` · <span class="ghl-dialer-recording-role">${agentRoleLabel}</span>` : '';
     const metaExtra = result && result !== '—' ? ` · ${result}` : '';
 
     return `
@@ -1530,7 +1580,7 @@ function buildRecordingRow(log) {
             <div class="ghl-dialer-recording-main">
                 ${leadName ? `<span class="ghl-dialer-recording-name">${leadName}</span>` : ''}
                 <span class="ghl-dialer-recording-number">${phone}</span>
-                <span class="ghl-dialer-recording-meta">${directionLabel} · ${timeAgo} · ${durationLabel}${agentMeta}${metaExtra}</span>
+                <span class="ghl-dialer-recording-meta">${directionLabel} · ${timeAgo} · ${durationLabel}${agentMeta}${roleMeta}${metaExtra}</span>
             </div>
             <div class="ghl-dialer-recording-actions">
                 ${hasRecording
@@ -1550,6 +1600,23 @@ function buildRecordingRow(log) {
             </div>
         </div>
     `;
+}
+
+function reloadCallRecordingsList(workspace, recordingRole = '') {
+    const list = workspace?.querySelector?.('[data-call-recordings-list]');
+    if (!list) {
+        return;
+    }
+
+    const items = list.querySelector('[data-call-recordings-items]');
+    if (items) {
+        items.innerHTML = '';
+    }
+    list.dataset.recordingRole = recordingRole || '';
+    list.dataset.callRecordingsOffset = '0';
+    list.dataset.callRecordingsHasMore = '1';
+    list.dataset.callRecordingsInit = '0';
+    initCallRecordingsList(workspace);
 }
 
 function initCallRecordingsList(root = document) {
@@ -1572,8 +1639,8 @@ function initCallRecordingsList(root = document) {
 
         let fetching = false;
 
-        const fetchMore = async () => {
-            if (fetching || list.dataset.callRecordingsHasMore === '0') {
+        const fetchMore = async ({ reset = false } = {}) => {
+            if (fetching || (!reset && list.dataset.callRecordingsHasMore === '0')) {
                 return;
             }
 
@@ -1581,12 +1648,18 @@ function initCallRecordingsList(root = document) {
             loading?.classList.remove('hidden');
 
             try {
-                const offset = Number.parseInt(list.dataset.callRecordingsOffset || '0', 10) || 0;
+                const offset = reset
+                    ? 0
+                    : (Number.parseInt(list.dataset.callRecordingsOffset || '0', 10) || 0);
+                const recordingRole = list.dataset.recordingRole || '';
                 const params = new URLSearchParams({
                     offset: String(offset),
                     per_page: '20',
                     recordings_only: '1',
                 });
+                if (recordingRole) {
+                    params.set('recording_role', recordingRole);
+                }
                 const response = await fetch(`${url}?${params.toString()}`, {
                     headers: { Accept: 'application/json' },
                     credentials: 'same-origin',
@@ -1597,10 +1670,18 @@ function initCallRecordingsList(root = document) {
                 }
 
                 const logs = payload.logs || [];
+                if (reset) {
+                    items.innerHTML = '';
+                }
                 items.querySelector('[data-call-recordings-empty]')?.remove();
 
                 if (logs.length === 0 && offset === 0) {
-                    items.innerHTML = '<p class="ghl-dialer-recent-empty" data-call-recordings-empty>No call recordings yet.</p>';
+                    const emptyLabel = recordingRole === 'agent'
+                        ? 'No agent recordings yet.'
+                        : (recordingRole === 'team_lead'
+                            ? 'No team lead recordings yet.'
+                            : 'No call recordings yet.');
+                    items.innerHTML = `<p class="ghl-dialer-recent-empty" data-call-recordings-empty>${emptyLabel}</p>`;
                 } else {
                     const wrapper = document.createElement('div');
                     wrapper.innerHTML = logs.map((log) => buildRecordingRow(log)).join('');
@@ -1620,6 +1701,10 @@ function initCallRecordingsList(root = document) {
                 fetching = false;
             }
         };
+
+        if (items.children.length === 0 || list.dataset.callRecordingsOffset === '0') {
+            void fetchMore({ reset: true });
+        }
 
         if (sentinel && 'IntersectionObserver' in window) {
             const observer = new IntersectionObserver((entries) => {
@@ -1911,14 +1996,19 @@ export async function placeOutboundCall(phone, meta = {}) {
     form.dataset.dialLeadPhone = destination;
     handleDialerNumberChange(form);
 
+    let placed = false;
     if (document.querySelector('[data-webphone-panel]')) {
-        return originateViaJson(form, dialBtn);
+        placed = await originateViaJson(form, dialBtn);
+    } else {
+        form.requestSubmit?.();
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        placed = true;
     }
 
-    form.requestSubmit?.();
-    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    // Once dialing/ringing starts, keep the pad empty (number lives on the call card).
+    clearDialerDestinationInput();
 
-    return true;
+    return placed;
 }
 
 window.initGhlDialer = function initGhlDialer(config) {

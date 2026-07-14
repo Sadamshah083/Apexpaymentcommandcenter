@@ -112,12 +112,39 @@
                     </svg>
                     <span>Notes</span>
                 </button>
+                <button type="button" class="ghl-dialer-active-screen__tool" data-dialer-active-keypad-toggle
+                    title="Show keypad" aria-expanded="false" aria-controls="ghl-dialer-active-keypad">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <rect x="4" y="3" width="16" height="18" rx="2" />
+                        <circle cx="8" cy="8" r="1" fill="currentColor" />
+                        <circle cx="12" cy="8" r="1" fill="currentColor" />
+                        <circle cx="16" cy="8" r="1" fill="currentColor" />
+                        <circle cx="8" cy="12" r="1" fill="currentColor" />
+                        <circle cx="12" cy="12" r="1" fill="currentColor" />
+                        <circle cx="16" cy="12" r="1" fill="currentColor" />
+                        <circle cx="8" cy="16" r="1" fill="currentColor" />
+                        <circle cx="12" cy="16" r="1" fill="currentColor" />
+                        <circle cx="16" cy="16" r="1" fill="currentColor" />
+                    </svg>
+                    <span>Keypad</span>
+                </button>
                 <button type="button" class="ghl-dialer-active-screen__tool hidden" data-dialer-call-hold
                     title="Place caller on hold">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" />
                     </svg>
-                    <span>Hold</span>
+                    <span data-dialer-call-hold-label>Hold</span>
+                </button>
+                <button type="button" class="ghl-dialer-active-screen__tool hidden" data-dialer-call-mute
+                    title="Mute your microphone" aria-pressed="false">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"
+                        data-dialer-call-mute-icon>
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        <line x1="12" y1="19" x2="12" y2="23" />
+                        <line x1="8" y1="23" x2="16" y2="23" />
+                    </svg>
+                    <span data-dialer-call-mute-label>Mute</span>
                 </button>
                 <button type="button" class="ghl-dialer-active-screen__tool hidden" data-dialer-call-transfer
                     title="Transfer this call">
@@ -135,6 +162,40 @@
                     <span data-dialer-call-record-label>Record</span>
                 </button>
             </div>
+            <div class="ghl-dialer-active-keypad hidden" id="ghl-dialer-active-keypad" data-dialer-active-keypad aria-hidden="true">
+                <div class="ghl-dialer-active-keypad__display">
+                    <p class="ghl-dialer-active-keypad__digits" data-dialer-active-keypad-digits aria-live="polite"></p>
+                    <button type="button" class="ghl-dialer-active-keypad__delete" data-dialer-active-keypad-delete
+                        aria-label="Delete last digit" title="Delete">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"></path>
+                            <line x1="18" y1="9" x2="12" y2="15"></line>
+                            <line x1="12" y1="9" x2="18" y2="15"></line>
+                        </svg>
+                        <span>Delete</span>
+                    </button>
+                </div>
+                <div class="ghl-dialer-active-keypad__grid">
+                    @foreach (['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'] as $tone)
+                        <button type="button" class="ghl-dialer-active-keypad__key" data-dialer-active-dtmf="{{ $tone }}"
+                            aria-label="Send {{ $tone }}">{{ $tone }}</button>
+                    @endforeach
+                </div>
+                <div class="ghl-dialer-active-keypad__footer">
+                    <button type="button" class="ghl-dialer-active-keypad__clear" data-dialer-active-keypad-clear
+                        title="Clear all digits">Clear</button>
+                    <button type="button" class="ghl-dialer-active-keypad__delete ghl-dialer-active-keypad__delete--text"
+                        data-dialer-active-keypad-delete aria-label="Delete last digit" title="Delete">
+                        Delete
+                    </button>
+                    <button type="button" class="ghl-dialer-active-keypad__hide" data-dialer-active-keypad-hide>Hide keypad</button>
+                    <button type="button" class="ghl-dialer-active-keypad__amd" data-dialer-answering-machine
+                        title="Mark as answering machine and end call">
+                        Answering machine
+                    </button>
+                </div>
+            </div>
             <div class="ghl-dialer-active-notes hidden" data-dialer-active-notes>
                 <p class="ghl-dialer-active-notes__title">Call notes</p>
                 <label class="ghl-dialer-active-notes__label" for="dialer-active-notes-field">Notes</label>
@@ -148,6 +209,21 @@
                 <div class="ghl-dialer-active-notes-actions">
                     <span class="ghl-dialer-active-notes-status" data-dialer-active-notes-status aria-live="polite">Auto-saves to call log</span>
                     <button type="button" class="ch-btn ch-btn--secondary ch-btn--sm" data-dialer-active-notes-save>Save</button>
+                </div>
+            </div>
+            <div class="ghl-dialer-transfer-modal hidden" data-dialer-transfer-modal aria-hidden="true">
+                <div class="ghl-dialer-transfer-modal__backdrop" data-dialer-transfer-close></div>
+                <div class="ghl-dialer-transfer-modal__card" role="dialog" aria-modal="true" aria-labelledby="ghl-dialer-transfer-title">
+                    <p class="ghl-dialer-transfer-modal__title" id="ghl-dialer-transfer-title">Transfer call</p>
+                    <p class="ghl-dialer-transfer-modal__hint">Enter an extension or phone number</p>
+                    <input type="tel" class="ghl-dialer-transfer-modal__input" data-dialer-transfer-input
+                        placeholder="e.g. 1012 or +12025551234" inputmode="tel" autocomplete="off">
+                    <div class="ghl-dialer-transfer-modal__actions">
+                        <button type="button" class="ghl-dialer-transfer-modal__btn ghl-dialer-transfer-modal__btn--ghost"
+                            data-dialer-transfer-close>Cancel</button>
+                        <button type="button" class="ghl-dialer-transfer-modal__btn ghl-dialer-transfer-modal__btn--primary"
+                            data-dialer-transfer-confirm>Transfer</button>
+                    </div>
                 </div>
             </div>
             <div class="ghl-dialer-active-screen__footer">
@@ -188,6 +264,10 @@
                         title="Answer the incoming call on your browser line">Answer</button>
                     <button type="button" class="ghl-webphone-btn-hold hidden" data-dialer-call-hold
                         title="Place caller on hold">Hold</button>
+                    <button type="button" class="ghl-webphone-btn-mute hidden" data-dialer-call-mute
+                        title="Mute your microphone" aria-pressed="false">
+                        <span data-dialer-call-mute-label>Mute</span>
+                    </button>
                     <button type="button" class="ghl-webphone-btn-transfer hidden" data-dialer-call-transfer
                         title="Transfer this call">Transfer</button>
                     <button type="button" class="ghl-webphone-btn-record hidden" data-dialer-call-record

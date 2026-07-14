@@ -66,12 +66,74 @@ class WorkspaceMemberController extends Controller
         return $this->respond($request, "Updated {$member->name}'s role to ".SalesOps::roleLabel($data['role']).'.');
     }
 
+    public function updateTeamLead(Request $request, Workspace $workspace, User $member)
+    {
+        $data = $request->validate([
+            'team_lead_user_id' => ['nullable', 'integer'],
+        ]);
+
+        $teamLeadUserId = isset($data['team_lead_user_id']) && (int) $data['team_lead_user_id'] > 0
+            ? (int) $data['team_lead_user_id']
+            : null;
+
+        $this->memberService->updateMemberTeamLead($workspace, Auth::user(), $member, $teamLeadUserId);
+
+        if ($teamLeadUserId === null) {
+            return $this->respond($request, "{$member->name} is unassigned from a team.");
+        }
+
+        $lead = $workspace->users()->where('user_id', $teamLeadUserId)->first();
+
+        return $this->respond(
+            $request,
+            "Assigned {$member->name} to ".($lead?->name ?? 'team')."'s team.",
+        );
+    }
+
+    public function updateCampaign(Request $request, Workspace $workspace, User $member)
+    {
+        $data = $request->validate([
+            'campaign_id' => ['nullable', 'integer'],
+        ]);
+
+        $campaignId = isset($data['campaign_id']) && (int) $data['campaign_id'] > 0
+            ? (int) $data['campaign_id']
+            : null;
+
+        $this->memberService->updateMemberCampaign($workspace, Auth::user(), $member, $campaignId);
+
+        if ($campaignId === null) {
+            return $this->respond($request, "{$member->name} has no campaign assigned.");
+        }
+
+        $campaign = \App\Models\LeadCampaign::query()
+            ->where('workspace_id', $workspace->id)
+            ->where('id', $campaignId)
+            ->first();
+
+        return $this->respond(
+            $request,
+            "Assigned campaign \"".($campaign?->name ?? 'Campaign')."\" to {$member->name}. Their team members inherit it.",
+        );
+    }
+
     public function update(Request $request, Workspace $workspace, User $member)
     {
+        $assignableRoles = array_keys(SalesOps::assignableMemberRoles());
+
+        $request->merge([
+            'campaign_id' => $request->filled('campaign_id') ? $request->input('campaign_id') : null,
+            'team_lead_user_id' => $request->filled('team_lead_user_id') ? $request->input('team_lead_user_id') : null,
+            'role' => $request->filled('role') ? $request->input('role') : null,
+        ]);
+
         $data = $request->validate([
             'username' => 'required|string|max:255|unique:users,name,'.$member->id,
             'email' => 'required|email|max:255|unique:users,email,'.$member->id,
             'password' => 'nullable|string|min:6|confirmed',
+            'role' => 'nullable|in:'.implode(',', $assignableRoles),
+            'team_lead_user_id' => ['nullable', 'integer'],
+            'campaign_id' => ['nullable', 'integer'],
         ]);
 
         $member = $this->memberService->updateMemberProfile(
@@ -82,6 +144,26 @@ class WorkspaceMemberController extends Controller
             $data['email'],
             $data['password'] ?? null,
         );
+
+        if (! empty($data['role'])) {
+            $this->memberService->updateMemberRole($workspace, Auth::user(), $member, $data['role']);
+        }
+
+        $role = (string) ($workspace->users()->where('user_id', $member->id)->first()?->pivot?->role ?? '');
+
+        if (SalesOps::isTeamLeadRole($role) && $request->exists('campaign_id')) {
+            $campaignId = isset($data['campaign_id']) && (int) $data['campaign_id'] > 0
+                ? (int) $data['campaign_id']
+                : null;
+            $this->memberService->updateMemberCampaign($workspace, Auth::user(), $member, $campaignId);
+        }
+
+        if (SalesOps::isAgentRole($role) && $request->exists('team_lead_user_id')) {
+            $teamLeadUserId = isset($data['team_lead_user_id']) && (int) $data['team_lead_user_id'] > 0
+                ? (int) $data['team_lead_user_id']
+                : null;
+            $this->memberService->updateMemberTeamLead($workspace, Auth::user(), $member, $teamLeadUserId);
+        }
 
         return $this->respond($request, "Updated account for {$member->name}.");
     }

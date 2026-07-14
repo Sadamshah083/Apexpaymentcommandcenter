@@ -58,6 +58,62 @@ class SalesOps
         return self::normalizeLegacyRole((string) $role) === 'closer';
     }
 
+    public static function isSetterTeamLeadRole(?string $role): bool
+    {
+        return self::normalizeLegacyRole((string) $role) === 'appointment_setter_team_lead';
+    }
+
+    public static function isClosersTeamLeadRole(?string $role): bool
+    {
+        return self::normalizeLegacyRole((string) $role) === 'closers_team_lead';
+    }
+
+    public static function isTeamAssignableRole(?string $role): bool
+    {
+        $normalized = self::normalizeLegacyRole((string) $role);
+
+        return in_array($normalized, [
+            'appointment_setter',
+            'appointment_setter_team_lead',
+            'closer',
+            'closers_team_lead',
+        ], true);
+    }
+
+    public static function isTeamLeadRole(?string $role): bool
+    {
+        $normalized = self::normalizeLegacyRole((string) $role);
+
+        return in_array($normalized, [
+            'appointment_setter_team_lead',
+            'closers_team_lead',
+        ], true);
+    }
+
+    public static function isAgentRole(?string $role): bool
+    {
+        $normalized = self::normalizeLegacyRole((string) $role);
+
+        return in_array($normalized, [
+            'appointment_setter',
+            'closer',
+        ], true);
+    }
+
+    /**
+     * Team lead role that agents/team leads of this family should belong under.
+     */
+    public static function teamLeadRoleFor(?string $role): ?string
+    {
+        $normalized = self::normalizeLegacyRole((string) $role);
+
+        return match ($normalized) {
+            'appointment_setter', 'appointment_setter_team_lead' => 'appointment_setter_team_lead',
+            'closer', 'closers_team_lead' => 'closers_team_lead',
+            default => null,
+        };
+    }
+
     /**
      * @return array<string, string>
      */

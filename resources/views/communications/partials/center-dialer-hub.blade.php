@@ -2,6 +2,7 @@
     $routePrefix = $routePrefix ?? (request()->is('admin*') ? 'admin.' : 'portal.');
     $compact = $compact ?? false;
     $autoDialer = (bool) ($hubAccess['canAutoDial'] ?? false);
+    $canViewTeamRecordings = (bool) ($hubAccess['canViewTeamRecordings'] ?? false);
     $isAgentDialer = ($hubAccess['tier'] ?? '') === 'agent';
     $callLogsPerPage = (int) config('integrations.communications.list_page_size', 20);
     $allCallLogs = collect($callLogs ?? []);
@@ -14,6 +15,7 @@
     $leadsPageSize = (int) config('integrations.communications.dialer_leads_page_size', 25);
     $hasMoreImportedLeads = (bool) ($dialerImportedLeadsHasMore ?? $importedLeads->count() > $leadsPageSize);
     $importedLeadsApiUrl = $autoDialer ? route($routePrefix . 'communications.dialer.imported-leads') : '';
+    $presenceUrl = route($routePrefix . 'communications.monitoring.presence');
     $campaignOptions = collect($dialerCampaignOptions ?? []);
     $recordingLogs = $allCallLogs
         ->filter(fn ($log) => ! empty($log['has_recording_media']) && ! empty($log['recording_id']))
@@ -24,7 +26,9 @@
 
 <div class="ch-dial-workspace ch-dial-workspace--compact ghl-dialer-center {{ $compact ? 'ghl-dialer-center--compact' : '' }} {{ $autoDialer ? 'ch-dial-workspace--admin' : '' }}"
     data-phone-workspace
+    data-presence-url="{{ $presenceUrl }}"
     data-phone-view="{{ $autoDialer ? 'logs' : 'dialer' }}"
+    data-recording-role=""
     data-recording-sync-url="{{ $recordingSyncUrl }}"
     @if ($autoDialer) data-auto-dial-hub data-imported-leads-url="{{ $importedLeadsApiUrl }}" @endif>
     <div class="ch-dial-workspace__toolbar">
@@ -45,13 +49,25 @@
                         role="tab" aria-selected="true" aria-controls="ghl-phone-logs-pane-center">Call logs</button>
                     <button type="button" class="ghl-phone-panel-switch__btn" data-phone-panel-view="leads"
                         role="tab" aria-selected="false" aria-controls="ghl-phone-leads-pane-center">Imported leads</button>
-                    <button type="button" class="ghl-phone-panel-switch__btn" data-phone-panel-view="recordings"
+                    <button type="button" class="ghl-phone-panel-switch__btn" data-phone-panel-view="recordings" data-recording-role=""
                         role="tab" aria-selected="false" aria-controls="ghl-phone-recordings-pane-center">Call Recording</button>
+                    @if ($canViewTeamRecordings)
+                        <button type="button" class="ghl-phone-panel-switch__btn" data-phone-panel-view="recordings" data-recording-role="agent"
+                            role="tab" aria-selected="false" aria-controls="ghl-phone-recordings-pane-center">Agent recordings</button>
+                        <button type="button" class="ghl-phone-panel-switch__btn" data-phone-panel-view="recordings" data-recording-role="team_lead"
+                            role="tab" aria-selected="false" aria-controls="ghl-phone-recordings-pane-center">Team lead recordings</button>
+                    @endif
                 @else
                     <button type="button" class="ghl-phone-panel-switch__btn is-active" data-phone-panel-view="logs"
                         role="tab" aria-selected="true" aria-controls="ghl-phone-logs-pane-center">Call logs</button>
-                    <button type="button" class="ghl-phone-panel-switch__btn" data-phone-panel-view="recordings"
+                    <button type="button" class="ghl-phone-panel-switch__btn" data-phone-panel-view="recordings" data-recording-role=""
                         role="tab" aria-selected="false" aria-controls="ghl-phone-recordings-pane-center">Call Recording</button>
+                    @if ($canViewTeamRecordings)
+                        <button type="button" class="ghl-phone-panel-switch__btn" data-phone-panel-view="recordings" data-recording-role="agent"
+                            role="tab" aria-selected="false" aria-controls="ghl-phone-recordings-pane-center">Agent recordings</button>
+                        <button type="button" class="ghl-phone-panel-switch__btn" data-phone-panel-view="recordings" data-recording-role="team_lead"
+                            role="tab" aria-selected="false" aria-controls="ghl-phone-recordings-pane-center">Team lead recordings</button>
+                    @endif
                     <button type="button" class="ghl-phone-panel-switch__btn" data-phone-panel-view="dialer"
                         role="tab" aria-selected="false" aria-controls="ghl-phone-dial-pane-center">Dial pad</button>
                 @endif
@@ -212,11 +228,12 @@
             <aside class="ch-panel ghl-dialer-center-recordings ghl-dialer-center-logs ghl-dialer-center-logs--full hidden" id="ghl-phone-recordings-pane-center"
                 data-phone-recordings-pane role="tabpanel" aria-label="Call recordings">
                 <div class="ghl-dialer-center-logs__header ch-panel__header ch-panel__header--slim">
-                    <h3 class="ch-panel__title">Call Recording</h3>
+                    <h3 class="ch-panel__title" data-phone-recordings-title>Call Recording</h3>
                 </div>
                 <div class="ghl-dialer-center-logs__scroll ch-panel__body ch-panel__body--slim ghl-dialer-recent-list ghl-dialer-recent-list--full"
                     data-call-recordings-list
                     data-call-logs-url="{{ $callLogsApiUrl }}"
+                    data-recording-role=""
                     data-call-recordings-offset="{{ $recentRecordings->count() }}"
                     data-call-recordings-has-more="{{ $hasMoreRecordings ? '1' : '0' }}">
                     <div data-call-recordings-items>

@@ -82,6 +82,13 @@ class CommunicationsHubController extends Controller
         if ($request->boolean('recordings_only')) {
             $filters['recordings_only'] = true;
         }
+        $recordingRole = strtolower(trim((string) $request->query('recording_role', '')));
+        if (
+            in_array($recordingRole, ['agent', 'team_lead'], true)
+            && $this->access->canViewTeamRecordings(auth()->user(), $this->routePrefix())
+        ) {
+            $filters['recording_role'] = $recordingRole;
+        }
         $offset = max(0, (int) $request->query('offset', 0));
         $perPage = min(50, max(1, (int) $request->query(
             'per_page',
@@ -173,8 +180,9 @@ class CommunicationsHubController extends Controller
 
         $user = auth()->user();
         $routePrefix = $this->routePrefix();
-        if (! $this->access->canAutoDial($user, $routePrefix)) {
-            return response()->json(['message' => 'Auto dial is not available for this account.'], 403);
+        // Anyone who can place calls must be able to save a disposition.
+        if (! $this->access->canDial($user, $routePrefix)) {
+            return response()->json(['message' => 'Dialer is not available for this account.'], 403);
         }
 
         $validated = $request->validate([
@@ -291,6 +299,20 @@ class CommunicationsHubController extends Controller
             $hubLog = $enriched[0] ?? $hubLog;
         }
         $formatted = $this->inbox->formatDialerCallLogForApi($hubLog, $routePrefix);
+        $formatted['disposition'] = $disposition;
+        if ($lead) {
+            if (empty($formatted['lead_id'])) {
+                $formatted['lead_id'] = (int) $lead->id;
+            }
+            if (empty($formatted['lead_name'])) {
+                $formatted['lead_name'] = filled($lead->business_name)
+                    ? (string) $lead->business_name
+                    : (string) ($lead->owner_name ?? '');
+            }
+            if (empty($formatted['lead_contact']) && filled($lead->owner_name) && filled($lead->business_name)) {
+                $formatted['lead_contact'] = (string) $lead->owner_name;
+            }
+        }
 
         return response()->json([
             'saved' => true,

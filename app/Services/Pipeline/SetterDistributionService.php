@@ -183,6 +183,14 @@ class SetterDistributionService
             ->orderBy('users.name')
             ->get();
 
+        $teamSetters = $setters->filter(
+            fn ($setter) => (int) ($setter->pivot->team_lead_user_id ?? 0) === (int) $teamLead->id
+        )->values();
+
+        if ($teamSetters->isNotEmpty()) {
+            $setters = $teamSetters;
+        }
+
         if ($setters->isEmpty()) {
             return 0;
         }
@@ -229,6 +237,14 @@ class SetterDistributionService
             ->wherePivot('status', 'active')
             ->orderBy('users.name')
             ->get();
+
+        $teamSetters = $setters->filter(
+            fn ($setter) => (int) ($setter->pivot->team_lead_user_id ?? 0) === (int) $teamLead->id
+        )->values();
+
+        if ($teamSetters->isNotEmpty()) {
+            $setters = $teamSetters;
+        }
 
         if ($setters->isEmpty()) {
             return 0;

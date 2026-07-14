@@ -25,6 +25,12 @@ class CommunicationsCallHistoryService
 
         if (! empty($filters['user_id'])) {
             $query->where('user_id', (int) $filters['user_id']);
+        } elseif (array_key_exists('user_ids', $filters)) {
+            $userIds = array_values(array_filter(array_map('intval', (array) $filters['user_ids'])));
+            if ($userIds === []) {
+                return [];
+            }
+            $query->whereIn('user_id', $userIds);
         } elseif (! empty($filters['from_extension'])) {
             $ext = preg_replace('/\D/', '', (string) $filters['from_extension']) ?: (string) $filters['from_extension'];
             if ($ext !== '') {
@@ -32,7 +38,9 @@ class CommunicationsCallHistoryService
             }
         }
 
-        $limit = ! empty($filters['user_id']) ? 200 : 100;
+        $limit = (! empty($filters['user_id']) || ! empty($filters['user_ids']) || ! empty($filters['recordings_only']))
+            ? 250
+            : 100;
 
         return $query
             ->orderByDesc('created_at')

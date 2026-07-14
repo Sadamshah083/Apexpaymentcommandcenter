@@ -569,6 +569,12 @@ class WorkflowService
         $workflowName = $workflow->name;
         $filePath = $workflow->file_path;
 
+        // Stop enrichment immediately so queued ProcessLeadJob exits early.
+        $workflow->forceFill([
+            'status' => 'paused',
+            'ingestion_complete' => true,
+        ])->save();
+
         DB::transaction(function () use ($workflow, $filePath) {
             $workflow->leads()->delete();
 

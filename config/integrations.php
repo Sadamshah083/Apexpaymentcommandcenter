@@ -47,6 +47,7 @@ return [
         'dialer_leads_page_size' => (int) env('COMMUNICATIONS_DIALER_LEADS_PAGE_SIZE', 25),
         'dispositions' => [
             'No Answer',
+            'Answering Machine',
             'Voicemail',
             'Follow Up',
             'Requested Appointment',

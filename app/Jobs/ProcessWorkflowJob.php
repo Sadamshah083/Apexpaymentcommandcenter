@@ -8,11 +8,14 @@ use App\Services\Pipeline\LeadImportDedupService;
 use App\Services\Pipeline\LeadSegmentationService;
 use App\Services\Workspace\WorkspaceSyncService;
 use App\Support\LeadStageSync;
+use App\Support\SpreadsheetHeaderDetector;
+use App\Support\SpreadsheetText;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Reader\Csv as CsvReader;
 
 class ProcessWorkflowJob implements ShouldQueue
 {
@@ -68,6 +71,9 @@ class ProcessWorkflowJob implements ShouldQueue
 
             $reader = IOFactory::createReaderForFile($fullPath);
             $reader->setReadDataOnly(true);
+            if ($reader instanceof CsvReader) {
+                $reader->setInputEncoding('UTF-8');
+            }
 
             if ($workflow->selected_sheet) {
                 $reader->setLoadSheetsOnly([$workflow->selected_sheet]);
@@ -82,7 +88,7 @@ class ProcessWorkflowJob implements ShouldQueue
                 $cellIterator->setIterateOnlyExistingCells(false);
                 $rowData = [];
                 foreach ($cellIterator as $cell) {
-                    $rowData[] = $cell->getValue();
+                    $rowData[] = SpreadsheetText::normalize($cell->getValue());
                 }
                 $rows[] = $rowData;
             }
@@ -96,12 +102,14 @@ class ProcessWorkflowJob implements ShouldQueue
                 return;
             }
 
+            $detected = SpreadsheetHeaderDetector::detect($rows);
+            $headerIndex = (int) $detected['index'];
             $headers = array_map(
-                fn ($val) => $val !== null ? trim((string) $val) : '',
-                $rows[0]
+                fn ($val) => SpreadsheetText::normalize($val),
+                $detected['headers']
             );
 
-            $dataRows = array_slice($rows, 1);
+            $dataRows = array_slice($rows, $headerIndex + 1);
             $mapping = $workflow->column_mapping ?? [];
             $offset = (int) ($workflow->ingestion_row_offset ?? 0);
             $remainingRows = array_slice($dataRows, $offset);
@@ -137,7 +145,7 @@ class ProcessWorkflowJob implements ShouldQueue
                         }
                     }
                     $rawRowsBatch[] = $rawRow;
-                    $rowNumbers[] = $offset + $rowsProcessed + 2;
+                    $rowNumbers[] = $headerIndex + $offset + $rowsProcessed + 2;
                     $rowsProcessed++;
                 }
 

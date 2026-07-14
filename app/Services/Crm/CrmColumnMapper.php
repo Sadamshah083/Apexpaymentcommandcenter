@@ -164,6 +164,10 @@ class CrmColumnMapper
 
         'input_phone' => [
 
+            'contact number',
+
+            'contact no',
+
             'phone number',
 
             'telephone number',

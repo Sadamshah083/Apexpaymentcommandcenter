@@ -1,4 +1,4 @@
-import { placeOutboundCall } from './communications-dialer.js';
+import { placeOutboundCall, clearDialerDestinationInput } from './communications-dialer.js';
 import { getWebphone } from './communications-webphone.js';
 import { showToast, dismissAllToasts } from './toast.js';
 
@@ -19,6 +19,11 @@ let state = {
 
 let autoDialDelayTimer = null;
 let autoDialCountdownTimer = null;
+let presenceTimer = null;
+let presenceOnCall = false;
+
+let autoDialListenersBound = false;
+let callSummaryModalBound = false;
 
 function csrfToken() {
     return document.querySelector('meta[name="csrf-token"]')?.content || '';
@@ -47,7 +52,11 @@ function syncAutoDialControls() {
     });
 
     statusEls.forEach((el) => {
-        if (running) {
+        if (isDispositionBlocking()) {
+            el.textContent = 'Set disposition to continue';
+            el.classList.remove('hidden');
+            el.classList.add('is-active');
+        } else if (running) {
             const remaining = state.queue.length + (state.currentLead ? 1 : 0);
             el.textContent = remaining > 0
                 ? `Auto dial running · ${remaining} lead${remaining === 1 ? '' : 's'} left`
@@ -56,6 +65,9 @@ function syncAutoDialControls() {
             el.classList.add('is-active');
         } else if (state.mode === 'auto' && state.paused) {
             el.textContent = 'Auto dial paused';
+            el.classList.remove('hidden', 'is-active');
+        } else if (state.mode === 'auto') {
+            el.textContent = 'Auto dial ready — press Start to begin';
             el.classList.remove('hidden', 'is-active');
         } else {
             el.textContent = '';
@@ -74,6 +86,7 @@ function stopAutoDialSession({ toast = true } = {}) {
         row.classList.remove('is-dialing');
     });
     syncAutoDialControls();
+    sendPresenceHeartbeat();
     if (toast) {
         showToast('Auto dial stopped.', 'info');
     }
@@ -105,10 +118,42 @@ function showAutoDialCountdown(seconds, message) {
     text.textContent = `${message} in ${seconds}s…`;
 }
 
+function isDispositionBlocking() {
+    if (state.pendingDisposition) {
+        return true;
+    }
+
+    const modal = document.querySelector('[data-call-summary-modal]');
+    return Boolean(modal && !modal.classList.contains('hidden'));
+}
+
+function dispositionToast(message, type = 'warning') {
+    // Summary modal suppresses toasts by default — always show disposition feedback.
+    return showToast(message, type, { suppressWhenSummary: false });
+}
+
+function suggestedDispositionFromResult(result, connected) {
+    const normalized = String(result || '').trim().toLowerCase();
+    if (connected || normalized === 'connected' || normalized === 'answered') {
+        return '';
+    }
+    if (normalized.includes('busy')) {
+        return 'Not Available';
+    }
+    if (normalized.includes('voicemail') || normalized.includes('answering')) {
+        return 'Answering Machine';
+    }
+    if (normalized.includes('wrong') || normalized.includes('invalid')) {
+        return 'Incorrect Number';
+    }
+
+    return 'No Answer';
+}
+
 function scheduleAutoDial(action, message = 'Next call') {
     clearAutoDialDelay();
 
-    if (state.mode !== 'auto' || state.paused) {
+    if (state.mode !== 'auto' || state.paused || isDispositionBlocking()) {
         return Promise.resolve(false);
     }
 
@@ -132,7 +177,7 @@ function scheduleAutoDial(action, message = 'Next call') {
             autoDialDelayTimer = null;
             clearAutoDialDelay();
 
-            if (state.mode !== 'auto' || state.paused) {
+            if (state.mode !== 'auto' || state.paused || isDispositionBlocking()) {
                 resolve(false);
 
                 return;
@@ -236,6 +281,7 @@ function setDialMode(mode) {
 
     const hub = hubRoot();
     hub?.classList.toggle('ch-dial-workspace--auto-mode', state.mode === 'auto');
+    document.body.classList.toggle('ch-dial-auto-mode', state.mode === 'auto');
 
     if (state.mode !== 'auto') {
         state.sessionActive = false;
@@ -243,14 +289,119 @@ function setDialMode(mode) {
     }
 
     syncAutoDialControls();
+    sendPresenceHeartbeat();
 }
 
-function showSummaryModal(context) {
-    const modal = document.querySelector('[data-call-summary-modal]');
-    if (!modal) {
+function presenceUrl() {
+    const hub = document.querySelector('[data-presence-url]');
+    const fromAttr = hub?.getAttribute('data-presence-url') || '';
+    if (fromAttr) {
+        return fromAttr;
+    }
+    const path = window.location.pathname || '';
+    if (path.startsWith('/portal')) {
+        return '/portal/communications/monitoring/presence';
+    }
+    return '/admin/communications/monitoring/presence';
+}
+
+function currentExtension() {
+    const form = document.querySelector('.ghl-dialer-originate-form');
+    const synced = form?.querySelector('[data-dial-extension-sync], [name="from_extension"]');
+    const raw = synced?.value || form?.querySelector('select[name="from_extension"]')?.value || '';
+    return String(raw || '').replace(/\D/g, '');
+}
+
+async function sendPresenceHeartbeat(extra = {}) {
+    const url = presenceUrl();
+    if (!url) {
         return;
     }
 
+    const body = {
+        dial_mode: state.mode === 'auto' ? 'auto' : 'manual',
+        auto_session_active: Boolean(state.sessionActive && state.mode === 'auto'),
+        auto_paused: Boolean(state.paused && state.mode === 'auto'),
+        on_call: Boolean(extra.on_call ?? presenceOnCall),
+        extension: currentExtension() || null,
+        ...extra,
+    };
+
+    try {
+        await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+                'X-CSRF-TOKEN': csrfToken(),
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify(body),
+            keepalive: Boolean(extra.call_ended),
+        });
+    } catch {
+        // Presence is best-effort for monitoring.
+    }
+}
+
+function initAgentPresence() {
+    if (document.documentElement.dataset.agentPresenceInit === '1') {
+        return;
+    }
+    if (!document.querySelector('[data-phone-workspace], .ghl-dialer-originate-form, [data-call-summary-modal]')) {
+        return;
+    }
+
+    document.documentElement.dataset.agentPresenceInit = '1';
+
+    window.addEventListener('comm:call-active', () => {
+        presenceOnCall = true;
+        sendPresenceHeartbeat({ on_call: true });
+    });
+
+    window.addEventListener('comm:call-ended', () => {
+        presenceOnCall = false;
+        sendPresenceHeartbeat({ on_call: false, call_ended: true });
+    });
+
+    sendPresenceHeartbeat();
+    presenceTimer = window.setInterval(() => {
+        sendPresenceHeartbeat();
+    }, 20000);
+
+    window.addEventListener('beforeunload', () => {
+        sendPresenceHeartbeat({ on_call: presenceOnCall });
+    });
+}
+
+function showSummaryModal(context) {
+    // Prefer the live modal; drop Turbo orphans so disposition never stacks twice.
+    const modals = Array.from(document.querySelectorAll('[data-call-summary-modal]'));
+    const modal = modals.find((el) => el.isConnected) || modals[0] || null;
+    if (!modal) {
+        return;
+    }
+    modals.forEach((el) => {
+        if (el !== modal) {
+            el.remove();
+        }
+    });
+
+    // Same hangup can emit call-ended more than once — never reopen / restack UI.
+    if (!modal.classList.contains('hidden') && state.pendingDisposition) {
+        const openUuid = String(state.pendingDisposition.callUuid || '');
+        const nextUuid = String(context?.callUuid || '');
+        const openPhone = String(state.pendingDisposition.phone || state.pendingDisposition.lead?.phone || '');
+        const nextPhone = String(context?.phone || context?.lead?.phone || '');
+        if ((openUuid && nextUuid && openUuid === nextUuid) || (openPhone && nextPhone && openPhone === nextPhone)) {
+            return;
+        }
+    }
+
+    // Never continue the queue while disposition is required.
+    clearAutoDialDelay();
+    clearDialerDestinationInput();
     dismissAllToasts();
     getWebphone()?.restoreDialerAfterCall?.();
 
@@ -267,6 +418,16 @@ function showSummaryModal(context) {
     };
     state.selectedDisposition = null;
 
+    const forcedDisposition = String(window.__apexForceDisposition || context.forceDisposition || '').trim();
+    const suggested = forcedDisposition
+        || suggestedDispositionFromResult(context.result, context.connected === true);
+    if (suggested) {
+        state.selectedDisposition = suggested;
+    }
+    if (forcedDisposition) {
+        window.__apexForceDisposition = '';
+    }
+
     const leadLine = modal.querySelector('[data-call-summary-lead]');
     const durationEl = modal.querySelector('[data-call-summary-duration]');
     const resultEl = modal.querySelector('[data-call-summary-result]');
@@ -282,7 +443,7 @@ function showSummaryModal(context) {
         durationEl.textContent = formatDuration(context.durationSec);
     }
     if (resultEl) {
-        resultEl.textContent = context.result || 'Completed';
+        resultEl.textContent = forcedDisposition || context.result || 'Completed';
     }
     if (noteEl) {
         noteEl.value = activeNotes.comment || context.comment || '';
@@ -291,24 +452,32 @@ function showSummaryModal(context) {
         customDispositionEl.value = '';
     }
     if (nextLabel) {
-        nextLabel.textContent = state.mode === 'auto' ? 'Next' : 'Save';
+        nextLabel.textContent = state.mode === 'auto' && state.sessionActive ? 'Save & Next' : 'Save';
     }
     if (pauseBtn) {
         pauseBtn.classList.toggle('hidden', state.mode !== 'auto');
+        pauseBtn.classList.toggle('is-paused', state.paused);
     }
     modal.classList.toggle('ch-call-summary--manual', state.mode !== 'auto');
 
     modal.querySelectorAll('[data-disposition-value]').forEach((btn) => {
-        btn.classList.remove('is-selected');
+        const value = String(btn.dataset.dispositionValue || '').trim();
+        const selected = Boolean(suggested) && value.toLowerCase() === suggested.toLowerCase();
+        btn.classList.toggle('is-selected', selected);
     });
+    if (suggested && customDispositionEl && !modal.querySelector('[data-disposition-value].is-selected')) {
+        customDispositionEl.value = suggested;
+    }
 
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');
     document.body.classList.add('ch-call-summary-open');
+    syncAutoDialControls();
 
-    // Focus first disposition so agents can pick an outcome immediately.
+    // Focus selected disposition so agents can confirm and continue quickly.
     window.setTimeout(() => {
-        modal.querySelector('[data-disposition-value]')?.focus?.();
+        modal.querySelector('[data-disposition-value].is-selected')?.focus?.()
+            || modal.querySelector('[data-disposition-value]')?.focus?.();
     }, 40);
 }
 
@@ -319,7 +488,7 @@ function hideSummaryModal({ force = false } = {}) {
     }
 
     if (!force && state.pendingDisposition && !modal.classList.contains('hidden')) {
-        showToast('Select or write a disposition to continue.', 'warning');
+        dispositionToast('Select or write a disposition to continue.', 'warning');
         return;
     }
 
@@ -328,10 +497,11 @@ function hideSummaryModal({ force = false } = {}) {
     document.body.classList.remove('ch-call-summary-open');
     state.pendingDisposition = null;
     state.selectedDisposition = null;
+    syncAutoDialControls();
 }
 
-async function saveDisposition(disposition) {
-    const context = state.pendingDisposition;
+async function saveDisposition(disposition, contextOverride = null, noteOverride = null) {
+    const context = contextOverride || state.pendingDisposition;
     if (!context || !disposition) {
         return null;
     }
@@ -341,7 +511,9 @@ async function saveDisposition(disposition) {
         return null;
     }
 
-    const note = document.querySelector('[data-call-summary-note]')?.value?.trim() || '';
+    const note = noteOverride !== null
+        ? String(noteOverride || '').trim()
+        : (document.querySelector('[data-call-summary-note]')?.value?.trim() || '');
     const active = window.__apexActiveCallNotes?.read?.() || {};
     const inCallNotes = String(active.notes || context?.inCallNotes || '').trim();
 
@@ -373,7 +545,7 @@ async function saveDisposition(disposition) {
         return payload;
     } catch (error) {
         console.warn('[auto-dial] disposition save failed', error);
-        showToast(error.message || 'Could not save disposition. Please try again.', 'error');
+        dispositionToast(error.message || 'Could not save disposition. Please try again.', 'error');
 
         return null;
     }
@@ -388,37 +560,63 @@ function resolveSummaryDisposition(modal) {
     return String(state.selectedDisposition || '').trim();
 }
 
-function removeLeadFromQueue(leadId, phone) {
-    const root = hubRoot();
-    if (!root) {
-        return;
+function normalizePhoneDigits(phone) {
+    const digits = String(phone || '').replace(/\D/g, '');
+    if (digits.length >= 10) {
+        return digits.slice(-10);
     }
+
+    return digits;
+}
+
+function phonesMatch(a, b) {
+    const left = normalizePhoneDigits(a);
+    const right = normalizePhoneDigits(b);
+
+    return Boolean(left && right && left === right);
+}
+
+function removeLeadFromQueue(leadId, phone) {
+    const root = hubRoot() || document;
+    const targetId = Number.parseInt(String(leadId || '0'), 10) || null;
+    const targetPhone = String(phone || '').trim();
 
     root.querySelectorAll('[data-dialer-lead-row]').forEach((row) => {
         const rowId = Number.parseInt(row.dataset.leadId || '0', 10) || null;
         const rowPhone = row.dataset.leadPhone || '';
-        const matchId = leadId && rowId === Number(leadId);
-        const matchPhone = phone && rowPhone && rowPhone === phone;
+        const matchId = targetId && rowId && rowId === targetId;
+        const matchPhone = targetPhone && phonesMatch(rowPhone, targetPhone);
         if (matchId || matchPhone) {
+            row.classList.remove('is-dialing');
             row.remove();
         }
     });
 
     state.queue = state.queue.filter((lead) => {
-        if (leadId && Number(lead.id) === Number(leadId)) {
+        if (targetId && Number(lead.id) === targetId) {
             return false;
         }
-        if (phone && lead.phone === phone) {
+        if (targetPhone && phonesMatch(lead.phone, targetPhone)) {
             return false;
         }
 
         return true;
     });
 
+    if (state.currentLead) {
+        const currentMatchId = targetId && Number(state.currentLead.id) === targetId;
+        const currentMatchPhone = targetPhone && phonesMatch(state.currentLead.phone, targetPhone);
+        if (currentMatchId || currentMatchPhone) {
+            state.currentLead = null;
+        }
+    }
+
     const items = root.querySelector('[data-imported-leads-items]');
     if (items && !items.querySelector('[data-dialer-lead-row]')) {
         items.innerHTML = '<p class="ghl-dialer-recent-empty" data-imported-leads-empty>No imported leads with phone numbers yet.</p>';
     }
+
+    syncAutoDialControls();
 }
 
 function prependCallLog(callLog) {
@@ -426,66 +624,101 @@ function prependCallLog(callLog) {
         return;
     }
 
-    const list = document.querySelector('[data-call-logs-list]');
-    const items = list?.querySelector('[data-call-logs-items]');
-    if (!items) {
-        return;
-    }
+    // Ensure disposition / lead labels survive even if API omit some display fields.
+    const enriched = {
+        ...callLog,
+        disposition: callLog.disposition || callLog.result || '',
+        lead_name: callLog.lead_name || callLog.name || '',
+        phone_display: callLog.phone_display || callLog.phone || '',
+        time_ago: callLog.time_ago || 'just now',
+        duration_label: callLog.duration_label || (callLog.duration_sec ? `${callLog.duration_sec}s` : '0s'),
+    };
 
-    items.querySelector('[data-call-logs-empty]')?.remove();
-
-    if (typeof window.buildCallLogRow === 'function') {
-        const wrapper = document.createElement('div');
-        wrapper.innerHTML = window.buildCallLogRow(callLog);
-        const row = wrapper.firstElementChild;
-        if (row) {
-            items.prepend(row);
+    document.querySelectorAll('[data-call-logs-list]').forEach((list) => {
+        const items = list.querySelector('[data-call-logs-items]');
+        if (!items) {
+            return;
         }
 
-        return;
-    }
+        items.querySelector('[data-call-logs-empty]')?.remove();
 
-    const statusLike = ['', '—', '-', 'completed', 'initiated', 'connected', 'answered', 'no-answer', 'no answer', 'busy', 'failed', 'missed', 'unknown'];
-    let disposition = String(callLog.disposition || '').trim();
-    if (disposition && statusLike.includes(disposition.toLowerCase())) {
-        disposition = '';
-    }
-    const note = String(callLog.call_note || '').trim();
-    const inCallNotes = String(callLog.in_call_notes || '').trim();
-    const escape = (value) => String(value)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-    const fields = [];
-    if (inCallNotes) {
-        fields.push(`<p class="ghl-dialer-recent-field"><span class="ghl-dialer-recent-field__label">Notes:</span> <span class="ghl-dialer-recent-field__value">${escape(inCallNotes)}</span></p>`);
-    }
-    if (note) {
-        fields.push(`<p class="ghl-dialer-recent-field"><span class="ghl-dialer-recent-field__label">Comment:</span> <span class="ghl-dialer-recent-field__value">${escape(note)}</span></p>`);
-    }
-    if (disposition) {
-        fields.push(`<p class="ghl-dialer-recent-field ghl-dialer-recent-field--disposition"><span class="ghl-dialer-recent-field__label">Disposition:</span> <span class="ghl-dialer-recent-field__value">${escape(disposition)}</span></p>`);
-    }
-    const fieldsHtml = fields.length ? `<div class="ghl-dialer-recent-fields">${fields.join('')}</div>` : '';
-    const phone = callLog.phone_display || callLog.phone || '—';
-    const leadName = callLog.lead_name || '';
-    const row = document.createElement('div');
-    row.className = 'ghl-dialer-recent-row';
-    row.innerHTML = `
-        <div class="ghl-dialer-recent-main">
-            <div class="ghl-dialer-recent-head">
-                <span class="ghl-dialer-recent-dir">Outbound</span>
+        if (typeof window.buildCallLogRow === 'function') {
+            const wrapper = document.createElement('div');
+            wrapper.innerHTML = window.buildCallLogRow(enriched);
+            const row = wrapper.firstElementChild;
+            if (row) {
+                items.prepend(row);
+            }
+
+            return;
+        }
+
+        const statusLike = ['', '—', '-', 'completed', 'initiated', 'connected', 'answered', 'no-answer', 'no answer', 'busy', 'failed', 'missed', 'unknown'];
+        let disposition = String(enriched.disposition || '').trim();
+        if (disposition && statusLike.includes(disposition.toLowerCase())) {
+            disposition = '';
+        }
+        const note = String(enriched.call_note || '').trim();
+        const inCallNotes = String(enriched.in_call_notes || '').trim();
+        const escape = (value) => String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+        const fields = [];
+        if (inCallNotes) {
+            fields.push(`<p class="ghl-dialer-recent-field"><span class="ghl-dialer-recent-field__label">Notes:</span> <span class="ghl-dialer-recent-field__value">${escape(inCallNotes)}</span></p>`);
+        }
+        if (note) {
+            fields.push(`<p class="ghl-dialer-recent-field"><span class="ghl-dialer-recent-field__label">Comment:</span> <span class="ghl-dialer-recent-field__value">${escape(note)}</span></p>`);
+        }
+        if (disposition) {
+            fields.push(`<p class="ghl-dialer-recent-field ghl-dialer-recent-field--disposition"><span class="ghl-dialer-recent-field__label">Disposition:</span> <span class="ghl-dialer-recent-field__value">${escape(disposition)}</span></p>`);
+        }
+        const fieldsHtml = fields.length ? `<div class="ghl-dialer-recent-fields">${fields.join('')}</div>` : '';
+        const phone = enriched.phone_display || enriched.phone || '—';
+        const leadName = enriched.lead_name || '';
+        const row = document.createElement('div');
+        row.className = 'ghl-dialer-recent-row';
+        row.innerHTML = `
+            <div class="ghl-dialer-recent-main">
+                <div class="ghl-dialer-recent-head">
+                    <span class="ghl-dialer-recent-dir">Outbound</span>
+                </div>
+                <div class="ghl-dialer-recent-contact">
+                    ${leadName ? `<span class="ghl-dialer-recent-name">${escape(leadName)}</span>` : ''}
+                    <span class="ghl-dialer-recent-number">${escape(phone)}</span>
+                </div>
+                <span class="ghl-dialer-recent-meta">${escape(enriched.time_ago || 'just now')} · ${escape(enriched.duration_label || '0s')}</span>
+                ${fieldsHtml}
             </div>
-            <div class="ghl-dialer-recent-contact">
-                ${leadName ? `<span class="ghl-dialer-recent-name">${escape(leadName)}</span>` : ''}
-                <span class="ghl-dialer-recent-number">${escape(phone)}</span>
-            </div>
-            <span class="ghl-dialer-recent-meta">${escape(callLog.time_ago || 'just now')} · ${escape(callLog.duration_label || '0s')}</span>
-            ${fieldsHtml}
-        </div>
-    `;
-    items.prepend(row);
+        `;
+        items.prepend(row);
+    });
+}
+
+function applyDispositionSideEffects(payload, context, disposition) {
+    const leadId = context?.lead?.id || payload?.lead?.id || null;
+    const phone = context?.phone || context?.lead?.phone || payload?.call_log?.phone || '';
+    const callLog = {
+        ...(payload?.call_log || {}),
+        disposition: disposition || payload?.disposition || payload?.call_log?.disposition || '',
+        lead_name: payload?.call_log?.lead_name || context?.lead?.name || '',
+        lead_contact: payload?.call_log?.lead_contact || context?.lead?.contact || '',
+        phone: payload?.call_log?.phone || phone,
+        phone_display: payload?.call_log?.phone_display || context?.lead?.phone_display || phone,
+    };
+
+    removeLeadFromQueue(leadId, phone);
+    prependCallLog(callLog);
+    window.__apexActiveCallNotes?.clear?.();
+    clearDialerDestinationInput();
+
+    // Always stay on Imported leads — never jump to Call logs after disposition.
+    switchToLeadsTab();
+    syncAutoDialControls();
+
+    return { leadId, phone, disposition };
 }
 
 async function dialLead(lead) {
@@ -507,11 +740,15 @@ async function dialLead(lead) {
 }
 
 async function dialNextInQueue({ withDelay = false, delayMessage = 'Next call' } = {}) {
-    if (state.mode !== 'auto' || state.paused) {
+    if (state.mode !== 'auto' || state.paused || isDispositionBlocking()) {
         return false;
     }
 
     const placeNext = async () => {
+        if (isDispositionBlocking()) {
+            return false;
+        }
+
         if (state.queue.length === 0) {
             const list = hubRoot()?.querySelector('[data-imported-leads-list]');
             if (list && list.dataset.importedLeadsHasMore !== '0') {
@@ -793,11 +1030,19 @@ function initImportedLeadsList(root = document) {
 
     const pane = list.closest('[data-phone-leads-pane]');
     pane?.querySelector('[data-dialer-leads-pool]')?.addEventListener('change', () => {
+        if (state.sessionActive) {
+            showToast('Stop auto dial before changing the lead pool.', 'info');
+            return;
+        }
         list.dataset.importedLeadsOffset = '0';
         list.dataset.importedLeadsHasMore = '1';
         void fetchImportedLeads(list, true);
     });
     pane?.querySelector('[data-dialer-leads-campaign]')?.addEventListener('change', () => {
+        if (state.sessionActive) {
+            showToast('Stop auto dial before changing the campaign filter.', 'info');
+            return;
+        }
         list.dataset.importedLeadsOffset = '0';
         list.dataset.importedLeadsHasMore = '1';
         void fetchImportedLeads(list, true);
@@ -815,11 +1060,16 @@ function initImportedLeadsList(root = document) {
 }
 
 function initCallSummaryModal() {
+    if (callSummaryModalBound) {
+        return;
+    }
+
     const modal = document.querySelector('[data-call-summary-modal]');
     if (!modal || modal.dataset.summaryInit === '1') {
         return;
     }
 
+    callSummaryModalBound = true;
     modal.dataset.summaryInit = '1';
 
     // Disposition is required — backdrop / X cannot dismiss the popup.
@@ -827,7 +1077,7 @@ function initCallSummaryModal() {
         btn.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();
-            showToast('Select or write a disposition to continue.', 'warning');
+            dispositionToast('Select or write a disposition to continue.', 'warning');
             modal.querySelector('[data-disposition-value]')?.focus?.();
         });
     });
@@ -841,7 +1091,7 @@ function initCallSummaryModal() {
         }
         event.preventDefault();
         event.stopPropagation();
-        showToast('Select or write a disposition to continue.', 'warning');
+        dispositionToast('Select or write a disposition to continue.', 'warning');
     }, true);
 
     modal.querySelectorAll('[data-disposition-value]').forEach((btn) => {
@@ -866,22 +1116,40 @@ function initCallSummaryModal() {
     });
 
     modal.querySelector('[data-call-summary-redial]')?.addEventListener('click', async () => {
+        if (modal.dataset.dispositionBusy === '1') {
+            return;
+        }
+
         const disposition = resolveSummaryDisposition(modal);
         if (!disposition) {
-            showToast('Select or write a disposition before redialing.', 'warning');
+            dispositionToast('Select or write a disposition before redialing.', 'warning');
             return;
         }
 
-        const context = state.pendingDisposition;
-        const payload = await saveDisposition(disposition);
-        if (!payload) {
-            return;
-        }
+        const context = { ...(state.pendingDisposition || {}) };
+        const note = modal.querySelector('[data-call-summary-note]')?.value?.trim() || '';
+        const redialBtn = modal.querySelector('[data-call-summary-redial]');
+        const nextBtn = modal.querySelector('[data-call-summary-next]');
 
-        removeLeadFromQueue(context?.lead?.id || payload?.lead?.id, context?.phone || context?.lead?.phone);
-        prependCallLog(payload.call_log);
-        window.__apexActiveCallNotes?.clear?.();
+        modal.dataset.dispositionBusy = '1';
+        redialBtn?.setAttribute('disabled', 'disabled');
+        nextBtn?.setAttribute('disabled', 'disabled');
+
+        // Close immediately — save continues in background of the closed modal.
+        clearDialerDestinationInput();
         hideSummaryModal({ force: true });
+
+        const payload = await saveDisposition(disposition, context, note);
+        modal.dataset.dispositionBusy = '';
+        redialBtn?.removeAttribute('disabled');
+        nextBtn?.removeAttribute('disabled');
+
+        if (!payload) {
+            showSummaryModal(context);
+            return;
+        }
+
+        applyDispositionSideEffects(payload, context, disposition);
 
         if (context?.lead) {
             await dialLead(context.lead);
@@ -903,26 +1171,52 @@ function initCallSummaryModal() {
     });
 
     modal.querySelector('[data-call-summary-next]')?.addEventListener('click', async () => {
+        if (modal.dataset.dispositionBusy === '1') {
+            return;
+        }
+
         const disposition = resolveSummaryDisposition(modal);
         if (!disposition) {
-            showToast('Select or write a disposition first.', 'warning');
+            dispositionToast('Select or write a disposition first.', 'warning');
 
             return;
         }
 
-        const context = state.pendingDisposition;
-        const payload = await saveDisposition(disposition);
-        if (!payload) {
-            return;
+        const context = { ...(state.pendingDisposition || {}) };
+        const note = modal.querySelector('[data-call-summary-note]')?.value?.trim() || '';
+        const nextBtn = modal.querySelector('[data-call-summary-next]');
+        const redialBtn = modal.querySelector('[data-call-summary-redial]');
+        const nextLabel = modal.querySelector('[data-call-summary-next-label]');
+        const previousLabel = nextLabel?.textContent || 'Next';
+
+        modal.dataset.dispositionBusy = '1';
+        nextBtn?.setAttribute('disabled', 'disabled');
+        redialBtn?.setAttribute('disabled', 'disabled');
+        if (nextLabel) {
+            nextLabel.textContent = 'Saving…';
         }
 
-        removeLeadFromQueue(context?.lead?.id || payload?.lead?.id, context?.phone || context?.lead?.phone);
-        prependCallLog(payload.call_log);
-        window.__apexActiveCallNotes?.clear?.();
+        // Instant close so agents never wait on the popup.
+        clearDialerDestinationInput();
         hideSummaryModal({ force: true });
-        switchToCallLogsTab();
 
-        if (state.mode === 'auto' && !state.paused) {
+        const payload = await saveDisposition(disposition, context, note);
+        modal.dataset.dispositionBusy = '';
+        nextBtn?.removeAttribute('disabled');
+        redialBtn?.removeAttribute('disabled');
+        if (nextLabel) {
+            nextLabel.textContent = previousLabel;
+        }
+
+        if (!payload) {
+            showSummaryModal(context);
+            return;
+        }
+
+        applyDispositionSideEffects(payload, context, disposition);
+
+        // Stay on Imported leads. Continue auto dial when session is running.
+        if (state.mode === 'auto' && state.sessionActive && !state.paused) {
             await dialNextInQueue({ withDelay: true, delayMessage: 'Next call' });
         } else {
             showToast(`Disposition saved: ${disposition}`, 'success');
@@ -989,6 +1283,10 @@ function initDialModeSwitch() {
     });
 }
 
+export function markAnsweringMachineDisposition() {
+    window.__apexForceDisposition = 'Answering Machine';
+}
+
 function resolveLeadContext(phone) {
     const form = document.querySelector('.ghl-dialer-originate-form');
     const leadId = Number.parseInt(form?.dataset.dialLeadId || '0', 10) || null;
@@ -1023,15 +1321,25 @@ function resolveLeadContext(phone) {
 }
 
 function initAutoDialListeners() {
-    if (document.documentElement.dataset.autoDialListenersInit === '1') {
+    if (autoDialListenersBound || document.documentElement.dataset.autoDialListenersInit === '1') {
         return;
     }
 
+    autoDialListenersBound = true;
     document.documentElement.dataset.autoDialListenersInit = '1';
 
     document.addEventListener('click', async (event) => {
         const callBtn = event.target.closest('[data-dial-lead-call]');
         if (!callBtn) {
+            return;
+        }
+
+        // Auto dial queues calls via Start auto dial — no per-lead phone dialing.
+        if (state.mode === 'auto') {
+            event.preventDefault();
+            showToast(state.sessionActive
+                ? 'Auto dial is running — use Stop auto dial first.'
+                : 'In Auto dial mode, use Start auto dial. Switch to Manual dial to call a single lead.', 'info');
             return;
         }
 
@@ -1061,8 +1369,11 @@ function initAutoDialListeners() {
     });
 
     window.addEventListener('comm:call-ended', (event) => {
+        // Capture lead/phone before clearing form context.
         const context = resolveEndedCallContext(event.detail || {});
         state.callStartedAt = null;
+        // Stop any pending "next call" countdown — disposition is required first.
+        clearAutoDialDelay();
         formClearLeadContext();
 
         // Always require a disposition after every hangup (manual or auto).
@@ -1072,7 +1383,9 @@ function initAutoDialListeners() {
 
 function formClearLeadContext() {
     const form = document.querySelector('.ghl-dialer-originate-form');
+    clearDialerDestinationInput();
     if (!form) {
+        state.currentLead = null;
         return false;
     }
 
@@ -1087,6 +1400,14 @@ function formClearLeadContext() {
 export function initAutoDialHub(root = document) {
     const hasHub = Boolean(root.querySelector('[data-auto-dial-hub]'));
     const hasSummary = Boolean(root.querySelector('[data-call-summary-modal]'));
+    const hasPhone = Boolean(root.querySelector('[data-phone-workspace], .ghl-dialer-originate-form'));
+    if (!hasHub && !hasSummary && !hasPhone) {
+        return;
+    }
+
+    initDialModeSwitch();
+    initAgentPresence();
+
     if (!hasHub && !hasSummary) {
         return;
     }
@@ -1098,7 +1419,6 @@ export function initAutoDialHub(root = document) {
         return;
     }
 
-    initDialModeSwitch();
     initImportedLeadsList(root);
 
     document.querySelectorAll('[data-auto-dial-start]').forEach((btn) => {
@@ -1107,6 +1427,10 @@ export function initAutoDialHub(root = document) {
         }
         btn.dataset.autoDialStartBound = '1';
         btn.addEventListener('click', async () => {
+            if (isDispositionBlocking()) {
+                dispositionToast('Save the pending disposition before starting auto dial.', 'warning');
+                return;
+            }
             btn.disabled = true;
             btn.textContent = 'Starting…';
             setDialMode('auto');
@@ -1135,6 +1459,11 @@ export function initAutoDialHub(root = document) {
 window.initImportedLeadsList = initImportedLeadsList;
 
 export async function startAutoDialSession() {
+    if (isDispositionBlocking()) {
+        dispositionToast('Save the pending disposition before starting auto dial.', 'warning');
+        return false;
+    }
+
     if (state.mode !== 'auto') {
         setDialMode('auto');
     }
@@ -1142,7 +1471,6 @@ export async function startAutoDialSession() {
     state.paused = false;
     state.sessionActive = true;
     state.currentLead = null;
-    state.pendingDisposition = null;
     localStorage.setItem(STORAGE_PAUSED_KEY, '0');
     setDialMode('auto');
     switchToLeadsTab();
@@ -1159,11 +1487,13 @@ export async function startAutoDialSession() {
     if (state.queue.length === 0) {
         state.sessionActive = false;
         syncAutoDialControls();
+        sendPresenceHeartbeat();
         showToast('No callable imported leads available for auto dial.', 'info');
 
         return false;
     }
 
     syncAutoDialControls();
+    sendPresenceHeartbeat();
     return dialNextInQueue({ withDelay: true, delayMessage: 'Starting call' });
 }

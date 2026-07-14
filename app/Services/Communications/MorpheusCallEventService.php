@@ -19,10 +19,14 @@ class MorpheusCallEventService
             return;
         }
 
+        $fromDigits = $this->digits($fromExtension);
+        $destDigits = $this->digits($destination);
+        $this->supersedeLiveCallsForLeg($fromDigits, $destDigits, $uuid);
+
         $state = $this->normalizeState([
             'uuid' => $uuid,
-            'from_extension' => $this->digits($fromExtension),
-            'destination' => $this->digits($destination),
+            'from_extension' => $fromDigits,
+            'destination' => $destDigits,
             'destination_answered' => false,
             'destination_connected' => false,
             'live' => true,
@@ -33,9 +37,33 @@ class MorpheusCallEventService
 
         $this->putState($uuid, $state);
 
-        $destDigits = $this->digits($destination);
         if ($destDigits !== '') {
             Cache::put($this->destinationWatchKey($destDigits), $uuid, self::CACHE_TTL_SECONDS);
+        }
+    }
+
+    /**
+     * Keep one live watch per agent+destination so wallboard does not stack ringing rows.
+     */
+    protected function supersedeLiveCallsForLeg(string $fromDigits, string $destDigits, string $keepUuid): void
+    {
+        if ($fromDigits === '' && $destDigits === '') {
+            return;
+        }
+
+        foreach ($this->listLiveStates() as $state) {
+            $existingUuid = trim((string) ($state['uuid'] ?? ''));
+            if ($existingUuid === '' || $existingUuid === $keepUuid) {
+                continue;
+            }
+
+            $sameExt = $fromDigits === '' || $this->digits((string) ($state['from_extension'] ?? '')) === $fromDigits;
+            $sameDest = $destDigits === '' || $this->digits((string) ($state['destination'] ?? '')) === $destDigits;
+            if (! $sameExt || ! $sameDest) {
+                continue;
+            }
+
+            $this->markCallEnded($existingUuid, 'SUPERSEDED', isset($state['billsec']) ? (int) $state['billsec'] : null);
         }
     }
 
@@ -124,6 +152,11 @@ class MorpheusCallEventService
                 $merged['destination_connected'] = true;
                 $merged['outcome'] = 'connected';
                 $merged['live'] = true;
+                if (empty($existing['connected_at'])) {
+                    $merged['connected_at'] = now()->toIso8601String();
+                } else {
+                    $merged['connected_at'] = $existing['connected_at'];
+                }
             }
 
             if ($hangup) {
@@ -154,6 +187,7 @@ class MorpheusCallEventService
             'live' => false,
             'outcome' => 'ended',
             'destination_connected' => false,
+            'destination_answered' => false,
             'hangup_cause' => $this->stringOrNull($hangupCause),
             'billsec' => $billsec,
             'source' => 'hangup',
@@ -161,6 +195,140 @@ class MorpheusCallEventService
         ]));
 
         $this->putState($uuid, $merged);
+
+        $destDigits = $this->digits((string) ($merged['destination'] ?? $existing['destination'] ?? ''));
+        if ($destDigits !== '') {
+            Cache::put($this->destinationKey($destDigits), $merged, self::CACHE_TTL_SECONDS);
+        }
+    }
+
+    /**
+     * End every live watch for an agent leg (used on hangup / release).
+     */
+    public function endLiveCallsForLeg(?string $fromExtension = null, ?string $destination = null, string $hangupCause = 'NORMAL_CLEARING'): int
+    {
+        $fromDigits = $this->digits($fromExtension);
+        $destDigits = $this->digits($destination);
+        $ended = 0;
+
+        foreach ($this->listLiveStates() as $state) {
+            $uuid = trim((string) ($state['uuid'] ?? ''));
+            if ($uuid === '') {
+                continue;
+            }
+
+            $sameExt = $fromDigits === '' || $this->digits((string) ($state['from_extension'] ?? '')) === $fromDigits;
+            $sameDest = $destDigits === '' || $this->digits((string) ($state['destination'] ?? '')) === $destDigits;
+            if (! $sameExt || ! $sameDest) {
+                continue;
+            }
+
+            $this->markCallEnded($uuid, $hangupCause, isset($state['billsec']) ? (int) $state['billsec'] : null);
+            $ended++;
+        }
+
+        return $ended;
+    }
+
+    /**
+     * Drop abandoned ringing rows. Connected calls are ended only by hangup/release —
+     * do not auto-hide mid-call (that made timers disappear after ~60s).
+     */
+    public function pruneStaleLiveStates(int $ringMaxSec = 120, int $connectedIdleSec = 0): int
+    {
+        $ended = 0;
+        foreach ($this->listLiveStates() as $state) {
+            $uuid = trim((string) ($state['uuid'] ?? ''));
+            if ($uuid === '') {
+                continue;
+            }
+
+            $updatedAt = $state['updated_at'] ?? null;
+            $updatedAge = 0;
+            if (filled($updatedAt)) {
+                try {
+                    $updatedAge = max(0, \Carbon\Carbon::parse((string) $updatedAt)->diffInSeconds(now()));
+                } catch (\Throwable) {
+                    $updatedAge = 0;
+                }
+            }
+
+            $connected = (bool) ($state['destination_answered'] ?? false)
+                || (bool) ($state['destination_connected'] ?? false);
+
+            if (! $connected && $updatedAge >= $ringMaxSec) {
+                $this->markCallEnded($uuid, 'STALE_RING', isset($state['billsec']) ? (int) $state['billsec'] : null);
+                $ended++;
+                continue;
+            }
+
+            // Optional safety for extreme zombies only (disabled when $connectedIdleSec <= 0).
+            if ($connected && $connectedIdleSec > 0 && $updatedAge >= $connectedIdleSec) {
+                $this->markCallEnded($uuid, 'STALE_CONNECTED', isset($state['billsec']) ? (int) $state['billsec'] : null);
+                $ended++;
+            }
+        }
+
+        return $ended;
+    }
+
+    /**
+     * Persist both-sides-connected for wallboard / dialer (webhooks often miss this).
+     */
+    public function markDestinationConnected(
+        string $uuid,
+        ?string $destination = null,
+        ?int $billsec = null,
+        string $source = 'agent',
+        ?string $connectedAt = null,
+    ): void {
+        $uuid = trim($uuid);
+        if ($uuid === '') {
+            return;
+        }
+
+        $existing = $this->getCallState($uuid) ?? [];
+        if (($existing['live'] ?? true) === false && filled($existing['hangup_cause'] ?? null)) {
+            return;
+        }
+
+        $resolvedConnectedAt = $existing['connected_at'] ?? null;
+        // Dialer connected timer is source of truth — always prefer client connected_at when provided.
+        if (filled($connectedAt)) {
+            try {
+                $resolvedConnectedAt = \Carbon\Carbon::parse($connectedAt)->utc()->toIso8601String();
+            } catch (\Throwable) {
+                if (! filled($resolvedConnectedAt)) {
+                    $resolvedConnectedAt = now()->utc()->toIso8601String();
+                }
+            }
+        }
+        if (! filled($resolvedConnectedAt)) {
+            $resolvedConnectedAt = now()->utc()->toIso8601String();
+        }
+
+        $destDigits = $this->digits($destination) ?: (string) ($existing['destination'] ?? '');
+        $fromExtension = (string) ($existing['from_extension'] ?? '');
+        $merged = $this->normalizeState(array_merge($existing, [
+            'uuid' => $uuid,
+            'destination' => $destDigits !== '' ? $destDigits : ($existing['destination'] ?? null),
+            'from_extension' => $fromExtension !== '' ? $fromExtension : ($existing['from_extension'] ?? null),
+            'destination_answered' => true,
+            'destination_connected' => true,
+            'live' => true,
+            'outcome' => 'connected',
+            'billsec' => $billsec ?? ($existing['billsec'] ?? null),
+            'connected_at' => $resolvedConnectedAt,
+            'source' => $source,
+            'updated_at' => now()->toIso8601String(),
+        ]));
+
+        $this->putState($uuid, $merged);
+
+        if ($destDigits !== '') {
+            Cache::put($this->destinationKey($destDigits), $merged, self::CACHE_TTL_SECONDS);
+            Cache::put($this->destinationWatchKey($destDigits), $uuid, self::CACHE_TTL_SECONDS);
+        }
     }
 
     /**
@@ -241,6 +409,7 @@ class MorpheusCallEventService
             'live' => true,
             'billsec' => $state['billsec'] ?? null,
             'bridged_to' => $state['bridged_to'] ?? null,
+            'connected_at' => $state['connected_at'] ?? null,
             'updated_at' => $state['updated_at'] ?? null,
             'source' => 'webhook',
             'webhook_event' => $state['event'] ?? null,
@@ -275,6 +444,110 @@ class MorpheusCallEventService
     protected function putState(string $uuid, array $state): void
     {
         Cache::put($this->stateKey($uuid), $state, self::CACHE_TTL_SECONDS);
+        $this->syncLiveIndex($uuid, (bool) ($state['live'] ?? false));
+        $this->bumpMonitoringVersion();
+    }
+
+    /**
+     * Live call states currently tracked from originate/webhooks.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function listLiveStates(): array
+    {
+        $index = Cache::get($this->liveIndexKey(), []);
+        if (! is_array($index) || $index === []) {
+            return [];
+        }
+
+        $live = [];
+        $stillLive = [];
+
+        foreach ($index as $uuid) {
+            $uuid = trim((string) $uuid);
+            if ($uuid === '') {
+                continue;
+            }
+
+            $state = $this->getCallState($uuid);
+            if (! is_array($state) || ! ($state['live'] ?? false)) {
+                continue;
+            }
+
+            $stillLive[] = $uuid;
+            $live[] = $state;
+        }
+
+        if ($stillLive !== array_values(array_map('strval', $index))) {
+            Cache::put($this->liveIndexKey(), array_values(array_unique($stillLive)), self::CACHE_TTL_SECONDS);
+        }
+
+        return $live;
+    }
+
+    public function monitoringVersion(): int
+    {
+        return (int) Cache::get($this->monitoringVersionKey(), 0);
+    }
+
+    public function bumpMonitoringVersion(): void
+    {
+        $key = $this->monitoringVersionKey();
+        Cache::put($key, ((int) Cache::get($key, 0)) + 1, self::CACHE_TTL_SECONDS);
+    }
+
+    protected function syncLiveIndex(string $uuid, bool $live): void
+    {
+        $uuid = trim($uuid);
+        if ($uuid === '') {
+            return;
+        }
+
+        $index = Cache::get($this->liveIndexKey(), []);
+        if (! is_array($index)) {
+            $index = [];
+        }
+
+        if ($live) {
+            if (! in_array($uuid, $index, true)) {
+                $index[] = $uuid;
+            }
+        } else {
+            $index = array_values(array_filter($index, fn ($item) => (string) $item !== $uuid));
+        }
+
+        Cache::put($this->liveIndexKey(), $index, self::CACHE_TTL_SECONDS);
+    }
+
+    protected function liveIndexKey(): string
+    {
+        return 'integrations.morpheus.live_call_uuids';
+    }
+
+    protected function monitoringVersionKey(): string
+    {
+        return 'integrations.morpheus.monitoring_version';
+    }
+
+    /**
+     * @param  array<string, mixed>  $state
+     * @return array<string, mixed>
+     */
+    protected function normalizeState(array $state): array
+    {
+        if (isset($state['destination'])) {
+            $state['destination'] = $this->digits((string) $state['destination']);
+        }
+        if (isset($state['from_extension'])) {
+            $state['from_extension'] = $this->digits((string) $state['from_extension']);
+        }
+
+        return $state;
+    }
+
+    protected function stateKey(string $uuid): string
+    {
+        return 'integrations.morpheus.call_state.'.$uuid;
     }
 
     /**
@@ -501,27 +774,6 @@ class MorpheusCallEventService
             || str_contains($eventName, 'completed')
             || str_contains($eventName, 'disconnected')
         ) || in_array(strtoupper($eventName), ['HANGUP', 'COMPLETED', 'DESTROYED'], true);
-    }
-
-    /**
-     * @param  array<string, mixed>  $state
-     * @return array<string, mixed>
-     */
-    protected function normalizeState(array $state): array
-    {
-        if (isset($state['destination'])) {
-            $state['destination'] = $this->digits((string) $state['destination']);
-        }
-        if (isset($state['from_extension'])) {
-            $state['from_extension'] = $this->digits((string) $state['from_extension']);
-        }
-
-        return $state;
-    }
-
-    protected function stateKey(string $uuid): string
-    {
-        return 'integrations.morpheus.call_state.'.$uuid;
     }
 
     protected function destinationKey(string $destinationDigits): string

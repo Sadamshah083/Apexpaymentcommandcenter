@@ -25,12 +25,12 @@
         </div>
         <h2 id="import-delete-title" class="member-confirm-title">Delete import?</h2>
         <p id="import-delete-message" class="member-confirm-message text-left">This will permanently remove the import and all lead records from the database.</p>
-        <form id="import-delete-form" method="POST" action="#">
+        <form id="import-delete-form" method="POST" action="#" data-turbo="true">
             @csrf
             @method('DELETE')
             <div class="member-confirm-actions">
                 <button type="button" class="member-confirm-cancel" data-import-delete-dismiss>Cancel</button>
-                <button type="submit" class="member-confirm-submit bg-rose-600 hover:bg-rose-700">Delete permanently</button>
+                <button type="submit" id="import-delete-submit" class="member-confirm-submit bg-rose-600 hover:bg-rose-700">Delete permanently</button>
             </div>
         </form>
     </div>
@@ -157,7 +157,25 @@
         deleteModal.hidden = true;
         deleteModal.setAttribute('aria-hidden', 'true');
         document.body.classList.remove('member-confirm-open');
+        const submit = document.getElementById('import-delete-submit');
+        if (submit) {
+            submit.disabled = false;
+            submit.textContent = 'Delete permanently';
+        }
     }
+
+    deleteForm?.addEventListener('submit', () => {
+        // Stop live sync/monitoring immediately so Network does not keep streaming a deleted import.
+        document.dispatchEvent(new CustomEvent('workspace:teardown-request'));
+        const submit = document.getElementById('import-delete-submit');
+        if (submit) {
+            submit.disabled = true;
+            submit.textContent = 'Deleting…';
+        }
+        deleteModal?.querySelectorAll('[data-import-delete-dismiss]').forEach((el) => {
+            el.setAttribute('disabled', 'disabled');
+        });
+    });
 
     function syncAssignTeamLeadDefault() {
         if (!assignTeamLead) return;

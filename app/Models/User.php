@@ -41,6 +41,8 @@ class User extends Authenticatable
         return $this->belongsToMany(Workspace::class, 'workspace_user')
             ->withPivot(
                 'role',
+                'team_lead_user_id',
+                'campaign_id',
                 'status',
                 'invited_at',
                 'joined_at',

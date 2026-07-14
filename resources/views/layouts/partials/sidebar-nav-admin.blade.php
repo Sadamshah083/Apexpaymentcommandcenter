@@ -48,7 +48,7 @@
     </x-sidebar.section>
 @endif
 
-@if ($showEmailToolkit)
+<!-- @if ($showEmailToolkit)
     <x-sidebar.section title="Email Toolkit">
         @if ($can('email_lists'))
             <x-sidebar.link :href="route('admin.lists.index')" label="Bulk Email Verifier" icon-name="verify"
@@ -75,7 +75,7 @@
             </x-sidebar.link>
         @endif
     </x-sidebar.section>
-@endif
+@endif -->
 
 @if ($can('sales_ops'))
     <x-sidebar.section title="Sales Operations">
@@ -108,9 +108,26 @@
 @if ($can('communications') || auth()->user()?->canAccessAdminPortal())
     <x-sidebar.section title="Communications">
         <x-sidebar.link :href="route('admin.communications.index')" label="Communications Hub" icon-name="communications"
-            :active="request()->routeIs('admin.communications.*')">
+            :exclude-prefixes="['/admin/communications/monitoring']"
+            :active="request()->routeIs('admin.communications.*') && ! request()->routeIs('admin.communications.monitoring*')">
             <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'communications'])</x-slot:icon>
         </x-sidebar.link>
+        @if (app(\App\Services\Communications\CommunicationsAccessService::class)->canViewCallMonitoring(auth()->user(), 'admin.'))
+            <x-sidebar.link
+                :href="route('admin.communications.monitoring')"
+                label="Call Monitoring"
+                icon-name="phone"
+                :active="request()->routeIs('admin.communications.monitoring*')"
+                data-call-monitoring-nav
+                data-call-monitoring-poll-url="{{ route('admin.communications.monitoring.live') }}"
+                data-call-monitoring-stream-url="{{ route('admin.communications.monitoring.stream') }}">
+                <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'phone'])</x-slot:icon>
+                <x-slot:badge>
+                    <span class="sidebar-live-chip sidebar-live-chip--pink is-empty" title="Active in call" data-call-monitoring-nav-incall hidden>0</span>
+                    <span class="sidebar-live-chip sidebar-live-chip--blue is-empty" title="Ringing" data-call-monitoring-nav-waiting hidden>0</span>
+                </x-slot:badge>
+            </x-sidebar.link>
+        @endif
     </x-sidebar.section>
 @endif
 

@@ -46,6 +46,36 @@ class CampaignController extends Controller
             ->with('success', "Campaign \"{$data['name']}\" created.");
     }
 
+    public function update(Request $request, LeadCampaign $campaign)
+    {
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+        $this->ensureInWorkspace($campaign, $workspace);
+
+        $data = $request->validate([
+            'name' => 'required|string|max:100',
+            'description' => 'nullable|string|max:500',
+        ]);
+
+        $this->campaigns->update($campaign, $data['name'], $data['description'] ?? $campaign->description);
+
+        return redirect()
+            ->route('admin.campaigns.index')
+            ->with('success', "Campaign renamed to \"{$data['name']}\".");
+    }
+
+    public function destroy(LeadCampaign $campaign)
+    {
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+        $this->ensureInWorkspace($campaign, $workspace);
+
+        $name = $campaign->name;
+        $this->campaigns->delete($campaign);
+
+        return redirect()
+            ->route('admin.campaigns.index')
+            ->with('success', "Campaign \"{$name}\" deleted. Linked imports and leads were unassigned from this campaign.");
+    }
+
     public function show(Request $request, LeadCampaign $campaign)
     {
         $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());

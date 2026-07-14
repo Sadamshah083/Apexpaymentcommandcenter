@@ -366,8 +366,9 @@ class LeadContactDisplay
         }
 
         $value = trim((string) $value);
+        $value = \App\Support\SpreadsheetText::repairMojibake($value);
 
-        if ($value === '' || $value === '—') {
+        if ($value === '' || $value === '—' || $value === '–' || $value === '-') {
             return true;
         }
 
@@ -379,16 +380,26 @@ class LeadContactDisplay
             'none',
             'unknown',
             'unavailable',
+            'γçö',
+            'гçö',
         ], true);
     }
 
     public static function label(?string $value, string $fallback = '—'): string
     {
-        return self::isUnavailable($value) ? $fallback : $value;
+        if (self::isUnavailable($value)) {
+            return $fallback;
+        }
+
+        return \App\Support\SpreadsheetText::normalize((string) $value);
     }
 
     public static function cell(?string $value): string
     {
-        return self::isUnavailable($value) ? '' : $value;
+        if (self::isUnavailable($value)) {
+            return '';
+        }
+
+        return \App\Support\SpreadsheetText::normalize((string) $value);
     }
 }

@@ -25,6 +25,8 @@
         data-transfer-url="{{ route($routePrefix . 'communications.morpheus.calls.transfer', ['uuid' => '__UUID__']) }}"
         data-call-status-url="{{ route($routePrefix . 'communications.morpheus.calls.status', ['uuid' => '__UUID__']) }}"
         data-call-events-url="{{ route($routePrefix . 'communications.morpheus.calls.events', ['uuid' => '__UUID__']) }}"
+        data-destination-connected-url="{{ route($routePrefix . 'communications.morpheus.calls.destination-connected', ['uuid' => '__UUID__']) }}"
+        data-call-ended-url="{{ route($routePrefix . 'communications.morpheus.calls.ended', ['uuid' => '__UUID__']) }}"
         data-originate-url="{{ route($routePrefix . 'communications.morpheus.calls.originate') }}"
         data-portal-url="{{ $portalUrl !== '#' ? $portalUrl . 'agent/' : 'https://' . config('integrations.morpheus.host') . '/agent/' }}"
         data-default-extension="{{ $defaultExtension }}"
@@ -124,6 +126,9 @@
                     <button type="button" class="ch-btn ch-btn--secondary ch-btn--sm hidden" data-webphone-hold title="Place caller on hold">
                         Hold
                     </button>
+                    <button type="button" class="ch-btn ch-btn--secondary ch-btn--sm hidden" data-webphone-mute title="Mute your microphone" aria-pressed="false">
+                        Mute
+                    </button>
                     <button type="button" class="ch-btn ch-btn--secondary ch-btn--sm hidden" data-webphone-transfer title="Transfer this call">
                         Transfer
                     </button>
@@ -176,7 +181,8 @@
                 <span class="ch-status-dot" data-webphone-dot></span>
                 <span data-webphone-status-text>Offline</span>
             </span>
-            <audio id="apex-webphone-remote" autoplay playsinline data-webphone-remote></audio>
+            <audio id="apex-webphone-remote" autoplay playsinline webkit-playsinline
+                data-webphone-remote preload="none"></audio>
         </div>
     </section>
 @endif

@@ -214,12 +214,12 @@ function patchImportStatCell(el, value) {
 
 function formatRelativeTime(isoString) {
     if (!isoString) {
-        return 'ΓÇö';
+        return '—';
     }
 
     const date = new Date(isoString);
     if (Number.isNaN(date.getTime())) {
-        return 'ΓÇö';
+        return '—';
     }
 
     const diffSec = Math.round((date.getTime() - Date.now()) / 1000);
@@ -331,7 +331,7 @@ function resolveLeadDisplay(lead) {
 
 function formatLeadCell(value) {
     const trimmed = String(value || '').trim();
-    return trimmed ? escapeHtml(trimmed) : '<span class="text-zinc-400">ΓÇö</span>';
+    return trimmed ? escapeHtml(trimmed) : '<span class="text-zinc-400">—</span>';
 }
 
 function resolveLeadContact(lead) {
@@ -575,16 +575,16 @@ const AE_PIPELINE_STAGES = new Set(['meeting_scheduled', 'proposal_sent', 'follo
 function renderAePipelineRow(lead, leadShowBase) {
     const volume = lead.monthly_processing_volume
         ? `$${Number(lead.monthly_processing_volume).toLocaleString()}`
-        : 'ΓÇö';
-    const meeting = lead.schedule_at || 'ΓÇö';
+        : '—';
+    const meeting = lead.schedule_at || '—';
 
     return `
         <tr data-lead-id="${lead.id}">
             <td class="font-bold">${escapeHtml(lead.business_name)}</td>
-            <td>${escapeHtml(lead.owner_name || 'ΓÇö')}</td>
+            <td>${escapeHtml(lead.owner_name || '—')}</td>
             <td>${escapeHtml(lead.stage_label || stageLabel(lead.stage))}</td>
             <td>${volume}</td>
-            <td>${escapeHtml(lead.current_processor || lead.payment_processor || 'ΓÇö')}</td>
+            <td>${escapeHtml(lead.current_processor || lead.payment_processor || '—')}</td>
             <td class="text-xs">${escapeHtml(meeting)}</td>
             <td><a href="${leadShowBase}/${lead.id}" class="app-link text-sm">Details</a></td>
         </tr>
@@ -1011,6 +1011,7 @@ let syncVisibilityHandler = null;
 let syncRequestHandler = null;
 let syncPollTimer = null;
 let syncPollAborted = false;
+let syncGeneration = 0;
 const SYNC_LIST_POLL_MS = 8000;
 const SYNC_FULL_POLL_MS = 5000;
 const SYNC_HIDDEN_POLL_MS = 30000;
@@ -1032,8 +1033,9 @@ function pageNeedsWorkspaceSync() {
     }
 
     const root = document.body;
-    if (root.dataset.workspaceSyncScope === 'lite' && root.dataset.workspaceSyncUrl) {
-        return true;
+    const scope = root.dataset.workspaceSyncScope || 'full';
+    if (scope === 'off' || !root.dataset.workspaceSyncUrl) {
+        return false;
     }
 
     const pageContext = document.getElementById('workspace-sync-page');
@@ -1041,11 +1043,22 @@ function pageNeedsWorkspaceSync() {
         return false;
     }
 
-    return SYNC_TARGET_IDS.some((id) => document.getElementById(id));
+    // Only keep a live connection when this page has syncable UI.
+    if (SYNC_TARGET_IDS.some((id) => document.getElementById(id))) {
+        return true;
+    }
+
+    // Lite/toolkit pages must opt in with a toolkit root; never poll globally.
+    if (scope === 'lite') {
+        return Boolean(document.querySelector('[data-workspace-toolkit-root], #workspace-sync-toolkit'));
+    }
+
+    return false;
 }
 
 export function teardownWorkspaceSync() {
     syncPollAborted = true;
+    syncGeneration += 1;
     if (syncPollTimer) {
         window.clearTimeout(syncPollTimer);
         syncPollTimer = null;
@@ -1055,7 +1068,14 @@ export function teardownWorkspaceSync() {
         syncReconnectTimer = null;
     }
     if (syncEventSource) {
-        syncEventSource.close();
+        try {
+            syncEventSource.onopen = null;
+            syncEventSource.onmessage = null;
+            syncEventSource.onerror = null;
+            syncEventSource.close();
+        } catch {
+            // ignore
+        }
         syncEventSource = null;
     }
     if (syncVisibilityHandler) {
@@ -1066,11 +1086,13 @@ export function teardownWorkspaceSync() {
         document.removeEventListener('workspace:sync-request', syncRequestHandler);
         syncRequestHandler = null;
     }
+    updateSyncIndicator('paused');
 }
 
 export function initWorkspaceSync() {
     teardownWorkspaceSync();
     syncPollAborted = false;
+    const generation = syncGeneration;
 
     const root = document.body;
     const streamUrl = root.dataset.workspaceSyncStreamUrl;
@@ -1228,16 +1250,24 @@ export function initWorkspaceSync() {
     }
 
     function scheduleReconnect(ms = 1500) {
+        if (syncPollAborted || generation !== syncGeneration) {
+            return;
+        }
         if (syncReconnectTimer) {
             window.clearTimeout(syncReconnectTimer);
         }
-        syncReconnectTimer = window.setTimeout(connectStream, ms);
+        syncReconnectTimer = window.setTimeout(() => {
+            if (syncPollAborted || generation !== syncGeneration) {
+                return;
+            }
+            connectStream();
+        }, ms);
     }
 
     function schedulePoll(delayMs) {
-        if (syncPollAborted) {
-                return;
-            }
+        if (syncPollAborted || generation !== syncGeneration) {
+            return;
+        }
         if (syncPollTimer) {
             window.clearTimeout(syncPollTimer);
         }
@@ -1245,7 +1275,7 @@ export function initWorkspaceSync() {
     }
 
     async function pollTick() {
-        if (syncPollAborted || !pollUrl) {
+        if (syncPollAborted || generation !== syncGeneration || !pollUrl) {
             return;
         }
 
@@ -1266,14 +1296,18 @@ export function initWorkspaceSync() {
                 credentials: 'same-origin',
             });
 
+            if (syncPollAborted || generation !== syncGeneration) {
+                return;
+            }
+
             if (response.ok) {
                 const data = await response.json();
                 applySyncPayload(data);
             } else {
-            updateSyncIndicator('paused');
+                updateSyncIndicator('paused');
             }
         } catch (error) {
-            if (!syncPollAborted) {
+            if (!syncPollAborted && generation === syncGeneration) {
                 updateSyncIndicator('paused');
             }
         }
@@ -1282,13 +1316,26 @@ export function initWorkspaceSync() {
     }
 
     function connectPoll() {
+        if (syncPollAborted || generation !== syncGeneration) {
+            return;
+        }
         updateSyncIndicator('live');
         schedulePoll(0);
     }
 
     function connectStream() {
+        if (syncPollAborted || generation !== syncGeneration) {
+            return;
+        }
         if (syncEventSource) {
-            syncEventSource.close();
+            try {
+                syncEventSource.onopen = null;
+                syncEventSource.onmessage = null;
+                syncEventSource.onerror = null;
+                syncEventSource.close();
+            } catch {
+                // ignore
+            }
             syncEventSource = null;
         }
 
@@ -1296,10 +1343,17 @@ export function initWorkspaceSync() {
         syncEventSource = source;
 
         source.onopen = () => {
+            if (syncPollAborted || generation !== syncGeneration || syncEventSource !== source) {
+                source.close();
+                return;
+            }
             updateSyncIndicator('live');
         };
 
         source.onmessage = (event) => {
+            if (syncPollAborted || generation !== syncGeneration || syncEventSource !== source) {
+                return;
+            }
             try {
                 applySyncPayload(JSON.parse(event.data));
             } catch (error) {
@@ -1308,17 +1362,20 @@ export function initWorkspaceSync() {
         };
 
         source.addEventListener('reconnect', () => {
-            source.close();
             if (syncEventSource === source) {
+                source.close();
                 syncEventSource = null;
             }
             scheduleReconnect(300);
         });
 
         source.onerror = () => {
-            source.close();
             if (syncEventSource === source) {
+                source.close();
                 syncEventSource = null;
+            }
+            if (syncPollAborted || generation !== syncGeneration) {
+                return;
             }
             updateSyncIndicator('paused');
             scheduleReconnect(2000);
@@ -1326,6 +1383,9 @@ export function initWorkspaceSync() {
     }
 
     function onSyncRequest() {
+        if (syncPollAborted || generation !== syncGeneration) {
+            return;
+        }
         if (syncLite || usePoll) {
             connectPoll();
             return;
@@ -1337,12 +1397,12 @@ export function initWorkspaceSync() {
     document.addEventListener('workspace:sync-request', syncRequestHandler);
 
     syncVisibilityHandler = () => {
-        if (document.hidden) {
+        if (document.hidden || syncPollAborted || generation !== syncGeneration) {
             return;
         }
         if (syncLite || usePoll) {
             if (!syncPollTimer && !syncPollAborted) {
-            schedulePoll(0);
+                schedulePoll(0);
             }
             return;
         }

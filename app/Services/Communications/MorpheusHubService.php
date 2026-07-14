@@ -20,6 +20,23 @@ class MorpheusHubService
     }
 
     /**
+     * Bypass the long hub cache — used by Call Monitoring for near-real-time state.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function activeCallsFresh(): array
+    {
+        try {
+            // Use the 2s poll client path — never block page navigations on Morpheus.
+            $calls = $this->api->listCallsFast()['calls'] ?? [];
+
+            return is_array($calls) ? $calls : [];
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /**
      * @return array<int, array<string, mixed>>
      */
     public function queues(): array

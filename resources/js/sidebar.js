@@ -56,12 +56,37 @@ function parseMatchPrefixes(link) {
     return link._navMatchPrefixes;
 }
 
+function parseExcludePrefixes(link) {
+    if (Array.isArray(link._navExcludePrefixes)) {
+        return link._navExcludePrefixes;
+    }
+
+    const raw = link.dataset.navExcludePrefixes;
+
+    if (! raw) {
+        link._navExcludePrefixes = [];
+        return [];
+    }
+
+    try {
+        link._navExcludePrefixes = JSON.parse(raw).filter((prefix) => typeof prefix === 'string' && prefix !== '');
+    } catch {
+        link._navExcludePrefixes = [];
+    }
+
+    return link._navExcludePrefixes;
+}
+
 function isLinkActive(link, currentLocation) {
     const linkPath = normalizePath(link.dataset.navPath || '');
     const linkQuery = normalizeQuery(link.dataset.navQuery || '');
     const queryMode = link.dataset.navQueryMode || 'ignore';
     const currentPath = normalizePath(currentLocation.pathname);
     const currentQuery = normalizeQuery(currentLocation.search);
+
+    if (parseExcludePrefixes(link).some((prefix) => isPrefixMatch(prefix, currentPath))) {
+        return false;
+    }
 
     if (queryMode === 'exact') {
         if (linkPath === currentPath && linkQuery === currentQuery) {
@@ -127,40 +152,14 @@ function syncSidebarLinkTooltips() {
 }
 
 function bindSidebarLinkStatusHide(link) {
+    // Keep href intact so Turbo hover-prefetch and clicks stay fast.
+    // Only strip native title tooltips that can show raw URLs.
     if (link.dataset.statusHrefBound === '1') {
         return;
     }
 
     link.dataset.statusHrefBound = '1';
-
-    const restoreHref = () => {
-        const href = link.dataset.statusHref;
-        if (href && ! link.getAttribute('href')) {
-            link.setAttribute('href', href);
-        }
-    };
-
-    const hideStatusUrl = () => {
-        const href = link.getAttribute('href');
-        if (! href || href === '#' || href.startsWith('javascript:')) {
-            return;
-        }
-
-        link.dataset.statusHref = href;
-        link.removeAttribute('href');
-    };
-
-    link.addEventListener('mouseenter', hideStatusUrl);
-    link.addEventListener('mouseleave', restoreHref);
-    link.addEventListener('focus', hideStatusUrl);
-    link.addEventListener('blur', restoreHref);
-    link.addEventListener('mousedown', restoreHref, true);
-    link.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-            restoreHref();
-        }
-    });
-    link.addEventListener('auxclick', restoreHref, true);
+    link.removeAttribute('title');
 }
 
 function bindAllSidebarLinkStatusHide() {
@@ -309,6 +308,14 @@ function handleSidebarLinkClick(event) {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
         return;
     }
+
+    // Optimistic active state so the switch feels instant while Turbo loads.
+    document.querySelectorAll('.app-sidebar .sidebar-link').forEach((other) => {
+        other.classList.remove('sidebar-link-active');
+        other.removeAttribute('aria-current');
+    });
+    link.classList.add('sidebar-link-active');
+    link.setAttribute('aria-current', 'page');
 
     saveSidebarNavScroll();
     closeMobileSidebar();

@@ -187,6 +187,24 @@ class ZoomApiService
     }
 
     /**
+     * Fast active-calls probe for wallboards (2s timeout).
+     *
+     * @return array{calls: array<int, array<string, mixed>>}
+     */
+    public function listCallsFast(): array
+    {
+        try {
+            $response = $this->pollClient()->get($this->url('/calls'));
+            if ($response->successful()) {
+                return ['calls' => $response->json('calls') ?? []];
+            }
+        } catch (\Throwable) {
+        }
+
+        return ['calls' => []];
+    }
+
+    /**
      * Whether the outbound destination leg has actually answered (not just the agent).
      */
     public function destinationAnsweredOnCall(string $uuid, ?string $destination = null): bool
@@ -722,10 +740,7 @@ class ZoomApiService
             ], $webhookOverlay);
         }
 
-        // Always re-fetch active calls for dialer status (do not reuse a stale 350ms cache).
-        $this->activeCallsCache = null;
-        $this->activeCallsCacheAt = 0.0;
-
+        // Reuse the short in-process active-calls TTL (350ms) under dialer poll pressure.
         $destLive = $this->probeDestinationOnActiveCalls($destination);
         if (is_array($destLive) && ($destLive['destination_connected'] ?? false) === true) {
             return array_merge([
@@ -1487,20 +1502,33 @@ class ZoomApiService
             return ['ok' => false, 'error' => 'Extension and destination are required.'];
         }
 
-        $this->clearExtensionForOutboundDial($fromExtension, kickSip: false);
-        usleep(1_500_000);
+        $method = strtolower((string) config('integrations.morpheus.originate_method', 'originate'));
+        $webphoneReady = (bool) ($options['webphone_ready'] ?? false);
+        // Connected browser click-to-call: skip pre-dial GET /calls + settle sleeps (often 1–3s+).
+        $skipLinePrep = (bool) ($options['skip_line_clear'] ?? false)
+            || ($method === 'click-to-call' && $webphoneReady);
 
-        if ($this->extensionHasLiveCalls($fromExtension)) {
-            $this->clearExtensionForOutboundDial($fromExtension, kickSip: false);
-            sleep(2);
+        $lineReset = false;
+
+        if (! $skipLinePrep) {
+            $cleared = $this->clearExtensionForOutboundDial($fromExtension, kickSip: false);
+            // Brief settle only when we actually released stale legs.
+            if (($cleared['released'] ?? []) !== []) {
+                usleep(200_000);
+            }
 
             if ($this->extensionHasLiveCalls($fromExtension)) {
-                return [
-                    'ok' => false,
-                    'extension_busy' => true,
-                    'error' => "Extension {$fromExtension} is still busy. Wait 10–15 seconds, click Connect line, then try again.",
-                    'attempted' => ['pre-check-busy'],
-                ];
+                $this->clearExtensionForOutboundDial($fromExtension, kickSip: false);
+                usleep(500_000);
+
+                if ($this->extensionHasLiveCalls($fromExtension)) {
+                    return [
+                        'ok' => false,
+                        'extension_busy' => true,
+                        'error' => "Extension {$fromExtension} is still busy. Wait 10–15 seconds, click Connect line, then try again.",
+                        'attempted' => ['pre-check-busy'],
+                    ];
+                }
             }
         }
 
@@ -1509,10 +1537,8 @@ class ZoomApiService
 
         $timeout = $this->originateRingTimeout();
         $attempted = [];
-        $method = strtolower((string) config('integrations.morpheus.originate_method', 'originate'));
         $customerFirst = (bool) ($options['customer_first'] ?? config('integrations.morpheus.originate_customer_first', false));
         $isPstn = strlen($dialDestination) > 6;
-        $lineReset = false;
 
         $place = function () use ($customerFirst, $isPstn, $method, $fromExtension, $dialDestination, $timeout, $extra, &$attempted): array {
             // Ring the customer's PSTN line first, then bridge the agent extension (browser).
@@ -1898,6 +1924,11 @@ class ZoomApiService
             return;
         }
 
+        $cacheKey = 'integrations.morpheus.manual_campaign_ok.'.(string) $campaignId;
+        if (Cache::get($cacheKey) === true) {
+            return;
+        }
+
         $campaign = $this->getCampaign((string) $campaignId);
         if (! is_array($campaign)) {
             return;
@@ -1909,17 +1940,17 @@ class ZoomApiService
             || $ringTimeout < 90
             || $dropTimeout < 90;
 
-        if (! $needsPatch) {
-            return;
+        if ($needsPatch) {
+            $this->updateCampaign((string) $campaignId, [
+                'dial_mode' => 'manual',
+                'status' => 'active',
+                'require_disposition' => false,
+                'ring_timeout' => 90,
+                'drop_timeout' => 90,
+            ]);
         }
 
-        $this->updateCampaign((string) $campaignId, [
-            'dial_mode' => 'manual',
-            'status' => 'active',
-            'require_disposition' => false,
-            'ring_timeout' => 90,
-            'drop_timeout' => 90,
-        ]);
+        Cache::put($cacheKey, true, now()->addMinutes(10));
     }
 
     /**
@@ -2147,26 +2178,12 @@ class ZoomApiService
     protected function postOriginate(string $path, array $body): array
     {
         try {
-            \Log::info('Morpheus originate request', [
-                'path' => $path,
-                'extension' => $body['extension'] ?? $body['from'] ?? null,
-                'destination' => $body['destination'] ?? $body['to'] ?? null,
-                'campaign_id' => $body['campaign_id'] ?? null,
-                'caller_id_number' => $body['caller_id_number'] ?? null,
-            ]);
-
-            $response = $this->client()->post($this->url($path), $body);
+            $response = $this->originateClient()->post($this->url($path), $body);
 
             if ($response->successful()) {
                 $json = $response->json() ?? [];
 
                 app(MorpheusCircuitBreaker::class)->recordSuccess();
-
-                \Log::info('Morpheus originate response', [
-                    'path' => $path,
-                    'call_uuid' => $json['call_uuid'] ?? null,
-                    'ok' => $json['ok'] ?? true,
-                ]);
 
                 return array_merge([
                     'ok' => (bool) ($json['ok'] ?? true),
@@ -4160,14 +4177,29 @@ class ZoomApiService
             ->timeout((int) config('integrations.communications.http_timeout_seconds', 6));
     }
 
+    /**
+     * Faster dial-path client: short connect, keep request timeout for Morpheus place-call.
+     */
+    private function originateClient(): PendingRequest
+    {
+        app(MorpheusCircuitBreaker::class)->guard();
+
+        $timeout = max(4, (int) config('integrations.communications.http_timeout_seconds', 6));
+
+        return Http::withHeaders($this->morpheusAuthHeaders())
+            ->acceptJson()
+            ->connectTimeout(1)
+            ->timeout($timeout);
+    }
+
     private function pollClient(): PendingRequest
     {
         app(MorpheusCircuitBreaker::class)->guard();
 
         return Http::withHeaders($this->morpheusAuthHeaders())
             ->acceptJson()
-            ->connectTimeout(2)
-            ->timeout(3);
+            ->connectTimeout(1)
+            ->timeout(2);
     }
 
     private function url(string $path): string

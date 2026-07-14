@@ -17,8 +17,9 @@ const ACTION_COPY = {
     remove: {
         title: 'Delete member?',
         tone: 'error',
-        confirmLabel: 'Delete',
-        message: (name) => `Are you sure you want to delete ${name} from this workspace? This cannot be undone.`,
+        confirmLabel: 'Delete permanently',
+        message: (name) =>
+            `Delete ${name} from this workspace? This cannot be undone. Their campaign and team assignments will be removed.`,
     },
     role: {
         title: 'Change role?',
@@ -34,11 +35,57 @@ const ACTION_COPY = {
             return `Change ${name}'s role to ${label}?`;
         },
     },
+    'team-lead': {
+        title: 'Assign team lead?',
+        tone: 'warning',
+        confirmLabel: 'Save team lead',
+        message: (name, form) => {
+            const select = form?.querySelector('[name="team_lead_user_id"], [data-member-team-select]');
+            const label = select?.selectedOptions?.[0]?.textContent?.trim() || '';
+            if (!select?.value) {
+                return `Remove ${name} from their team lead?`;
+            }
+
+            return `Assign ${name} under ${label.trim()}? They will inherit that lead's campaign only.`;
+        },
+    },
+    campaign: {
+        title: 'Assign campaign?',
+        tone: 'warning',
+        confirmLabel: 'Save campaign',
+        message: (name, form) => {
+            const select = form?.querySelector('[name="campaign_id"], [data-member-campaign-select]');
+            const label = select?.selectedOptions?.[0]?.textContent?.trim() || '';
+            if (!select?.value) {
+                return `Remove campaign from ${name}? Their team members will also lose it.`;
+            }
+
+            return `Assign "${label.trim()}" to team lead ${name}? Only their team members inherit this campaign.`;
+        },
+    },
     'update': {
         title: 'Save account changes?',
         tone: 'warning',
         confirmLabel: 'Save changes',
-        message: (name) => `Save the updated username, email, and password settings for ${name}?`,
+        message: (name, form) => {
+            const roleLabel = form?.querySelector('[data-edit-member-role] option:checked')?.textContent?.trim()
+                || form?.querySelector('[name="role"] option:checked')?.textContent?.trim()
+                || '';
+            const campaign = form?.querySelector('[data-edit-member-campaign]')?.selectedOptions?.[0]?.textContent?.trim();
+            const teamLead = form?.querySelector('[data-edit-member-team-lead]')?.selectedOptions?.[0]?.textContent?.trim();
+            const bits = [`Save account changes for ${name}?`];
+            if (roleLabel) {
+                bits.push(`Role: ${roleLabel}.`);
+            }
+            if (campaign && campaign !== 'Unassigned') {
+                bits.push(`Campaign: ${campaign}.`);
+            }
+            if (teamLead && teamLead !== 'Unassigned') {
+                bits.push(`Team lead: ${teamLead}.`);
+            }
+
+            return bits.join(' ');
+        },
     },
     'reset-password': {
         title: 'Reset password?',
@@ -252,6 +299,20 @@ async function submitMemberForm(form) {
             return;
         }
 
+        if (form.dataset.memberAction === 'team-lead') {
+            showToast(payload.message || `${name} team updated.`, 'success');
+            window.setTimeout(() => window.location.reload(), 400);
+            row?.classList.remove('member-row-busy');
+            return;
+        }
+
+        if (form.dataset.memberAction === 'campaign') {
+            showToast(payload.message || `${name} campaign updated.`, 'success');
+            window.setTimeout(() => window.location.reload(), 400);
+            row?.classList.remove('member-row-busy');
+            return;
+        }
+
         if (form.dataset.memberAction === 'suspend' || form.dataset.memberAction === 'reactivate') {
             const status = form.dataset.memberAction === 'suspend' ? 'suspended' : 'active';
             const badge = row?.querySelector('[data-member-status]');
@@ -273,7 +334,7 @@ async function submitMemberForm(form) {
                 if (list && list.querySelectorAll('.member-row').length === 0) {
                     list.innerHTML = `
                         <tr data-um-empty-members>
-                            <td colspan="6">
+                            <td colspan="8">
                                 <div class="um-empty-state">
                                     <p class="um-empty-title">No team members yet</p>
                                     <p class="um-empty-desc">Create an agent account below to get started.</p>
@@ -298,27 +359,11 @@ async function submitMemberForm(form) {
         }
 
         if (form.dataset.memberAction === 'update') {
-            const username = form.querySelector('[name="username"]')?.value?.trim();
-            const email = form.querySelector('[name="email"]')?.value?.trim();
-            const nameEl = row?.querySelector('.um-member-name');
-            const emailEl = row?.querySelector('.um-member-email');
-            const roleLabel = row?.querySelector('.um-role-readonly')?.textContent?.trim() || '';
-
-            if (nameEl && username) {
-                nameEl.textContent = username;
-            }
-
-            if (emailEl && email) {
-                emailEl.textContent = email;
-            }
-
-            if (row && username) {
-                row.dataset.memberName = username;
-                row.dataset.memberSearch = `${username} ${email || ''} ${roleLabel}`.toLowerCase();
-            }
-
-            form.reset();
+            showToast(payload.message || `${name} updated.`, 'success');
             closeEditMemberModal();
+            window.setTimeout(() => window.location.reload(), 400);
+            row?.classList.remove('member-row-busy');
+            return;
         }
 
         if (form.dataset.memberAction === 'reset-password') {
@@ -881,6 +926,78 @@ function closeEditMemberModal() {
     modal.setAttribute('aria-hidden', 'true');
 }
 
+function parseLeadJson(raw) {
+    try {
+        const parsed = JSON.parse(raw || '[]');
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+function fillEditTeamLeadOptions(select, role, selectedId = '') {
+    if (!select) {
+        return;
+    }
+
+    const modal = document.getElementById('um-edit-member-modal');
+    const setterLeads = parseLeadJson(modal?.dataset.setterLeads);
+    const closerLeads = parseLeadJson(modal?.dataset.closerLeads);
+    const leads = role === 'closer' || role === 'closers_team_lead' ? closerLeads : setterLeads;
+
+    select.innerHTML = '<option value="">Unassigned</option>';
+    leads.forEach((lead) => {
+        const option = document.createElement('option');
+        option.value = String(lead.id);
+        option.textContent = lead.campaign_name
+            ? `${lead.name} · ${lead.campaign_name}`
+            : lead.name;
+        if (String(lead.id) === String(selectedId || '')) {
+            option.selected = true;
+        }
+        select.appendChild(option);
+    });
+}
+
+function syncEditAssignmentFields(selectedRole, { teamLeadId = '', campaignId = '' } = {}) {
+    const campaignField = document.querySelector('[data-edit-campaign-field]');
+    const teamLeadField = document.querySelector('[data-edit-team-lead-field]');
+    const campaignSelect = document.querySelector('[data-edit-member-campaign]');
+    const teamLeadSelect = document.querySelector('[data-edit-member-team-lead]');
+    const isTeamLead = selectedRole === 'appointment_setter_team_lead' || selectedRole === 'closers_team_lead';
+    const isAgent = selectedRole === 'appointment_setter' || selectedRole === 'closer';
+
+    if (campaignField) {
+        campaignField.hidden = !isTeamLead;
+    }
+    if (teamLeadField) {
+        teamLeadField.hidden = !isAgent;
+    }
+
+    if (campaignSelect) {
+        if (isTeamLead) {
+            campaignSelect.disabled = false;
+            campaignSelect.removeAttribute('disabled');
+            campaignSelect.value = campaignId ? String(campaignId) : '';
+        } else {
+            campaignSelect.value = '';
+            campaignSelect.disabled = true;
+        }
+    }
+
+    if (teamLeadSelect) {
+        if (isAgent) {
+            teamLeadSelect.disabled = false;
+            teamLeadSelect.removeAttribute('disabled');
+            fillEditTeamLeadOptions(teamLeadSelect, selectedRole, teamLeadId);
+        } else {
+            teamLeadSelect.innerHTML = '<option value="">Unassigned</option>';
+            teamLeadSelect.value = '';
+            teamLeadSelect.disabled = true;
+        }
+    }
+}
+
 function bindEditMemberModal() {
     const modal = document.getElementById('um-edit-member-modal');
     const form = document.getElementById('um-edit-member-form');
@@ -894,16 +1011,20 @@ function bindEditMemberModal() {
 
         const desc = document.getElementById('um-edit-member-desc');
         if (desc) {
-            desc.textContent = `Update username, email, and password for ${form.dataset.memberName}.`;
+            desc.textContent = `Update account, role, and team assignment for ${form.dataset.memberName}.`;
         }
 
         const usernameInput = document.getElementById('um-edit-member-username');
         const emailInput = document.getElementById('um-edit-member-email');
+        const roleSelect = document.querySelector('[data-edit-member-role]');
         if (usernameInput) {
             usernameInput.value = button.dataset.memberName || '';
         }
         if (emailInput) {
             emailInput.value = button.dataset.memberEmail || '';
+        }
+        if (roleSelect) {
+            roleSelect.value = button.dataset.memberRole || 'appointment_setter';
         }
 
         const passwordInput = form.querySelector('[name="password"]');
@@ -914,6 +1035,11 @@ function bindEditMemberModal() {
         if (confirmationInput) {
             confirmationInput.value = '';
         }
+
+        syncEditAssignmentFields(roleSelect?.value || '', {
+            teamLeadId: button.dataset.memberTeamLeadId || '',
+            campaignId: button.dataset.memberCampaignId || '',
+        });
 
         modal.hidden = false;
         modal.setAttribute('aria-hidden', 'false');
@@ -928,6 +1054,17 @@ function bindEditMemberModal() {
         button.dataset.editBound = '1';
         button.addEventListener('click', () => open(button));
     });
+
+    const roleSelect = document.querySelector('[data-edit-member-role]');
+    if (roleSelect && roleSelect.dataset.bound !== '1') {
+        roleSelect.dataset.bound = '1';
+        roleSelect.addEventListener('change', () => {
+            syncEditAssignmentFields(roleSelect.value, {
+                teamLeadId: document.querySelector('[data-edit-member-team-lead]')?.value || '',
+                campaignId: document.querySelector('[data-edit-member-campaign]')?.value || '',
+            });
+        });
+    }
 
     if (modal.dataset.bound !== '1') {
         modal.dataset.bound = '1';

@@ -170,7 +170,7 @@ function updateUpcomingCallbacks(items) {
         const overdueClass = item.overdue ? 'text-red-600 font-semibold' : 'text-slate-500';
         return `<a href="/portal/leads/${item.id}" data-turbo="false" class="dash-callback-row">
             <span class="font-medium">${escapeText(item.name || '')}</span>
-            <span class="${overdueClass}">${escapeText(item.when || 'ΓÇö')}</span>
+            <span class="${overdueClass}">${escapeText(item.when || '—')}</span>
         </a>`;
     }).join('');
 }

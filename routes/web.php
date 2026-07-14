@@ -137,6 +137,8 @@ Route::prefix('admin')->name('admin.')->middleware([
         Route::get('/', [CampaignController::class, 'index'])->name('index');
         Route::post('/', [CampaignController::class, 'store'])->name('store');
         Route::get('/{campaign}', [CampaignController::class, 'show'])->name('show');
+        Route::put('/{campaign}', [CampaignController::class, 'update'])->name('update');
+        Route::delete('/{campaign}', [CampaignController::class, 'destroy'])->name('destroy');
         Route::post('/{campaign}/enrich', [CampaignController::class, 'enrich'])->name('enrich');
         Route::post('/{campaign}/distribute', [CampaignController::class, 'distribute'])->name('distribute');
         Route::post('/{campaign}/assign-team-lead', [CampaignController::class, 'assignTeamLead'])->name('assign-team-lead');
@@ -163,6 +165,8 @@ Route::prefix('admin')->name('admin.')->middleware([
         Route::post('/{workspace}/members', [WorkspaceMemberController::class, 'store'])->name('members.store');
         Route::patch('/{workspace}/members/{member}', [WorkspaceMemberController::class, 'update'])->name('members.update');
         Route::patch('/{workspace}/members/{member}/role', [WorkspaceMemberController::class, 'updateRole'])->name('members.role');
+        Route::patch('/{workspace}/members/{member}/team-lead', [WorkspaceMemberController::class, 'updateTeamLead'])->name('members.team-lead');
+        Route::patch('/{workspace}/members/{member}/campaign', [WorkspaceMemberController::class, 'updateCampaign'])->name('members.campaign');
         Route::post('/{workspace}/members/{member}/reset-password', [WorkspaceMemberController::class, 'resetPassword'])->name('members.reset-password');
         Route::post('/{workspace}/members/{member}/suspend', [WorkspaceMemberController::class, 'suspend'])->name('members.suspend');
         Route::post('/{workspace}/members/{member}/reactivate', [WorkspaceMemberController::class, 'reactivate'])->name('members.reactivate');
@@ -186,6 +190,10 @@ Route::prefix('admin')->name('admin.')->middleware([
         $registerMorpheusHub = require __DIR__.'/morpheus-communications.php';
 
         Route::get('/', [CommunicationsHubController::class, 'index'])->name('index');
+        Route::get('/monitoring', [\App\Http\Controllers\CallMonitoringController::class, 'index'])->name('monitoring');
+        Route::get('/monitoring/live', [\App\Http\Controllers\CallMonitoringController::class, 'live'])->name('monitoring.live');
+        Route::get('/monitoring/stream', [\App\Http\Controllers\CallMonitoringController::class, 'stream'])->name('monitoring.stream');
+        Route::post('/monitoring/presence', [\App\Http\Controllers\CallMonitoringController::class, 'presenceHeartbeat'])->name('monitoring.presence');
         Route::get('/dialer/call-logs', [CommunicationsHubController::class, 'dialerCallLogs'])->name('dialer.call-logs');
         Route::get('/dialer/notes', [CommunicationsHubController::class, 'dialerPhoneNoteShow'])->name('dialer.notes.show');
         Route::put('/dialer/notes/phone', [CommunicationsHubController::class, 'dialerPhoneNoteSave'])->name('dialer.notes.phone.save');
@@ -270,6 +278,10 @@ Route::prefix('portal')->name('portal.')->middleware([\App\Http\Middleware\Marke
         $registerMorpheusHub = require __DIR__.'/morpheus-communications.php';
 
         Route::get('/', [CommunicationsHubController::class, 'index'])->name('index');
+        Route::get('/monitoring', [\App\Http\Controllers\CallMonitoringController::class, 'index'])->name('monitoring');
+        Route::get('/monitoring/live', [\App\Http\Controllers\CallMonitoringController::class, 'live'])->name('monitoring.live');
+        Route::get('/monitoring/stream', [\App\Http\Controllers\CallMonitoringController::class, 'stream'])->name('monitoring.stream');
+        Route::post('/monitoring/presence', [\App\Http\Controllers\CallMonitoringController::class, 'presenceHeartbeat'])->name('monitoring.presence');
         Route::get('/dialer/call-logs', [CommunicationsHubController::class, 'dialerCallLogs'])->name('dialer.call-logs');
         Route::get('/dialer/notes', [CommunicationsHubController::class, 'dialerPhoneNoteShow'])->name('dialer.notes.show');
         Route::put('/dialer/notes/phone', [CommunicationsHubController::class, 'dialerPhoneNoteSave'])->name('dialer.notes.phone.save');

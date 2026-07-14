@@ -39,6 +39,36 @@ class CampaignService
         ]);
     }
 
+    public function update(LeadCampaign $campaign, string $name, ?string $description = null): LeadCampaign
+    {
+        $name = trim($name);
+        if ($name === '') {
+            throw ValidationException::withMessages(['name' => 'Campaign name is required.']);
+        }
+
+        $duplicate = LeadCampaign::query()
+            ->where('workspace_id', $campaign->workspace_id)
+            ->where('name', $name)
+            ->where('id', '!=', $campaign->id)
+            ->exists();
+
+        if ($duplicate) {
+            throw ValidationException::withMessages(['name' => 'A campaign with this name already exists.']);
+        }
+
+        $campaign->update([
+            'name' => $name,
+            'description' => $description,
+        ]);
+
+        return $campaign->fresh();
+    }
+
+    public function delete(LeadCampaign $campaign): void
+    {
+        $campaign->delete();
+    }
+
     public function resolveForImport(Workspace $workspace, User $user, ?int $campaignId, ?string $campaignName): LeadCampaign
     {
         if ($campaignId) {

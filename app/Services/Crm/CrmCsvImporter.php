@@ -4,6 +4,8 @@ namespace App\Services\Crm;
 
 use App\Models\CrmCampaign;
 use App\Models\CrmLead;
+use App\Support\SpreadsheetHeaderDetector;
+use App\Support\SpreadsheetText;
 
 class CrmCsvImporter
 {
@@ -27,18 +29,36 @@ class CrmCsvImporter
      */
     public function import(CrmCampaign $campaign, string $filePath): array
     {
-        $handle = fopen($filePath, 'r');
+        $handle = fopen($filePath, 'rb');
         if ($handle === false) {
             throw new \RuntimeException('Could not read CSV file.');
         }
 
-        $headers = fgetcsv($handle);
-        if (! $headers || count(array_filter($headers)) === 0) {
+        // Skip UTF-8 BOM if present.
+        $bom = fread($handle, 3);
+        if ($bom !== "\xEF\xBB\xBF") {
+            rewind($handle);
+        }
+
+        $previewRows = [];
+        while (count($previewRows) < 25 && ($row = fgetcsv($handle)) !== false) {
+            $previewRows[] = SpreadsheetText::normalizeRow($row);
+        }
+
+        if ($previewRows === []) {
             fclose($handle);
             throw new \RuntimeException('CSV has no header row.');
         }
 
-        $headers = array_map(fn ($h) => trim((string) $h), $headers);
+        $detected = SpreadsheetHeaderDetector::detect($previewRows);
+        $headerIndex = (int) $detected['index'];
+        $headers = array_values(array_map(fn ($h) => SpreadsheetText::normalize($h), $detected['headers']));
+
+        if (count(array_filter($headers)) === 0) {
+            fclose($handle);
+            throw new \RuntimeException('CSV has no header row.');
+        }
+
         $mapping = $this->mapper->map($headers);
         $extraHeaders = $this->mapper->unmappedHeaders($headers, $mapping);
 
@@ -53,10 +73,35 @@ class CrmCsvImporter
         $cached = 0;
         $skipped = 0;
         $needsResearch = [];
-        $rowNumber = 1;
+        $rowNumber = $headerIndex; // will become 1-based spreadsheet-style after increment
+
+        // Rewind and fast-forward to the first data row after the detected header.
+        rewind($handle);
+        $bom = fread($handle, 3);
+        if ($bom !== "\xEF\xBB\xBF") {
+            rewind($handle);
+        }
+
+        for ($i = 0; $i <= $headerIndex; $i++) {
+            if (fgetcsv($handle) === false) {
+                fclose($handle);
+
+                return [
+                    'imported' => 0,
+                    'updated' => 0,
+                    'cached' => 0,
+                    'skipped' => 0,
+                    'needs_research' => [],
+                    'mapping' => $mapping,
+                    'headers' => $headers,
+                ];
+            }
+            $rowNumber++;
+        }
 
         while (($row = fgetcsv($handle)) !== false) {
             $rowNumber++;
+            $row = SpreadsheetText::normalizeRow($row);
 
             if (count(array_filter($row, fn ($v) => trim((string) $v) !== '')) === 0) {
                 continue;
@@ -179,7 +224,7 @@ class CrmCsvImporter
     ): ?array {
         $raw = [];
         foreach ($headers as $i => $header) {
-            $raw[$header] = $this->sanitizeUtf8(trim((string) ($row[$i] ?? '')));
+            $raw[$header] = SpreadsheetText::normalize($row[$i] ?? '');
         }
 
         $get = fn (string $field) => isset($mapping[$field], $raw[$mapping[$field]])
@@ -306,16 +351,12 @@ class CrmCsvImporter
 
     protected function sanitizeUtf8(?string $value): ?string
     {
-        if ($value === null || $value === '') {
-            return $value;
+        if ($value === null) {
+            return null;
         }
 
-        if (mb_check_encoding($value, 'UTF-8')) {
-            return $value;
-        }
+        $clean = SpreadsheetText::normalize($value);
 
-        $clean = iconv('UTF-8', 'UTF-8//IGNORE', $value);
-
-        return $clean === false ? '' : $clean;
+        return $clean === '' ? '' : $clean;
     }
 }

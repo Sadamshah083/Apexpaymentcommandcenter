@@ -2375,6 +2375,7 @@
 }
 
 .ghl-webphone-btn-hold,
+.ghl-webphone-btn-mute,
 .ghl-webphone-btn-transfer {
     display: inline-flex;
     align-items: center;
@@ -2396,7 +2397,14 @@
     color: #92400e !important;
 }
 
+.ghl-webphone-btn-mute.is-active {
+    background: #ecfdf5;
+    border-color: #6ee7b7;
+    color: #047857 !important;
+}
+
 .ghl-webphone-call-controls .ghl-webphone-btn-hold.hidden,
+.ghl-webphone-call-controls .ghl-webphone-btn-mute.hidden,
 .ghl-webphone-call-controls .ghl-webphone-btn-transfer.hidden {
     display: none !important;
 }

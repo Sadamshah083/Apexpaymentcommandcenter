@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Services\Workspace\WorkspaceContextService;
 use App\Services\Workspace\WorkspaceSyncService;
+use App\Support\ReleaseSessionLock;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -16,6 +17,9 @@ class WorkspaceSyncController extends Controller
 
     public function poll(Request $request)
     {
+        // Release the session lock so Turbo navigation is not blocked by sync polls.
+        ReleaseSessionLock::now($request);
+
         $user = Auth::user();
         $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
         $this->workspaceContext->ensureActiveMember($user, $workspace);
@@ -57,7 +61,7 @@ class WorkspaceSyncController extends Controller
         $this->workspaceContext->ensureActiveMember($user, $workspace);
 
         // Release the session lock so Turbo navigation + sync polls are not blocked for ~60s.
-        $request->session()->save();
+        ReleaseSessionLock::now($request);
 
         $workflowId = $request->integer('workflow_id') ?: null;
         $leadId = $request->integer('lead_id') ?: null;

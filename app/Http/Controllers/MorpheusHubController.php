@@ -7,10 +7,12 @@ use App\Services\Communications\CommunicationsWebphoneService;
 use App\Services\Communications\CommunicationsAgentService;
 use App\Services\Communications\CommunicationsCallHistoryService;
 use App\Services\Communications\CommunicationsDataService;
+use App\Services\Communications\AgentPresenceService;
 use App\Services\Communications\MorpheusCallEventService;
 use App\Services\Communications\MorpheusHubService;
 use App\Services\Integrations\ZoomApiService;
 use App\Services\Workspace\WorkspaceContextService;
+use App\Support\ReleaseSessionLock;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -218,10 +220,15 @@ class MorpheusHubController extends Controller
 
             // Never kickSip here — rotating SIP password while the browser is Registered
             // drops the WSS registration needed to answer the click-to-call INVITE.
-            $this->webphone->prepareExtension($user, $workspace, $fromExtension, $routePrefix);
-            $this->morpheus->clearExtensionForOutboundDial($fromExtension, kickSip: false);
+            // Skip prepare when the browser SIP line is already connected (done via webphone/prepare).
+            if (! $transportConnected) {
+                $this->webphone->prepareExtension($user, $workspace, $fromExtension, $routePrefix);
+            }
 
-            $result = $this->morpheus->originateCall($fromExtension, $destination, $dialOptions);
+            $result = $this->morpheus->originateCall($fromExtension, $destination, array_merge($dialOptions, [
+                'webphone_ready' => $transportConnected,
+                'skip_line_clear' => $transportConnected,
+            ]));
 
             if (! ($result['ok'] ?? false) && $request->wantsJson()) {
                 return response()->json(
@@ -232,12 +239,42 @@ class MorpheusHubController extends Controller
 
             if ($result['ok'] ?? false) {
                 $callUuid = (string) ($result['call_uuid'] ?? '');
+                $formatted = $this->morpheus->formatOriginateResponse($result, $fromExtension, $destination, $dialOptions);
+
+                if ($request->wantsJson()) {
+                    // Return dial ack immediately; history/cache work after the response.
+                    $userId = Auth::id();
+                    dispatch(function () use ($userId, $fromExtension, $destination, $callUuid): void {
+                        try {
+                            if ($callUuid !== '') {
+                                app(\App\Services\Communications\MorpheusCallEventService::class)
+                                    ->watchCall($callUuid, $fromExtension, $destination);
+                            }
+
+                            $user = $userId ? \App\Models\User::find($userId) : null;
+                            if ($user) {
+                                $workspace = app(\App\Services\Workspace\WorkspaceContextService::class)
+                                    ->resolveActiveWorkspace($user);
+                                if ($workspace) {
+                                    app(\App\Services\Communications\CommunicationsCallHistoryService::class)
+                                        ->logOutboundDial($workspace, $user, $fromExtension, $destination, $callUuid !== '' ? $callUuid : null);
+                                    app(\App\Services\Communications\MorpheusHubService::class)->bustCache();
+                                    app(\App\Services\Communications\CommunicationsDataService::class)->bustCache();
+                                }
+                            }
+                        } catch (\Throwable $e) {
+                            report($e);
+                        }
+                    })->afterResponse();
+
+                    return response()->json($formatted);
+                }
+
                 if ($callUuid !== '') {
                     $this->callEvents->watchCall($callUuid, $fromExtension, $destination);
                 }
 
                 $this->logOutboundDial($request, $fromExtension, $destination, $result['call_uuid'] ?? null);
-                $this->data->bustCache();
                 $this->hub->bustCache();
 
                 $successMessage = match ($result['outcome'] ?? 'initiated') {
@@ -251,12 +288,6 @@ class MorpheusHubController extends Controller
                         ? 'Your phone is ringing — answer within 90 seconds. Keep Connect line on.'
                         : 'Connecting your line… the destination will ring once your browser phone answers.',
                 };
-
-                if ($request->wantsJson()) {
-                    return response()->json(
-                        $this->morpheus->formatOriginateResponse($result, $fromExtension, $destination, $dialOptions)
-                    );
-                }
 
                 $redirect = back()->with('success', $successMessage);
 
@@ -412,22 +443,76 @@ class MorpheusHubController extends Controller
         return $this->executeCallAction(
             $request,
             function () use ($originateUuid, $uuid, $fromExtension, $destination, $relatedUuids) {
-                $result = $this->morpheus->hangupWithContext(
-                    $originateUuid !== '' ? $originateUuid : $uuid,
+                $primary = $originateUuid !== '' ? $originateUuid : $uuid;
+
+                // Clear wallboard LIVE state first so Monitoring hides immediately,
+                // even if Morpheus hangup HTTP is slow or fails.
+                $ended = array_values(array_unique(array_filter([
+                    $primary,
+                    $uuid,
+                    ...array_map(static fn ($id) => (string) $id, $relatedUuids),
+                ])));
+                foreach ($ended as $endedUuid) {
+                    $this->callEvents->markCallEnded($endedUuid, 'NORMAL_CLEARING');
+                    $this->touchCallLogEnded($endedUuid);
+                }
+                $this->callEvents->endLiveCallsForLeg(
+                    is_string($fromExtension) ? $fromExtension : null,
+                    is_string($destination) ? $destination : null,
+                    'NORMAL_CLEARING',
+                );
+                $this->markAgentPresenceIdle();
+
+                return $this->morpheus->hangupWithContext(
+                    $primary,
                     is_string($fromExtension) ? $fromExtension : null,
                     is_string($destination) ? $destination : null,
                     array_map(static fn ($id) => (string) $id, $relatedUuids),
                 );
-
-                if ($result['ok'] ?? false) {
-                    $endedUuid = $originateUuid !== '' ? $originateUuid : $uuid;
-                    $this->callEvents->markCallEnded($endedUuid, 'NORMAL_CLEARING');
-                }
-
-                return $result;
             },
             'Call ended.'
         );
+    }
+
+    /**
+     * Fast hangup signal for Call Monitoring — no Morpheus wait.
+     */
+    public function markCallEnded(Request $request, string $uuid)
+    {
+        ReleaseSessionLock::now($request);
+
+        $validated = $request->validate([
+            'from_extension' => ['nullable', 'string', 'max:32'],
+            'destination' => ['nullable', 'string', 'max:64'],
+            'related_uuids' => ['nullable', 'array'],
+            'related_uuids.*' => ['nullable', 'string', 'max:64'],
+            'hangup_cause' => ['nullable', 'string', 'max:64'],
+        ]);
+
+        $cause = (string) ($validated['hangup_cause'] ?? 'NORMAL_CLEARING');
+        $related = array_values(array_filter(array_map(
+            static fn ($id) => trim((string) $id),
+            $validated['related_uuids'] ?? [],
+        )));
+        $ended = array_values(array_unique(array_filter([$uuid, ...$related])));
+
+        foreach ($ended as $endedUuid) {
+            $this->callEvents->markCallEnded($endedUuid, $cause);
+            $this->touchCallLogEnded($endedUuid);
+        }
+
+        $this->callEvents->endLiveCallsForLeg(
+            $validated['from_extension'] ?? null,
+            $validated['destination'] ?? null,
+            $cause,
+        );
+        $this->markAgentPresenceIdle();
+
+        return response()->json([
+            'ok' => true,
+            'ended' => $ended,
+            'version' => $this->callEvents->monitoringVersion(),
+        ]);
     }
 
     public function releaseExtensionCalls(Request $request)
@@ -439,10 +524,20 @@ class MorpheusHubController extends Controller
 
         return $this->executeCallAction(
             $request,
-            fn () => $this->morpheus->releaseExtensionCallsWithDestination(
-                $validated['from_extension'],
-                $validated['destination'] ?? null,
-            ),
+            function () use ($validated) {
+                $result = $this->morpheus->releaseExtensionCallsWithDestination(
+                    $validated['from_extension'],
+                    $validated['destination'] ?? null,
+                );
+
+                $this->callEvents->endLiveCallsForLeg(
+                    $validated['from_extension'],
+                    $validated['destination'] ?? null,
+                    'RELEASED',
+                );
+
+                return $result;
+            },
             'Active calls released for extension.'
         );
     }
@@ -453,12 +548,16 @@ class MorpheusHubController extends Controller
             return response()->json(['ok' => false, 'error' => 'Morpheus is not configured.'], 503);
         }
 
+        // Unlock immediately so destination-connected + Turbo nav never wait on Morpheus HTTP.
+        ReleaseSessionLock::now($request);
+
         $destination = is_string($request->query('destination')) ? $request->query('destination') : null;
 
         try {
             $status = $this->morpheus->hubCallStatus($uuid, $destination, $request->boolean('customer_first'));
             $overlay = $this->callEvents->hubStatusOverlay($uuid, $destination);
             $status = $this->mergeLiveCallStatus($status, $overlay);
+            $this->persistConnectedFromStatus($uuid, $destination, $status);
 
             return response()->json($status);
         } catch (\Throwable $e) {
@@ -469,6 +568,42 @@ class MorpheusHubController extends Controller
                 'error' => 'Could not load call status.',
             ], 500);
         }
+    }
+
+    public function markDestinationConnected(Request $request, string $uuid)
+    {
+        if (! $this->morpheus->isConfigured()) {
+            return response()->json(['ok' => false, 'error' => 'Morpheus is not configured.'], 503);
+        }
+
+        ReleaseSessionLock::now($request);
+
+        $validated = $request->validate([
+            'destination' => ['nullable', 'string', 'max:64'],
+            'billsec' => ['nullable', 'integer', 'min:0', 'max:86400'],
+            'source' => ['nullable', 'string', 'max:64'],
+            'connected_at' => ['nullable', 'date'],
+        ]);
+
+        $destination = $validated['destination'] ?? null;
+        $this->callEvents->markDestinationConnected(
+            $uuid,
+            is_string($destination) ? $destination : null,
+            isset($validated['billsec']) ? (int) $validated['billsec'] : null,
+            (string) ($validated['source'] ?? 'agent'),
+            isset($validated['connected_at']) ? (string) $validated['connected_at'] : null,
+        );
+
+        $this->touchCallLogConnected($uuid);
+
+        return response()->json([
+            'ok' => true,
+            'uuid' => $uuid,
+            'destination_connected' => true,
+            'destination_answered' => true,
+            'outcome' => 'connected',
+            'live' => true,
+        ]);
     }
 
     public function webhookHealth()
@@ -527,7 +662,7 @@ class MorpheusHubController extends Controller
         }
 
         $destination = is_string($request->query('destination')) ? $request->query('destination') : null;
-        $request->session()->save();
+        ReleaseSessionLock::now($request);
 
         return response()->stream(function () use ($uuid, $destination) {
             if (function_exists('set_time_limit')) {
@@ -582,6 +717,7 @@ class MorpheusHubController extends Controller
                     }
 
                     $status = $this->mergeLiveCallStatus($apiStatus, $overlay);
+                    $this->persistConnectedFromStatus($uuid, $destination, $status);
                 } catch (\Throwable) {
                     $status = ['ok' => false];
                 }
@@ -697,6 +833,70 @@ class MorpheusHubController extends Controller
         }
 
         return array_merge($apiStatus, $overlay);
+    }
+
+    /**
+     * @param  array<string, mixed>  $status
+     */
+    protected function persistConnectedFromStatus(string $uuid, ?string $destination, array $status): void
+    {
+        if (($status['call_ended'] ?? false) === true || (($status['live'] ?? true) === false && filled($status['hangup_cause'] ?? null))) {
+            return;
+        }
+
+        $connected = ($status['destination_connected'] ?? false) === true
+            || ($status['destination_answered'] ?? false) === true
+            || (($status['outcome'] ?? '') === 'connected');
+
+        if (! $connected) {
+            return;
+        }
+
+        $this->callEvents->markDestinationConnected(
+            $uuid,
+            $destination,
+            isset($status['billsec']) ? (int) $status['billsec'] : null,
+            (string) ($status['source'] ?? 'status'),
+        );
+        $this->touchCallLogConnected($uuid);
+    }
+
+    protected function touchCallLogConnected(string $uuid): void
+    {
+        $uuid = trim($uuid);
+        if ($uuid === '') {
+            return;
+        }
+
+        try {
+            \App\Models\CommunicationCallLog::query()
+                ->where('morpheus_call_uuid', $uuid)
+                ->whereIn('status', ['initiated', 'ringing', 'bridging', 'active'])
+                ->orderByDesc('id')
+                ->limit(1)
+                ->update(['status' => 'connected']);
+        } catch (\Throwable) {
+            // Monitoring should not fail if call-log update is unavailable.
+        }
+    }
+
+    protected function touchCallLogEnded(string $uuid): void
+    {
+        $uuid = trim($uuid);
+        if ($uuid === '') {
+            return;
+        }
+
+        try {
+            \App\Models\CommunicationCallLog::query()
+                ->where('morpheus_call_uuid', $uuid)
+                ->whereIn('status', ['initiated', 'ringing', 'bridging', 'active', 'connected', 'talking'])
+                ->orderByDesc('id')
+                ->limit(1)
+                ->update(['status' => 'completed']);
+        } catch (\Throwable) {
+            // Hangup should not fail if call-log update is unavailable.
+        }
     }
 
     public function holdCall(Request $request, string $uuid)
@@ -1149,6 +1349,23 @@ class MorpheusHubController extends Controller
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    protected function markAgentPresenceIdle(): void
+    {
+        try {
+            $user = Auth::user();
+            if (! $user) {
+                return;
+            }
+            $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
+            if (! $workspace) {
+                return;
+            }
+            app(AgentPresenceService::class)->markCallEnded($user, $workspace);
+        } catch (\Throwable) {
+            // Presence is best-effort for monitoring idle timers.
+        }
+    }
 
     protected function executeCallAction(Request $request, callable $action, string $successMessage)
     {

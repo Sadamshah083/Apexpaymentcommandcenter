@@ -2,6 +2,7 @@
 
 namespace App\Services\Workspace;
 
+use App\Models\LeadCampaign;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceInvitation;
@@ -308,9 +309,34 @@ class WorkspaceMemberService
             abort(404);
         }
 
+        $currentLeadId = (int) ($workspace->users()->where('user_id', $member->id)->first()?->pivot?->team_lead_user_id ?? 0);
+        $currentCampaignId = (int) ($workspace->users()->where('user_id', $member->id)->first()?->pivot?->campaign_id ?? 0);
+        $expectedLeadRole = SalesOps::teamLeadRoleFor($role);
+        $keepLeadId = null;
+        $keepCampaignId = null;
+
+        if ($expectedLeadRole !== null && $currentLeadId > 0 && SalesOps::isAgentRole($role)) {
+            $leadRole = $workspace->users()->where('user_id', $currentLeadId)->first()?->pivot?->role;
+            if ($leadRole === $expectedLeadRole) {
+                $keepLeadId = $currentLeadId;
+            }
+        }
+
+        if (SalesOps::isTeamLeadRole($role) && $currentCampaignId > 0) {
+            $campaignExists = LeadCampaign::query()
+                ->where('workspace_id', $workspace->id)
+                ->where('id', $currentCampaignId)
+                ->exists();
+            if ($campaignExists) {
+                $keepCampaignId = $currentCampaignId;
+            }
+        }
+
         $workspace->users()->updateExistingPivot($member->id, [
             'role' => $role,
             'module_permissions' => $this->modulePermissionsForRoleChange($role, $member, $workspace),
+            'team_lead_user_id' => $keepLeadId,
+            'campaign_id' => $keepCampaignId,
         ]);
 
         $this->syncService->record(
@@ -321,6 +347,170 @@ class WorkspaceMemberService
             array_merge($this->memberPayload($member, $workspace), ['role' => $role]),
             $admin->id
         );
+    }
+
+    public function updateMemberTeamLead(Workspace $workspace, User $admin, User $member, ?int $teamLeadUserId): void
+    {
+        $this->workspaceContext->ensureCanManageMembers($admin, $workspace);
+        $this->ensureMemberIsEditable($workspace, $member, 'team');
+
+        $membership = $workspace->users()->where('user_id', $member->id)->first();
+        if (! $membership) {
+            abort(404);
+        }
+
+        $role = (string) ($membership->pivot->role ?? '');
+        if (! SalesOps::isAgentRole($role)) {
+            throw ValidationException::withMessages([
+                'team_lead_user_id' => 'Only agents can be assigned under a team lead. Assign campaigns to team leads instead.',
+            ]);
+        }
+
+        $expectedLeadRole = SalesOps::teamLeadRoleFor($role);
+        if ($expectedLeadRole === null) {
+            throw ValidationException::withMessages([
+                'team_lead_user_id' => 'This role cannot be assigned to a team.',
+            ]);
+        }
+
+        if ($teamLeadUserId === null || $teamLeadUserId === 0) {
+            $workspace->users()->updateExistingPivot($member->id, [
+                'team_lead_user_id' => null,
+                'campaign_id' => null,
+            ]);
+            $this->syncService->record(
+                $workspace,
+                'member.team_updated',
+                'user',
+                $member->id,
+                array_merge($this->memberPayload($member, $workspace), ['team_lead_user_id' => null]),
+                $admin->id
+            );
+
+            return;
+        }
+
+        if ($teamLeadUserId === (int) $member->id) {
+            throw ValidationException::withMessages([
+                'team_lead_user_id' => 'Agents must be assigned to a team lead, not themselves.',
+            ]);
+        }
+
+        $teamLead = $workspace->users()
+            ->where('user_id', $teamLeadUserId)
+            ->wherePivot('status', 'active')
+            ->wherePivot('role', $expectedLeadRole)
+            ->first();
+
+        if (! $teamLead) {
+            throw ValidationException::withMessages([
+                'team_lead_user_id' => 'Select an active '.SalesOps::roleLabel($expectedLeadRole).' in this workspace.',
+            ]);
+        }
+
+        // Agents inherit campaign from their team lead only — never another lead's campaign.
+        $inheritedCampaignId = filled($teamLead->pivot->campaign_id ?? null)
+            ? (int) $teamLead->pivot->campaign_id
+            : null;
+
+        $workspace->users()->updateExistingPivot($member->id, [
+            'team_lead_user_id' => $teamLeadUserId,
+            'campaign_id' => $inheritedCampaignId,
+        ]);
+
+        $this->syncService->record(
+            $workspace,
+            'member.team_updated',
+            'user',
+            $member->id,
+            array_merge($this->memberPayload($member, $workspace), [
+                'team_lead_user_id' => $teamLeadUserId,
+                'team_lead_name' => $teamLead->name,
+                'campaign_id' => $inheritedCampaignId,
+            ]),
+            $admin->id
+        );
+    }
+
+    public function updateMemberCampaign(Workspace $workspace, User $admin, User $member, ?int $campaignId): void
+    {
+        $this->workspaceContext->ensureCanManageMembers($admin, $workspace);
+        $this->ensureMemberIsEditable($workspace, $member, 'campaign');
+
+        $membership = $workspace->users()->where('user_id', $member->id)->first();
+        if (! $membership) {
+            abort(404);
+        }
+
+        $role = (string) ($membership->pivot->role ?? '');
+        if (! SalesOps::isTeamLeadRole($role)) {
+            throw ValidationException::withMessages([
+                'campaign_id' => 'Campaigns can only be assigned to team leads.',
+            ]);
+        }
+
+        if ($campaignId === null || $campaignId === 0) {
+            $workspace->users()->updateExistingPivot($member->id, ['campaign_id' => null]);
+            $this->syncTeamMembersCampaign($workspace, (int) $member->id, null);
+            $this->syncService->record(
+                $workspace,
+                'member.campaign_updated',
+                'user',
+                $member->id,
+                array_merge($this->memberPayload($member, $workspace), ['campaign_id' => null]),
+                $admin->id
+            );
+
+            return;
+        }
+
+        $campaign = LeadCampaign::query()
+            ->where('workspace_id', $workspace->id)
+            ->where('id', $campaignId)
+            ->first();
+
+        if (! $campaign) {
+            throw ValidationException::withMessages([
+                'campaign_id' => 'Select a campaign from this workspace.',
+            ]);
+        }
+
+        $workspace->users()->updateExistingPivot($member->id, [
+            'campaign_id' => $campaign->id,
+            'team_lead_user_id' => null,
+        ]);
+
+        // Keep this lead's agents on the same campaign — never other team leads' members.
+        $this->syncTeamMembersCampaign($workspace, (int) $member->id, (int) $campaign->id);
+
+        $this->syncService->record(
+            $workspace,
+            'member.campaign_updated',
+            'user',
+            $member->id,
+            array_merge($this->memberPayload($member, $workspace), [
+                'campaign_id' => $campaign->id,
+                'campaign_name' => $campaign->name,
+            ]),
+            $admin->id
+        );
+    }
+
+    /**
+     * Push a team lead's campaign onto only that lead's agents.
+     */
+    protected function syncTeamMembersCampaign(Workspace $workspace, int $teamLeadUserId, ?int $campaignId): void
+    {
+        $agentIds = $workspace->users()
+            ->wherePivot('team_lead_user_id', $teamLeadUserId)
+            ->wherePivotIn('role', ['appointment_setter', 'closer'])
+            ->pluck('users.id');
+
+        foreach ($agentIds as $agentId) {
+            $workspace->users()->updateExistingPivot((int) $agentId, [
+                'campaign_id' => $campaignId,
+            ]);
+        }
     }
 
     public function suspendMember(Workspace $workspace, User $admin, User $member): void
@@ -562,6 +752,8 @@ class WorkspaceMemberService
             'account' => 'Super Admin accounts cannot be edited.',
             'role' => 'The Super Admin role cannot be changed.',
             'password' => 'Super Admin passwords cannot be changed here.',
+            'team' => 'Super Admin accounts cannot be assigned to a team.',
+            'campaign' => 'Super Admin accounts cannot be assigned a campaign.',
             'member' => 'Super Admin accounts cannot be modified.',
         ];
 
@@ -582,6 +774,8 @@ class WorkspaceMemberService
             'email' => $member->email,
             'role' => $pivot->role ?? null,
             'status' => $pivot->status ?? null,
+            'team_lead_user_id' => isset($pivot->team_lead_user_id) ? (int) $pivot->team_lead_user_id : null,
+            'campaign_id' => isset($pivot->campaign_id) ? (int) $pivot->campaign_id : null,
             'module_permissions' => $member->getModulePermissions($workspace->id),
         ];
     }

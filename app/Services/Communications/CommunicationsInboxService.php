@@ -1461,6 +1461,76 @@ class CommunicationsInboxService
   }
 
   /**
+   * Limit dialer recordings to agent or team-lead callers when requested.
+   *
+   * @param  array<string, mixed>  $filters
+   * @return array<string, mixed>
+   */
+  public function applyRecordingRoleScope(array $filters, $workspace): array
+  {
+    $role = strtolower(trim((string) ($filters['recording_role'] ?? '')));
+    if (! in_array($role, ['agent', 'team_lead'], true) || ! $workspace) {
+      return $filters;
+    }
+
+    $teamLeadRoles = ['appointment_setter_team_lead', 'closers_team_lead'];
+    $query = \Illuminate\Support\Facades\DB::table('workspace_user')
+      ->where('workspace_id', $workspace->id);
+
+    if ($role === 'team_lead') {
+      $query->whereIn('role', $teamLeadRoles);
+    } else {
+      $query->whereNotIn('role', array_merge($teamLeadRoles, ['super_admin', 'admin', 'manager']));
+    }
+
+    $filters['user_ids'] = $query->pluck('user_id')->map(fn ($id) => (int) $id)->all();
+    unset($filters['user_id'], $filters['from_extension']);
+
+    return $filters;
+  }
+
+  /**
+   * @param  array<int, array<string, mixed>>  $logs
+   * @return array<int, array<string, mixed>>
+   */
+  public function enrichDialerLogsWithCallerRoles(array $logs, $workspace): array
+  {
+    if ($logs === [] || ! $workspace) {
+      return $logs;
+    }
+
+    $userIds = collect($logs)
+      ->map(fn (array $log) => (int) ($log['user_id'] ?? data_get($log, 'raw.user_id') ?? 0))
+      ->filter(fn (int $id) => $id > 0)
+      ->unique()
+      ->values()
+      ->all();
+
+    if ($userIds === []) {
+      return $logs;
+    }
+
+    $rolesByUser = \Illuminate\Support\Facades\DB::table('workspace_user')
+      ->where('workspace_id', $workspace->id)
+      ->whereIn('user_id', $userIds)
+      ->pluck('role', 'user_id');
+
+    $teamLeadRoles = ['appointment_setter_team_lead', 'closers_team_lead'];
+
+    return array_map(function (array $log) use ($rolesByUser, $teamLeadRoles) {
+      $userId = (int) ($log['user_id'] ?? data_get($log, 'raw.user_id') ?? 0);
+      $workspaceRole = $userId > 0 ? (string) ($rolesByUser[$userId] ?? '') : '';
+      $group = in_array($workspaceRole, $teamLeadRoles, true) ? 'team_lead' : 'agent';
+
+      $log['agent_role'] = $workspaceRole !== '' ? $workspaceRole : null;
+      $log['agent_role_group'] = $group;
+      $log['agent_role_label'] = $group === 'team_lead' ? 'Team lead' : 'Agent';
+
+      return $log;
+    }, $logs);
+  }
+
+  /**
    * @return array<int, array<string, mixed>>
    */
   public function resolveDialerCallLogs(array $filters, bool $mergeRemote = true, ?string $routePrefix = null): array
@@ -1479,12 +1549,16 @@ class CommunicationsInboxService
       return [];
     }
 
+    $filters = $this->applyRecordingRoleScope($filters, $workspace);
+
     $logs = $this->callHistory->listForHub($workspace, $filters);
+    $logs = $this->enrichDialerLogsWithCallerRoles($logs, $workspace);
 
     // Agents stay on local history so account-wide Morpheus CDR cannot leak other agents' calls.
     $allowRemote = $mergeRemote
       && $this->zoom->isConfigured()
-      && empty($filters['actor_scoped']);
+      && empty($filters['actor_scoped'])
+      && empty($filters['recording_role']);
 
     if (! $allowRemote) {
       return $this->filterCallLogs($logs, $filters);
@@ -1513,9 +1587,12 @@ class CommunicationsInboxService
       $pages++;
     } while ($pageToken && $pages < 3);
 
-    return $this->filterCallLogs(
-      $this->callHistory->mergeLiveAndHistory($remote, $logs),
-      $filters,
+    return $this->enrichDialerLogsWithCallerRoles(
+      $this->filterCallLogs(
+        $this->callHistory->mergeLiveAndHistory($remote, $logs),
+        $filters,
+      ),
+      $workspace,
     );
   }
 
@@ -1531,16 +1608,19 @@ class CommunicationsInboxService
   ): array {
     $filters = $this->applyCallLogActorScope($filters, Auth::user(), $routePrefix);
     $recordingsOnly = (bool) ($filters['recordings_only'] ?? false);
+    $recordingRole = strtolower(trim((string) ($filters['recording_role'] ?? '')));
     $userId = Auth::id() ?? 0;
     $version = (int) Cache::get('dialer_logs_ver.'.$userId, 0);
-    $cacheKey = 'dialer_logs.v3.'.$userId.'.'.$version.'.'.md5(json_encode([
+    $cacheKey = 'dialer_logs.v4.'.$userId.'.'.$version.'.'.md5(json_encode([
       $filters['from'] ?? null,
       $filters['to'] ?? null,
       $filters['direction'] ?? null,
       $filters['filter'] ?? null,
       $filters['user_id'] ?? null,
+      $filters['user_ids'] ?? null,
       $filters['from_extension'] ?? null,
       $filters['actor_scoped'] ?? null,
+      $recordingRole,
       $recordingsOnly,
       $mergeRemote,
       $routePrefix,
@@ -1549,7 +1629,12 @@ class CommunicationsInboxService
     $all = Cache::remember(
       $cacheKey,
       30,
-      fn () => $this->resolveDialerCallLogs($filters, $mergeRemote, $routePrefix),
+      function () use ($filters, $mergeRemote, $routePrefix) {
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+        $scoped = $this->applyRecordingRoleScope($filters, $workspace);
+
+        return $this->resolveDialerCallLogs($scoped, $mergeRemote, $routePrefix);
+      },
     );
 
     $enriched = $this->data->enrichCallLogsWithRecordings($all, $filters);
@@ -1742,6 +1827,8 @@ class CommunicationsInboxService
       'extension' => $logExtension,
       'user_id' => $log['user_id'] ?? data_get($log, 'raw.user_id'),
       'agent_name' => $log['agent_name'] ?? data_get($log, 'raw.user.name') ?? null,
+      'agent_role_group' => $log['agent_role_group'] ?? null,
+      'agent_role_label' => $log['agent_role_label'] ?? null,
       'phone' => $callbackPhone,
       'phone_display' => $phoneDisplay,
       'lead_name' => $leadName !== '' ? $leadName : null,

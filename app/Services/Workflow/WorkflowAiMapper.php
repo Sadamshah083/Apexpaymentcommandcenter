@@ -3,8 +3,11 @@
 namespace App\Services\Workflow;
 
 use App\Services\BusinessResearch\GeminiClient;
+use App\Support\SpreadsheetHeaderDetector;
+use App\Support\SpreadsheetText;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use Illuminate\Support\Facades\Log;
+use PhpOffice\PhpSpreadsheet\Reader\Csv as CsvReader;
 
 class WorkflowAiMapper
 {
@@ -29,25 +32,38 @@ class WorkflowAiMapper
      */
     public function getHeaderRow(string $filePath, ?string $sheetName = null): array
     {
+        return $this->detectHeaderRow($filePath, $sheetName)['headers'];
+    }
+
+    /**
+     * @return array{index: int, headers: array<int, string>}
+     */
+    public function detectHeaderRow(string $filePath, ?string $sheetName = null): array
+    {
         try {
             $reader = IOFactory::createReaderForFile($filePath);
             $reader->setReadDataOnly(true);
+            $this->configureCsvReader($reader, $filePath);
 
-            if ($sheetName) {
+            if ($sheetName && method_exists($reader, 'setLoadSheetsOnly')) {
                 $reader->setLoadSheetsOnly([$sheetName]);
             }
 
             $spreadsheet = $reader->load($filePath);
             $sheet = $spreadsheet->getActiveSheet();
-            $headers = [];
+            $rows = [];
 
-            foreach ($sheet->getRowIterator(1, 1) as $row) {
-                foreach ($row->getCellIterator() as $cell) {
-                    $headers[] = $cell->getValue();
+            foreach ($sheet->getRowIterator(1, 25) as $row) {
+                $cellIterator = $row->getCellIterator();
+                $cellIterator->setIterateOnlyExistingCells(false);
+                $rowData = [];
+                foreach ($cellIterator as $cell) {
+                    $rowData[] = $cell->getValue();
                 }
+                $rows[] = $rowData;
             }
 
-            return $headers;
+            return SpreadsheetHeaderDetector::detect($rows);
         } catch (\Throwable $e) {
             Log::debug('Workflow header row extraction failed', [
                 'file_path' => $filePath,
@@ -55,7 +71,14 @@ class WorkflowAiMapper
                 'error' => $e->getMessage(),
             ]);
 
-            return [];
+            return ['index' => 0, 'headers' => []];
+        }
+    }
+
+    protected function configureCsvReader(mixed $reader, string $filePath): void
+    {
+        if ($reader instanceof CsvReader) {
+            $reader->setInputEncoding('UTF-8');
         }
     }
 
@@ -140,7 +163,17 @@ class WorkflowAiMapper
             'zip_code' => ['zip code' => 100, 'postal code' => 100, 'zip' => 90, 'postcode' => 90],
             'country' => ['country' => 100],
             'website' => ['website' => 100, 'url' => 90, 'domain' => 85, 'web' => 70],
-            'input_phone' => ['phone' => 100, 'mobile' => 90, 'telephone' => 90, 'cell' => 85, 'phone number' => 100, 'phone_number' => 100],
+            'input_phone' => [
+                'contact number' => 100,
+                'phone number' => 100,
+                'phone_number' => 100,
+                'contact phone' => 95,
+                'telephone' => 90,
+                'mobile' => 90,
+                'cell' => 85,
+                'phone' => 100,
+                'tel' => 70,
+            ],
             'input_email' => ['email' => 100, 'e-mail' => 100, 'mail' => 70],
             'owner_name' => [
                 'owner name' => 100,
@@ -235,19 +268,23 @@ class WorkflowAiMapper
 
             $spreadsheet = $reader->load($filePath);
             $sheet = $spreadsheet->getActiveSheet();
-            $rows = [];
 
-            foreach ($sheet->getRowIterator(1, 5) as $row) {
+            $preview = [];
+            foreach ($sheet->getRowIterator(1, 12) as $row) {
                 $cellIterator = $row->getCellIterator();
                 $cellIterator->setIterateOnlyExistingCells(false);
                 $rowData = [];
                 foreach ($cellIterator as $cell) {
-                    $rowData[] = $cell->getValue();
+                    $rowData[] = SpreadsheetText::normalize($cell->getValue());
                 }
-                $rows[] = $rowData;
+                $preview[] = $rowData;
             }
 
-            $dataRows = array_slice($rows, 1);
+            $headerIndex = (int) SpreadsheetHeaderDetector::detect($preview)['index'];
+            $dataRows = [];
+            foreach (array_slice($preview, $headerIndex + 1, 4) as $rowData) {
+                $dataRows[] = $rowData;
+            }
 
             $systemPrompt = "You are an AI data mapper. Map the uploaded spreadsheet headers to these target system keys:\n".
                 "- business_name (Business, company, trade name, account, merchant, shop, firm, name, client)\n".
@@ -257,14 +294,15 @@ class WorkflowAiMapper
                 "- zip_code (Zip code, postal code, zip)\n".
                 "- country (Country)\n".
                 "- website (Website, domain, url)\n".
-                "- input_phone (Phone number, mobile, contact phone)\n".
-                "- input_email (Email address, contact email)\n\n".
+                "- input_phone (Phone number, mobile, contact phone, contact number)\n".
+                "- input_email (Email address, contact email)\n".
+                "- owner_name (Owner name, owner, contact name)\n\n".
                 "STRICT RULES:\n".
                 "1. You MUST find a match for business_name. If no explicit 'business_name' is present, use the column containing the name of the store, company, name of client, or row name.\n".
                 "2. Respond with a raw JSON object where keys are the target system keys listed above and values are the exact matching headers from the uploaded file (or null if not found).\n".
                 "3. Do not include any explanation or markdown block wrappers. Output ONLY the raw JSON.";
 
-            $userPrompt = 'Uploaded Headers: '.json_encode($headers)."\n".
+            $userPrompt = 'Uploaded Headers: '.json_encode(array_values($headers))."\n".
                 "Sample Rows:\n".json_encode($dataRows);
 
             $options = [

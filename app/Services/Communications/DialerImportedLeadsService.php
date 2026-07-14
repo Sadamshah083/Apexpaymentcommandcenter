@@ -84,11 +84,14 @@ class DialerImportedLeadsService
     {
         return match (strtolower(trim($disposition))) {
             'no answer', 'no_answer', 'no-answer' => 'contacted',
+            'answering machine', 'answering_machine', 'answering-machine' => 'contacted',
             'voicemail' => 'contacted',
             'follow up', 'follow_up', 'follow-up' => 'follow_up',
             'requested appointment', 'requested_appointment', 'requested-appointment' => 'appointment_settled',
             'not interested', 'not_interested', 'not-interested' => 'not_interested',
             'incorrect number', 'incorrect_number', 'incorrect-number' => 'not_interested',
+            'not available', 'not_available', 'not-available' => 'contacted',
+            'call me later', 'call_me_later', 'call-me-later' => 'follow_up',
             default => null,
         };
     }

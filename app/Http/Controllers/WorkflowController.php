@@ -554,6 +554,28 @@ class WorkflowController extends Controller
             ->orderBy('users.name')
             ->paginate(config('pagination.members_per_page'))
             ->withQueryString();
+        $setterTeamLeads = $activeWorkspace->users()
+            ->wherePivot('status', 'active')
+            ->wherePivot('role', 'appointment_setter_team_lead')
+            ->orderBy('users.name')
+            ->get(['users.id', 'users.name']);
+        $closerTeamLeads = $activeWorkspace->users()
+            ->wherePivot('status', 'active')
+            ->wherePivot('role', 'closers_team_lead')
+            ->orderBy('users.name')
+            ->get(['users.id', 'users.name']);
+        $teamLeadNames = $activeWorkspace->users()
+            ->wherePivotIn('role', ['appointment_setter_team_lead', 'closers_team_lead'])
+            ->get(['users.id', 'users.name'])
+            ->pluck('name', 'id');
+        $campaigns = $activeWorkspace->campaigns()
+            ->orderBy('name')
+            ->get(['id', 'name']);
+        $campaignNames = $campaigns->pluck('name', 'id');
+        $teamLeadCampaignIds = $activeWorkspace->users()
+            ->wherePivotIn('role', ['appointment_setter_team_lead', 'closers_team_lead'])
+            ->get()
+            ->mapWithKeys(fn ($lead) => [(int) $lead->id => (int) ($lead->pivot->campaign_id ?? 0)]);
         $workspaces->each(function (Workspace $workspace) {
             $workspace->loadMissing('admin:id,name');
             $workspace->loadCount(['workflows', 'users']);
@@ -565,6 +587,12 @@ class WorkflowController extends Controller
             'members',
             'activeMemberCount',
             'suspendedMemberCount',
+            'setterTeamLeads',
+            'closerTeamLeads',
+            'teamLeadNames',
+            'campaigns',
+            'campaignNames',
+            'teamLeadCampaignIds',
         ));
     }
 

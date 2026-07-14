@@ -312,7 +312,27 @@ This is **correct behavior** — the destination does not ring until the agent l
 
 ---
 
-## 8. Browser webphone flow
+## Browser microphone → destination (what PHP does vs does not)
+
+**PHP does not process live microphone PCM.** Clean audio is handled in the browser, then WebRTC sends it to Morpheus.
+
+```
+Agent mic
+  → Browser: echoCancellation + noiseSuppression + autoGainControl
+  → Soft speech gate (mute send only during long silence)
+  → SIP.js / WebRTC WSS
+  → Morpheus FreeSWITCH
+  → Destination phone
+```
+
+Laravel/PHP remains the **signaling API** only:
+- `POST .../morpheus/calls/originate` — start call to destination
+- hangup / hold / status / disposition endpoints
+- webphone config (extension credentials)
+
+Microphone capture constraints are applied in `resources/js/communications-webphone.js` via `buildWebphoneMediaConstraints()`.
+
+
 
 | Step | UI state | What happens |
 |------|----------|--------------|

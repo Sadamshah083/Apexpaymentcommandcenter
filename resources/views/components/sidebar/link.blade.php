@@ -5,6 +5,7 @@
     'iconName' => null,
     'queryMode' => null,
     'matchPrefixes' => [],
+    'excludePrefixes' => [],
 ])
 
 @php
@@ -15,15 +16,20 @@
         ->filter(fn ($prefix) => is_string($prefix) && $prefix !== '')
         ->values()
         ->all();
+    $navExcludePrefixes = collect($excludePrefixes)
+        ->filter(fn ($prefix) => is_string($prefix) && $prefix !== '')
+        ->values()
+        ->all();
 @endphp
 
-<a href="{{ $href }}" @class(['sidebar-link', 'sidebar-link-active' => $active]) data-turbo-preload
+<a href="{{ $href }}" @class(['sidebar-link', 'sidebar-link-active' => $active])
     data-nav-path="{{ $navPath }}"
     data-nav-query="{{ $navQuery }}"
     data-nav-query-mode="{{ $resolvedQueryMode }}"
     @if ($navMatchPrefixes !== []) data-nav-match-prefixes='@json($navMatchPrefixes)' @endif
+    @if ($navExcludePrefixes !== []) data-nav-exclude-prefixes='@json($navExcludePrefixes)' @endif
     @if ($active) aria-current="page" @endif
-    title="{{ $label }}"
+    {{ $attributes->except(['href', 'active', 'label', 'iconName', 'queryMode', 'matchPrefixes', 'excludePrefixes', 'icon', 'badge']) }}
     aria-label="{{ $label }}">
     @isset($icon)
         <span @class([
@@ -32,4 +38,7 @@
         ])>{!! $icon !!}</span>
     @endisset
     <span class="sidebar-link-label">{{ $label }}</span>
+    @isset($badge)
+        <span class="sidebar-link-badges">{{ $badge }}</span>
+    @endisset
 </a>

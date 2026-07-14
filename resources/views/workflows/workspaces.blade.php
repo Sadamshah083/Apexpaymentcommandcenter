@@ -105,7 +105,7 @@
             <div class="um-panel-toolbar">
                 <div>
                     <h3 class="um-panel-heading">Team members</h3>
-                    <p class="um-panel-desc">Suspend, change roles, reset passwords, or limit admin module access.</p>
+                    <p class="um-panel-desc">Suspend, change roles, assign campaigns to team leads, put agents on the same team lead, reset passwords, or limit admin module access.</p>
                 </div>
                 <div class="um-toolbar-actions">
                     <input type="search" id="um-member-search" class="um-input um-search-input"
@@ -119,12 +119,14 @@
                 </div>
             </div>
 
-            <x-data-table :paginator="$members" min-width="1080px" class="um-members-table-wrap">
+            <x-data-table :paginator="$members" min-width="1380px" class="um-members-table-wrap">
                 <table class="um-members-table">
                     <thead>
                         <tr>
                             <th class="col-member">Member</th>
                             <th class="col-role">Role</th>
+                            <th class="col-campaign">Campaign</th>
+                            <th class="col-team">Team lead</th>
                             <th class="col-status">Status</th>
                             <th class="col-portal">Portal</th>
                             <th class="col-access">Access</th>
@@ -136,10 +138,16 @@
                             @include('workflows.partials.member-row', [
                                 'member' => $member,
                                 'activeWorkspace' => $activeWorkspace,
+                                'setterTeamLeads' => $setterTeamLeads ?? collect(),
+                                'closerTeamLeads' => $closerTeamLeads ?? collect(),
+                                'teamLeadNames' => $teamLeadNames ?? collect(),
+                                'campaigns' => $campaigns ?? collect(),
+                                'campaignNames' => $campaignNames ?? collect(),
+                                'teamLeadCampaignIds' => $teamLeadCampaignIds ?? collect(),
                             ])
                         @empty
                             <tr data-um-empty-members>
-                                <td colspan="6">
+                                <td colspan="8">
                                     <div class="um-empty-state">
                                         <p class="um-empty-title">No team members yet</p>
                                         <p class="um-empty-desc">Create an agent account to get started.</p>
@@ -167,6 +175,13 @@
     ])
 
     @include('workflows.partials.confirm-modal')
-    @include('workflows.partials.edit-member-modal')
+    @include('workflows.partials.edit-member-modal', [
+        'campaigns' => $campaigns ?? collect(),
+        'campaignNames' => $campaignNames ?? collect(),
+        'setterTeamLeads' => $setterTeamLeads ?? collect(),
+        'closerTeamLeads' => $closerTeamLeads ?? collect(),
+        'teamLeadCampaignIds' => $teamLeadCampaignIds ?? collect(),
+    ])
     @include('workflows.partials.module-access-modal')
 @endsection
+

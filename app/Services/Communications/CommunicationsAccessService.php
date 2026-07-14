@@ -120,6 +120,22 @@ class CommunicationsAccessService
         return in_array($this->tierFor($user, $routePrefix), ['admin', 'supervisor', 'team_lead', 'agent'], true);
     }
 
+    /**
+     * Browse agent vs team-lead call recordings in the dialer workspace.
+     */
+    public function canViewTeamRecordings(?User $user, string $routePrefix): bool
+    {
+        return in_array($this->tierFor($user, $routePrefix), ['admin', 'supervisor', 'team_lead'], true);
+    }
+
+    /**
+     * Live call wallboard (active / waiting counts + timers).
+     */
+    public function canViewCallMonitoring(?User $user, string $routePrefix): bool
+    {
+        return in_array($this->tierFor($user, $routePrefix), ['admin', 'supervisor', 'team_lead'], true);
+    }
+
     public function canAccessHub(?User $user, string $routePrefix): bool
     {
         if ($routePrefix === 'portal.') {
@@ -227,6 +243,8 @@ class CommunicationsAccessService
             'canManageTelephony' => $this->canManageTelephony($user, $routePrefix),
             'canDial' => $this->canDial($user, $routePrefix),
             'canAutoDial' => $this->canAutoDial($user, $routePrefix),
+            'canViewTeamRecordings' => $this->canViewTeamRecordings($user, $routePrefix),
+            'canViewCallMonitoring' => $this->canViewCallMonitoring($user, $routePrefix),
             'roleLabel' => $this->roleLabel($tier),
         ];
     }

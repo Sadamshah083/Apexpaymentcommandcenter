@@ -1050,12 +1050,49 @@ body.ghl-comm-mode .ghl-comm-app :is(h1, h2, h3, h4),
     width: 100% !important;
     min-height: 0 !important;
     height: 100% !important;
+    max-height: 100% !important;
     max-width: none !important;
     margin: 0 !important;
     border-radius: 0.75rem !important;
-    padding: 1rem 0.85rem 0.9rem !important;
+    padding: 0.75rem 0.65rem 0.65rem !important;
     justify-content: flex-start !important;
-    gap: 0.75rem !important;
+    gap: 0.45rem !important;
+    overflow: hidden !important;
+}
+
+.ch-dial-workspace--admin .ghl-dialer-active-screen__tools,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-active-screen__tools {
+    flex-wrap: nowrap !important;
+    max-width: none !important;
+    width: 100% !important;
+    gap: 0.1rem !important;
+}
+
+.ch-dial-workspace--admin .ghl-dialer-active-screen__tool,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-active-screen__tool {
+    min-width: 0 !important;
+    flex: 1 1 0 !important;
+}
+
+.ch-dial-workspace--admin .ghl-dialer-active-keypad,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-active-keypad {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    max-width: 15rem !important;
+}
+
+.ch-dial-workspace--admin .ghl-dialer-active-screen__footer,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-active-screen__footer {
+    flex: 0 0 auto !important;
+    margin-top: 0.25rem !important;
+    padding-bottom: 0.15rem !important;
+}
+
+.ch-dial-workspace--admin .ghl-dialer-active-screen__end,
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-active-screen__end {
+    width: 3.4rem !important;
+    height: 3.4rem !important;
 }
 
 .ch-dial-workspace--admin .ghl-dialer-form--phone:has(.ghl-dialer-active-screen:not(.hidden)) .ghl-dialer-phone-stage {
@@ -1188,6 +1225,18 @@ body.ghl-comm-mode .ghl-comm-app :is(h1, h2, h3, h4),
 .ghl-dialer-recording-meta {
     font-size: 0.72rem;
     color: #94a3b8;
+}
+
+.ghl-dialer-recording-role {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.05rem 0.4rem;
+    border-radius: 0.35rem;
+    background: #d1fae5;
+    color: #047857;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
 }
 
 .ghl-dialer-recording-actions {

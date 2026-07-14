@@ -15,6 +15,8 @@ return function (): void {
             Route::post('/webhook', [MorpheusHubController::class, 'receiveCallWebhook'])->name('webhook');
             Route::get('/{uuid}/events', [MorpheusHubController::class, 'streamCallEvents'])->name('events');
             Route::get('/{uuid}', [MorpheusHubController::class, 'callStatus'])->name('status');
+            Route::post('/{uuid}/destination-connected', [MorpheusHubController::class, 'markDestinationConnected'])->name('destination-connected');
+            Route::post('/{uuid}/ended', [MorpheusHubController::class, 'markCallEnded'])->name('ended');
             Route::post('/{uuid}/transfer', [MorpheusHubController::class, 'transferCall'])->name('transfer');
             Route::post('/{uuid}/hangup', [MorpheusHubController::class, 'hangupCall'])->name('hangup');
             Route::post('/{uuid}/hold', [MorpheusHubController::class, 'holdCall'])->name('hold');

@@ -57,8 +57,25 @@
 @if ($user?->canAccessPortalModule('communications', $user?->current_workspace_id))
     <x-sidebar.section title="Communications">
         <x-sidebar.link :href="route('portal.communications.index')" label="Communications" icon-name="phone"
-            :active="request()->routeIs('portal.communications.*')">
+            :exclude-prefixes="['/portal/communications/monitoring']"
+            :active="request()->routeIs('portal.communications.*') && ! request()->routeIs('portal.communications.monitoring*')">
             <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'phone'])</x-slot:icon>
         </x-sidebar.link>
+        @if (app(\App\Services\Communications\CommunicationsAccessService::class)->canViewCallMonitoring($user, 'portal.'))
+            <x-sidebar.link
+                :href="route('portal.communications.monitoring')"
+                label="Call Monitoring"
+                icon-name="phone"
+                :active="request()->routeIs('portal.communications.monitoring*')"
+                data-call-monitoring-nav
+                data-call-monitoring-poll-url="{{ route('portal.communications.monitoring.live') }}"
+                data-call-monitoring-stream-url="{{ route('portal.communications.monitoring.stream') }}">
+                <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'phone'])</x-slot:icon>
+                <x-slot:badge>
+                    <span class="sidebar-live-chip sidebar-live-chip--pink is-empty" title="Active in call" data-call-monitoring-nav-incall hidden>0</span>
+                    <span class="sidebar-live-chip sidebar-live-chip--blue is-empty" title="Ringing" data-call-monitoring-nav-waiting hidden>0</span>
+                </x-slot:badge>
+            </x-sidebar.link>
+        @endif
     </x-sidebar.section>
 @endif
