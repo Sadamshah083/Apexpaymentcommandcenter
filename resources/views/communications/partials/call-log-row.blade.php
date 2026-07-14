@@ -52,6 +52,7 @@
     $displayNote = $callNote;
     $leadName = trim((string) ($log['lead_name'] ?? ''));
     $leadContact = trim((string) ($log['lead_contact'] ?? ''));
+    $leadFileName = trim((string) ($log['lead_file_name'] ?? ''));
     $agentName = trim((string) ($log['agent_name'] ?? data_get($log, 'raw.user.name') ?? ''));
     $phoneDisplay = trim((string) ($log['phone_display'] ?? ''));
     if ($phoneDisplay === '') {
@@ -143,6 +144,9 @@
                 @endif
             @endif
             <span class="ghl-dialer-recent-number">{{ $phoneDisplay }}</span>
+            @if ($leadFileName !== '')
+                <span class="ghl-dialer-recent-file" title="{{ $leadFileName }}">{{ $leadFileName }}</span>
+            @endif
         </div>
         <div class="ghl-dialer-recent-meta-row">
             <span class="ghl-dialer-recent-meta">

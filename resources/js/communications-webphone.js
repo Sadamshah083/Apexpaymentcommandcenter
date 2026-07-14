@@ -13,21 +13,25 @@ const RING_NO_ANSWER_TIMEOUT_MS = 70_000;
 const REMOTE_PLAYBACK_VOLUME = 0.62;
 
 /**
- * Soft silence gate for outbound mic:
- * When agent is NOT speaking, briefly pause sending so room noise / fans / keyboard
- * don't fill the destination. Hangover avoids chopping word endings.
+ * Soft silence gate for outbound mic (OPTIONAL).
+ * Disabled by default: toggling track.enabled mid-call chops speech and feels like
+ * a "breaking" call even while WebRTC stays connected.
  */
 const SPEECH_GATE = {
+    enabled: false,
     /** RMS above this = talking (0–1 scale from analyser). */
     openRms: 0.035,
     /** RMS below this = silence (hysteresis). */
     closeRms: 0.018,
     /** Must stay silent this long before gating outbound mic. */
-    silenceMs: 900,
+    silenceMs: 1800,
     /** Keep mic open this long after last speech. */
-    hangoverMs: 450,
-    pollMs: 80,
+    hangoverMs: 700,
+    pollMs: 100,
 };
+
+/** Wait before treating WebRTC "disconnected" as a real call end. */
+const WEBRTC_DISCONNECT_GRACE_MS = 4500;
 
 function supportedAudioConstraints() {
     try {
@@ -284,6 +288,8 @@ class ApexWebphone {
         this._speechGateSpeaking = true;
         this._speechGateSilentSince = 0;
         this._speechGateLastVoiceAt = 0;
+        this._webrtcRecoverTimer = null;
+        this._webrtcIceRestarted = false;
         this._rtpGrowthFrames = 0;
         this._liveTrackWatcher = null;
         this._voiceEnergyWatcher = null;
@@ -964,6 +970,9 @@ class ApexWebphone {
      */
     startOutboundSpeechGate() {
         this.stopOutboundSpeechGate();
+        if (!SPEECH_GATE.enabled) {
+            return;
+        }
 
         const pc = this.session?.sessionDescriptionHandler?.peerConnection;
         const track = pc?.getSenders?.().find((sender) => sender.track?.kind === 'audio')?.track;
@@ -2659,7 +2668,11 @@ class ApexWebphone {
             this.awaitingDestinationBridge || this.state === 'dialing' || this.state === 'connecting';
 
         if (!promoting && this.state === 'in-call') {
-            this.enterBothSidesConnected({ source, restartTimer: !this.callTimer || !this.callStartedAt });
+            // Already live — never restart/reset the connected timer (causes flicker).
+            this._serverConfirmedDestination = true;
+            if (!this.callTimer || !this.callStartedAt || this.timerPhase !== 'connected') {
+                this.startCallTimer({ restart: false });
+            }
             this.reportDestinationConnected(source);
 
             return;
@@ -2777,10 +2790,22 @@ class ApexWebphone {
      * Both legs are up: stop ringing and start the connected call timer.
      */
     enterBothSidesConnected({ source = 'unknown', restartTimer = true } = {}) {
+        const alreadyLive =
+            this.state === 'in-call'
+            && this.timerPhase === 'connected'
+            && Boolean(this.callStartedAt)
+            && Boolean(this.callTimer);
+
         this.awaitingDestinationBridge = false;
         this.clickToCallActive = false;
         this._serverConfirmedDestination = true;
         this.agentLegEstablishedAt = this.agentLegEstablishedAt || Date.now();
+
+        // Poll/SSE often re-confirm "connected" — do not rewrite timer UI to 00:00.
+        if (alreadyLive && !restartTimer) {
+            return;
+        }
+
         this.stopAllLocalRingers();
         this.outboundWaitingActive = false;
         // Keep remote muted while local ringers stop, then open talk audio quickly.
@@ -2805,28 +2830,32 @@ class ApexWebphone {
             this.currentCallPeer = normalizeDialTarget(this.lastDialedDestination) || this.lastDialedDestination;
         }
 
-        if (restartTimer || this.timerPhase !== 'connected') {
+        // First connect may restart; later confirmations must keep the same epoch.
+        if (restartTimer && !alreadyLive) {
             this.startCallTimer({ restart: true });
+        } else if (this.timerPhase !== 'connected' || !this.callTimer || !this.callStartedAt) {
+            this.startCallTimer({ restart: false });
         }
 
         const peer = this.currentCallPeer || this.lastDialedDestination || '';
         const detail = peer
             ? (this.currentCallDirection === 'outbound' ? `To: ${peer}` : `Caller: ${peer}`)
             : '';
+        const timerDisplay = this.currentFormattedTimer() || '00:00';
 
         this.updateCallCard({
             title: peer || 'Call live',
             subtitle: 'Both sides connected — timer started.',
             detail,
             visible: true,
-            timer: '00:00',
+            timer: timerDisplay,
         });
         this.updateFloatingPopup({
             title: peer || 'Call live',
             subtitle: 'Both sides connected — timer started.',
             detail,
             visible: true,
-            timer: '00:00',
+            timer: timerDisplay,
             timerLabel: 'Connected time',
             statusLabel: 'Connected',
             showRingingVisual: false,
@@ -2846,8 +2875,11 @@ class ApexWebphone {
             showMute: true,
             showTransfer: Boolean(this.morpheusCallUuid || this.activeCallUuid?.()),
         });
-        this.setState('in-call');
-        this.refreshDialerCallOverlay?.('in-call');
+        if (this.state !== 'in-call') {
+            this.setState('in-call');
+        } else {
+            this.refreshDialerCallOverlay('in-call');
+        }
 
         this.logPhone('info', 'Both sides connected', { source, peer });
     }
@@ -3094,7 +3126,16 @@ class ApexWebphone {
         }
     }
 
-    updateCallCard({ title = '', subtitle = '', detail = '', visible = false, timer = '00:00' } = {}) {
+    currentFormattedTimer() {
+        if (!this.callStartedAt) {
+            return null;
+        }
+
+        const seconds = Math.max(0, Math.floor((Date.now() - this.callStartedAt) / 1000));
+        return formatDuration(seconds);
+    }
+
+    updateCallCard({ title = '', subtitle = '', detail = '', visible = false, timer = null } = {}) {
         if (!this.ui) {
             return;
         }
@@ -3106,7 +3147,8 @@ class ApexWebphone {
         if (this.ui.callSubtitle) {
             this.ui.callSubtitle.textContent = subtitle;
         }
-        if (this.ui.callTimer) {
+        // null = keep current text so poll/SSE UI refreshes do not snap to 00:00.
+        if (this.ui.callTimer && timer != null) {
             this.ui.callTimer.textContent = timer;
         }
         if (this.ui.callInfo) {
@@ -3120,7 +3162,7 @@ class ApexWebphone {
         subtitle = '',
         detail = '',
         visible = false,
-        timer = '00:00',
+        timer = null,
         timerLabel = 'Connected time',
         statusLabel = '',
         showRingingVisual = false,
@@ -3145,6 +3187,11 @@ class ApexWebphone {
         const badgeText =
             statusLabel ||
             (state === 'in-call' ? 'Connected' : state === 'ringing' || state === 'dialing' ? 'Ringing' : '');
+        const resolvedTimer =
+            timer
+            ?? this.currentFormattedTimer()
+            ?? document.querySelector('[data-dialer-call-timer]')?.textContent
+            ?? '00:00';
 
         document.querySelectorAll('[data-dialer-input-shell]').forEach((shell) => {
             shell.classList.toggle('is-call-active', visible);
@@ -3179,7 +3226,9 @@ class ApexWebphone {
 
             const timerEl = layer.querySelector('[data-dialer-call-timer]');
             if (timerEl) {
-                timerEl.textContent = timer;
+                if (timer != null || showTimer) {
+                    timerEl.textContent = resolvedTimer;
+                }
                 timerEl.classList.toggle('hidden', !showTimer);
                 timerEl.dataset.timerLabel = timerLabel;
             }
@@ -3198,7 +3247,7 @@ class ApexWebphone {
             visible,
             state,
             peer,
-            timer,
+            timer: resolvedTimer,
             showTimer,
             showHold,
             showMute,
@@ -3216,7 +3265,7 @@ class ApexWebphone {
         visible = false,
         state = 'offline',
         peer = '',
-        timer = '00:00',
+        timer = null,
         showTimer = false,
         showHold = false,
         showMute = false,
@@ -3266,7 +3315,12 @@ class ApexWebphone {
 
             const timerEl = screen.querySelector('[data-dialer-active-timer]');
             if (timerEl) {
-                timerEl.textContent = timer;
+                const nextTimer =
+                    timer
+                    ?? this.currentFormattedTimer()
+                    ?? timerEl.textContent
+                    ?? '00:00';
+                timerEl.textContent = nextTimer;
                 timerEl.classList.toggle('hidden', !showTimer);
             }
         });
@@ -3307,6 +3361,10 @@ class ApexWebphone {
                     : 'Connecting';
         const timerEl = document.querySelector('[data-dialer-call-timer]');
         const isConnectedUi = statusLabel === 'Connected';
+        const overlayTimer =
+            this.currentFormattedTimer()
+            || timerEl?.textContent
+            || '00:00';
 
         this.updateFloatingPopup({
             title: isConnectedUi ? 'Call live' : 'Outgoing call',
@@ -3315,7 +3373,7 @@ class ApexWebphone {
                 : (peer ? `Ringing ${peer}…` : 'Ringing destination…'),
             detail: peer ? `To: ${peer}` : '',
             visible: true,
-            timer: timerEl?.textContent || '00:00',
+            timer: overlayTimer,
             timerLabel: isConnectedUi ? 'Connected time' : 'Ringing time',
             statusLabel,
             showRingingVisual: !isConnectedUi,
@@ -3352,9 +3410,31 @@ class ApexWebphone {
             return;
         }
 
-        this.stopCallTimer();
+        // Keep a stable connected epoch — restarting mid-call resets the UI to 00:00.
+        if (
+            !restart
+            && this.timerPhase === 'connected'
+            && this.callTimer
+            && this.callStartedAt
+        ) {
+            this.tickCallTimer();
+            return;
+        }
+
+        const preservedStartedAt =
+            !restart
+            && this.timerPhase === 'connected'
+            && this.callStartedAt
+                ? this.callStartedAt
+                : null;
+
+        if (this.callTimer) {
+            window.clearInterval(this.callTimer);
+            this.callTimer = null;
+        }
+
         this.timerPhase = 'connected';
-        this.callStartedAt = Date.now();
+        this.callStartedAt = preservedStartedAt || Date.now();
         document.querySelectorAll('[data-dialer-call-layer]').forEach((layer) => {
             layer.classList.remove('is-ringing');
             layer.classList.add('is-connected');
@@ -3481,11 +3561,13 @@ class ApexWebphone {
 
         const seconds = Math.max(0, Math.floor((Date.now() - this.callStartedAt) / 1000));
         const formatted = formatDuration(seconds);
-        if (this.ui?.callTimer) {
+        if (this.ui?.callTimer && this.ui.callTimer.textContent !== formatted) {
             this.ui.callTimer.textContent = formatted;
         }
         document.querySelectorAll('[data-dialer-call-timer], [data-dialer-active-timer]').forEach((timerEl) => {
-            timerEl.textContent = formatted;
+            if (timerEl.textContent !== formatted) {
+                timerEl.textContent = formatted;
+            }
             timerEl.classList.remove('hidden');
         });
     }
@@ -3950,7 +4032,7 @@ class ApexWebphone {
             throw new Error('Invalid SIP address.');
         }
 
-        const iceServers = (this.config.stun_servers || []).map((url) => ({ urls: url }));
+        const iceServers = this.buildIceServers();
 
         this.userAgent = new UserAgent({
             uri,
@@ -3969,6 +4051,7 @@ class ApexWebphone {
                 constraints: buildWebphoneMediaConstraints(),
                 peerConnectionConfiguration: {
                     iceServers,
+                    iceCandidatePoolSize: 10,
                 },
             },
         });
@@ -4670,6 +4753,203 @@ class ApexWebphone {
         });
     }
 
+    /**
+     * STUN + optional TURN (Morpheus/TURN credentials from prepare-webphone config).
+     * STUN alone fails on many NAT/firewall networks — configure MORPHEUS_TURN_* when available.
+     */
+    buildIceServers() {
+        const servers = [];
+        const stunList = Array.isArray(this.config?.stun_servers) ? this.config.stun_servers : [];
+        stunList.forEach((url) => {
+            const trimmed = String(url || '').trim();
+            if (trimmed) {
+                servers.push({ urls: trimmed });
+            }
+        });
+
+        const turnList = Array.isArray(this.config?.turn_urls) ? this.config.turn_urls : [];
+        const username = String(this.config?.turn_username || '').trim();
+        const credential = String(this.config?.turn_credential || '').trim();
+        turnList.forEach((url) => {
+            const trimmed = String(url || '').trim();
+            if (!trimmed) {
+                return;
+            }
+            const entry = { urls: trimmed };
+            if (username !== '') {
+                entry.username = username;
+                entry.credential = credential;
+            }
+            servers.push(entry);
+        });
+
+        if (servers.length === 0) {
+            servers.push({ urls: 'stun:stun.l.google.com:19302' });
+        }
+
+        return servers;
+    }
+
+    clearWebrtcRecoverTimer() {
+        if (this._webrtcRecoverTimer) {
+            window.clearTimeout(this._webrtcRecoverTimer);
+            this._webrtcRecoverTimer = null;
+        }
+    }
+
+    /**
+     * Do not hang up on a brief WebRTC "disconnected" blip (Wi-Fi hiccup).
+     * Wait, try ICE restart once, then treat sustained failed/closed as remote hangup.
+     */
+    attachWebRtcConnectionRecovery(pc) {
+        const shouldConsiderLive = () => (
+            this.state === 'in-call'
+            && !this.awaitingDestinationBridge
+            && !this.hangupInFlight
+            && !this.remoteHangupHandled
+            && this.session?.sessionDescriptionHandler?.peerConnection === pc
+        );
+
+        const endFromWebrtc = (source) => {
+            if (!shouldConsiderLive()) {
+                return;
+            }
+            void this.handleRemotePartyHangup(
+                { hangup_cause: 'NORMAL_CLEARING' },
+                { source },
+            );
+        };
+
+        const tryIceRestart = () => {
+            try {
+                if (typeof pc.restartIce === 'function') {
+                    pc.restartIce();
+                    this.logPhone('info', 'WebRTC ICE restart requested');
+                    return true;
+                }
+            } catch (error) {
+                this.logPhone('warn', 'WebRTC ICE restart failed', {
+                    message: error?.message || String(error),
+                });
+            }
+
+            return false;
+        };
+
+        const scheduleRecoverOrEnd = () => {
+            this.clearWebrtcRecoverTimer();
+            this._webrtcRecoverTimer = window.setTimeout(() => {
+                this._webrtcRecoverTimer = null;
+                if (!shouldConsiderLive()) {
+                    return;
+                }
+
+                const ice = pc.iceConnectionState;
+                const conn = pc.connectionState;
+                if (
+                    conn === 'connected'
+                    || ice === 'connected'
+                    || ice === 'completed'
+                ) {
+                    return;
+                }
+
+                if (!this._webrtcIceRestarted && (conn === 'failed' || ice === 'failed' || conn === 'disconnected' || ice === 'disconnected')) {
+                    this._webrtcIceRestarted = true;
+                    tryIceRestart();
+                    this._webrtcRecoverTimer = window.setTimeout(() => {
+                        this._webrtcRecoverTimer = null;
+                        if (!shouldConsiderLive()) {
+                            return;
+                        }
+                        const ice2 = pc.iceConnectionState;
+                        const conn2 = pc.connectionState;
+                        if (
+                            conn2 === 'connected'
+                            || ice2 === 'connected'
+                            || ice2 === 'completed'
+                        ) {
+                            this._webrtcIceRestarted = false;
+                            return;
+                        }
+                        endFromWebrtc(
+                            conn2 === 'closed' ? 'webrtc-closed' : 'webrtc-recover-failed',
+                        );
+                    }, WEBRTC_DISCONNECT_GRACE_MS);
+                    return;
+                }
+
+                endFromWebrtc(
+                    conn === 'closed' ? 'webrtc-closed' : 'webrtc-recover-failed',
+                );
+            }, WEBRTC_DISCONNECT_GRACE_MS);
+        };
+
+        pc.addEventListener('connectionstatechange', () => {
+            const connectionState = pc.connectionState;
+            this.logPhone('info', 'WebRTC connection state', { connectionState });
+
+            if (connectionState === 'connected') {
+                this.clearWebrtcRecoverTimer();
+                this._webrtcIceRestarted = false;
+                return;
+            }
+
+            if (!shouldConsiderLive()) {
+                return;
+            }
+
+            if (connectionState === 'disconnected') {
+                showCommToast('Connection interrupted. Recovering…', 'warning');
+                scheduleRecoverOrEnd();
+                return;
+            }
+
+            if (connectionState === 'failed') {
+                showCommToast('Connection failed. Reconnecting…', 'warning');
+                scheduleRecoverOrEnd();
+                return;
+            }
+
+            if (connectionState === 'closed') {
+                scheduleRecoverOrEnd();
+            }
+        });
+
+        pc.addEventListener('iceconnectionstatechange', () => {
+            const iceConnectionState = pc.iceConnectionState;
+            this.logPhone('info', 'WebRTC ICE state', { iceConnectionState });
+
+            if (
+                iceConnectionState === 'connected'
+                || iceConnectionState === 'completed'
+            ) {
+                this.clearWebrtcRecoverTimer();
+                this._webrtcIceRestarted = false;
+                return;
+            }
+
+            if (!shouldConsiderLive()) {
+                return;
+            }
+
+            if (
+                iceConnectionState === 'failed'
+                || iceConnectionState === 'disconnected'
+            ) {
+                scheduleRecoverOrEnd();
+            }
+        });
+
+        pc.addEventListener('icecandidateerror', (event) => {
+            this.logPhone('warn', 'ICE candidate error', {
+                errorCode: event.errorCode,
+                errorText: event.errorText,
+                url: event.url,
+            });
+        });
+    }
+
     attachRemoteAudio(session) {
         const remoteAudio = this.ui?.remoteAudio;
         const pc = session?.sessionDescriptionHandler?.peerConnection;
@@ -4716,26 +4996,7 @@ class ApexWebphone {
 
         if (!pc._commHubHangupBound) {
             pc._commHubHangupBound = true;
-            pc.addEventListener('connectionstatechange', () => {
-                const connectionState = pc.connectionState;
-                // Do NOT promote to connected on WebRTC "connected" while still
-                // awaiting the destination — that is agent-leg early media only.
-                // Both-sides connect is confirmed by Morpheus poll / SIP Established
-                // after awaitingDestinationBridge clears.
-
-                if (
-                    this.state === 'in-call'
-                    && !this.awaitingDestinationBridge
-                    && !this.hangupInFlight
-                    && !this.remoteHangupHandled
-                    && (connectionState === 'disconnected' || connectionState === 'failed' || connectionState === 'closed')
-                ) {
-                    void this.handleRemotePartyHangup(
-                        { hangup_cause: 'NORMAL_CLEARING' },
-                        { source: 'webrtc-state' },
-                    );
-                }
-            });
+            this.attachWebRtcConnectionRecovery(pc);
         }
 
         const stream = new MediaStream();
@@ -4992,6 +5253,8 @@ class ApexWebphone {
         const callEndedAlready = this._callEndedDispatched;
 
         this.session = null;
+        this.clearWebrtcRecoverTimer();
+        this._webrtcIceRestarted = false;
         this.stopAllLocalRingers();
         this.stopAntiEchoKeepalive();
         this.stopOutboundSpeechGate();

@@ -24,6 +24,7 @@ class CommunicationsLeadLookupServiceTest extends TestCase
         $workflow = Workflow::create([
             'workspace_id' => $workspace->id,
             'name' => 'Test Import',
+            'original_filename' => 'B2B data 9 july.xlsx',
             'status' => 'completed',
             'processing_mode' => 'full_pipeline',
         ]);
@@ -44,6 +45,7 @@ class CommunicationsLeadLookupServiceTest extends TestCase
         $this->assertArrayHasKey('12722001232', $labels);
         $this->assertSame('Balitech Pharmacy', $labels['12722001232']['name']);
         $this->assertSame('Jane Doe', $labels['12722001232']['contact']);
+        $this->assertSame('B2B data 9 july.xlsx', $labels['12722001232']['file_name']);
     }
 
     public function test_format_phone_display_normalizes_us_numbers(): void

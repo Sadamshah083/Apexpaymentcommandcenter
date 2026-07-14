@@ -74,6 +74,11 @@ class CommunicationsWebphoneService
             'stun_servers' => array_values(array_filter(
                 array_map('trim', explode(',', (string) config('integrations.morpheus.stun_servers', 'stun:stun.l.google.com:19302')))
             )),
+            'turn_urls' => array_values(array_filter(
+                array_map('trim', explode(',', (string) config('integrations.morpheus.turn_urls', '')))
+            )),
+            'turn_username' => (string) config('integrations.morpheus.turn_username', ''),
+            'turn_credential' => (string) config('integrations.morpheus.turn_credential', ''),
         ];
     }
 

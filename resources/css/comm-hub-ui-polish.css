@@ -1821,6 +1821,23 @@ button.ghl-auto-dial-btn.hidden,
     white-space: nowrap;
 }
 
+.ghl-dialer-recent-file {
+    display: inline-flex;
+    align-self: flex-start;
+    margin-top: 0.15rem;
+    padding: 0.12rem 0.45rem;
+    border-radius: 999px;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    color: #64748b;
+    font-size: 0.68rem;
+    font-weight: 600;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .ghl-dialer-lead-actions {
     display: flex;
     align-items: center;

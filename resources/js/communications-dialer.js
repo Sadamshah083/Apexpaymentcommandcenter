@@ -1726,8 +1726,13 @@ function buildCallLogRow(log) {
     const phone = escapeHtml(log.phone_display || log.phone || '—');
     const leadName = escapeHtml(String(log.lead_name || '').trim());
     const leadContact = escapeHtml(String(log.lead_contact || '').trim());
+    const leadFileNameRaw = String(log.lead_file_name || '').trim();
+    const leadFileName = escapeHtml(leadFileNameRaw);
     const leadNameBlock = leadName
         ? `<span class="ghl-dialer-recent-name">${leadName}</span>${leadContact ? `<span class="ghl-dialer-recent-contact-name">${leadContact}</span>` : ''}`
+        : '';
+    const leadFileBlock = leadFileName
+        ? `<span class="ghl-dialer-recent-file" title="${leadFileName}">${leadFileName}</span>`
         : '';
     const result = escapeHtml(log.result || '—');
     const statusLikeDispositions = ['', '—', '-', 'completed', 'initiated', 'connected', 'answered', 'no-answer', 'no answer', 'busy', 'failed', 'missed', 'unknown'];
@@ -1827,6 +1832,7 @@ function buildCallLogRow(log) {
                 <div class="ghl-dialer-recent-contact">
                     ${leadNameBlock}
                     <span class="ghl-dialer-recent-number">${phone}</span>
+                    ${leadFileBlock}
                 </div>
                 <div class="ghl-dialer-recent-meta-row">
                     <span class="ghl-dialer-recent-meta">

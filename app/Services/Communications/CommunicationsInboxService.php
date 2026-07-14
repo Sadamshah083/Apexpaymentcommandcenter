@@ -1741,6 +1741,7 @@ class CommunicationsInboxService
       $log['lead_name'] = $label['name'] ?? null;
       $log['lead_contact'] = $label['contact'] ?? null;
       $log['lead_id'] = $label['lead_id'] ?? null;
+      $log['lead_file_name'] = $label['file_name'] ?? null;
       $log['phone_display'] = CommunicationsLeadLookupService::formatPhoneDisplay($phone);
 
       return $log;
@@ -1815,6 +1816,9 @@ class CommunicationsInboxService
     $leadContact = filled($log['lead_contact'] ?? null)
       ? (string) $log['lead_contact']
       : (string) ($leadLabel['contact'] ?? '');
+    $leadFileName = filled($log['lead_file_name'] ?? null)
+      ? (string) $log['lead_file_name']
+      : (string) ($leadLabel['file_name'] ?? '');
     $phoneDisplay = filled($log['phone_display'] ?? null)
       ? (string) $log['phone_display']
       : (CommunicationsLeadLookupService::formatPhoneDisplay($callbackPhone) ?? $callbackPhone);
@@ -1833,6 +1837,7 @@ class CommunicationsInboxService
       'phone_display' => $phoneDisplay,
       'lead_name' => $leadName !== '' ? $leadName : null,
       'lead_contact' => $leadContact !== '' ? $leadContact : null,
+      'lead_file_name' => $leadFileName !== '' ? $leadFileName : null,
       'lead_id' => $log['lead_id'] ?? ($leadLabel['lead_id'] ?? null),
       'result' => $log['result'] ?? '—',
       'disposition' => $this->resolveDialerDispositionLabel($log),

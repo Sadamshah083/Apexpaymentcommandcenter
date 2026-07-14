@@ -147,10 +147,9 @@ class CommunicationsHubController extends Controller
         ];
 
         if ($this->access->tierFor($user, $routePrefix) === 'agent') {
+            // Agents only see their own assigned queue — no lead-pool switch.
             $filters['assigned_user_id'] = (int) $user->id;
-            if (! in_array((string) $filters['pool'], ['assigned', 'callable', 'all'], true)) {
-                $filters['pool'] = 'assigned';
-            }
+            $filters['pool'] = 'assigned';
         }
 
         try {

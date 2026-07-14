@@ -15,7 +15,7 @@ class CommunicationsLeadLookupService
 
     /**
      * @param  array<int, string|null>  $phones
-     * @return array<string, array{name: string, contact: ?string, lead_id: int}>
+     * @return array<string, array{name: string, contact: ?string, lead_id: int, file_name: ?string}>
      */
     public function mapLabelsForPhones(Workspace $workspace, array $phones): array
     {
@@ -43,7 +43,9 @@ class CommunicationsLeadLookupService
                 'workflow_leads.markdown_report',
                 'workflow_leads.raw_row',
                 'workflow_leads.updated_at',
+                'workflow_leads.workflow_id',
             ])
+            ->with(['workflow:id,name,original_filename'])
             ->join('workflows', 'workflows.id', '=', 'workflow_leads.workflow_id')
             ->where('workflows.workspace_id', $workspace->id)
             ->whereIn('workflow_leads.normalized_phone', $keys)
@@ -78,7 +80,9 @@ class CommunicationsLeadLookupService
                 'workflow_leads.markdown_report',
                 'workflow_leads.raw_row',
                 'workflow_leads.updated_at',
+                'workflow_leads.workflow_id',
             ])
+            ->with(['workflow:id,name,original_filename'])
             ->join('workflows', 'workflows.id', '=', 'workflow_leads.workflow_id')
             ->where('workflows.workspace_id', $workspace->id)
             ->where(function ($query) {
@@ -144,12 +148,15 @@ class CommunicationsLeadLookupService
     }
 
     /**
-     * @return array{name: string, contact: ?string, lead_id: int}
+     * @return array{name: string, contact: ?string, lead_id: int, file_name: ?string}
      */
     protected function buildLabel(WorkflowLead $lead): array
     {
         $business = LeadContactDisplay::label($lead->business_name, '');
-        $owner = LeadContactDisplay::label(LeadContactDisplay::value($lead, 'owner'), '');
+        $owner = LeadContactDisplay::label(
+            $lead->owner_name ?: LeadContactDisplay::value($lead, 'owner'),
+            ''
+        );
 
         $name = '';
         $contact = null;
@@ -163,10 +170,13 @@ class CommunicationsLeadLookupService
             $name = $owner;
         }
 
+        $fileName = trim((string) ($lead->workflow?->original_filename ?: $lead->workflow?->name ?: ''));
+
         return [
             'name' => $name,
             'contact' => $contact,
             'lead_id' => (int) $lead->id,
+            'file_name' => $fileName !== '' ? $fileName : null,
         ];
     }
 }

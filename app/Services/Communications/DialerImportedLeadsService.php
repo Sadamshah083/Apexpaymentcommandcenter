@@ -107,9 +107,22 @@ class DialerImportedLeadsService
             ->where('workflows.workspace_id', $workspace->id)
             ->whereNotIn('workflow_leads.status', ['failed', 'rejected'])
             ->where(function (Builder $phone) {
-                $phone->whereNotNull('workflow_leads.normalized_phone')
-                    ->orWhereNotNull('workflow_leads.direct_phone')
-                    ->orWhereNotNull('workflow_leads.input_phone');
+                // Real dialable numbers only — text like "Not Publicly Available" must not fill pages.
+                $phone->where(function (Builder $normalized) {
+                    $normalized->whereNotNull('workflow_leads.normalized_phone')
+                        ->where('workflow_leads.normalized_phone', '!=', '')
+                        ->whereRaw("workflow_leads.normalized_phone REGEXP '[0-9]{10}'");
+                })->orWhere(function (Builder $direct) {
+                    $direct->whereNotNull('workflow_leads.direct_phone')
+                        ->where('workflow_leads.direct_phone', '!=', '')
+                        ->where('workflow_leads.direct_phone', 'not like', '%Not Publicly%')
+                        ->whereRaw("workflow_leads.direct_phone REGEXP '[0-9]{10}'");
+                })->orWhere(function (Builder $input) {
+                    $input->whereNotNull('workflow_leads.input_phone')
+                        ->where('workflow_leads.input_phone', '!=', '')
+                        ->where('workflow_leads.input_phone', 'not like', '%Not Publicly%')
+                        ->whereRaw("workflow_leads.input_phone REGEXP '[0-9]{10}'");
+                });
             })
             // Once dialed / dispositioned, never show again in the dialer imported-leads queue.
             ->whereNull('workflow_leads.last_contacted_at')
@@ -117,7 +130,7 @@ class DialerImportedLeadsService
                 $attempts->whereNull('workflow_leads.contact_attempts')
                     ->orWhere('workflow_leads.contact_attempts', '<=', 0);
             })
-            ->with(['campaign:id,name', 'workflow:id,name'])
+            ->with(['campaign:id,name', 'workflow:id,name,original_filename'])
             // Oldest first at the top; auto-dial starts from the top and works down.
             ->orderBy('workflow_leads.id');
 
@@ -126,7 +139,11 @@ class DialerImportedLeadsService
         }
 
         if (filled($filters['assigned_user_id'] ?? null)) {
-            $query->where('workflow_leads.assigned_user_id', (int) $filters['assigned_user_id']);
+            $query->where(function (Builder $assigned) use ($filters) {
+                $uid = (int) $filters['assigned_user_id'];
+                $assigned->where('workflow_leads.assigned_user_id', $uid)
+                    ->orWhere('workflow_leads.assigned_setter_id', $uid);
+            });
         }
 
         if (filled($filters['search'] ?? null)) {
@@ -141,8 +158,12 @@ class DialerImportedLeadsService
         }
 
         return match ((string) ($filters['pool'] ?? 'all')) {
-            'assigned' => $query->whereNotNull('workflow_leads.assigned_user_id'),
-            'unassigned' => $query->whereNull('workflow_leads.assigned_user_id'),
+            'assigned' => $query->where(function (Builder $assigned) {
+                $assigned->whereNotNull('workflow_leads.assigned_user_id')
+                    ->orWhereNotNull('workflow_leads.assigned_setter_id');
+            }),
+            'unassigned' => $query->whereNull('workflow_leads.assigned_user_id')
+                ->whereNull('workflow_leads.assigned_setter_id'),
             'callable' => $query->where(function (Builder $callable) {
                 $callable->whereNull('workflow_leads.setter_status')
                     ->orWhereNotIn('workflow_leads.setter_status', ['appointment_settled', 'not_interested']);
@@ -183,19 +204,32 @@ class DialerImportedLeadsService
         $phone = $this->resolvePhone($lead);
         $name = $this->resolveName($lead);
         $contact = $this->resolveContact($lead, $name);
+        $fileName = $this->resolveFileName($lead);
 
         return [
             'id' => (int) $lead->id,
             'name' => $name,
             'contact' => $contact,
+            'owner_name' => $contact,
             'phone' => $phone,
             'phone_display' => CommunicationsLeadLookupService::formatPhoneDisplay($phone),
             'campaign' => $lead->campaign?->name,
             'workflow' => $lead->workflow?->name,
+            'file_name' => $fileName,
             'setter_status' => $lead->setter_status,
             'assigned' => $lead->assigned_user_id !== null,
             'last_contacted_at' => $lead->last_contacted_at?->toIso8601String(),
         ];
+    }
+
+    protected function resolveFileName(WorkflowLead $lead): string
+    {
+        $original = trim((string) ($lead->workflow?->original_filename ?? ''));
+        if ($original !== '') {
+            return $original;
+        }
+
+        return trim((string) ($lead->workflow?->name ?? ''));
     }
 
     protected function resolvePhone(WorkflowLead $lead): ?string
@@ -208,7 +242,11 @@ class DialerImportedLeadsService
         ];
 
         foreach ($candidates as $candidate) {
-            $normalized = UsPhoneNormalizer::e164($candidate) ?? trim((string) $candidate);
+            $raw = trim((string) ($candidate ?? ''));
+            if ($raw === '' || str_contains(strtolower($raw), 'not publicly')) {
+                continue;
+            }
+            $normalized = UsPhoneNormalizer::e164($raw) ?? $raw;
             if ($normalized !== '' && strlen(preg_replace('/\D/', '', $normalized) ?? '') >= 10) {
                 return $normalized;
             }
@@ -230,16 +268,23 @@ class DialerImportedLeadsService
 
     protected function resolveContact(WorkflowLead $lead, string $name): string
     {
-        $owner = LeadContactDisplay::label(LeadContactDisplay::value($lead, 'owner'), '');
+        $candidates = [
+            $lead->owner_name,
+            LeadContactDisplay::value($lead, 'owner'),
+        ];
 
-        if ($owner === '' || $owner === '—') {
-            return '';
+        foreach ($candidates as $candidate) {
+            $owner = LeadContactDisplay::label((string) ($candidate ?? ''), '');
+            if ($owner === '' || $owner === '—') {
+                continue;
+            }
+            if ($name !== '' && strcasecmp($owner, $name) === 0) {
+                continue;
+            }
+
+            return $owner;
         }
 
-        if ($name !== '' && strcasecmp($owner, $name) === 0) {
-            return '';
-        }
-
-        return $owner;
+        return '';
     }
 }

@@ -30,7 +30,8 @@
     data-phone-view="{{ $autoDialer ? 'logs' : 'dialer' }}"
     data-recording-role=""
     data-recording-sync-url="{{ $recordingSyncUrl }}"
-    @if ($autoDialer) data-auto-dial-hub data-imported-leads-url="{{ $importedLeadsApiUrl }}" @endif>
+    @if ($autoDialer) data-auto-dial-hub data-imported-leads-url="{{ $importedLeadsApiUrl }}" @endif
+    @if ($isAgentDialer) data-agent-dialer="1" @endif>
     <div class="ch-dial-workspace__toolbar">
         <div class="ch-dial-workspace__nav" data-phone-workspace-nav>
             @if ($autoDialer)
@@ -143,41 +144,40 @@
                 </div>
                 <div class="ghl-dialer-leads-toolbar">
                     <div class="ghl-dialer-leads-filters">
-                        <div class="ghl-dialer-leads-field">
-                            <span class="ghl-dialer-leads-label" id="dialer-leads-pool-label">Lead pool</span>
-                            <div class="ghl-leads-select" data-leads-select>
-                                <select class="ghl-leads-select__native" data-dialer-leads-pool
-                                    aria-labelledby="dialer-leads-pool-label">
-                                    @if ($isAgentDialer)
-                                        <option value="assigned" selected>My assigned leads</option>
-                                        <option value="callable">My callable leads</option>
-                                        <option value="all">All my leads with phone</option>
-                                    @else
+                        @unless ($isAgentDialer)
+                            <div class="ghl-dialer-leads-field">
+                                <span class="ghl-dialer-leads-label" id="dialer-leads-pool-label">Lead pool</span>
+                                <div class="ghl-leads-select" data-leads-select>
+                                    <select class="ghl-leads-select__native" data-dialer-leads-pool
+                                        aria-labelledby="dialer-leads-pool-label">
                                         <option value="callable" selected>Callable leads</option>
                                         <option value="all">All with phone</option>
                                         <option value="unassigned">Unassigned</option>
                                         <option value="assigned">Assigned</option>
-                                    @endif
-                                </select>
-                                <button type="button" class="ghl-leads-select__trigger" aria-haspopup="listbox"
-                                    aria-expanded="false" aria-labelledby="dialer-leads-pool-label">
-                                    <span class="ghl-leads-select__value" data-leads-select-value>Callable leads</span>
-                                    <svg class="ghl-leads-select__chevron" viewBox="0 0 24 24" fill="none"
-                                        stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                        <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
-                                    </svg>
-                                </button>
-                                <div class="ghl-leads-select__menu" hidden role="listbox"
-                                    aria-labelledby="dialer-leads-pool-label"></div>
+                                    </select>
+                                    <button type="button" class="ghl-leads-select__trigger" aria-haspopup="listbox"
+                                        aria-expanded="false" aria-labelledby="dialer-leads-pool-label">
+                                        <span class="ghl-leads-select__value" data-leads-select-value>Callable leads</span>
+                                        <svg class="ghl-leads-select__chevron" viewBox="0 0 24 24" fill="none"
+                                            stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                    </button>
+                                    <div class="ghl-leads-select__menu" hidden role="listbox"
+                                        aria-labelledby="dialer-leads-pool-label"></div>
+                                </div>
                             </div>
-                        </div>
+                        @else
+                            {{-- Agents always see only their assigned leads. --}}
+                            <input type="hidden" data-dialer-leads-pool value="assigned">
+                        @endunless
                         @if ($campaignOptions->isNotEmpty())
                             <div class="ghl-dialer-leads-field">
                                 <span class="ghl-dialer-leads-label" id="dialer-leads-campaign-label">Campaign</span>
                                 <div class="ghl-leads-select" data-leads-select>
                                     <select class="ghl-leads-select__native" data-dialer-leads-campaign
                                         aria-labelledby="dialer-leads-campaign-label">
-                                        <option value="">All campaigns</option>
+                                        <option value="" selected>All campaigns</option>
                                         @foreach ($campaignOptions as $campaign)
                                             <option value="{{ $campaign['id'] }}">{{ $campaign['name'] }}</option>
                                         @endforeach

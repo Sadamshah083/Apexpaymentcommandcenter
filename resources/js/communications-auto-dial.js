@@ -238,24 +238,26 @@ function leadLabel(lead) {
 
 function buildLeadRow(lead) {
     const name = String(lead.name || '').trim();
-    const contact = String(lead.contact || '').trim();
+    const contact = String(lead.contact || lead.owner_name || '').trim();
     const phone = String(lead.phone_display || lead.phone || '—');
-    const campaign = String(lead.campaign || '').trim();
-    const showCampaign = campaign !== '' && !['default', 'result', 'n/a', 'none', '-'].includes(campaign.toLowerCase());
+    const fileName = String(lead.file_name || lead.workflow || '').trim();
+    const showFileName = fileName !== '' && !['default', 'result', 'n/a', 'none', '-'].includes(fileName.toLowerCase());
     const initial = (name || contact || 'L').charAt(0).toUpperCase();
+    const escAttr = (value) => String(value || '').replace(/"/g, '&quot;');
 
     return `
         <div class="ghl-dialer-lead-row" data-dialer-lead-row tabindex="0"
             data-lead-id="${lead.id || ''}"
             data-lead-phone="${lead.phone || ''}"
-            data-lead-name="${name.replace(/"/g, '&quot;')}"
-            data-lead-contact="${contact.replace(/"/g, '&quot;')}">
+            data-lead-name="${escAttr(name)}"
+            data-lead-contact="${escAttr(contact)}"
+            data-lead-file-name="${escAttr(fileName)}">
             <div class="ghl-dialer-lead-avatar" aria-hidden="true">${initial}</div>
             <div class="ghl-dialer-lead-main">
                 ${name ? `<span class="ghl-dialer-lead-name">${name}</span>` : ''}
                 ${contact ? `<span class="ghl-dialer-lead-contact">${contact}</span>` : ''}
                 <span class="ghl-dialer-lead-number">${phone}</span>
-                ${showCampaign ? `<span class="ghl-dialer-lead-meta">${campaign}</span>` : ''}
+                ${showFileName ? `<span class="ghl-dialer-lead-meta" title="${escAttr(fileName)}">${fileName}</span>` : ''}
             </div>
             <div class="ghl-dialer-lead-actions">
                 <button type="button" class="ghl-dialer-lead-call-btn" data-dial-lead-call title="Call this lead">
@@ -678,6 +680,8 @@ function prependCallLog(callLog) {
         const fieldsHtml = fields.length ? `<div class="ghl-dialer-recent-fields">${fields.join('')}</div>` : '';
         const phone = enriched.phone_display || enriched.phone || '—';
         const leadName = enriched.lead_name || '';
+        const leadContact = enriched.lead_contact || '';
+        const leadFileName = enriched.lead_file_name || '';
         const row = document.createElement('div');
         row.className = 'ghl-dialer-recent-row';
         row.innerHTML = `
@@ -687,7 +691,9 @@ function prependCallLog(callLog) {
                 </div>
                 <div class="ghl-dialer-recent-contact">
                     ${leadName ? `<span class="ghl-dialer-recent-name">${escape(leadName)}</span>` : ''}
+                    ${leadContact ? `<span class="ghl-dialer-recent-contact-name">${escape(leadContact)}</span>` : ''}
                     <span class="ghl-dialer-recent-number">${escape(phone)}</span>
+                    ${leadFileName ? `<span class="ghl-dialer-recent-file" title="${escape(leadFileName)}">${escape(leadFileName)}</span>` : ''}
                 </div>
                 <span class="ghl-dialer-recent-meta">${escape(enriched.time_ago || 'just now')} · ${escape(enriched.duration_label || '0s')}</span>
                 ${fieldsHtml}
@@ -704,7 +710,8 @@ function applyDispositionSideEffects(payload, context, disposition) {
         ...(payload?.call_log || {}),
         disposition: disposition || payload?.disposition || payload?.call_log?.disposition || '',
         lead_name: payload?.call_log?.lead_name || context?.lead?.name || '',
-        lead_contact: payload?.call_log?.lead_contact || context?.lead?.contact || '',
+        lead_contact: payload?.call_log?.lead_contact || context?.lead?.contact || context?.lead?.owner_name || '',
+        lead_file_name: payload?.call_log?.lead_file_name || context?.lead?.file_name || context?.lead?.workflow || '',
         phone: payload?.call_log?.phone || phone,
         phone_display: payload?.call_log?.phone_display || context?.lead?.phone_display || phone,
     };
@@ -866,7 +873,7 @@ async function fetchImportedLeads(list, reset = false) {
         return;
     }
 
-    const pool = list.closest('[data-phone-leads-pane]')?.querySelector('[data-dialer-leads-pool]')?.value || 'callable';
+    const pool = list.closest('[data-phone-leads-pane]')?.querySelector('[data-dialer-leads-pool]')?.value || 'assigned';
     const campaign = list.closest('[data-phone-leads-pane]')?.querySelector('[data-dialer-leads-campaign]')?.value || '';
     const params = new URLSearchParams({ offset: String(offset), per_page: '25', pool });
     if (campaign) {
@@ -890,8 +897,11 @@ async function fetchImportedLeads(list, reset = false) {
         }
 
         const leads = payload.leads || [];
+        const emptyMessage = list.closest('[data-auto-dial-hub]')?.dataset.agentDialer === '1'
+            ? 'No leads assigned to you with phone numbers yet.'
+            : 'No imported leads with phone numbers yet.';
         if (leads.length === 0 && offset === 0) {
-            items.innerHTML = '<p class="ghl-dialer-recent-empty" data-imported-leads-empty>No imported leads with phone numbers yet.</p>';
+            items.innerHTML = `<p class="ghl-dialer-recent-empty" data-imported-leads-empty>${emptyMessage}</p>`;
         } else {
             items.querySelector('[data-imported-leads-empty]')?.remove();
             const wrapper = document.createElement('div');
@@ -1029,6 +1039,16 @@ function initImportedLeadsList(root = document) {
     initLeadsSelects(list.closest('[data-phone-leads-pane]') || root);
 
     const pane = list.closest('[data-phone-leads-pane]');
+    const campaignSelect = pane?.querySelector('[data-dialer-leads-campaign]');
+    // Prefer All campaigns so agents don't get stuck on an empty campaign filter.
+    if (campaignSelect && campaignSelect.value !== '') {
+        campaignSelect.value = '';
+        const campaignWrap = campaignSelect.closest('[data-leads-select]');
+        if (campaignWrap) {
+            syncLeadsSelect(campaignWrap);
+        }
+    }
+
     pane?.querySelector('[data-dialer-leads-pool]')?.addEventListener('change', () => {
         if (state.sessionActive) {
             showToast('Stop auto dial before changing the lead pool.', 'info');
@@ -1038,7 +1058,7 @@ function initImportedLeadsList(root = document) {
         list.dataset.importedLeadsHasMore = '1';
         void fetchImportedLeads(list, true);
     });
-    pane?.querySelector('[data-dialer-leads-campaign]')?.addEventListener('change', () => {
+    campaignSelect?.addEventListener('change', () => {
         if (state.sessionActive) {
             showToast('Stop auto dial before changing the campaign filter.', 'info');
             return;
@@ -1047,6 +1067,11 @@ function initImportedLeadsList(root = document) {
         list.dataset.importedLeadsHasMore = '1';
         void fetchImportedLeads(list, true);
     });
+
+    // Refresh once so agents get dialable assigned leads (skips junk phone placeholders).
+    list.dataset.importedLeadsOffset = '0';
+    list.dataset.importedLeadsHasMore = '1';
+    void fetchImportedLeads(list, true);
 
     const sentinel = list.querySelector('[data-imported-leads-sentinel]');
     if (sentinel && 'IntersectionObserver' in window) {

@@ -107,6 +107,10 @@ MORPHEUS_SIP_WSS_URL=wss://apexone.morpheus.cx:7443/
 MORPHEUS_WEBPHONE_AUTO_ANSWER=true
 MORPHEUS_EXTENSION_PASSWORD=your_sip_password
 MORPHEUS_STUN_SERVERS=stun:stun.l.google.com:19302
+# Optional TURN (ask Morpheus for credentials when calls drop on mobile / strict NAT)
+# MORPHEUS_TURN_URLS=turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp,turns:turn.example.com:443?transport=tcp
+# MORPHEUS_TURN_USERNAME=
+# MORPHEUS_TURN_CREDENTIAL=
 
 # Default extension in dialer dropdown
 COMMUNICATIONS_DEFAULT_CALLER_ID=1020
@@ -120,6 +124,8 @@ Mapped in `config/integrations.php`:
 | `MORPHEUS_HOST` | `integrations.morpheus.host` | Tenant hostname |
 | `MORPHEUS_DEFAULT_CAMPAIGN_ID` | `integrations.morpheus.default_campaign_id` | Required for click-to-call |
 | `MORPHEUS_SIP_WSS_URL` | `integrations.morpheus.sip_wss_url` | Defaults to `:7443` |
+| `MORPHEUS_STUN_SERVERS` | `integrations.morpheus.stun_servers` | ICE STUN list |
+| `MORPHEUS_TURN_URLS` | `integrations.morpheus.turn_urls` | Optional TURN URLs (comma-separated) |
 | `COMMUNICATIONS_DEFAULT_OUTBOUND_DID` | `integrations.communications.default_outbound_did` | Fallback caller ID |
 
 After changing `.env`:

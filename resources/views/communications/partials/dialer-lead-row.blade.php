@@ -1,20 +1,21 @@
 @php
     $phone = $lead['phone'] ?? '';
     $name = trim((string) ($lead['name'] ?? ''));
-    $contact = trim((string) ($lead['contact'] ?? ''));
+    $contact = trim((string) ($lead['contact'] ?? $lead['owner_name'] ?? ''));
     $phoneDisplay = trim((string) ($lead['phone_display'] ?? ''));
     if ($phoneDisplay === '' && filled($phone)) {
         $phoneDisplay = \App\Services\Communications\CommunicationsLeadLookupService::formatPhoneDisplay($phone) ?? $phone;
     }
-    $campaign = trim((string) ($lead['campaign'] ?? ''));
-    $showCampaign = $campaign !== '' && ! in_array(strtolower($campaign), ['default', 'result', 'n/a', 'none', '-'], true);
+    $fileName = trim((string) ($lead['file_name'] ?? $lead['workflow'] ?? ''));
+    $showFileName = $fileName !== '' && ! in_array(strtolower($fileName), ['default', 'result', 'n/a', 'none', '-'], true);
 @endphp
 
 <div class="ghl-dialer-lead-row" data-dialer-lead-row tabindex="0"
     data-lead-id="{{ $lead['id'] ?? '' }}"
     data-lead-phone="{{ $phone }}"
     data-lead-name="{{ e($name) }}"
-    data-lead-contact="{{ e($contact) }}">
+    data-lead-contact="{{ e($contact) }}"
+    data-lead-file-name="{{ e($fileName) }}">
     <div class="ghl-dialer-lead-avatar" aria-hidden="true">
         {{ strtoupper(mb_substr($name !== '' ? $name : ($contact !== '' ? $contact : 'L'), 0, 1)) }}
     </div>
@@ -26,8 +27,8 @@
             <span class="ghl-dialer-lead-contact">{{ $contact }}</span>
         @endif
         <span class="ghl-dialer-lead-number">{{ $phoneDisplay ?: '—' }}</span>
-        @if ($showCampaign)
-            <span class="ghl-dialer-lead-meta">{{ $campaign }}</span>
+        @if ($showFileName)
+            <span class="ghl-dialer-lead-meta" title="{{ $fileName }}">{{ $fileName }}</span>
         @endif
     </div>
     <div class="ghl-dialer-lead-actions">
