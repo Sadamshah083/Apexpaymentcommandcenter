@@ -103,7 +103,9 @@
                         <circle cx="11" cy="11" r="7"></circle>
                         <path stroke-linecap="round" d="M20 20l-3-3"></path>
                     </svg>
-                    <input type="search" class="ghl-line-dropdown__search" placeholder="Search extension or number"
+                    <input type="search" id="{{ ($callerSelectId ?? 'line') }}-search"
+                        name="line_search"
+                        class="ghl-line-dropdown__search" placeholder="Search extension or number"
                         autocomplete="off" spellcheck="false" aria-label="Search phone lines">
                 </div>
             @endif

@@ -7,7 +7,7 @@
         <div class="flex items-center justify-between">
             <div>
                 <h1 class="app-page-title">Team Performance & Leaderboards</h1>
-                <p class="app-page-subtitle">Weekly rankings for dials, discoveries, meetings booked, and deals funded.</p>
+                <p class="app-page-subtitle">Weekly rankings for calls taken, talk time, dispositions, meetings, and deals funded. Click a name for full call details.</p>
             </div>
             <form method="GET" class="flex gap-2">
                 <select name="period" onchange="this.form.submit()" class="app-input !w-auto">
@@ -25,11 +25,11 @@
                             <th>Rank</th>
                             <th>Name</th>
                             <th>Role</th>
-                            <th>Dials</th>
-                            <th>Live Conversations</th>
-                            <th>Discoveries</th>
-                            <th>Meetings Booked</th>
-                            <th>Deals Funded</th>
+                            <th>Calls</th>
+                            <th>Talk time</th>
+                            <th>Dispositions</th>
+                            <th>Meetings</th>
+                            <th>Funded</th>
                             <th>Score</th>
                         </tr>
                     </thead>
@@ -38,11 +38,15 @@
                         @forelse($leaderboard as $index => $row)
                             <tr>
                                 <td class="font-black text-zinc-900">#{{ $index + 1 }}</td>
-                                <td class="font-bold">{{ $row['name'] }}</td>
+                                <td class="font-bold">
+                                    <a href="{{ route('admin.dashboard', ['detail' => 'performer', 'user_id' => $row['user_id']]) }}" class="app-link">
+                                        {{ $row['name'] }}
+                                    </a>
+                                </td>
                                 <td>{{ $row['role'] }}</td>
-                                <td>{{ $row['dials'] }}</td>
-                                <td>{{ $row['conversations'] }}</td>
-                                <td>{{ $row['discoveries'] }}</td>
+                                <td>{{ (int) ($row['calls_taken'] ?? $row['calls'] ?? $row['dials'] ?? 0) }}</td>
+                                <td>{{ $row['talk_label'] ?? '0s' }}</td>
+                                <td>{{ (int) ($row['disposed'] ?? 0) }}</td>
                                 <td>{{ $row['meetings'] }}</td>
                                 <td>{{ $row['deals_funded'] }}</td>
                                 <td class="font-bold">{{ $row['score'] }}</td>

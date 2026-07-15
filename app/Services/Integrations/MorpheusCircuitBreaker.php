@@ -16,24 +16,42 @@ class MorpheusCircuitBreaker
 
     public function isOpen(): bool
     {
-        return Cache::has(self::OPEN_KEY);
+        try {
+            return Cache::has(self::OPEN_KEY);
+        } catch (\Throwable) {
+            // Never block dialing if the cache store is misconfigured.
+            return false;
+        }
     }
 
     public function trip(?int $seconds = null): void
     {
         $seconds ??= (int) config('integrations.morpheus.circuit_breaker_seconds', 120);
-        Cache::put(self::OPEN_KEY, true, $seconds);
+
+        try {
+            Cache::put(self::OPEN_KEY, true, $seconds);
+        } catch (\Throwable) {
+            //
+        }
     }
 
     public function reset(): void
     {
-        Cache::forget(self::OPEN_KEY);
+        try {
+            Cache::forget(self::OPEN_KEY);
+        } catch (\Throwable) {
+            //
+        }
     }
 
     public function recordSuccess(): void
     {
-        if ($this->isOpen()) {
-            $this->reset();
+        try {
+            if ($this->isOpen()) {
+                $this->reset();
+            }
+        } catch (\Throwable) {
+            //
         }
     }
 

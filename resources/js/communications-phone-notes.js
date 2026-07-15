@@ -847,7 +847,9 @@ export function buildCallLogRowNotesPanel(log) {
 
     return `
         <div class="ghl-dialer-recent-notes hidden" data-log-notes-panel>
-            <textarea class="ghl-dialer-recent-notes-input" data-log-notes-input rows="3"
+            <textarea id="call-log-note-${escapeHtml(String(log.call_log_ref || log.id || 'row'))}"
+                name="call_log_note"
+                class="ghl-dialer-recent-notes-input" data-log-notes-input rows="3"
                 placeholder="Notes for this call (${timeLabel})…" maxlength="5000">${callNote}</textarea>
             <div class="ghl-dialer-recent-notes-actions">
                 <span class="ghl-dialer-recent-notes-status" data-log-notes-status aria-live="polite"></span>

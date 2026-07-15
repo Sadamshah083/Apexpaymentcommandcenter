@@ -21,12 +21,22 @@ function parseConnectedAtMs(value) {
 function timerSecForRow(row, nowMs = Date.now()) {
     const connectedAtMs = parseConnectedAtMs(row.connected_at);
     if (connectedAtMs) {
-        return Math.max(1, Math.floor((nowMs - connectedAtMs) / 1000));
+        // Match dialer: start at 00:00 (do not force a +1s floor).
+        return Math.max(0, Math.floor((nowMs - connectedAtMs) / 1000));
     }
     return Math.max(0, Math.floor(Number(row.timer_sec) || 0));
 }
 
 function bucketFor(row, timerSec = null) {
+    if (row.bucket === 'disposition' || row.status_group === 'disposition') {
+        return 'disposition';
+    }
+    if (row.bucket === 'not_logged_in' || row.status_group === 'not_logged_in') {
+        return 'not_logged_in';
+    }
+    if (row.bucket === 'dead' || row.status_group === 'dead') {
+        return 'dead';
+    }
     if (row.bucket === 'incall_short' || row.bucket === 'incall_long' || row.status_group === 'incall') {
         const sec = timerSec == null ? timerSecForRow(row) : timerSec;
         return sec > 120 ? 'incall_long' : 'incall_short';
@@ -44,6 +54,8 @@ function rowClassFor(bucket) {
     if (bucket === 'incall_short') return 'is-incall';
     if (bucket === 'incall_long') return 'is-incall-long';
     if (bucket === 'not_in_call' || bucket === 'idle') return 'is-idle';
+    if (bucket === 'disposition') return 'is-disposition';
+    if (bucket === 'not_logged_in') return 'is-offline';
     if (bucket === 'queue') return 'is-queue';
     if (bucket === 'dead') return 'is-dead';
     return 'is-waiting';
@@ -53,6 +65,8 @@ function statusLabelFor(bucket) {
     if (bucket === 'incall_short') return 'INCALL ≤2M';
     if (bucket === 'incall_long') return 'INCALL >2M';
     if (bucket === 'not_in_call' || bucket === 'idle') return 'NOT IN CALL';
+    if (bucket === 'disposition') return 'DISPOSITION';
+    if (bucket === 'not_logged_in') return 'NOT LOGGED IN';
     if (bucket === 'ringing') return 'RINGING';
     if (bucket === 'queue') return 'QUEUE';
     if (bucket === 'dead') return 'DEAD';
@@ -116,7 +130,10 @@ function campaignCellHtml(row, { idle = false } = {}) {
 
 function buildRowHtml(row, nowMs = Date.now()) {
     const idle = row.bucket === 'not_in_call' || row.status_group === 'idle';
-    const connected = !idle && (
+    const disposition = row.bucket === 'disposition' || row.status_group === 'disposition';
+    const offline = row.bucket === 'not_logged_in' || row.status_group === 'not_logged_in';
+    const dead = row.bucket === 'dead' || row.status_group === 'dead';
+    const connected = !idle && !disposition && !offline && !dead && (
         row.status_group === 'incall'
         || row.bucket === 'incall_short'
         || row.bucket === 'incall_long'
@@ -124,27 +141,31 @@ function buildRowHtml(row, nowMs = Date.now()) {
     let timerSec = 0;
     if (connected) {
         timerSec = timerSecForRow(row, nowMs);
-    } else if (idle) {
+    } else if (idle || disposition) {
         const idleMs = parseConnectedAtMs(row.idle_since);
         timerSec = idleMs
             ? Math.max(0, Math.floor((nowMs - idleMs) / 1000))
             : Math.max(0, Math.floor(Number(row.timer_sec) || 0));
     }
-    const bucket = idle
-        ? 'not_in_call'
-        : (connected ? (timerSec > 120 ? 'incall_long' : 'incall_short') : bucketFor(row, timerSec));
+    const bucket = offline
+        ? 'not_logged_in'
+        : (idle
+            ? 'not_in_call'
+            : (disposition
+                ? 'disposition'
+                : (dead ? 'dead' : (connected ? (timerSec > 120 ? 'incall_long' : 'incall_short') : bucketFor(row, timerSec)))));
     const colorClass = rowClassFor(bucket);
     const role = row.role_label
         ? `<span class="call-monitoring-row__role">${escapeHtml(row.role_label)}</span>`
         : '';
-    const status = escapeHtml(statusLabelFor(bucket));
+    const status = escapeHtml(row.status || statusLabelFor(bucket));
     const connectedAt = connected && row.connected_at ? escapeHtml(row.connected_at) : '';
-    const idleSince = idle && row.idle_since ? escapeHtml(row.idle_since) : '';
+    const idleSince = (idle || disposition) && row.idle_since ? escapeHtml(row.idle_since) : '';
     const dialMeta = dialModeMeta(row, { idle });
 
     return `<tr class="call-monitoring-row ${colorClass}"
         data-row-id="${escapeHtml(row.id || '')}"
-        data-status-group="${escapeHtml(idle ? 'idle' : (connected ? 'incall' : (row.status_group || 'ringing')))}"
+        data-status-group="${escapeHtml(offline ? 'not_logged_in' : (idle ? 'idle' : (disposition ? 'disposition' : (dead ? 'dead' : (connected ? 'incall' : (row.status_group || 'ringing'))))))}"
         data-bucket="${escapeHtml(bucket)}"
         data-timer-sec="${timerSec}"
         data-dial-mode="${escapeHtml(dialMeta.mode || '')}"
@@ -158,9 +179,9 @@ function buildRowHtml(row, nowMs = Date.now()) {
         <td class="call-monitoring-row__status">
             <span class="call-monitoring-status-pill">${status}</span>
         </td>
-        <td class="call-monitoring-row__timer" data-row-timer>${(connected || idle) ? formatTimer(timerSec) : '00:00'}</td>
+        <td class="call-monitoring-row__timer" data-row-timer>${(connected || idle || disposition) ? formatTimer(timerSec) : '00:00'}</td>
         <td class="call-monitoring-row__dest">${destinationCellHtml(row, { idle })}</td>
-        <td class="call-monitoring-row__campaign">${campaignCellHtml(row, { idle })}</td>
+        <td class="call-monitoring-row__campaign">${campaignCellHtml(row, { idle: idle || disposition })}</td>
     </tr>`;
 }
 
@@ -174,8 +195,91 @@ function emptyMessageFor(bucket) {
     if (bucket === 'ringing') return 'No ringing calls.';
     if (bucket === 'incall_short') return 'No connected calls under 2 minutes.';
     if (bucket === 'incall_long') return 'No connected calls over 2 minutes.';
+    if (bucket === 'dead') return 'No dead / missed calls right now.';
+    if (bucket === 'disposition') return 'No agents on disposition.';
     if (bucket === 'not_in_call') return 'No logged-in agents available (not in call).';
+    if (bucket === 'not_logged_in') return 'All monitorable agents are logged in.';
+    if (bucket === 'all') return 'No agents or calls to show right now.';
     return 'No calls.';
+}
+
+function rowIdentityKeys(row) {
+    const id = String(row?.id || '').trim();
+    const uid = Number(row?.user_id || 0);
+    const ext = String(row?.station || row?.extension || '').replace(/\D/g, '');
+    return { id, uid, ext };
+}
+
+function occupyKeySet(rows) {
+    const users = new Set();
+    const exts = new Set();
+    (rows || []).forEach((row) => {
+        const { uid, ext } = rowIdentityKeys(row);
+        if (uid > 0) users.add(uid);
+        if (ext) exts.add(ext);
+    });
+    return { users, exts };
+}
+
+function isOccupied(row, occupied) {
+    const { uid, ext } = rowIdentityKeys(row);
+    if (uid > 0 && occupied.users.has(uid)) return true;
+    if (ext && occupied.exts.has(ext)) return true;
+    return false;
+}
+
+const STICKY_ROW_MS = 12000;
+
+function rememberStickyRows(root, rows, nowMs = Date.now()) {
+    if (!root._stickyRows) {
+        root._stickyRows = Object.create(null);
+    }
+    (rows || []).forEach((row) => {
+        const { id, uid, ext } = rowIdentityKeys(row);
+        if (!id) return;
+        const bucket = bucketFor(row);
+        // Only pin statuses that briefly disappear between light/full polls.
+        if (!['ringing', 'waiting', 'queue', 'incall_short', 'incall_long', 'disposition', 'not_in_call', 'idle'].includes(bucket)) {
+            return;
+        }
+        root._stickyRows[id] = {
+            row: { ...row },
+            until: nowMs + STICKY_ROW_MS,
+            uid,
+            ext,
+        };
+    });
+
+    Object.keys(root._stickyRows).forEach((id) => {
+        if ((root._stickyRows[id]?.until || 0) < nowMs) {
+            delete root._stickyRows[id];
+        }
+    });
+}
+
+function mergeStickyRows(root, liveRows, nowMs = Date.now()) {
+    if (!root._stickyRows) {
+        return liveRows;
+    }
+    const occupied = occupyKeySet(liveRows);
+    const merged = [...liveRows];
+    Object.values(root._stickyRows).forEach((entry) => {
+        if (!entry || (entry.until || 0) < nowMs || !entry.row) {
+            return;
+        }
+        const stickyId = String(entry.row.id || '');
+        if (merged.some((row) => String(row.id || '') === stickyId)) {
+            return;
+        }
+        if (isOccupied(entry.row, occupied)) {
+            return;
+        }
+        merged.push(entry.row);
+        const { uid, ext } = rowIdentityKeys(entry.row);
+        if (uid > 0) occupied.users.add(uid);
+        if (ext) occupied.exts.add(ext);
+    });
+    return merged;
 }
 
 function fillTable(root, bucket, rows, nowMs = Date.now()) {
@@ -212,24 +316,57 @@ function fillTable(root, bucket, rows, nowMs = Date.now()) {
         }
     });
 
-    const nextIds = list.map((row) => String(row.id || '')).join('|');
-    const existingRows = [...tbody.querySelectorAll('.call-monitoring-row')];
-    const currentIds = existingRows.map((row) => row.dataset.rowId || '').join('|');
-
-    // Same set of calls: update cells in place so the table does not jump each poll/tick.
-    if (list.length > 0 && nextIds === currentIds && existingRows.length === list.length) {
-        list.forEach((row, index) => {
-            patchRow(existingRows[index], row, nowMs);
-        });
+    if (list.length === 0) {
+        tbody.innerHTML = emptyRow(emptyMessageFor(bucket));
     } else {
-        tbody.innerHTML = list.length > 0
-            ? list.map((row) => buildRowHtml(row, nowMs)).join('')
-            : emptyRow(emptyMessageFor(bucket));
+        // Keyed reconciliation: patch / reorder existing <tr>s instead of wiping innerHTML.
+        tbody.querySelector('[data-call-monitoring-empty]')?.remove();
+        const existingById = new Map();
+        [...tbody.querySelectorAll('.call-monitoring-row')].forEach((el) => {
+            const id = String(el.dataset.rowId || '');
+            if (id) {
+                existingById.set(id, el);
+            } else {
+                el.remove();
+            }
+        });
+
+        const keep = new Set();
+        list.forEach((row) => {
+            const id = String(row.id || '');
+            if (!id) {
+                return;
+            }
+            keep.add(id);
+            let el = existingById.get(id);
+            if (!el) {
+                const wrap = document.createElement('tbody');
+                wrap.innerHTML = buildRowHtml(row, nowMs);
+                el = wrap.firstElementChild;
+                if (!el) {
+                    return;
+                }
+                existingById.set(id, el);
+            } else {
+                patchRow(el, row, nowMs);
+            }
+            tbody.appendChild(el);
+        });
+
+        existingById.forEach((el, id) => {
+            if (!keep.has(id)) {
+                el.remove();
+            }
+        });
     }
 
     const countEl = board?.querySelector('[data-board-count]');
     if (countEl) {
         countEl.textContent = String(list.length);
+    }
+    const countHead = board?.querySelector('[data-board-count-head]');
+    if (countHead) {
+        countHead.textContent = String(list.length);
     }
 }
 
@@ -239,7 +376,10 @@ function patchRow(el, row, nowMs = Date.now()) {
     }
 
     const idle = row.bucket === 'not_in_call' || row.status_group === 'idle';
-    const connected = !idle && (
+    const disposition = row.bucket === 'disposition' || row.status_group === 'disposition';
+    const offline = row.bucket === 'not_logged_in' || row.status_group === 'not_logged_in';
+    const dead = row.bucket === 'dead' || row.status_group === 'dead';
+    const connected = !idle && !disposition && !offline && !dead && (
         row.status_group === 'incall'
         || row.bucket === 'incall_short'
         || row.bucket === 'incall_long'
@@ -247,17 +387,25 @@ function patchRow(el, row, nowMs = Date.now()) {
     let timerSec = 0;
     if (connected) {
         timerSec = timerSecForRow(row, nowMs);
-    } else if (idle) {
+    } else if (idle || disposition) {
         const idleMs = parseConnectedAtMs(row.idle_since);
         timerSec = idleMs
             ? Math.max(0, Math.floor((nowMs - idleMs) / 1000))
             : Math.max(0, Math.floor(Number(row.timer_sec) || 0));
     }
-    const bucket = idle
-        ? 'not_in_call'
-        : (connected ? (timerSec > 120 ? 'incall_long' : 'incall_short') : bucketFor(row, timerSec));
+    const bucket = offline
+        ? 'not_logged_in'
+        : (idle
+            ? 'not_in_call'
+            : (disposition
+                ? 'disposition'
+                : (dead ? 'dead' : (connected ? (timerSec > 120 ? 'incall_long' : 'incall_short') : bucketFor(row, timerSec)))));
 
-    el.dataset.statusGroup = idle ? 'idle' : (connected ? 'incall' : (row.status_group || 'ringing'));
+    el.dataset.statusGroup = offline
+        ? 'not_logged_in'
+        : (idle
+            ? 'idle'
+            : (disposition ? 'disposition' : (dead ? 'dead' : (connected ? 'incall' : (row.status_group || 'ringing')))));
     el.dataset.bucket = bucket;
     el.dataset.timerSec = String(timerSec);
     if (connected && row.connected_at) {
@@ -265,33 +413,42 @@ function patchRow(el, row, nowMs = Date.now()) {
     } else {
         delete el.dataset.connectedAt;
     }
-    if (idle && row.idle_since) {
+    if ((idle || disposition) && row.idle_since) {
         el.dataset.idleSince = String(row.idle_since);
     } else {
         delete el.dataset.idleSince;
     }
 
-    el.classList.remove('is-waiting', 'is-incall', 'is-incall-long', 'is-idle', 'is-queue', 'is-dead');
-    el.classList.add(rowClassFor(bucket));
+    const nextClass = rowClassFor(bucket);
+    if (!el.classList.contains(nextClass)) {
+        el.classList.remove('is-waiting', 'is-incall', 'is-incall-long', 'is-idle', 'is-offline', 'is-queue', 'is-dead', 'is-disposition');
+        el.classList.add(nextClass);
+    }
 
     const timerEl = el.querySelector('[data-row-timer]');
     if (timerEl) {
-        timerEl.textContent = (connected || idle) ? formatTimer(timerSec) : '00:00';
+        const nextTimer = (connected || idle || disposition) ? formatTimer(timerSec) : '00:00';
+        if (timerEl.textContent !== nextTimer) {
+            timerEl.textContent = nextTimer;
+        }
     }
     const pill = el.querySelector('.call-monitoring-status-pill');
     if (pill) {
-        pill.textContent = statusLabelFor(bucket);
+        const nextStatus = row.status || statusLabelFor(bucket);
+        if (pill.textContent !== nextStatus) {
+            pill.textContent = nextStatus;
+        }
     }
     const station = el.querySelector('.call-monitoring-row__station');
     if (station) {
         const nextStation = String(row.station || row.extension || '').trim();
-        if (nextStation && nextStation !== '—') {
+        if (nextStation && nextStation !== '—' && station.textContent !== nextStation) {
             station.textContent = nextStation;
         }
         // Never blank a known station during light polls.
     }
     const name = el.querySelector('.call-monitoring-row__name');
-    if (name) {
+    if (name && name.textContent !== (row.user || '—')) {
         name.textContent = row.user || '—';
     }
     const userCell = el.querySelector('.call-monitoring-row__user');
@@ -323,6 +480,38 @@ function patchRow(el, row, nowMs = Date.now()) {
     } else {
         delete el.dataset.dialMode;
     }
+}
+
+function sortUnifiedRows(rows) {
+    const rank = {
+        not_in_call: 0,
+        idle: 0,
+        ringing: 1,
+        waiting: 1,
+        queue: 1,
+        incall_short: 2,
+        incall_long: 3,
+        disposition: 4,
+        not_logged_in: 5,
+        dead: 6,
+    };
+
+    return [...rows].sort((a, b) => {
+        const bucketA = bucketFor(a);
+        const bucketB = bucketFor(b);
+        const ra = rank[bucketA] ?? 9;
+        const rb = rank[bucketB] ?? 9;
+        if (ra !== rb) {
+            return ra - rb;
+        }
+
+        // Stable within-bucket order: name first, then id — avoids timer-driven reshuffles / flicker.
+        const nameCmp = String(a.user || '').localeCompare(String(b.user || ''), undefined, { sensitivity: 'base' });
+        if (nameCmp !== 0) {
+            return nameCmp;
+        }
+        return String(a.id || '').localeCompare(String(b.id || ''));
+    });
 }
 
 function applySnapshot(root, payload) {
@@ -370,35 +559,118 @@ function applySnapshot(root, payload) {
         .map((row) => ({ ...row, timer_sec: timerSecForRow(row, nowMs) }))
         .filter((row) => timerSecForRow(row, nowMs) > 120);
 
-    // Move any short→long boundary rows that tables arrays still split wrongly.
     const allConnected = [...shortRows, ...longRows];
     const shortFinal = allConnected.filter((row) => timerSecForRow(row, nowMs) <= 120);
     const longFinal = allConnected.filter((row) => timerSecForRow(row, nowMs) > 120);
 
-    const notInCall = Array.isArray(tables.not_in_call) ? tables.not_in_call : [];
+    const notInCallRaw = Array.isArray(tables.not_in_call) ? tables.not_in_call : [];
+    const notLoggedInRaw = Array.isArray(tables.not_logged_in) ? tables.not_logged_in : [];
+    const deadRows = Array.isArray(tables.dead)
+        ? tables.dead
+        : enriched.filter((row) => bucketFor(row) === 'dead');
+    const dispositionRaw = Array.isArray(tables.disposition)
+        ? tables.disposition
+        : enriched.filter((row) => bucketFor(row) === 'disposition');
+    const queueRows = Array.isArray(tables.queue)
+        ? tables.queue
+        : enriched.filter((row) => bucketFor(row) === 'queue');
 
-    fillTable(root, 'ringing', ringing, nowMs);
-    fillTable(root, 'incall_short', shortFinal, nowMs);
-    fillTable(root, 'incall_long', longFinal, nowMs);
-    fillTable(root, 'not_in_call', notInCall, nowMs);
+    // Pin live / idle rows briefly so light polls cannot flash them to NOT LOGGED IN.
+    rememberStickyRows(root, [...shortFinal, ...longFinal, ...ringing, ...queueRows, ...dispositionRaw, ...notInCallRaw], nowMs);
+    const stickyLive = mergeStickyRows(
+        root,
+        [...shortFinal, ...longFinal, ...ringing, ...queueRows, ...dispositionRaw, ...notInCallRaw],
+        nowMs,
+    );
+    const stickyShort = stickyLive.filter((row) => bucketFor(row, timerSecForRow(row, nowMs)) === 'incall_short');
+    const stickyLong = stickyLive.filter((row) => bucketFor(row, timerSecForRow(row, nowMs)) === 'incall_long');
+    const stickyRinging = stickyLive.filter((row) => {
+        const bucket = bucketFor(row);
+        return bucket === 'ringing' || bucket === 'waiting' || bucket === 'queue';
+    });
+    const stickyDisposition = stickyLive.filter((row) => bucketFor(row) === 'disposition');
+    const stickyNotInCall = stickyLive.filter((row) => {
+        const bucket = bucketFor(row);
+        return bucket === 'not_in_call' || bucket === 'idle';
+    });
+
+    const occupied = occupyKeySet([...stickyShort, ...stickyLong, ...stickyRinging, ...stickyDisposition, ...stickyNotInCall]);
+    const notLoggedIn = notLoggedInRaw.filter((row) => !isOccupied(row, occupied));
+
+    const unified = sortUnifiedRows([
+        ...stickyNotInCall,
+        ...stickyRinging,
+        ...stickyShort,
+        ...stickyLong,
+        ...stickyDisposition,
+        ...notLoggedIn,
+        ...deadRows,
+    ]);
+
+    if (root.querySelector('[data-call-monitoring-rows="all"]')) {
+        fillTable(root, 'all', unified, nowMs);
+    } else {
+        fillTable(root, 'ringing', stickyRinging, nowMs);
+        fillTable(root, 'incall_short', stickyShort, nowMs);
+        fillTable(root, 'incall_long', stickyLong, nowMs);
+        fillTable(root, 'dead', deadRows, nowMs);
+        fillTable(root, 'disposition', stickyDisposition, nowMs);
+        fillTable(root, 'not_in_call', stickyNotInCall, nowMs);
+        fillTable(root, 'not_logged_in', notLoggedIn, nowMs);
+    }
 
     const shortStat = root.querySelector('[data-stat="in_call_short"]');
     const longStat = root.querySelector('[data-stat="in_call_long"]');
     const totalStat = root.querySelector('[data-stat="in_call"]');
     const idleStat = root.querySelector('[data-stat="not_in_call"]');
+    const deadStat = root.querySelector('[data-stat="dead"]');
+    const dispositionStat = root.querySelector('[data-stat="disposition"]');
+    const loggedInStat = root.querySelector('[data-stat="logged_in"]');
+    const notLoggedInStat = root.querySelector('[data-stat="not_logged_in"]');
     const agentsStat = root.querySelector('[data-stat="total"]');
-    if (shortStat) shortStat.textContent = String(shortFinal.length);
-    if (longStat) longStat.textContent = String(longFinal.length);
-    if (totalStat) totalStat.textContent = String(shortFinal.length + longFinal.length);
-    if (idleStat) idleStat.textContent = String(notInCall.length);
-    if (agentsStat) {
-        agentsStat.textContent = String(
-            Number(summary.total ?? (shortFinal.length + longFinal.length + ringing.length + notInCall.length))
+    if (shortStat) shortStat.textContent = String(stickyShort.length);
+    if (longStat) longStat.textContent = String(stickyLong.length);
+    if (totalStat) totalStat.textContent = String(stickyShort.length + stickyLong.length);
+    if (idleStat) idleStat.textContent = String(stickyNotInCall.length);
+    if (deadStat) deadStat.textContent = String(deadRows.length);
+    if (dispositionStat) dispositionStat.textContent = String(stickyDisposition.length);
+    if (loggedInStat) {
+        loggedInStat.textContent = String(
+            stickyShort.length + stickyLong.length + stickyRinging.length + stickyDisposition.length + stickyNotInCall.length
         );
     }
+    if (notLoggedInStat) notLoggedInStat.textContent = String(notLoggedIn.length);
+    if (agentsStat) {
+        agentsStat.textContent = String(Number(summary.total ?? unified.length));
+    }
+
+    syncSidebarFromBoard(root);
 }
 
 function rebucketConnectedRows(root) {
+    if (root?.dataset?.callMonitoringUnified === '1' || root?.querySelector('[data-call-monitoring-rows="all"]')) {
+        root.querySelectorAll('.call-monitoring-row[data-status-group="incall"]').forEach((row) => {
+            const sec = Number(row.dataset.timerSec) || 0;
+            const bucket = sec > 120 ? 'incall_long' : 'incall_short';
+            row.dataset.bucket = bucket;
+            row.classList.remove('is-waiting', 'is-incall', 'is-incall-long', 'is-idle', 'is-offline', 'is-queue', 'is-dead', 'is-disposition');
+            row.classList.add(rowClassFor(bucket));
+            const pill = row.querySelector('.call-monitoring-status-pill');
+            if (pill) {
+                pill.textContent = statusLabelFor(bucket);
+            }
+        });
+        const shortCount = root.querySelectorAll('.call-monitoring-row[data-bucket="incall_short"]').length;
+        const longCount = root.querySelectorAll('.call-monitoring-row[data-bucket="incall_long"]').length;
+        const shortStat = root.querySelector('[data-stat="in_call_short"]');
+        const longStat = root.querySelector('[data-stat="in_call_long"]');
+        const totalStat = root.querySelector('[data-stat="in_call"]');
+        if (shortStat) shortStat.textContent = String(shortCount);
+        if (longStat) longStat.textContent = String(longCount);
+        if (totalStat) totalStat.textContent = String(shortCount + longCount);
+        return;
+    }
+
     const shortBody = root.querySelector('[data-call-monitoring-rows="incall_short"]');
     const longBody = root.querySelector('[data-call-monitoring-rows="incall_long"]');
     if (!shortBody || !longBody) {
@@ -456,20 +728,29 @@ function tickTimers(root) {
     root.querySelectorAll('.call-monitoring-row[data-status-group="incall"]').forEach((row) => {
         const connectedAtMs = parseConnectedAtMs(row.dataset.connectedAt);
         const next = connectedAtMs
-            ? Math.max(1, Math.floor((nowMs - connectedAtMs) / 1000))
+            ? Math.max(0, Math.floor((nowMs - connectedAtMs) / 1000))
             : (Number(row.dataset.timerSec) || 0) + 1;
         row.dataset.timerSec = String(next);
         const timerEl = row.querySelector('[data-row-timer]');
         if (timerEl) {
-            timerEl.textContent = formatTimer(next);
+            const label = formatTimer(next);
+            if (timerEl.textContent !== label) {
+                timerEl.textContent = label;
+            }
         }
         const bucket = next > 120 ? 'incall_long' : 'incall_short';
         row.dataset.bucket = bucket;
-        row.classList.remove('is-waiting', 'is-incall', 'is-incall-long', 'is-idle', 'is-queue', 'is-dead');
-        row.classList.add(rowClassFor(bucket));
+        const nextClass = rowClassFor(bucket);
+        if (!row.classList.contains(nextClass)) {
+            row.classList.remove('is-waiting', 'is-incall', 'is-incall-long', 'is-idle', 'is-offline', 'is-queue', 'is-dead', 'is-disposition');
+            row.classList.add(nextClass);
+        }
         const pill = row.querySelector('.call-monitoring-status-pill');
         if (pill) {
-            pill.textContent = statusLabelFor(bucket);
+            const label = statusLabelFor(bucket);
+            if (pill.textContent !== label) {
+                pill.textContent = label;
+            }
         }
     });
     root.querySelectorAll('.call-monitoring-row[data-status-group="idle"], .call-monitoring-row[data-bucket="not_in_call"]').forEach((row) => {
@@ -480,14 +761,42 @@ function tickTimers(root) {
         row.dataset.timerSec = String(next);
         const timerEl = row.querySelector('[data-row-timer]');
         if (timerEl) {
-            timerEl.textContent = formatTimer(next);
+            const label = formatTimer(next);
+            if (timerEl.textContent !== label) {
+                timerEl.textContent = label;
+            }
         }
         row.dataset.bucket = 'not_in_call';
-        row.classList.remove('is-waiting', 'is-incall', 'is-incall-long', 'is-queue', 'is-dead');
-        row.classList.add('is-idle');
+        if (!row.classList.contains('is-idle')) {
+            row.classList.remove('is-waiting', 'is-incall', 'is-incall-long', 'is-offline', 'is-queue', 'is-dead', 'is-disposition');
+            row.classList.add('is-idle');
+        }
+        const pill = row.querySelector('.call-monitoring-status-pill');
+        if (pill && pill.textContent !== 'NOT IN CALL') {
+            pill.textContent = 'NOT IN CALL';
+        }
+    });
+    root.querySelectorAll('.call-monitoring-row[data-status-group="disposition"], .call-monitoring-row[data-bucket="disposition"]').forEach((row) => {
+        const sinceMs = parseConnectedAtMs(row.dataset.idleSince);
+        const next = sinceMs
+            ? Math.max(0, Math.floor((nowMs - sinceMs) / 1000))
+            : (Number(row.dataset.timerSec) || 0) + 1;
+        row.dataset.timerSec = String(next);
+        const timerEl = row.querySelector('[data-row-timer]');
+        if (timerEl) {
+            const label = formatTimer(next);
+            if (timerEl.textContent !== label) {
+                timerEl.textContent = label;
+            }
+        }
+        row.dataset.bucket = 'disposition';
+        if (!row.classList.contains('is-disposition')) {
+            row.classList.remove('is-waiting', 'is-incall', 'is-incall-long', 'is-idle', 'is-offline', 'is-queue', 'is-dead');
+            row.classList.add('is-disposition');
+        }
         const pill = row.querySelector('.call-monitoring-status-pill');
         if (pill) {
-            pill.textContent = 'NOT IN CALL';
+            pill.textContent = 'DISPOSITION';
         }
     });
     rebucketConnectedRows(root);
@@ -521,9 +830,10 @@ function syncSidebarFromBoard(root) {
     if (!root) {
         return;
     }
-    const shortCount = root.querySelectorAll('[data-call-monitoring-rows="incall_short"] .call-monitoring-row').length;
-    const longCount = root.querySelectorAll('[data-call-monitoring-rows="incall_long"] .call-monitoring-row').length;
-    const ringingCount = root.querySelectorAll('[data-call-monitoring-rows="ringing"] .call-monitoring-row').length;
+    const scope = root.querySelector('[data-call-monitoring-rows="all"]') || root;
+    const shortCount = scope.querySelectorAll('.call-monitoring-row[data-bucket="incall_short"]').length;
+    const longCount = scope.querySelectorAll('.call-monitoring-row[data-bucket="incall_long"]').length;
+    const ringingCount = scope.querySelectorAll('.call-monitoring-row[data-bucket="ringing"]').length;
     updateSidebarBadges({
         summary: {
             in_call: shortCount + longCount,
@@ -539,10 +849,11 @@ let monitoringRuntime = null;
  * Timers tick locally every 1s from connected_at (matches dialer).
  * When the board has live rows, poll fast so hangup disappears in real time.
  */
-const BOARD_POLL_ACTIVE_MS = 1000;
-const BOARD_POLL_IDLE_MS = 4000;
-const BOARD_FULL_EVERY = 8;
-const NAV_POLL_MS = 45000;
+const BOARD_POLL_ACTIVE_MS = 2500;
+const BOARD_POLL_IDLE_MS = 5000;
+const BOARD_POLL_SSE_MS = 12000;
+const BOARD_FULL_EVERY = 6;
+const NAV_POLL_MS = 12000;
 
 function digitsOnly(value) {
     return String(value ?? '').replace(/\D/g, '');
@@ -575,6 +886,10 @@ function removeEndedCallsFromBoard(board, detail = {}) {
         const destMatch = endedDest && rowDest && endedDest === rowDest;
         const extMatch = !endedExt || !rowExt || endedExt === rowExt;
         if (idMatch || (destMatch && extMatch)) {
+            const sticky = board._stickyRows;
+            if (sticky && rowId && sticky[rowId]) {
+                delete sticky[rowId];
+            }
             row.remove();
             removed = true;
         }
@@ -584,23 +899,35 @@ function removeEndedCallsFromBoard(board, detail = {}) {
         return false;
     }
 
-    ['ringing', 'incall_short', 'incall_long'].forEach((bucket) => {
-        const tbody = board.querySelector(`[data-call-monitoring-rows="${bucket}"]`);
-        if (!tbody) {
-            return;
+    const unifiedBody = board.querySelector('[data-call-monitoring-rows="all"]');
+    if (unifiedBody) {
+        if (!unifiedBody.querySelector('.call-monitoring-row')) {
+            unifiedBody.innerHTML = emptyRow(emptyMessageFor('all'));
         }
-        if (!tbody.querySelector('.call-monitoring-row')) {
-            tbody.innerHTML = emptyRow(emptyMessageFor(bucket));
-        }
-        const countEl = board.querySelector(`[data-call-monitoring-board="${bucket}"] [data-board-count]`);
+        const countEl = board.querySelector('[data-call-monitoring-board="all"] [data-board-count], [data-board-count]');
         if (countEl) {
-            countEl.textContent = String(tbody.querySelectorAll('.call-monitoring-row').length);
+            countEl.textContent = String(unifiedBody.querySelectorAll('.call-monitoring-row').length);
         }
-    });
+    } else {
+        ['ringing', 'incall_short', 'incall_long'].forEach((bucket) => {
+            const tbody = board.querySelector(`[data-call-monitoring-rows="${bucket}"]`);
+            if (!tbody) {
+                return;
+            }
+            if (!tbody.querySelector('.call-monitoring-row')) {
+                tbody.innerHTML = emptyRow(emptyMessageFor(bucket));
+            }
+            const countEl = board.querySelector(`[data-call-monitoring-board="${bucket}"] [data-board-count]`);
+            if (countEl) {
+                countEl.textContent = String(tbody.querySelectorAll('.call-monitoring-row').length);
+            }
+        });
+    }
 
-    const shortCount = board.querySelectorAll('[data-call-monitoring-rows="incall_short"] .call-monitoring-row').length;
-    const longCount = board.querySelectorAll('[data-call-monitoring-rows="incall_long"] .call-monitoring-row').length;
-    const ringingCount = board.querySelectorAll('[data-call-monitoring-rows="ringing"] .call-monitoring-row').length;
+    const scope = unifiedBody || board;
+    const shortCount = scope.querySelectorAll('.call-monitoring-row[data-bucket="incall_short"]').length;
+    const longCount = scope.querySelectorAll('.call-monitoring-row[data-bucket="incall_long"]').length;
+    const ringingCount = scope.querySelectorAll('.call-monitoring-row[data-bucket="ringing"]').length;
     const shortStat = board.querySelector('[data-stat="in_call_short"]');
     const longStat = board.querySelector('[data-stat="in_call_long"]');
     const totalStat = board.querySelector('[data-stat="in_call"]');
@@ -625,7 +952,14 @@ function stopMonitoringRuntime() {
     window.clearInterval(monitoringRuntime.pollTimer);
     window.clearInterval(monitoringRuntime.tickTimer);
     monitoringRuntime.abortController?.abort();
-    monitoringRuntime.eventSource?.close();
+    if (typeof monitoringRuntime.streamGeneration === 'number') {
+        monitoringRuntime.streamGeneration += 1;
+    }
+    try {
+        monitoringRuntime.eventSource?.close();
+    } catch {
+        // ignore
+    }
     if (monitoringRuntime.onVisibility) {
         document.removeEventListener('visibilitychange', monitoringRuntime.onVisibility);
     }
@@ -653,25 +987,60 @@ export function initCallMonitoring(root = document) {
         return;
     }
 
-    // Re-bind after Turbo navigations.
-    stopMonitoringRuntime();
-    document.documentElement.dataset.callMonitoringInit = '1';
-
     const pollUrl = board?.dataset.callMonitoringPollUrl
         || navLinks[0]?.dataset.callMonitoringPollUrl
         || '';
+    const streamUrl = board?.dataset.callMonitoringStreamUrl
+        || navLinks[0]?.dataset.callMonitoringStreamUrl
+        || '';
 
     const navOnly = !board && navLinks.length > 0;
+
+    // Skip re-init when the same wallboard/nav is already polling — a second
+    // DOMContentLoaded+turbo:load boot was aborting /live as "(canceled)".
+    if (
+        document.documentElement.dataset.callMonitoringInit === '1'
+        && monitoringRuntime
+        && monitoringRuntime.pollUrl === pollUrl
+        && monitoringRuntime.navOnly === navOnly
+        && (navOnly ? document.contains(navLinks[0]) : document.contains(board))
+    ) {
+        return;
+    }
+
+    // Re-bind after Turbo navigations.
+    stopMonitoringRuntime();
+    document.documentElement.dataset.callMonitoringInit = '1';
 
     let pollTimer = null;
     let tickTimer = null;
     let fetching = false;
     let pollCount = 0;
     let abortController = null;
+    let eventSource = null;
+    let streamGeneration = 0;
+    let lastAppliedPresenceVersion = -1;
+    let lastAppliedVersion = -1;
 
     const handlePayload = (payload) => {
         if (!payload || payload.ok === false) {
             return;
+        }
+        const nextVersion = Number(payload.version ?? -1);
+        const nextPresence = Number(payload.presence_version ?? -1);
+        if (
+            nextPresence >= 0
+            && lastAppliedPresenceVersion >= 0
+            && nextPresence < lastAppliedPresenceVersion
+            && nextVersion <= lastAppliedVersion
+        ) {
+            return;
+        }
+        if (nextPresence >= 0) {
+            lastAppliedPresenceVersion = Math.max(lastAppliedPresenceVersion, nextPresence);
+        }
+        if (nextVersion >= 0) {
+            lastAppliedVersion = Math.max(lastAppliedVersion, nextVersion);
         }
         if (board) {
             applySnapshot(board, payload);
@@ -726,7 +1095,10 @@ export function initCallMonitoring(root = document) {
                 void poll({ full: false });
             }, NAV_POLL_MS);
         } else {
-            const delay = boardHasLiveRows(board) ? BOARD_POLL_ACTIVE_MS : BOARD_POLL_IDLE_MS;
+            const sseLive = Boolean(eventSource && eventSource.readyState === 1);
+            const delay = sseLive
+                ? BOARD_POLL_SSE_MS
+                : (boardHasLiveRows(board) ? BOARD_POLL_ACTIVE_MS : BOARD_POLL_IDLE_MS);
             pollTimer = window.setInterval(scheduleBoardPoll, delay);
         }
         if (monitoringRuntime) {
@@ -736,7 +1108,6 @@ export function initCallMonitoring(root = document) {
 
     const scheduleBoardPoll = () => {
         void poll({ full: pollCount === 0 || (pollCount % BOARD_FULL_EVERY) === 0 }).finally(() => {
-            // After each fetch, adapt interval to whether anyone is still live.
             if (!navOnly) {
                 reschedulePoll();
             }
@@ -756,6 +1127,9 @@ export function initCallMonitoring(root = document) {
         }
         lastVisibilityPollAt = now;
         scheduleBoardPoll();
+        if (!eventSource || eventSource.readyState === 2) {
+            connectStream();
+        }
     };
 
     const onHangup = (event) => {
@@ -766,9 +1140,58 @@ export function initCallMonitoring(root = document) {
         if (board) {
             removeEndedCallsFromBoard(board, detail);
         }
-        // Confirm with server immediately so other viewers also clear.
         void poll({ full: false });
         reschedulePoll();
+    };
+
+    const connectStream = () => {
+        if (navOnly || !streamUrl || typeof EventSource === 'undefined') {
+            return;
+        }
+        const generation = ++streamGeneration;
+        try {
+            eventSource?.close();
+        } catch {
+            // ignore
+        }
+        eventSource = new EventSource(streamUrl, { withCredentials: true });
+        eventSource.onmessage = (event) => {
+            if (generation !== streamGeneration) {
+                return;
+            }
+            try {
+                const payload = JSON.parse(event.data);
+                handlePayload(payload);
+                reschedulePoll();
+            } catch (error) {
+                console.warn('[call-monitoring] stream parse failed', error);
+            }
+        };
+        eventSource.onerror = () => {
+            if (generation !== streamGeneration) {
+                return;
+            }
+            try {
+                eventSource?.close();
+            } catch {
+                // ignore
+            }
+            eventSource = null;
+            if (monitoringRuntime) {
+                monitoringRuntime.eventSource = null;
+            }
+            window.setTimeout(() => {
+                if (document.documentElement.dataset.callMonitoringInit === '1'
+                    && generation === streamGeneration
+                    && !document.hidden) {
+                    connectStream();
+                }
+            }, 3000);
+            reschedulePoll();
+        };
+        if (monitoringRuntime) {
+            monitoringRuntime.eventSource = eventSource;
+        }
     };
 
     if (navOnly) {
@@ -776,6 +1199,7 @@ export function initCallMonitoring(root = document) {
         reschedulePoll();
     } else {
         scheduleBoardPoll();
+        connectStream();
         reschedulePoll();
         document.addEventListener('visibilitychange', onVisibility);
         window.addEventListener('comm:monitoring-hangup', onHangup);
@@ -800,10 +1224,13 @@ export function initCallMonitoring(root = document) {
         pollTimer,
         tickTimer,
         abortController,
-        eventSource: null,
+        eventSource,
         onVisibility: navOnly ? null : onVisibility,
         onHangup: navOnly ? null : onHangup,
         broadcast,
+        pollUrl,
+        navOnly,
+        streamGeneration,
     };
 
     document.addEventListener('turbo:before-cache', stopMonitoringRuntime, { once: true });

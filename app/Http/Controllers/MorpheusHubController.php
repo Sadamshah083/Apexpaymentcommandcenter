@@ -418,6 +418,8 @@ class MorpheusHubController extends Controller
 
     public function hangupCall(Request $request, string $uuid)
     {
+        ReleaseSessionLock::now($request);
+
         $fromExtension = $request->input('from_extension');
         $destination = $request->input('destination');
         $originateUuid = trim((string) ($request->input('originate_uuid') ?: $uuid));

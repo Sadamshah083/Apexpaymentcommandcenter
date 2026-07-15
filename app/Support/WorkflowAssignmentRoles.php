@@ -42,6 +42,65 @@ class WorkflowAssignmentRoles
     }
 
     /**
+     * Active appointment setters in the workspace (team members under team leads).
+     *
+     * @return Collection<int, User>
+     */
+    public static function activeSettersFor(Workspace $workspace): Collection
+    {
+        return $workspace->users()
+            ->wherePivot('status', 'active')
+            ->wherePivot('role', 'appointment_setter')
+            ->orderBy('users.name')
+            ->get();
+    }
+
+    /**
+     * Setters that report to a given Appointment Setter Team Lead.
+     *
+     * @return Collection<int, User>
+     */
+    public static function settersForTeamLead(Workspace $workspace, int $teamLeadId): Collection
+    {
+        if ($teamLeadId <= 0) {
+            return new Collection;
+        }
+
+        return $workspace->users()
+            ->wherePivot('status', 'active')
+            ->wherePivot('role', 'appointment_setter')
+            ->wherePivot('team_lead_user_id', $teamLeadId)
+            ->orderBy('users.name')
+            ->get();
+    }
+
+    /**
+     * Map of team-lead id => list of active team members (setters).
+     *
+     * @return array<int, list<array{id:int,name:string}>>
+     */
+    public static function setterTeamMemberMap(Workspace $workspace): array
+    {
+        $map = [];
+        foreach (self::setterTeamLeadsFor($workspace) as $lead) {
+            $map[(int) $lead->id] = [];
+        }
+
+        foreach (self::activeSettersFor($workspace) as $setter) {
+            $leadId = (int) ($setter->pivot->team_lead_user_id ?? 0);
+            if ($leadId <= 0 || ! array_key_exists($leadId, $map)) {
+                continue;
+            }
+            $map[$leadId][] = [
+                'id' => (int) $setter->id,
+                'name' => (string) $setter->name,
+            ];
+        }
+
+        return $map;
+    }
+
+    /**
      * @return Collection<int, User>
      */
     public static function teamLeadsFor(Workspace $workspace): Collection

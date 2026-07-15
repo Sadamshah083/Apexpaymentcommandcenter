@@ -102,16 +102,19 @@ function updateWeeklyMetrics(weekly) {
 
 function renderLeaderboardRow(row, index, options = {}) {
     const { includeScore = false } = options;
+    const calls = row.calls_taken ?? row.calls ?? row.dials ?? 0;
+    const detailUrl = row.detail_url
+        || (row.user_id ? `/admin/dashboard?detail=performer&user_id=${encodeURIComponent(row.user_id)}` : '#');
     return `
         <tr data-member-row="${row.user_id}">
             <td class="font-bold">#${index + 1}</td>
-            <td>${escapeHtml(row.name)}</td>
+            <td><a class="app-link" href="${escapeHtml(detailUrl)}">${escapeHtml(row.name)}</a></td>
             <td>${escapeHtml(row.role)}</td>
-            <td>${row.dials}</td>
-            <td>${row.conversations}</td>
-            <td>${row.discoveries}</td>
-            <td>${row.meetings}</td>
-            <td>${row.deals_funded}</td>
+            <td>${calls}</td>
+            <td>${escapeHtml(row.talk_label || '0s')}</td>
+            <td>${row.disposed ?? 0}</td>
+            <td>${row.meetings ?? 0}</td>
+            <td>${row.deals_funded ?? 0}</td>
             ${includeScore ? `<td class="font-bold">${row.score ?? 0}</td>` : ''}
         </tr>
     `;

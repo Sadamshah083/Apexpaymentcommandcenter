@@ -9,6 +9,7 @@ use App\Models\Workflow;
 use App\Models\WorkflowLead;
 use App\Models\Workspace;
 use App\Services\SalesOps\LeadActivityService;
+use App\Support\LeadDialablePhone;
 use App\Support\LeadStageSync;
 use App\Support\SqliteConcurrency;
 use App\Support\WorkflowAssignmentRoles;
@@ -170,6 +171,7 @@ class SetterDistributionService
         User $teamLead,
         int $count,
         User $actor,
+        array $memberIds = [],
     ): int {
         if ($count < 1 || $teamLead->getWorkspaceRole($workspace->id) !== WorkflowAssignmentRoles::setterTeamLeadRole()) {
             return 0;
@@ -177,18 +179,24 @@ class SetterDistributionService
 
         WorkflowLead::normalizeUnassignedForWorkflow($workflow->id);
 
-        $setters = $workspace->users()
-            ->wherePivot('role', 'appointment_setter')
-            ->wherePivot('status', 'active')
-            ->orderBy('users.name')
-            ->get();
+        $teamSetters = WorkflowAssignmentRoles::settersForTeamLead($workspace, (int) $teamLead->id);
+        $allSetters = WorkflowAssignmentRoles::activeSettersFor($workspace);
 
-        $teamSetters = $setters->filter(
-            fn ($setter) => (int) ($setter->pivot->team_lead_user_id ?? 0) === (int) $teamLead->id
-        )->values();
+        $setters = $teamSetters->isNotEmpty() ? $teamSetters : $allSetters;
 
-        if ($teamSetters->isNotEmpty()) {
-            $setters = $teamSetters;
+        $memberIds = array_values(array_unique(array_filter(array_map('intval', $memberIds))));
+        if ($memberIds !== []) {
+            $allowed = $setters->keyBy(fn ($user) => (int) $user->id);
+            $selected = collect($memberIds)
+                ->map(fn (int $id) => $allowed->get($id))
+                ->filter()
+                ->values();
+
+            // Selected members must belong to this team (or workspace fallback pool).
+            if ($selected->isEmpty()) {
+                return 0;
+            }
+            $setters = $selected;
         }
 
         if ($setters->isEmpty()) {
@@ -309,7 +317,9 @@ class SetterDistributionService
                     return false;
                 }
 
-                $locked->update(LeadStageSync::mergeStage($locked, [
+                $phoneUpdates = LeadDialablePhone::syncAttributes($locked);
+
+                $locked->update(LeadStageSync::mergeStage($locked, array_merge($phoneUpdates, [
                     'assigned_user_id' => $setter->id,
                     'assigned_setter_id' => $setter->id,
                     'pipeline_phase' => 'with_setter',
@@ -318,7 +328,7 @@ class SetterDistributionService
                     'verification_status' => 'approved',
                     'verified_at' => now(),
                     'verified_by' => $actor->id,
-                ]));
+                ])));
 
                 $this->recordAssignment($locked, null, $setter, 'with_setter', $actor);
                 $note = $teamLead

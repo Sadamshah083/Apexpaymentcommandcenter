@@ -293,10 +293,19 @@ class MorpheusCallEventService
         }
 
         $resolvedConnectedAt = $existing['connected_at'] ?? null;
-        // Dialer connected timer is source of truth — always prefer client connected_at when provided.
+        // Dialer connected timer is source of truth — prefer client connected_at.
+        // Once set, keep the earliest epoch so monitoring and dialer seconds stay matched.
         if (filled($connectedAt)) {
             try {
-                $resolvedConnectedAt = \Carbon\Carbon::parse($connectedAt)->utc()->toIso8601String();
+                $incoming = \Carbon\Carbon::parse($connectedAt)->utc();
+                if (filled($resolvedConnectedAt)) {
+                    $existingAt = \Carbon\Carbon::parse((string) $resolvedConnectedAt)->utc();
+                    $resolvedConnectedAt = $incoming->lte($existingAt)
+                        ? $incoming->toIso8601String()
+                        : $existingAt->toIso8601String();
+                } else {
+                    $resolvedConnectedAt = $incoming->toIso8601String();
+                }
             } catch (\Throwable) {
                 if (! filled($resolvedConnectedAt)) {
                     $resolvedConnectedAt = now()->utc()->toIso8601String();

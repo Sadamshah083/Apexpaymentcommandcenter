@@ -199,11 +199,13 @@
             <div class="ghl-dialer-active-notes hidden" data-dialer-active-notes>
                 <p class="ghl-dialer-active-notes__title">Call notes</p>
                 <label class="ghl-dialer-active-notes__label" for="dialer-active-notes-field">Notes</label>
-                <textarea id="dialer-active-notes-field" class="ghl-dialer-active-notes-input"
+                <textarea id="dialer-active-notes-field" name="active_call_notes"
+                    class="ghl-dialer-active-notes-input"
                     data-dialer-active-notes-input rows="3"
                     placeholder="Notes for this call…" maxlength="5000"></textarea>
                 <label class="ghl-dialer-active-notes__label" for="dialer-active-comment-field">Comment</label>
-                <textarea id="dialer-active-comment-field" class="ghl-dialer-active-notes-input"
+                <textarea id="dialer-active-comment-field" name="active_call_comment"
+                    class="ghl-dialer-active-notes-input"
                     data-dialer-active-comment-input rows="2"
                     placeholder="Comment for this call…" maxlength="5000"></textarea>
                 <div class="ghl-dialer-active-notes-actions">
@@ -216,7 +218,8 @@
                 <div class="ghl-dialer-transfer-modal__card" role="dialog" aria-modal="true" aria-labelledby="ghl-dialer-transfer-title">
                     <p class="ghl-dialer-transfer-modal__title" id="ghl-dialer-transfer-title">Transfer call</p>
                     <p class="ghl-dialer-transfer-modal__hint">Enter an extension or phone number</p>
-                    <input type="tel" class="ghl-dialer-transfer-modal__input" data-dialer-transfer-input
+                    <input type="tel" id="dialer-transfer-destination" name="transfer_destination"
+                        class="ghl-dialer-transfer-modal__input" data-dialer-transfer-input
                         placeholder="e.g. 1012 or +12025551234" inputmode="tel" autocomplete="off">
                     <div class="ghl-dialer-transfer-modal__actions">
                         <button type="button" class="ghl-dialer-transfer-modal__btn ghl-dialer-transfer-modal__btn--ghost"

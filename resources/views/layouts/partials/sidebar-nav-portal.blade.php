@@ -57,9 +57,13 @@
 @if ($user?->canAccessPortalModule('communications', $user?->current_workspace_id))
     <x-sidebar.section title="Communications">
         <x-sidebar.link :href="route('portal.communications.index')" label="Communications" icon-name="phone"
-            :exclude-prefixes="['/portal/communications/monitoring']"
-            :active="request()->routeIs('portal.communications.*') && ! request()->routeIs('portal.communications.monitoring*')">
+            :exclude-prefixes="['/portal/communications/monitoring', '/portal/communications/notes']"
+            :active="request()->routeIs('portal.communications.*') && ! request()->routeIs('portal.communications.monitoring*', 'portal.communications.notes')">
             <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'phone'])</x-slot:icon>
+        </x-sidebar.link>
+        <x-sidebar.link :href="route('portal.communications.notes')" label="Call Notes" icon-name="notes"
+            :active="request()->routeIs('portal.communications.notes')">
+            <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'notes'])</x-slot:icon>
         </x-sidebar.link>
         @if (app(\App\Services\Communications\CommunicationsAccessService::class)->canViewCallMonitoring($user, 'portal.'))
             <x-sidebar.link

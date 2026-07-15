@@ -8,7 +8,8 @@
 @endphp
 
 <div class="um-role-dropdown um-module-access-role-dropdown" data-module-access-role-dropdown>
-    <select class="um-role-dropdown-native" data-module-access-role-select tabindex="-1" aria-label="Account role">
+    <select id="module-access-role" name="module_access_role"
+        class="um-role-dropdown-native" data-module-access-role-select tabindex="-1" aria-label="Account role">
         @foreach ($assignableRoles as $value => $label)
             <option value="{{ $value }}" @selected($selectedRole === $value)>{{ $label }}</option>
         @endforeach

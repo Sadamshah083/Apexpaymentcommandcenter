@@ -14,10 +14,10 @@ window.updateAdminDetailPanel = updateAdminDetailPanel;
 
 // Delay the top loader slightly so fast sidebar clicks do not flash it.
 // Still shows on slow/blocked visits; hide is handled by Turbo when the visit ends.
-if (typeof Turbo.session?.drive?.progressBar?.setDelay === 'function') {
+if (Turbo.config?.drive) {
+    Turbo.config.drive.progressBarDelay = 200;
+} else if (typeof Turbo.session?.drive?.progressBar?.setDelay === 'function') {
     Turbo.session.drive.progressBar.setDelay(200);
-} else if (typeof Turbo.setProgressBarDelay === 'function') {
-    Turbo.setProgressBarDelay(200);
 }
 
 let workspaceSyncModule = null;
@@ -153,6 +153,9 @@ async function bootDeferredFeatures() {
     if (document.querySelector('[data-auto-dial-hub], [data-call-summary-modal], [data-phone-workspace]')) {
         // Safe to call again — module-level guards prevent double disposition listeners.
         tasks.push(import('./communications-auto-dial.js').then((module) => module.initAutoDialHub()));
+    } else if (document.querySelector('[data-presence-url]')) {
+        // Agent logged into portal — announce presence so Call Monitoring flips to Not in call.
+        tasks.push(import('./communications-auto-dial.js').then((module) => module.initAgentPresence()));
     }
 
     if (document.querySelector('[data-workflow-upload]')) {
@@ -184,8 +187,16 @@ async function bootDeferredFeatures() {
     await Promise.allSettled(tasks);
 }
 
+let deferredBootGeneration = 0;
+
 function scheduleDeferredBoot() {
+    // DOMContentLoaded and turbo:load both fire on first navigation — only the
+    // latest generation should boot, otherwise call-monitoring aborts /live mid-flight.
+    const generation = ++deferredBootGeneration;
     const run = () => {
+        if (generation !== deferredBootGeneration) {
+            return;
+        }
         void bootDeferredFeatures();
     };
 

@@ -9,6 +9,12 @@ use Illuminate\Support\Facades\Auth;
 
 class CallMonitoringService
 {
+    /** @var array<string, bool> */
+    protected array $monitoringExcludedExtensions = [];
+
+    /** @var array<int, bool> */
+    protected array $monitoringExcludedUserIds = [];
+
     public function __construct(
         protected MorpheusHubService $hub,
         protected CommunicationsAgentService $agents,
@@ -41,14 +47,43 @@ class CallMonitoringService
         }
 
         $agentsByExt = collect();
+        $excludedExtensions = [];
+        $excludedUserIds = [];
         if ($workspace) {
             try {
                 // Light polls must still resolve role badges (DB only). Full polls can enrich via Morpheus.
                 $agents = $light
                     ? $this->agents->listLocalExtensionDirectory($workspace)
                     : $this->agents->listForWorkspace($workspace);
+
+                foreach ($agents as $agent) {
+                    if (! is_array($agent)) {
+                        continue;
+                    }
+                    $role = (string) ($agent['role'] ?? '');
+                    $label = (string) ($agent['role_label'] ?? '');
+                    if (AgentPresenceService::isExcludedFromMonitoring($role, $label)) {
+                        $ext = preg_replace('/\D/', '', (string) ($agent['morpheus_extension_num'] ?? '')) ?? '';
+                        if ($ext !== '') {
+                            $excludedExtensions[$ext] = true;
+                        }
+                        $uid = (int) ($agent['user_id'] ?? 0);
+                        if ($uid > 0) {
+                            $excludedUserIds[$uid] = true;
+                        }
+                    }
+                }
+
+                $this->monitoringExcludedExtensions = $excludedExtensions;
+                $this->monitoringExcludedUserIds = $excludedUserIds;
+
                 $agentsByExt = collect($agents)
                     ->filter(fn (array $a) => filled($a['morpheus_extension_num'] ?? null))
+                    ->filter(fn (array $a) => ! AgentPresenceService::isExcludedFromMonitoring(
+                        (string) ($a['role'] ?? ''),
+                        (string) ($a['role_label'] ?? ''),
+                    ))
+                    ->filter(fn (array $a) => AgentPresenceService::isMonitorableRole((string) ($a['role'] ?? '')))
                     ->keyBy(fn (array $a) => preg_replace('/\D/', '', (string) $a['morpheus_extension_num']));
             } catch (\Throwable $e) {
                 $warnings[] = 'Could not load workspace agents.';
@@ -105,7 +140,7 @@ class CallMonitoringService
             }
         }
 
-        $rows = $this->dedupeRows(array_values($rowsById));
+        $rows = $this->rejectExcludedMonitoringRows($this->dedupeRows(array_values($rowsById)));
 
         usort($rows, function (array $a, array $b) {
             $rank = ['incall' => 0, 'queue' => 1, 'ringing' => 2, 'waiting' => 2, 'dead' => 3];
@@ -122,28 +157,83 @@ class CallMonitoringService
         $inCallLong = collect($rows)->where('bucket', 'incall_long')->count();
         $ringing = collect($rows)->where('bucket', 'ringing')->count();
         $queue = collect($rows)->where('bucket', 'queue')->count();
-        $dead = collect($rows)->where('bucket', 'dead')->count();
+        $deadFromLive = collect($rows)->where('bucket', 'dead')->values()->all();
         $inCall = $inCallShort + $inCallLong;
 
         $notInCall = [];
+        $disposition = [];
+        $notLoggedIn = [];
+        $deadRecent = [];
         if ($workspace) {
             try {
-                $notInCall = $this->buildNotInCallRows($workspace, $agentsByExt->values()->all(), $rows);
+                $notInCall = $this->rejectExcludedMonitoringRows(
+                    $this->buildNotInCallRows($workspace, $agentsByExt->values()->all(), $rows)
+                );
             } catch (\Throwable) {
                 $warnings[] = 'Could not load idle agents.';
             }
+
+            try {
+                $disposition = $this->rejectExcludedMonitoringRows(
+                    $this->buildDispositionRows($workspace, $agentsByExt->values()->all(), $rows)
+                );
+            } catch (\Throwable) {
+                $warnings[] = 'Could not load disposition agents.';
+            }
+
+            try {
+                $notLoggedIn = $this->rejectExcludedMonitoringRows(
+                    $this->buildNotLoggedInRows(
+                        $workspace,
+                        $agentsByExt->values()->all(),
+                        $rows,
+                        $notInCall,
+                        $disposition
+                    )
+                );
+            } catch (\Throwable) {
+                $warnings[] = 'Could not load offline agents.';
+            }
+
+            try {
+                $deadRecent = $this->rejectExcludedMonitoringRows(
+                    $this->recentDeadCallRows($workspace, $agentsByExt)
+                );
+            } catch (\Throwable) {
+                // Dead board is optional enrichment.
+            }
         }
+
+        // Deduplicate dead live + recent missed/ended legs.
+        $deadById = [];
+        foreach (array_merge($deadFromLive, $deadRecent) as $deadRow) {
+            $id = (string) ($deadRow['id'] ?? '');
+            if ($id === '') {
+                continue;
+            }
+            $deadById[$id] = $deadRow;
+        }
+        $deadRows = $this->rejectExcludedMonitoringRows(array_values($deadById));
+        $dead = count($deadRows);
         $notInCallCount = count($notInCall);
+        $dispositionCount = count($disposition);
+        $notLoggedInCount = count($notLoggedIn);
+        $loggedInCount = $notInCallCount + $dispositionCount + count($rows);
 
         // Attach dial mode onto live rows when presence knows it.
         $rows = $this->attachDialModeToLiveRows($workspace, $rows);
+
+        $presenceVersion = $workspace
+            ? app(AgentPresenceService::class)->presenceVersion($workspace)
+            : 0;
 
         return [
             'ok' => true,
             'generated_at' => now()->toIso8601String(),
             'version' => $this->callEvents->monitoringVersion(),
+            'presence_version' => $presenceVersion,
             'summary' => [
-                'total' => count($rows) + $notInCallCount,
+                'total' => $loggedInCount + $notLoggedInCount,
                 'in_call' => $inCall,
                 'in_call_short' => $inCallShort,
                 'in_call_long' => $inCallLong,
@@ -151,20 +241,26 @@ class CallMonitoringService
                 'ringing' => $ringing,
                 'queue' => $queue,
                 'dead' => $dead,
+                'disposition' => $dispositionCount,
                 'not_in_call' => $notInCallCount,
+                'logged_in' => $loggedInCount,
+                'not_logged_in' => $notLoggedInCount,
                 'active_calls' => $inCall + $queue,
-                'agents_online' => $notInCallCount + count($rows),
+                'agents_online' => $loggedInCount,
             ],
             'tables' => [
                 'ringing' => collect($rows)->where('bucket', 'ringing')->values()->all(),
                 'incall_short' => collect($rows)->where('bucket', 'incall_short')->values()->all(),
                 'incall_long' => collect($rows)->where('bucket', 'incall_long')->values()->all(),
                 'queue' => collect($rows)->where('bucket', 'queue')->values()->all(),
-                'dead' => collect($rows)->where('bucket', 'dead')->values()->all(),
+                'dead' => $deadRows,
+                'disposition' => $disposition,
                 'not_in_call' => $notInCall,
+                'not_logged_in' => $notLoggedIn,
             ],
             'rows' => $rows,
             'not_in_call' => $notInCall,
+            'not_logged_in' => $notLoggedIn,
             'warnings' => $warnings,
         ];
     }
@@ -379,12 +475,12 @@ class CallMonitoringService
             $timerSec = 0;
             if ($answered && filled($connectedAt)) {
                 try {
-                    $timerSec = max(1, \Carbon\Carbon::parse((string) $connectedAt)->diffInSeconds(now()));
+                    $timerSec = max(0, (int) \Carbon\Carbon::parse((string) $connectedAt)->diffInSeconds(now()));
                 } catch (\Throwable) {
-                    $timerSec = max(1, (int) ($log->duration_sec ?? 0));
+                    $timerSec = max(0, (int) ($log->duration_sec ?? 0));
                 }
             } elseif ($answered) {
-                $timerSec = max(1, (int) ($log->duration_sec ?? 0));
+                $timerSec = max(0, (int) ($log->duration_sec ?? 0));
             }
 
             $row = $this->buildRow([
@@ -449,12 +545,12 @@ class CallMonitoringService
             $connectedAt = $input['connected_at'] ?? null;
             if (filled($connectedAt)) {
                 try {
-                    $timerSec = max(1, (int) \Carbon\Carbon::parse((string) $connectedAt)->diffInSeconds(now()));
+                    $timerSec = max(0, (int) \Carbon\Carbon::parse((string) $connectedAt)->diffInSeconds(now()));
                 } catch (\Throwable) {
-                    $timerSec = max(1, $billsec);
+                    $timerSec = max(0, $billsec);
                 }
             } else {
-                $timerSec = max(1, $billsec);
+                $timerSec = max(0, $billsec);
             }
 
             if ($timerSec > 120) {
@@ -516,6 +612,11 @@ class CallMonitoringService
             }
         }
 
+        $userId = (int) ($local['user_id'] ?? $agent['user_id'] ?? 0);
+        if ($this->isExcludedMonitoringTarget($extension, $userId, $agent)) {
+            return null;
+        }
+
         $userName = (string) (
             $local['agent_name']
             ?? ($agent['name'] ?? null)
@@ -527,7 +628,7 @@ class CallMonitoringService
             'station' => $extension !== '' ? $extension : '—',
             'extension' => $extension,
             'user' => $userName,
-            'user_id' => (int) ($local['user_id'] ?? $agent['user_id'] ?? 0),
+            'user_id' => $userId,
             'role_label' => (string) ($agent['role_label'] ?? ''),
             'status' => $status,
             'status_group' => $statusGroup,
@@ -541,6 +642,51 @@ class CallMonitoringService
             'under_two_minutes' => $statusGroup === 'incall' && $timerSec <= 120,
             'connected_at' => $input['connected_at'] ?? null,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $agent
+     */
+    protected function isExcludedMonitoringTarget(string $extension, int $userId, ?array $agent = null): bool
+    {
+        if ($extension !== '' && isset($this->monitoringExcludedExtensions[$extension])) {
+            return true;
+        }
+
+        if ($userId > 0 && isset($this->monitoringExcludedUserIds[$userId])) {
+            return true;
+        }
+
+        if (is_array($agent) && AgentPresenceService::isExcludedFromMonitoring(
+            (string) ($agent['role'] ?? ''),
+            (string) ($agent['role_label'] ?? ''),
+        )) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Drop Super Admin / Admin (and other non-agent) rows that still slipped through.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     * @return list<array<string, mixed>>
+     */
+    protected function rejectExcludedMonitoringRows(array $rows): array
+    {
+        return array_values(array_filter($rows, function (array $row) {
+            $ext = preg_replace('/\D/', '', (string) ($row['station'] ?? $row['extension'] ?? '')) ?? '';
+            $uid = (int) ($row['user_id'] ?? 0);
+            if ($this->isExcludedMonitoringTarget($ext, $uid)) {
+                return false;
+            }
+
+            return ! AgentPresenceService::isExcludedFromMonitoring(
+                null,
+                (string) ($row['role_label'] ?? ''),
+            );
+        }));
     }
 
     /**
@@ -789,6 +935,10 @@ class CallMonitoringService
             if (($entry['on_call'] ?? false) === true) {
                 continue;
             }
+            // Agents wrapping up a call belong on the Disposition board, not Not in call.
+            if (($entry['in_disposition'] ?? false) === true) {
+                continue;
+            }
 
             $agent = $agentsByUser->get($userId) ?: [];
             $role = (string) ($entry['role'] ?? $agent['role'] ?? '');
@@ -854,7 +1004,273 @@ class CallMonitoringService
             ];
         }
 
+        usort($rows, static function (array $a, array $b) {
+            $name = strcasecmp((string) ($a['user'] ?? ''), (string) ($b['user'] ?? ''));
+            if ($name !== 0) {
+                return $name;
+            }
+
+            return strcmp((string) ($a['id'] ?? ''), (string) ($b['id'] ?? ''));
+        });
+
+        return $rows;
+    }
+
+    /**
+     * Monitorable agents with an extension who are not currently present (logged out / offline).
+     *
+     * @param  array<int, array<string, mixed>>  $agents
+     * @param  array<int, array<string, mixed>>  $liveRows
+     * @param  array<int, array<string, mixed>>  $notInCallRows
+     * @param  array<int, array<string, mixed>>  $dispositionRows
+     * @return array<int, array<string, mixed>>
+     */
+    protected function buildNotLoggedInRows(
+        Workspace $workspace,
+        array $agents,
+        array $liveRows,
+        array $notInCallRows = [],
+        array $dispositionRows = []
+    ): array {
+        $presence = app(AgentPresenceService::class)->listOnline($workspace);
+        $onlineUserIds = [];
+        $onlineExts = [];
+        foreach ($presence as $entry) {
+            $uid = (int) ($entry['user_id'] ?? 0);
+            if ($uid > 0) {
+                $onlineUserIds[$uid] = true;
+            }
+            $ext = preg_replace('/\D/', '', (string) ($entry['extension'] ?? '')) ?? '';
+            if ($ext !== '') {
+                $onlineExts[$ext] = true;
+            }
+        }
+
+        $occupiedUserIds = $onlineUserIds;
+        $occupiedExts = $onlineExts;
+        foreach (array_merge($liveRows, $notInCallRows, $dispositionRows) as $row) {
+            $uid = (int) ($row['user_id'] ?? 0);
+            if ($uid > 0) {
+                $occupiedUserIds[$uid] = true;
+            }
+            $ext = preg_replace('/\D/', '', (string) ($row['station'] ?? $row['extension'] ?? '')) ?? '';
+            if ($ext !== '') {
+                $occupiedExts[$ext] = true;
+            }
+        }
+
+        $rows = [];
+        foreach ($agents as $agent) {
+            if (! is_array($agent)) {
+                continue;
+            }
+
+            $role = (string) ($agent['role'] ?? '');
+            $label = (string) ($agent['role_label'] ?? '');
+            if (AgentPresenceService::isExcludedFromMonitoring($role, $label)) {
+                continue;
+            }
+            if (! AgentPresenceService::isMonitorableRole($role)) {
+                continue;
+            }
+
+            $userId = (int) ($agent['user_id'] ?? 0);
+            $ext = preg_replace('/\D/', '', (string) ($agent['morpheus_extension_num'] ?? '')) ?? '';
+            if ($ext === '') {
+                continue;
+            }
+            if (($userId > 0 && isset($occupiedUserIds[$userId])) || isset($occupiedExts[$ext])) {
+                continue;
+            }
+
+            $rows[] = [
+                'id' => 'offline:'.($userId > 0 ? $userId : $ext),
+                'station' => $ext,
+                'extension' => $ext,
+                'user' => (string) ($agent['name'] ?? 'Agent'),
+                'user_id' => $userId,
+                'role_label' => $label !== '' ? $label : \App\Support\SalesOps::roleLabel($role),
+                'status' => 'NOT LOGGED IN',
+                'status_group' => 'not_logged_in',
+                'bucket' => 'not_logged_in',
+                'timer_sec' => 0,
+                'timer_label' => '00:00',
+                'campaign' => '—',
+                'destination' => '—',
+                'dial_mode' => '',
+                'dial_mode_label' => '',
+                'direction' => '',
+                'color' => 'offline',
+                'under_two_minutes' => false,
+                'connected_at' => null,
+                'idle_since' => null,
+            ];
+        }
+
+        usort($rows, static fn (array $a, array $b) => strcasecmp((string) ($a['user'] ?? ''), (string) ($b['user'] ?? '')));
+
+        return $rows;
+    }
+
+    /**
+     * Agents currently on the call-summary / disposition modal.
+     *
+     * @param  array<int, array<string, mixed>>  $agents
+     * @param  array<int, array<string, mixed>>  $liveRows
+     * @return array<int, array<string, mixed>>
+     */
+    protected function buildDispositionRows(Workspace $workspace, array $agents, array $liveRows): array
+    {
+        $presence = app(AgentPresenceService::class)->listOnline($workspace);
+        if ($presence === []) {
+            return [];
+        }
+
+        $busyUserIds = [];
+        foreach ($liveRows as $row) {
+            if (in_array(($row['status_group'] ?? ''), ['incall', 'ringing', 'waiting', 'queue'], true)) {
+                $uid = (int) ($row['user_id'] ?? 0);
+                if ($uid > 0) {
+                    $busyUserIds[$uid] = true;
+                }
+            }
+        }
+
+        $agentsByUser = collect($agents)->keyBy(fn (array $a) => (int) ($a['user_id'] ?? 0));
+        $rows = [];
+
+        foreach ($presence as $entry) {
+            if (($entry['in_disposition'] ?? false) !== true) {
+                continue;
+            }
+
+            $userId = (int) ($entry['user_id'] ?? 0);
+            if ($userId <= 0) {
+                continue;
+            }
+            // Still live-talking overrides wrap-up state.
+            if (isset($busyUserIds[$userId]) || ($entry['on_call'] ?? false) === true) {
+                continue;
+            }
+
+            $agent = $agentsByUser->get($userId) ?: [];
+            $role = (string) ($entry['role'] ?? $agent['role'] ?? '');
+            if ($role !== '' && ! AgentPresenceService::isMonitorableRole($role)) {
+                continue;
+            }
+
+            $ext = preg_replace('/\D/', '', (string) ($entry['extension'] ?? $agent['morpheus_extension_num'] ?? '')) ?? '';
+            $since = $entry['disposition_since'] ?? $entry['idle_since'] ?? $entry['last_seen_at'] ?? now()->utc()->toIso8601String();
+            try {
+                $timerSec = max(0, (int) \Carbon\Carbon::parse((string) $since)->diffInSeconds(now()));
+            } catch (\Throwable) {
+                $timerSec = 0;
+            }
+
+            $destination = trim((string) ($entry['disposition_phone'] ?? $entry['last_destination'] ?? ''));
+            $dialMode = strtolower((string) ($entry['dial_mode'] ?? 'manual')) === 'auto' ? 'auto' : 'manual';
+
+            $rows[] = [
+                'id' => 'disposition:'.$userId,
+                'station' => $ext !== '' ? $ext : '—',
+                'extension' => $ext,
+                'user' => (string) ($entry['name'] ?? $agent['name'] ?? 'Agent'),
+                'user_id' => $userId,
+                'role_label' => (string) ($entry['role_label'] ?? $agent['role_label'] ?? \App\Support\SalesOps::roleLabel($role)),
+                'status' => 'DISPOSITION',
+                'status_group' => 'disposition',
+                'bucket' => 'disposition',
+                'timer_sec' => $timerSec,
+                'timer_label' => $this->formatTimer($timerSec),
+                'campaign' => $dialMode === 'auto' ? 'Auto dial' : 'Manual dial',
+                'destination' => $destination !== '' ? $destination : 'Awaiting disposition',
+                'dial_mode' => $dialMode,
+                'dial_mode_label' => $dialMode === 'auto' ? 'Auto dial' : 'Manual dial',
+                'direction' => '',
+                'color' => 'disposition',
+                'under_two_minutes' => false,
+                'connected_at' => null,
+                'idle_since' => $since,
+            ];
+        }
+
         usort($rows, static fn (array $a, array $b) => ($b['timer_sec'] ?? 0) <=> ($a['timer_sec'] ?? 0));
+
+        return $rows;
+    }
+
+    /**
+     * Recently ended legs that never connected (dead / missed / busy).
+     *
+     * @param  \Illuminate\Support\Collection<string, array<string, mixed>>  $agentsByExt
+     * @return array<int, array<string, mixed>>
+     */
+    protected function recentDeadCallRows(Workspace $workspace, $agentsByExt): array
+    {
+        $logs = CommunicationCallLog::query()
+            ->where('workspace_id', $workspace->id)
+            ->where('updated_at', '>=', now()->subSeconds(120))
+            ->where(function ($query) {
+                $query->whereIn('status', ['no_answer', 'busy', 'failed', 'missed', 'cancelled', 'canceled'])
+                    ->orWhere(function ($inner) {
+                        $inner->where('status', 'completed')
+                            ->where(function ($dur) {
+                                $dur->whereNull('duration_sec')->orWhere('duration_sec', '<=', 0);
+                            });
+                    });
+            })
+            ->with('user:id,name')
+            ->orderByDesc('id')
+            ->limit(40)
+            ->get();
+
+        $rows = [];
+        $seen = [];
+        foreach ($logs as $log) {
+            $ext = preg_replace('/\D/', '', (string) ($log->from_extension ?? '')) ?? '';
+            $dest = preg_replace('/\D/', '', (string) ($log->to_phone ?? '')) ?? '';
+            $legKey = $ext.'|'.$dest;
+            if ($legKey !== '|' && isset($seen[$legKey])) {
+                continue;
+            }
+            if ($legKey !== '|') {
+                $seen[$legKey] = true;
+            }
+
+            $uuid = (string) ($log->morpheus_call_uuid ?: ('dead-local:'.$log->id));
+            $row = $this->buildRow([
+                'uuid' => $uuid,
+                'state' => 'DEAD',
+                'answered' => false,
+                'billsec' => 0,
+                'age_sec' => max(0, $log->updated_at?->diffInSeconds(now()) ?? 0),
+                'destination' => (string) ($log->to_phone ?? ''),
+                'caller' => '',
+                'extension' => $ext,
+                'campaign' => '—',
+                'direction' => (string) ($log->direction ?? ''),
+                'raw' => [],
+            ], $agentsByExt, [
+                $uuid => [
+                    'user_id' => $log->user_id,
+                    'agent_name' => $log->user?->name,
+                    'direction' => $log->direction,
+                    'from_extension' => $log->from_extension,
+                ],
+            ]);
+
+            if ($row !== null) {
+                $status = match (strtolower((string) $log->status)) {
+                    'busy' => 'DEAD · BUSY',
+                    'no_answer', 'missed' => 'DEAD · NO ANSWER',
+                    'failed' => 'DEAD · FAILED',
+                    'cancelled', 'canceled' => 'DEAD · CANCELLED',
+                    default => 'DEAD',
+                };
+                $row['status'] = $status;
+                $rows[] = $row;
+            }
+        }
 
         return $rows;
     }

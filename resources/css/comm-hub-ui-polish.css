@@ -1899,9 +1899,9 @@ button.ghl-auto-dial-btn.hidden,
     inset: 0;
     z-index: 10120;
     display: flex;
-    align-items: flex-start;
-    justify-content: flex-end;
-    padding: 0.85rem 0.85rem 1rem;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
     pointer-events: none;
 }
 
@@ -1930,18 +1930,18 @@ body > .ch-call-summary {
     z-index: 1;
     display: flex;
     flex-direction: column;
-    width: min(100%, 420px);
-    max-height: min(92vh, 720px);
+    width: min(100%, 460px);
+    max-height: min(92vh, 760px);
     overflow: hidden;
     background: #fff;
     border-radius: 1.15rem;
     border: 1.5px solid #e2e8f0;
     box-shadow:
-        0 24px 60px rgba(15, 23, 42, 0.18),
-        0 2px 8px rgba(15, 23, 42, 0.06);
+        0 24px 60px rgba(15, 23, 42, 0.22),
+        0 2px 8px rgba(15, 23, 42, 0.08);
     padding: 0;
     pointer-events: auto;
-    margin-top: 0.25rem;
+    margin: 0 auto;
 }
 
 .ch-call-summary__header {
@@ -2085,13 +2085,18 @@ body > .ch-call-summary {
 
 .ch-call-summary__dispositions {
     margin-top: 1rem;
+    text-align: center;
+}
+
+.ch-call-summary__section-head {
+    text-align: center;
 }
 
 .ch-call-summary__section-head h3 {
     margin: 0;
-    font-size: 0.8125rem;
-    font-weight: 600;
-    color: #64748b;
+    font-size: 0.9375rem;
+    font-weight: 700;
+    color: #334155;
 }
 
 .ch-call-summary__required {
@@ -2109,9 +2114,11 @@ body > .ch-call-summary {
 }
 
 .ch-call-summary__hint {
-    margin: 0.25rem 0 0;
+    margin: 0.35rem auto 0;
+    max-width: 28rem;
     font-size: 0.75rem;
     color: #64748b;
+    text-align: center;
 }
 
 .ch-call-summary__backdrop {
@@ -2121,43 +2128,103 @@ body > .ch-call-summary {
 .ch-call-summary__grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.5rem;
-    margin-top: 0.75rem;
+    gap: 0.55rem;
+    margin-top: 0.85rem;
+    justify-items: stretch;
 }
 
 .ch-call-summary__dispo-btn {
-    min-height: 2.35rem;
-    padding: 0.45rem 0.65rem;
-    border: 1.5px solid #bbf7d0;
-    border-radius: 0.5rem;
-    background: #fff;
-    color: #059669;
+    min-height: 2.5rem;
+    padding: 0.5rem 0.7rem;
+    border: 1.5px solid transparent;
+    border-radius: 0.65rem;
+    background: #f8fafc;
+    color: #334155;
     font-size: 0.75rem;
-    font-weight: 600;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    text-align: center;
     cursor: pointer;
-    transition:
-        border-color 0.12s ease,
-        background 0.12s ease,
-        color 0.12s ease,
-        box-shadow 0.12s ease;
+    transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 }
 
 .ch-call-summary__dispo-btn:hover {
-    border-color: #6ee7b7;
-    background: #ecfdf5;
-    color: #047857;
+    transform: translateY(-1px);
+    filter: brightness(0.98);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
 }
 
 .ch-call-summary__dispo-btn.is-selected {
-    border-color: #6ee7b7;
-    background: #d1fae5;
-    color: #047857;
-    box-shadow: none;
+    outline: 2px solid #0f172a;
+    outline-offset: 1px;
+    box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.12);
+    transform: translateY(-1px);
 }
 
 .ch-call-summary__dispo-btn:focus-visible {
-    outline: 2px solid #e2e8f0;
-    outline-offset: 1px;
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+}
+
+.ch-call-summary__dispo-btn--slate {
+    background: #f1f5f9 !important;
+    border-color: #cbd5e1 !important;
+    color: #334155 !important;
+}
+
+.ch-call-summary__dispo-btn--amber {
+    background: #fef3c7 !important;
+    border-color: #fcd34d !important;
+    color: #92400e !important;
+}
+
+.ch-call-summary__dispo-btn--orange {
+    background: #ffedd5 !important;
+    border-color: #fdba74 !important;
+    color: #9a3412 !important;
+}
+
+.ch-call-summary__dispo-btn--sky {
+    background: #e0f2fe !important;
+    border-color: #7dd3fc !important;
+    color: #075985 !important;
+}
+
+.ch-call-summary__dispo-btn--emerald {
+    background: #d1fae5 !important;
+    border-color: #6ee7b7 !important;
+    color: #065f46 !important;
+}
+
+.ch-call-summary__dispo-btn--rose {
+    background: #ffe4e6 !important;
+    border-color: #fda4af !important;
+    color: #9f1239 !important;
+}
+
+.ch-call-summary__dispo-btn--violet {
+    background: #ede9fe !important;
+    border-color: #c4b5fd !important;
+    color: #5b21b6 !important;
+}
+
+.ch-call-summary__dispo-btn--cyan {
+    background: #cffafe !important;
+    border-color: #67e8f9 !important;
+    color: #155e75 !important;
+}
+
+.ch-call-summary__dispo-btn--indigo {
+    background: #e0e7ff !important;
+    border-color: #a5b4fc !important;
+    color: #3730a3 !important;
+}
+
+.ch-call-summary__dispo-btn--teal {
+    background: #ccfbf1 !important;
+    border-color: #5eead4 !important;
+    color: #115e59 !important;
 }
 
 .ch-call-summary__fields {
@@ -2315,16 +2382,16 @@ body > .ch-call-summary {
 
 @media (max-width: 480px) {
     .ch-call-summary {
-        padding: 0.65rem 0.65rem 0.85rem;
-        align-items: flex-start;
-        justify-content: flex-end;
+        padding: 0.65rem;
+        align-items: center;
+        justify-content: center;
     }
 
     .ch-call-summary__card {
         width: min(100%, 100%);
-        max-height: min(90vh, 760px);
+        max-height: min(92vh, 760px);
         border-radius: 1rem;
-        margin-top: 0;
+        margin: 0 auto;
     }
 
     .ch-call-summary__header {

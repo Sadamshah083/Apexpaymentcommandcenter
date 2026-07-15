@@ -347,10 +347,11 @@ class DashboardDetailService
         }
 
         $start = now()->startOfWeek();
+        $end = now()->endOfWeek();
         $counts = LeadActivity::query()
             ->select('type', DB::raw('count(*) as total'))
             ->where('user_id', $userId)
-            ->whereBetween('created_at', [$start, now()])
+            ->whereBetween('created_at', [$start, $end])
             ->whereIn('type', ['dial', 'conversation', 'discovery', 'meeting_booked'])
             ->whereHas('lead.workflow', fn ($q) => $q->where('workspace_id', $workspace->id))
             ->groupBy('type')
@@ -364,18 +365,53 @@ class DashboardDetailService
             ->where('updated_at', '>=', $start)
             ->count();
 
+        $callStats = $this->performance->callStatsByUser($workspace, [$userId], $start, $end)[$userId] ?? [
+            'calls' => 0,
+            'talk_sec' => 0,
+            'disposed' => 0,
+            'connected' => 0,
+        ];
+        $callsTaken = (int) ($callStats['calls'] ?? 0);
+        $talkSec = (int) ($callStats['talk_sec'] ?? 0);
+        $avgSec = $callsTaken > 0 ? (int) round($talkSec / $callsTaken) : 0;
+
+        $callLogs = $this->performance->agentCallHistory($workspace, $userId, $start, $end, 25);
+        $calls = $callLogs->getCollection()->map(function ($row) {
+            $duration = (int) ($row->duration_sec ?? 0);
+            $disposition = trim((string) ($row->disposition ?: data_get($row->meta, 'disposition', '')));
+            $phone = $row->to_phone ?: $row->from_phone ?: '—';
+            $when = $row->started_at ?? $row->created_at;
+
+            return [
+                'phone' => $phone,
+                'direction' => $row->direction ?: 'outbound',
+                'duration_sec' => $duration,
+                'duration_label' => $this->performance->formatTalkDuration($duration),
+                'disposition' => $disposition !== '' ? $disposition : '—',
+                'status' => $duration > 0 ? 'Connected' : ucfirst((string) ($row->status ?: 'completed')),
+                'note' => trim((string) ($row->note ?? '')),
+                'when' => $when?->diffForHumans() ?? '—',
+                'when_exact' => $when?->timezone(config('app.timezone'))->format('D M j · g:i A') ?? '—',
+            ];
+        })->values()->all();
+
         return [
             'key' => 'performer',
             'title' => $member->name,
-            'description' => 'Weekly performance breakdown for this team member.',
-            'total' => array_sum($counts) + $funded,
+            'description' => 'Weekly call activity — clicks from the leaderboard show duration, disposition, and outcomes.',
+            'total' => $callsTaken,
+            'total_label' => 'calls this week',
             'stats' => [
-                ['label' => 'Dials', 'value' => (int) ($counts['dial'] ?? 0)],
-                ['label' => 'Conversations', 'value' => (int) ($counts['conversation'] ?? 0)],
-                ['label' => 'Discoveries', 'value' => (int) ($counts['discovery'] ?? 0)],
+                ['label' => 'Calls taken', 'value' => $callsTaken],
+                ['label' => 'Talk time', 'value' => $this->performance->formatTalkDuration($talkSec)],
+                ['label' => 'Avg duration', 'value' => $this->performance->formatTalkDuration($avgSec)],
+                ['label' => 'Connected', 'value' => (int) ($callStats['connected'] ?? 0)],
+                ['label' => 'Dispositions', 'value' => (int) ($callStats['disposed'] ?? 0)],
                 ['label' => 'Meetings', 'value' => (int) ($counts['meeting_booked'] ?? 0)],
                 ['label' => 'Deals funded', 'value' => $funded],
             ],
+            'calls' => $calls,
+            'calls_paginator' => $callLogs,
             'user' => ['id' => $member->id, 'name' => $member->name],
             'workflows_link' => ['assigned_user_id' => $userId],
         ];

@@ -626,8 +626,8 @@ class ApexWebphone {
             return;
         }
 
-        window.__apexForceDisposition = 'Answering Machine';
-        showCommToast('Marked answering machine — ending call…', 'info');
+        window.__apexForceDisposition = 'Answer Machine';
+        showCommToast('Marked answer machine — ending call…', 'info');
         await this.hangup('answering-machine');
     }
 
@@ -1311,6 +1311,9 @@ class ApexWebphone {
         const durationSec = wasConnected && this.callStartedAt && this.timerPhase === 'connected'
             ? Math.max(0, Math.floor((Date.now() - this.callStartedAt) / 1000))
             : 0;
+        if (wasConnected && !window.__apexForceDisposition) {
+            window.__apexForceDisposition = 'Owner Hang up';
+        }
         this._pendingCallEndMeta = {
             connected: wasConnected,
             result: wasConnected ? 'Connected' : 'No answer',
@@ -1332,23 +1335,34 @@ class ApexWebphone {
         this.stopAllLocalRingers();
 
         const morpheusUuid = this.hangupCallUuid();
-        if (morpheusUuid) {
-            await this.hangupAllMorpheusLegs(morpheusUuid);
-        }
-        await this.releaseExtensionCalls();
+        const relatedUuids = [
+            ...new Set(
+                [
+                    morpheusUuid,
+                    this.bridgedCallUuid,
+                    this.originateCallUuid,
+                    this.morpheusCallUuid,
+                    this.pstnPollUuid,
+                    ...this.trackedCallUuids,
+                ]
+                    .filter(Boolean)
+                    .map(String),
+            ),
+        ];
+        await Promise.allSettled([
+            this.endLocalSipSession(this.session),
+            this.killDestinationLegsNow({
+                uuids: relatedUuids,
+                destination: endedPhone,
+                extension: selectedExtension() || this.currentExtension || '',
+                bridgedUuid: this.bridgedCallUuid || null,
+            }),
+        ]);
 
         try {
-            if (this.session) {
-                const sessionState = this.session.state;
-                if (sessionState === SessionState.Initial || sessionState === SessionState.Establishing) {
-                    if (this.session instanceof Inviter) {
-                        await this.session.cancel();
-                    } else {
-                        await this.session.reject();
-                    }
-                } else if (sessionState !== SessionState.Terminating && sessionState !== SessionState.Terminated) {
-                    await this.session.bye();
-                }
+            // session already bye'd above — keep as no-op safety if still open
+            if (this.session && this.session.state !== SessionState.Terminated) {
+                await this.endLocalSipSession(this.session);
             }
         } catch (error) {
             this.logPhone('warn', 'Local SIP cleanup after remote hangup failed', {
@@ -1447,18 +1461,18 @@ class ApexWebphone {
             // Keep LOCAL ringback only while PSTN is still ringing.
             // Unmuting remote early-media here made speakers play carrier ring into the
             // open mic → loud echo on the destination side.
-            if (this.agentLegEstablishedAt > 0 && Date.now() - this.agentLegEstablishedAt >= 2000) {
+            if (this.agentLegEstablishedAt > 0) {
                 this.setRemoteAudioMuted(true);
                 void this.reinforceAntiEcho();
             }
 
-            // Nudge the status poll so Connected flips quickly after answer.
-            if (this.agentLegEstablishedAt > 0 && Date.now() - this.agentLegEstablishedAt >= 800) {
+            // Poll status immediately so Connected flips the moment the destination answers.
+            if (this.agentLegEstablishedAt > 0) {
                 void this.pollDestinationOnce();
             }
 
             void this.detectAnswerFromWebRtcStats(session);
-        }, 400);
+        }, 250);
     }
 
     startRemoteVoiceEnergyWatcher(session) {
@@ -1481,7 +1495,8 @@ class ApexWebphone {
             return;
         }
 
-        if (!this.agentLegEstablishedAt || Date.now() - this.agentLegEstablishedAt < 2500) {
+        // Allow RTP inference as soon as the agent leg is up (no artificial 2s wait).
+        if (!this.agentLegEstablishedAt || Date.now() - this.agentLegEstablishedAt < 200) {
             return;
         }
 
@@ -1514,9 +1529,8 @@ class ApexWebphone {
 
             this._lastInboundAudioPackets = packets;
 
-            // ~1.6s of continuous inbound RTP growth after agent is up = destination talking.
-            // Ring cadence usually has multi-second silence gaps that reset the counter.
-            if ((this._rtpGrowthFrames || 0) >= 4) {
+            // ~0.5s of continuous inbound RTP growth after agent is up = destination talking.
+            if ((this._rtpGrowthFrames || 0) >= 2) {
                 this.logPhone('info', 'Destination answer inferred from sustained RTP', {
                     packets,
                     frames: this._rtpGrowthFrames,
@@ -2097,23 +2111,19 @@ class ApexWebphone {
                     return;
                 }
 
-                // Live SSE/WebSocket path: stop ring + start connected timer as soon
-                // as Morpheus reports the destination answered.
-                // Real-time: server/webhook confirmed answer → stop ring + start timer NOW.
+                // Instant Connected: server flags win immediately; otherwise billsec≥1 is enough.
                 const serverConfirmed =
                     data.destination_connected === true
                     || data.destination_answered === true
                     || data.outcome === 'connected';
 
-                const agentReady =
-                    this.agentLegEstablishedAt > 0
-                    && Date.now() - this.agentLegEstablishedAt >= 800;
+                const agentLive = this.agentLegEstablishedAt > 0;
 
                 const connectedNow =
                     serverConfirmed
                     || (
-                        agentReady
-                        && Number(data.billsec ?? 0) >= 2
+                        agentLive
+                        && Number(data.billsec ?? 0) >= 1
                         && data.live !== false
                         && !data.hangup_cause
                         && this.destinationMatchesPeer(data)
@@ -2440,7 +2450,7 @@ class ApexWebphone {
         this.runCallMonitorLoop().catch(() => {});
     }
 
-    scheduleCallMonitor(delayMs = 1200) {
+    scheduleCallMonitor(delayMs = 350) {
         if (!this._callMonitorActive || !this.activeCallUuid()) {
             return;
         }
@@ -2468,7 +2478,8 @@ class ApexWebphone {
             const hasEvents = Boolean(this.callEventsSource);
             let delayMs = 2500;
             if (this.awaitingDestinationBridge || this.state === 'dialing') {
-                delayMs = hasEvents ? 1500 : 900;
+                // Poll aggressively while waiting for answer — Connected must flip instantly.
+                delayMs = hasEvents ? 450 : 300;
             } else if (this.state === 'in-call') {
                 delayMs = hasEvents ? 4000 : 2500;
                 // Keep wallboard connected_at locked to dialer timer while call is live.
@@ -2585,7 +2596,6 @@ class ApexWebphone {
                 this.awaitingDestinationBridge
                 && data.live
                 && Number(data.billsec ?? 0) >= 1
-                && Number(data.billsec ?? 0) < 2
                 && !this.destinationMatchesPeer(data)
                 && data.destination_connected !== true
             ) {
@@ -2735,7 +2745,8 @@ class ApexWebphone {
         this._reportedDestinationConnected = uuid;
         const url = template.replace('__UUID__', encodeURIComponent(uuid));
         const startedAt = this.callStartedAt || Date.now();
-        const billsec = Math.max(1, Math.floor((Date.now() - startedAt) / 1000));
+        // Match dialer display seconds (0-based), not a forced +1.
+        const billsec = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
         const destination = this.currentCallPeer || this.lastDialedDestination || '';
 
         const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
@@ -2882,115 +2893,6 @@ class ApexWebphone {
         }
 
         this.logPhone('info', 'Both sides connected', { source, peer });
-    }
-
-    async releaseExtensionCalls() {
-        const url = this.releaseExtensionUrl();
-        const extension = selectedExtension() || this.currentExtension || '';
-        if (!url || !extension) {
-            return;
-        }
-
-        try {
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    Accept: 'application/json',
-                    'Content-Type': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'X-CSRF-TOKEN': csrfToken(),
-                },
-                credentials: 'same-origin',
-                body: JSON.stringify({
-                    from_extension: extension,
-                    destination: this.currentCallPeer || this.lastDialedDestination || '',
-                }),
-            });
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok || data.ok === false) {
-                this.logPhone('warn', 'Extension release API returned non-OK', {
-                    extension,
-                    status: response.status,
-                    data,
-                });
-            }
-        } catch (error) {
-            this.logPhone('warn', 'Extension release API failed', {
-                extension,
-                error: error instanceof Error ? error.message : String(error),
-            });
-        }
-    }
-
-    async hangupAllMorpheusLegs(primaryUuid) {
-        const uuids = [
-            ...new Set(
-                [primaryUuid, this.bridgedCallUuid, this.originateCallUuid, this.morpheusCallUuid, this.pstnPollUuid, ...this.trackedCallUuids]
-                    .filter(Boolean)
-                    .map(String),
-            ),
-        ];
-
-        for (const uuid of uuids) {
-            await this.hangupMorpheusCall(uuid);
-        }
-    }
-
-    async hangupMorpheusCall(uuid) {
-        const template = this.hangupUrlTemplate();
-        const callUuid = this.hangupCallUuid() || uuid;
-        if (!template || !callUuid) {
-            this.logPhone('warn', 'No originate call_uuid for Morpheus hangup', {
-                morpheusCallUuid: this.morpheusCallUuid,
-                originateCallUuid: this.originateCallUuid,
-            });
-
-            return false;
-        }
-
-        const url = template.replace('__UUID__', encodeURIComponent(callUuid));
-
-        try {
-            const controller = new AbortController();
-            const timeout = window.setTimeout(() => controller.abort(), 8000);
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    Accept: 'application/json',
-                    'Content-Type': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'X-CSRF-TOKEN': csrfToken(),
-                },
-                credentials: 'same-origin',
-                signal: controller.signal,
-                body: JSON.stringify({
-                    from_extension: selectedExtension() || this.currentExtension || '',
-                    destination: this.currentCallPeer || this.lastDialedDestination || '',
-                    originate_uuid: callUuid,
-                    bridged_uuid: this.bridgedCallUuid || null,
-                    related_uuids: Array.from(this.trackedCallUuids),
-                }),
-            });
-            window.clearTimeout(timeout);
-
-            const data = await response.json().catch(() => ({}));
-            const ok = response.ok && data.ok === true;
-
-            this.logPhone(ok ? 'info' : 'warn', ok ? 'Morpheus hangup OK' : 'Morpheus hangup failed', {
-                callUuid,
-                status: response.status,
-                data,
-            });
-
-            return ok;
-        } catch (error) {
-            this.logPhone('warn', 'Morpheus hangup request failed', {
-                callUuid,
-                error: error instanceof Error ? error.message : String(error),
-            });
-
-            return false;
-        }
     }
 
     cancelPendingConnect() {
@@ -5058,16 +4960,34 @@ class ApexWebphone {
             return;
         }
         this.hangupInFlight = true;
+
+        // Snapshot BEFORE UI flush so destination/extension/uuids stay available for kill.
+        const endedPhone = this.currentCallPeer || this.lastDialedDestination || '';
+        const extension = selectedExtension() || this.currentExtension || '';
         const morpheusUuid = this.hangupCallUuid();
+        const relatedUuids = [
+            ...new Set(
+                [
+                    morpheusUuid,
+                    this.bridgedCallUuid,
+                    this.originateCallUuid,
+                    this.morpheusCallUuid,
+                    this.pstnPollUuid,
+                    ...this.trackedCallUuids,
+                ]
+                    .filter(Boolean)
+                    .map(String),
+            ),
+        ];
+        const bridgedUuid = this.bridgedCallUuid || null;
+        const session = this.session;
         const wasLiveCall =
             this.state === 'dialing' || this.state === 'ringing' || this.state === 'in-call';
-        const endedPhone = this.currentCallPeer || this.lastDialedDestination || '';
-        const endedUuid = morpheusUuid || '';
-
         const wasConnected = this.timerPhase === 'connected' || this.state === 'in-call' || this._serverConfirmedDestination;
         const durationSec = wasConnected && this.callStartedAt && this.timerPhase === 'connected'
             ? Math.max(0, Math.floor((Date.now() - this.callStartedAt) / 1000))
             : 0;
+        const endedUuid = morpheusUuid || '';
 
         this.userInitiatedHangup = true;
         this.flushCallUiInstant();
@@ -5079,52 +4999,273 @@ class ApexWebphone {
         // Show disposition popup immediately on hangup (before API/SIP cleanup).
         this.dispatchCallEndedOnce({ phone: endedPhone, callUuid: endedUuid });
         // Clear Call Monitoring in real time (before awaiting Morpheus hangup HTTP).
-        this.notifyMonitoringHangup({ phone: endedPhone, callUuid: endedUuid });
+        this.notifyMonitoringHangup({ phone: endedPhone, callUuid: endedUuid, extension });
 
         this.logPhone('info', 'Hangup requested', {
             reason,
             originateCallUuid: morpheusUuid,
-            bridgedCallUuid: this.bridgedCallUuid,
-            sessionState: this.session?.state ?? null,
-            awaitingDestinationBridge: this.awaitingDestinationBridge,
+            bridgedCallUuid: bridgedUuid,
+            sessionState: session?.state ?? null,
             peer: endedPhone,
+            relatedUuids,
         });
 
         this.stopDestinationPoll();
         this.stopRemoteAnswerWatcher();
         this.stopAllLocalRingers();
 
-        if (morpheusUuid) {
-            await this.hangupAllMorpheusLegs(morpheusUuid);
+        // Kill destination + agent legs in parallel — do not wait for Morpheus before SIP bye.
+        await Promise.allSettled([
+            this.endLocalSipSession(session),
+            this.killDestinationLegsNow({
+                uuids: relatedUuids,
+                destination: endedPhone,
+                extension,
+                bridgedUuid,
+            }),
+        ]);
+
+        this.pendingClickToCall = false;
+        this.hangupInFlight = false;
+        if (wasLiveCall && !usesCallSummaryFlow()) {
+            showCommToast('Call ended.', 'info');
         }
-        await this.releaseExtensionCalls();
+        this.clearSession();
+    }
+
+    /**
+     * End local WebRTC/SIP leg immediately (agent side).
+     */
+    async endLocalSipSession(session = this.session) {
+        if (!session) {
+            return;
+        }
 
         try {
-            if (this.session) {
-                const state = this.session.state;
-                if (state === SessionState.Initial || state === SessionState.Establishing) {
-                    if (this.session instanceof Inviter) {
-                        await this.session.cancel();
-                    } else {
-                        await this.session.reject();
-                    }
-                } else if (state !== SessionState.Terminating && state !== SessionState.Terminated) {
-                    await this.session.bye();
+            const state = session.state;
+            if (state === SessionState.Initial || state === SessionState.Establishing) {
+                if (session instanceof Inviter) {
+                    await session.cancel();
+                } else {
+                    await session.reject();
                 }
+            } else if (state !== SessionState.Terminating && state !== SessionState.Terminated) {
+                await session.bye();
             }
         } catch (error) {
-            this.logPhone('warn', 'Local SIP hangup failed after Morpheus hangup', {
-                reason,
+            this.logPhone('warn', 'Local SIP hangup failed', {
                 error: error instanceof Error ? error.message : String(error),
-                morpheusCallUuid: morpheusUuid,
             });
-        } finally {
-            this.pendingClickToCall = false;
-            this.hangupInFlight = false;
-            if (wasLiveCall && !usesCallSummaryFlow()) {
-                showCommToast('Call ended.', 'info');
+        }
+    }
+
+    /**
+     * Instant PSTN/destination teardown: hangup every known UUID + release by destination.
+     * Fire-and-forget friendly with keepalive so the far end drops even if UI navigates.
+     */
+    async killDestinationLegsNow({
+        uuids = [],
+        destination = '',
+        extension = '',
+        bridgedUuid = null,
+    } = {}) {
+        const tasks = [];
+
+        const uniqueUuids = [...new Set((uuids || []).filter(Boolean).map(String))];
+        for (const uuid of uniqueUuids) {
+            tasks.push(this.hangupMorpheusCall(uuid, {
+                destination,
+                extension,
+                bridgedUuid,
+                relatedUuids: uniqueUuids,
+            }));
+        }
+
+        if (uniqueUuids.length === 0 && destination) {
+            // No UUID yet (ringing) — still release by destination/extension.
+            tasks.push(this.releaseExtensionCallsNow(extension, destination));
+        } else {
+            tasks.push(this.releaseExtensionCallsNow(extension, destination));
+        }
+
+        await Promise.allSettled(tasks);
+    }
+
+    async releaseExtensionCallsNow(extension, destination) {
+        const url = this.releaseExtensionUrl();
+        const ext = String(extension || selectedExtension() || this.currentExtension || '').trim();
+        if (!url || !ext) {
+            return;
+        }
+
+        try {
+            const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            const timeout = window.setTimeout(() => {
+                try {
+                    controller?.abort('timeout');
+                } catch {
+                    try {
+                        controller?.abort();
+                    } catch {
+                        // ignore
+                    }
+                }
+            }, 12000);
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': csrfToken(),
+                },
+                credentials: 'same-origin',
+                keepalive: true,
+                signal: controller?.signal,
+                body: JSON.stringify({
+                    from_extension: ext,
+                    destination: destination || this.currentCallPeer || this.lastDialedDestination || '',
+                }),
+            });
+            window.clearTimeout(timeout);
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || data.ok === false) {
+                this.logPhone('warn', 'Extension release API returned non-OK', {
+                    extension: ext,
+                    status: response.status,
+                    data,
+                });
+            } else {
+                this.logPhone('info', 'Extension + destination release OK', {
+                    extension: ext,
+                    destination,
+                    hungup: data.hungup || [],
+                });
             }
-            this.clearSession();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            const aborted = /aborted/i.test(message) || (error && error.name === 'AbortError');
+            this.logPhone(
+                aborted ? 'info' : 'warn',
+                aborted ? 'Extension release timed out' : 'Extension release API failed',
+                { extension: ext, error: message },
+            );
+        }
+    }
+
+    async releaseExtensionCalls() {
+        await this.releaseExtensionCallsNow(
+            selectedExtension() || this.currentExtension || '',
+            this.currentCallPeer || this.lastDialedDestination || '',
+        );
+    }
+
+    async hangupAllMorpheusLegs(primaryUuid) {
+        const uuids = [
+            ...new Set(
+                [primaryUuid, this.bridgedCallUuid, this.originateCallUuid, this.morpheusCallUuid, this.pstnPollUuid, ...this.trackedCallUuids]
+                    .filter(Boolean)
+                    .map(String),
+            ),
+        ];
+
+        // Parallel hangups — sequential awaits stacked AbortController timeouts.
+        await Promise.allSettled(uuids.map((uuid) => this.hangupMorpheusCall(uuid)));
+    }
+
+    async hangupMorpheusCall(uuid, {
+        destination = null,
+        extension = null,
+        bridgedUuid = null,
+        relatedUuids = null,
+    } = {}) {
+        const template = this.hangupUrlTemplate();
+        const callUuid = String(uuid || this.hangupCallUuid() || '').trim();
+        if (!template || !callUuid) {
+            this.logPhone('warn', 'No originate call_uuid for Morpheus hangup', {
+                morpheusCallUuid: this.morpheusCallUuid,
+                originateCallUuid: this.originateCallUuid,
+            });
+
+            return false;
+        }
+
+        const url = template.replace('__UUID__', encodeURIComponent(callUuid));
+        const dest = destination
+            ?? this.currentCallPeer
+            ?? this.lastDialedDestination
+            ?? '';
+        const fromExt = extension
+            ?? selectedExtension()
+            ?? this.currentExtension
+            ?? '';
+        const related = Array.isArray(relatedUuids)
+            ? relatedUuids
+            : Array.from(this.trackedCallUuids);
+
+        try {
+            const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            const timeout = window.setTimeout(() => {
+                try {
+                    controller?.abort('timeout');
+                } catch {
+                    try {
+                        controller?.abort();
+                    } catch {
+                        // ignore
+                    }
+                }
+            }, 12000);
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': csrfToken(),
+                },
+                credentials: 'same-origin',
+                keepalive: true,
+                signal: controller?.signal,
+                body: JSON.stringify({
+                    from_extension: fromExt,
+                    destination: dest,
+                    originate_uuid: callUuid,
+                    bridged_uuid: bridgedUuid ?? this.bridgedCallUuid ?? null,
+                    related_uuids: related,
+                }),
+            });
+            window.clearTimeout(timeout);
+
+            const data = await response.json().catch(() => ({}));
+            const ok = response.ok && data.ok === true;
+
+            this.logPhone(ok ? 'info' : 'warn', ok ? 'Morpheus hangup OK' : 'Morpheus hangup failed', {
+                callUuid,
+                destination: dest,
+                status: response.status,
+                hungup: data.hungup || [],
+                data,
+            });
+
+            return ok;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            const aborted =
+                (error && typeof error === 'object' && error.name === 'AbortError')
+                || /aborted/i.test(message);
+            // UI already ended the call — timeout/abort must not look like a broken hangup.
+            this.logPhone(
+                aborted ? 'info' : 'warn',
+                aborted ? 'Morpheus hangup request timed out (call already ended in UI)' : 'Morpheus hangup request failed',
+                {
+                    callUuid,
+                    destination: dest,
+                    error: message,
+                },
+            );
+
+            return aborted;
         }
     }
 
@@ -5180,19 +5321,19 @@ class ApexWebphone {
     /**
      * Instantly clear Call Monitoring live state (no Morpheus hangup wait).
      */
-    notifyMonitoringHangup({ phone = '', callUuid = '' } = {}) {
+    notifyMonitoringHangup({ phone = '', callUuid = '', extension = '' } = {}) {
         if (this._monitoringHangupNotified) {
             return;
         }
 
         const uuid = String(callUuid || this.hangupCallUuid() || this.originateCallUuid || this.morpheusCallUuid || '').trim();
         const destination = phone || this.currentCallPeer || this.lastDialedDestination || '';
-        const extension = selectedExtension() || this.currentExtension || '';
+        const ext = String(extension || selectedExtension() || this.currentExtension || '').trim();
         const related = [...this.trackedCallUuids].map(String).filter(Boolean);
 
         this._monitoringHangupNotified = true;
 
-        const detail = { phone: destination, callUuid: uuid, extension, relatedUuids: related };
+        const detail = { phone: destination, callUuid: uuid, extension: ext, relatedUuids: related };
         window.dispatchEvent(new CustomEvent('comm:monitoring-hangup', { detail }));
         try {
             const channel = new BroadcastChannel('apex-call-monitoring');

@@ -70,13 +70,19 @@
         <div id="ops-leaderboard" class="admin-dash-leaderboard">
             @forelse ($ops['leaderboard'] ?? [] as $i => $row)
                 <a href="{{ $detailService->adminDetailUrl('performer', ['user_id' => $row['user_id']]) }}"
-                    class="admin-dash-leaderboard-row admin-dash-leaderboard-row--clickable">
+                    class="admin-dash-leaderboard-row admin-dash-leaderboard-row--clickable"
+                    title="Open call details for {{ $row['name'] }}">
                     <span>
                         <span class="admin-dash-leaderboard-rank">#{{ $i + 1 }}</span>
                         <span class="admin-dash-leaderboard-name">{{ $row['name'] }}</span>
                         <span class="admin-dash-leaderboard-role">· {{ $row['role'] }}</span>
                     </span>
-                    <span class="admin-dash-leaderboard-stats">{{ $row['dials'] }} d · {{ $row['meetings'] }} m · {{ $row['deals_funded'] }} funded</span>
+                    <span class="admin-dash-leaderboard-stats">
+                        {{ (int) ($row['calls_taken'] ?? $row['calls'] ?? $row['dials'] ?? 0) }} calls
+                        · {{ $row['talk_label'] ?? '0s' }} talk
+                        · {{ (int) ($row['meetings'] ?? 0) }} mtgs
+                        · {{ (int) ($row['deals_funded'] ?? 0) }} funded
+                    </span>
                 </a>
             @empty
                 <p class="admin-dash-empty">No activity logged this week yet.</p>
@@ -309,13 +315,14 @@
 
             container.innerHTML = rows.map((row, index) => `
                 <a href="${escapeDashboardHtml(row.detail_url || '#')}"
-                    class="admin-dash-leaderboard-row admin-dash-leaderboard-row--clickable">
+                    class="admin-dash-leaderboard-row admin-dash-leaderboard-row--clickable"
+                    title="Open call details for ${escapeDashboardHtml(row.name)}">
                     <span>
                         <span class="admin-dash-leaderboard-rank">#${index + 1}</span>
                         <span class="admin-dash-leaderboard-name">${escapeDashboardHtml(row.name)}</span>
                         <span class="admin-dash-leaderboard-role">· ${escapeDashboardHtml(row.role)}</span>
                     </span>
-                    <span class="admin-dash-leaderboard-stats">${row.dials ?? 0} d · ${row.meetings ?? 0} m · ${row.deals_funded ?? 0} funded</span>
+                    <span class="admin-dash-leaderboard-stats">${row.calls_taken ?? row.calls ?? row.dials ?? 0} calls · ${escapeDashboardHtml(row.talk_label || '0s')} talk · ${row.meetings ?? 0} mtgs · ${row.deals_funded ?? 0} funded</span>
                 </a>
             `).join('');
         }

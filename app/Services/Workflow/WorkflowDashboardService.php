@@ -71,6 +71,8 @@ class WorkflowDashboardService
                 ->orderBy('users.name')
                 ->get(['users.id', 'users.name', 'users.email']),
             'setterTeamLeads' => WorkflowAssignmentRoles::setterTeamLeadsFor($workspace),
+            'activeSetters' => WorkflowAssignmentRoles::activeSettersFor($workspace),
+            'setterTeamMemberMap' => WorkflowAssignmentRoles::setterTeamMemberMap($workspace),
             'activeSetterCount' => $workspace->users()
                 ->wherePivot('role', 'appointment_setter')
                 ->wherePivot('status', 'active')

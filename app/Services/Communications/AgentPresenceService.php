@@ -9,29 +9,69 @@ use Illuminate\Support\Facades\Cache;
 
 class AgentPresenceService
 {
-    public const TTL_SECONDS = 120;
+    public const TTL_SECONDS = 180;
 
     public const MONITOR_ROLES = [
         'appointment_setter',
         'appointment_setter_team_lead',
         'closers',
+        'closer',
         'closers_team_lead',
     ];
 
-    /** Never show these accounts on Call Monitoring (Not in call / dial mode board). */
+    /** Never show these accounts on Call Monitoring. */
     public const EXCLUDED_ROLES = [
         'super_admin',
+        'admin',
     ];
 
     public static function isMonitorableRole(?string $role): bool
     {
         $normalized = \App\Support\SalesOps::normalizeLegacyRole($role) ?: (string) $role;
-        if ($normalized === '' || in_array($normalized, self::EXCLUDED_ROLES, true)) {
+        if ($normalized === '' || self::isExcludedRole($normalized)) {
             return false;
         }
 
         return in_array($normalized, self::MONITOR_ROLES, true)
             || in_array((string) $role, self::MONITOR_ROLES, true);
+    }
+
+    public static function isExcludedRole(?string $role): bool
+    {
+        $normalized = \App\Support\SalesOps::normalizeLegacyRole((string) $role) ?: (string) $role;
+
+        return in_array($normalized, self::EXCLUDED_ROLES, true)
+            || in_array((string) $role, self::EXCLUDED_ROLES, true);
+    }
+
+    /**
+     * True when this account must never appear on Call Monitoring (live, idle, disposition).
+     */
+    public static function isExcludedFromMonitoring(
+        ?string $role = null,
+        ?string $roleLabel = null,
+        ?User $user = null,
+        ?int $workspaceId = null
+    ): bool {
+        if ($user && ($user->isSuperAdmin($workspaceId) || $user->isAdmin($workspaceId))) {
+            return true;
+        }
+
+        if (self::isExcludedRole($role)) {
+            return true;
+        }
+
+        $label = strtolower(trim((string) $roleLabel));
+        if (in_array($label, ['super admin', 'admin'], true)) {
+            return true;
+        }
+
+        // Non-agent portal roles stay off the board when a role is known.
+        if (filled($role) && ! self::isMonitorableRole($role)) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -40,6 +80,8 @@ class AgentPresenceService
      *   auto_session_active?: bool,
      *   auto_paused?: bool,
      *   on_call?: bool,
+     *   in_disposition?: bool,
+     *   disposition_phone?: ?string,
      *   extension?: ?string,
      *   role?: ?string,
      *   role_label?: ?string,
@@ -50,8 +92,8 @@ class AgentPresenceService
     public function heartbeat(User $user, Workspace $workspace, array $payload = []): array
     {
         $role = (string) ($payload['role'] ?? '');
-        // Super Admin / non-agent accounts must not appear on the wallboard.
-        if ($role !== '' && ! self::isMonitorableRole($role)) {
+        // Super Admin / Admin / non-agent accounts must not appear on the wallboard.
+        if (self::isExcludedFromMonitoring($role, (string) ($payload['role_label'] ?? ''), $user, (int) $workspace->id)) {
             $this->forgetUser($workspace, (int) $user->id);
 
             return [
@@ -71,12 +113,31 @@ class AgentPresenceService
         }
 
         $onCall = (bool) ($payload['on_call'] ?? false);
+        $inDisposition = array_key_exists('in_disposition', $payload)
+            ? (bool) $payload['in_disposition']
+            : (bool) ($existing['in_disposition'] ?? false);
+        if ($onCall) {
+            $inDisposition = false;
+        }
+
         $nowIso = now()->utc()->toIso8601String();
         $idleSince = $existing['idle_since'] ?? $nowIso;
         if ($onCall) {
             $idleSince = null;
         } elseif (! filled($idleSince)) {
             $idleSince = $nowIso;
+        }
+
+        $dispositionSince = $existing['disposition_since'] ?? null;
+        if ($inDisposition) {
+            $dispositionSince = $dispositionSince ?: $nowIso;
+        } else {
+            $dispositionSince = null;
+        }
+
+        $dispositionPhone = null;
+        if ($inDisposition) {
+            $dispositionPhone = preg_replace('/\D/', '', (string) ($payload['disposition_phone'] ?? $existing['disposition_phone'] ?? '')) ?: null;
         }
 
         $entry = [
@@ -91,6 +152,9 @@ class AgentPresenceService
             'auto_session_active' => (bool) ($payload['auto_session_active'] ?? false),
             'auto_paused' => (bool) ($payload['auto_paused'] ?? false),
             'on_call' => $onCall,
+            'in_disposition' => $inDisposition,
+            'disposition_since' => $dispositionSince,
+            'disposition_phone' => $dispositionPhone,
             'last_seen_at' => $nowIso,
             'idle_since' => $idleSince,
         ];
@@ -116,6 +180,13 @@ class AgentPresenceService
         $this->writeMap((int) $workspace->id, $map);
     }
 
+    public function presenceVersion(Workspace|int $workspace): int
+    {
+        $workspaceId = $workspace instanceof Workspace ? (int) $workspace->id : (int) $workspace;
+
+        return (int) Cache::get($this->versionKey($workspaceId), 0);
+    }
+
     /**
      * Mark agent idle after hangup so the Not-in-call timer restarts cleanly.
      */
@@ -128,6 +199,8 @@ class AgentPresenceService
         }
 
         $existing['on_call'] = false;
+        $existing['in_disposition'] = true;
+        $existing['disposition_since'] = now()->utc()->toIso8601String();
         $existing['idle_since'] = now()->utc()->toIso8601String();
         $existing['last_seen_at'] = now()->utc()->toIso8601String();
         $map[$user->id] = $existing;
@@ -137,7 +210,7 @@ class AgentPresenceService
     /**
      * @return array<int, array<string, mixed>>
      */
-    public function listOnline(Workspace $workspace, int $maxAgeSec = 90): array
+    public function listOnline(Workspace $workspace, int $maxAgeSec = 150): array
     {
         $map = $this->readMap((int) $workspace->id);
         $online = [];
@@ -199,10 +272,29 @@ class AgentPresenceService
     protected function writeMap(int $workspaceId, array $map): void
     {
         Cache::put($this->mapKey($workspaceId), $map, self::TTL_SECONDS);
+        $this->bumpPresenceVersion($workspaceId);
+    }
+
+    protected function bumpPresenceVersion(int $workspaceId): void
+    {
+        $key = $this->versionKey($workspaceId);
+        Cache::put($key, ((int) Cache::get($key, 0)) + 1, self::TTL_SECONDS * 10);
+
+        // Wake Call Monitoring SSE / light polls immediately when someone logs in or idles.
+        try {
+            app(MorpheusCallEventService::class)->bumpMonitoringVersion();
+        } catch (\Throwable) {
+            // Presence still works without the call-event bus.
+        }
     }
 
     protected function mapKey(int $workspaceId): string
     {
         return 'communications.agent_presence_map.'.$workspaceId;
+    }
+
+    protected function versionKey(int $workspaceId): string
+    {
+        return 'communications.agent_presence_version.'.$workspaceId;
     }
 }

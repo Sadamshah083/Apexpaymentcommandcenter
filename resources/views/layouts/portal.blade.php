@@ -14,6 +14,7 @@
 <body class="app-shell min-h-screen font-sans antialiased" data-turbo-prefetch="false"
     @auth
 data-workspace-id="{{ auth()->user()->current_workspace_id }}"
+        data-presence-url="{{ route('portal.communications.monitoring.presence') }}"
         data-workspace-sync-scope="{{
             request()->routeIs('portal.communications.*')
                 ? 'off'

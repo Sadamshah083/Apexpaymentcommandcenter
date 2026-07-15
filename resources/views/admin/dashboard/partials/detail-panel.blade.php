@@ -15,7 +15,7 @@
                 @if (isset($detail['total']))
                     <div class="dash-detail-count">
                         <span class="dash-detail-count-value" id="detail-total-count">{{ number_format($detail['total']) }}</span>
-                        <span class="dash-detail-count-label">records</span>
+                        <span class="dash-detail-count-label">{{ $detail['total_label'] ?? 'records' }}</span>
                     </div>
                 @endif
                 <span class="dash-detail-live">
@@ -72,6 +72,49 @@
             </div>
             @if ($detail['activities']->hasPages())
                 <div class="dash-detail-pagination">{{ $detail['activities']->links() }}</div>
+            @endif
+        @elseif (!empty($detail['calls']) || ($detail['key'] ?? '') === 'performer')
+            <div class="dash-detail-table-wrap">
+                <table class="dash-detail-table">
+                    <thead>
+                        <tr>
+                            <th>Phone</th>
+                            <th>Duration</th>
+                            <th>Disposition</th>
+                            <th>Status</th>
+                            <th>When</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @forelse (($detail['calls'] ?? []) as $call)
+                            <tr>
+                                <td>
+                                    <div class="dash-detail-call-phone">{{ $call['phone'] }}</div>
+                                    @if (!empty($call['note']))
+                                        <div class="dash-detail-muted">{{ \Illuminate\Support\Str::limit($call['note'], 80) }}</div>
+                                    @endif
+                                </td>
+                                <td>{{ $call['duration_label'] }}</td>
+                                <td>
+                                    @if (($call['disposition'] ?? '—') !== '—')
+                                        <span class="dash-detail-badge dash-detail-badge--disposition">{{ $call['disposition'] }}</span>
+                                    @else
+                                        <span class="dash-detail-muted">—</span>
+                                    @endif
+                                </td>
+                                <td>{{ $call['status'] }}</td>
+                                <td class="dash-detail-muted" title="{{ $call['when_exact'] ?? '' }}">{{ $call['when'] }}</td>
+                            </tr>
+                        @empty
+                            <tr>
+                                <td colspan="5" class="dash-detail-empty">No dialer calls logged for this agent this week yet.</td>
+                            </tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
+            @if (!empty($detail['calls_paginator']) && $detail['calls_paginator']->hasPages())
+                <div class="dash-detail-pagination">{{ $detail['calls_paginator']->links() }}</div>
             @endif
         @elseif (!empty($detail['leads']))
             @include('admin.dashboard.partials.leads-mini-table', ['leads' => $detail['leads']])

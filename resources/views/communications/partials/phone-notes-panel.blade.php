@@ -44,7 +44,8 @@
             </button>
         </div>
         <label class="ghl-dialer-notes-drawer__label" for="ghl-dialer-notes-field">Call note</label>
-        <textarea id="ghl-dialer-notes-field" class="ghl-dialer-notes-input" data-dialer-notes-input rows="6"
+        <textarea id="ghl-dialer-notes-field" name="dialer_call_note"
+            class="ghl-dialer-notes-input" data-dialer-notes-input rows="6"
             placeholder="Add notes for this number or call…" maxlength="5000"></textarea>
         <div class="ghl-dialer-notes-drawer__actions">
             <span class="ghl-dialer-notes-status" data-dialer-notes-status aria-live="polite"></span>

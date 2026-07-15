@@ -137,7 +137,7 @@ function updateLeaderboard(rows) {
     const html = rows.map((row, i) => {
         const stats = role === 'closer'
             ? `${Number(row.deals_funded ?? 0)} funded · ${Number(row.discoveries ?? 0)} disc`
-            : `${Number(row.dials ?? 0)} dials · ${Number(row.meetings ?? 0)} mtgs`;
+            : `${Number(row.calls_taken ?? row.calls ?? row.dials ?? 0)} calls · ${escapeText(row.talk_label || '0s')} · ${Number(row.meetings ?? 0)} mtgs`;
         const href = dashRoute
             ? `?focus=member&member=${encodeURIComponent(row.user_id)}`
             : '#';

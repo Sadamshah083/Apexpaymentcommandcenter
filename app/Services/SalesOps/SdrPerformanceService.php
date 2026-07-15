@@ -2,6 +2,7 @@
 
 namespace App\Services\SalesOps;
 
+use App\Models\CommunicationCallLog;
 use App\Models\LeadActivity;
 use App\Models\User;
 use App\Models\WorkflowLead;
@@ -100,30 +101,135 @@ class SdrPerformanceService
             ->pluck('total', 'assigned_user_id')
             ->all();
 
+        $callStats = $this->callStatsByUser($workspace, $memberIds, $start, $end);
+
         return $members
-            ->map(function (User $member) use ($workspace, $start, $end, $activityRows, $fundedCounts, $map) {
+            ->map(function (User $member) use ($activityRows, $fundedCounts, $map, $callStats) {
                 $userActivities = $activityRows->get($member->id) ?? collect();
                 $counts = [];
                 foreach ($map as $type => $key) {
                     $counts[$key] = (int) ($userActivities->firstWhere('type', $type)?->total ?? 0);
                 }
 
-                $funded = $fundedCounts[$member->id] ?? 0;
+                $funded = (int) ($fundedCounts[$member->id] ?? 0);
+                $calls = $callStats[$member->id] ?? [
+                    'calls' => 0,
+                    'talk_sec' => 0,
+                    'disposed' => 0,
+                    'connected' => 0,
+                ];
+                $callsTaken = (int) ($calls['calls'] ?? 0);
+                $talkSec = (int) ($calls['talk_sec'] ?? 0);
+                // Prefer live dialer call count when activity dials are missing/stale.
+                $dials = max((int) ($counts['dial'] ?? 0), $callsTaken);
 
                 return [
                     'user_id' => $member->id,
                     'name' => $member->name,
                     'role' => SalesOps::roleLabel($member->pivot->role ?? null),
-                    'dials' => $counts['dial'] ?? 0,
+                    'dials' => $dials,
+                    'calls' => $callsTaken,
+                    'calls_taken' => $callsTaken,
+                    'talk_sec' => $talkSec,
+                    'talk_label' => $this->formatTalkDuration($talkSec),
+                    'disposed' => (int) ($calls['disposed'] ?? 0),
+                    'connected' => (int) ($calls['connected'] ?? 0),
                     'conversations' => $counts['conversation'] ?? 0,
                     'discoveries' => $counts['discovery'] ?? 0,
                     'meetings' => $counts['meeting_booked'] ?? 0,
                     'deals_funded' => $funded,
-                    'score' => ($counts['discovery'] ?? 0) * 10 + ($counts['meeting_booked'] ?? 0) * 25 + $funded * 100,
+                    'score' => ($counts['discovery'] ?? 0) * 10
+                        + ($counts['meeting_booked'] ?? 0) * 25
+                        + $funded * 100
+                        + ($callsTaken * 2)
+                        + (int) floor($talkSec / 60),
                 ];
             })
             ->sortByDesc('score')
             ->values();
+    }
+
+    /**
+     * Weekly (or daily) dialer call stats keyed by user_id.
+     *
+     * @param  list<int>  $userIds
+     * @return array<int, array{calls: int, talk_sec: int, disposed: int, connected: int}>
+     */
+    public function callStatsByUser(Workspace $workspace, array $userIds, Carbon $start, Carbon $end): array
+    {
+        if ($userIds === []) {
+            return [];
+        }
+
+        $rows = CommunicationCallLog::query()
+            ->select([
+                'user_id',
+                DB::raw('COUNT(*) as calls'),
+                DB::raw('COALESCE(SUM(COALESCE(duration_sec, 0)), 0) as talk_sec'),
+                DB::raw('SUM(CASE WHEN disposition IS NOT NULL AND disposition != \'\' THEN 1 ELSE 0 END) as disposed'),
+                DB::raw('SUM(CASE WHEN COALESCE(duration_sec, 0) > 0 THEN 1 ELSE 0 END) as connected'),
+            ])
+            ->where('workspace_id', $workspace->id)
+            ->whereIn('user_id', $userIds)
+            ->where(function ($query) use ($start, $end) {
+                $query->whereBetween('started_at', [$start, $end])
+                    ->orWhere(function ($inner) use ($start, $end) {
+                        $inner->whereNull('started_at')
+                            ->whereBetween('created_at', [$start, $end]);
+                    });
+            })
+            ->groupBy('user_id')
+            ->get();
+
+        $out = [];
+        foreach ($rows as $row) {
+            $out[(int) $row->user_id] = [
+                'calls' => (int) $row->calls,
+                'talk_sec' => (int) $row->talk_sec,
+                'disposed' => (int) $row->disposed,
+                'connected' => (int) $row->connected,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Recent dialer calls for one agent (week detail table).
+     *
+     * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator
+     */
+    public function agentCallHistory(Workspace $workspace, int $userId, Carbon $start, Carbon $end, int $perPage = 25)
+    {
+        return CommunicationCallLog::query()
+            ->where('workspace_id', $workspace->id)
+            ->where('user_id', $userId)
+            ->where(function ($query) use ($start, $end) {
+                $query->whereBetween('started_at', [$start, $end])
+                    ->orWhere(function ($inner) use ($start, $end) {
+                        $inner->whereNull('started_at')
+                            ->whereBetween('created_at', [$start, $end]);
+                    });
+            })
+            ->orderByDesc(DB::raw('COALESCE(started_at, created_at)'))
+            ->paginate($perPage)
+            ->withQueryString();
+    }
+
+    public function formatTalkDuration(int $seconds): string
+    {
+        $seconds = max(0, $seconds);
+        if ($seconds < 60) {
+            return $seconds.'s';
+        }
+
+        $hours = intdiv($seconds, 3600);
+        $mins = intdiv($seconds % 3600, 60);
+        if ($hours > 0) {
+            return $mins > 0 ? "{$hours}h {$mins}m" : "{$hours}h";
+        }
+
+        return "{$mins}m";
     }
 
     public function workspaceOverview(Workspace $workspace): array

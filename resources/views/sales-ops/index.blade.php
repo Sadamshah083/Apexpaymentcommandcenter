@@ -70,9 +70,9 @@
                             <th>Rank</th>
                             <th>Rep</th>
                             <th>Role</th>
-                            <th>Dials</th>
-                            <th>Conversations</th>
-                            <th>Discoveries</th>
+                            <th>Calls</th>
+                            <th>Talk time</th>
+                            <th>Dispositions</th>
                             <th>Meetings</th>
                             <th>Funded</th>
                         </tr>
@@ -81,11 +81,15 @@
                         @foreach ($leaderboard as $index => $row)
                             <tr>
                                 <td class="font-bold">#{{ $index + 1 }}</td>
-                                <td>{{ $row['name'] }}</td>
+                                <td>
+                                    <a href="{{ route('admin.dashboard', ['detail' => 'performer', 'user_id' => $row['user_id']]) }}" class="app-link">
+                                        {{ $row['name'] }}
+                                    </a>
+                                </td>
                                 <td>{{ $row['role'] }}</td>
-                                <td>{{ $row['dials'] }}</td>
-                                <td>{{ $row['conversations'] }}</td>
-                                <td>{{ $row['discoveries'] }}</td>
+                                <td>{{ (int) ($row['calls_taken'] ?? $row['calls'] ?? $row['dials'] ?? 0) }}</td>
+                                <td>{{ $row['talk_label'] ?? '0s' }}</td>
+                                <td>{{ (int) ($row['disposed'] ?? 0) }}</td>
                                 <td>{{ $row['meetings'] }}</td>
                                 <td>{{ $row['deals_funded'] }}</td>
                             </tr>

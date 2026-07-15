@@ -148,7 +148,8 @@
                             <div class="ghl-dialer-leads-field">
                                 <span class="ghl-dialer-leads-label" id="dialer-leads-pool-label">Lead pool</span>
                                 <div class="ghl-leads-select" data-leads-select>
-                                    <select class="ghl-leads-select__native" data-dialer-leads-pool
+                                    <select id="dialer-leads-pool" name="dialer_leads_pool"
+                                        class="ghl-leads-select__native" data-dialer-leads-pool
                                         aria-labelledby="dialer-leads-pool-label">
                                         <option value="callable" selected>Callable leads</option>
                                         <option value="all">All with phone</option>
@@ -169,13 +170,15 @@
                             </div>
                         @else
                             {{-- Agents always see only their assigned leads. --}}
-                            <input type="hidden" data-dialer-leads-pool value="assigned">
+                            <input type="hidden" id="dialer-leads-pool" name="dialer_leads_pool"
+                                data-dialer-leads-pool value="assigned">
                         @endunless
                         @if ($campaignOptions->isNotEmpty())
                             <div class="ghl-dialer-leads-field">
                                 <span class="ghl-dialer-leads-label" id="dialer-leads-campaign-label">Campaign</span>
                                 <div class="ghl-leads-select" data-leads-select>
-                                    <select class="ghl-leads-select__native" data-dialer-leads-campaign
+                                    <select id="dialer-leads-campaign" name="dialer_leads_campaign"
+                                        class="ghl-leads-select__native" data-dialer-leads-campaign
                                         aria-labelledby="dialer-leads-campaign-label">
                                         <option value="" selected>All campaigns</option>
                                         @foreach ($campaignOptions as $campaign)

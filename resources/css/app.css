@@ -10553,6 +10553,17 @@ a.admin-dash-stat-card:hover .admin-dash-stat-chevron {
     text-transform: capitalize;
 }
 
+.dash-detail-badge--disposition {
+    background: #ecfdf5;
+    color: #047857;
+    text-transform: none;
+}
+
+.dash-detail-call-phone {
+    font-weight: 600;
+    color: #0f172a;
+}
+
 .dash-detail-link {
     font-size: 0.75rem;
     font-weight: 600;
@@ -11085,14 +11096,14 @@ body.app-sidebar-collapsed .sidebar-link-badges {
     position: sticky;
     top: 0;
     z-index: 1;
-    background: #166534;
-    color: #f0fdf4;
+    background: #bbf7d0;
+    color: #14532d;
     text-align: left;
     padding: 0.7rem 0.85rem;
     font-size: 0.72rem;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    border-bottom: 1px solid #14532d;
+    border-bottom: 1px solid #86efac;
 }
 
 .call-monitoring-table th:nth-child(1),
@@ -11268,13 +11279,173 @@ body.app-sidebar-collapsed .sidebar-link-badges {
 .call-monitoring-stat--idle .call-monitoring-stat__value {
     color: #166534;
 }
+.call-monitoring-stat--dead {
+    background: #0f172a;
+    border-color: #1e293b;
+    color: #f8fafc;
+}
+.call-monitoring-stat--dead .call-monitoring-stat__label {
+    color: #cbd5e1;
+}
+.call-monitoring-stat--dead .call-monitoring-stat__value {
+    color: #f8fafc;
+}
+.call-monitoring-stat--disposition {
+    background: #fff7ed;
+    border-color: #fdba74;
+}
+.call-monitoring-stat--disposition .call-monitoring-stat__value {
+    color: #c2410c;
+}
 .call-monitoring-row.is-idle {
     background: #dcfce7;
     color: #14532d;
 }
+.call-monitoring-row.is-offline {
+    background: #f1f5f9;
+    color: #475569;
+}
+.call-monitoring-row.is-offline .call-monitoring-status-pill {
+    background: #cbd5e1;
+    color: #334155;
+}
+.call-monitoring-stat--logged-in {
+    background: #ecfdf5;
+    border-color: #6ee7b7;
+}
+.call-monitoring-stat--logged-in .call-monitoring-stat__value {
+    color: #047857;
+}
+.call-monitoring-stat--offline {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+}
+.call-monitoring-stat--offline .call-monitoring-stat__value {
+    color: #475569;
+}
+.call-monitoring-legend__item--offline {
+    background: #e2e8f0;
+    color: #334155;
+}
+.call-monitoring-row.is-disposition {
+    background: #ffedd5;
+    color: #9a3412;
+}
+.call-monitoring-row.is-disposition .call-monitoring-status-pill {
+    background: #fb923c;
+    color: #7c2d12;
+}
 .call-monitoring-board--idle .call-monitoring-board__count {
     background: #bbf7d0;
     color: #14532d;
+}
+.call-monitoring-board--dead .call-monitoring-board__count {
+    background: #1e293b;
+    color: #f8fafc;
+}
+.call-monitoring-board--disposition .call-monitoring-board__count {
+    background: #fdba74;
+    color: #7c2d12;
+}
+.call-monitoring-board__indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    margin-bottom: 0.35rem;
+    padding: 0.45rem 0.7rem;
+    border-radius: 0.65rem;
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+.call-monitoring-board__indicator-dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 999px;
+    flex: 0 0 auto;
+}
+.call-monitoring-board__indicator-label {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.call-monitoring-board__indicator .call-monitoring-board__count {
+    margin-left: auto;
+}
+.call-monitoring-board__indicator--blue {
+    background: #dbeafe;
+    color: #1e3a8a;
+}
+.call-monitoring-board__indicator--blue .call-monitoring-board__indicator-dot {
+    background: #2563eb;
+}
+.call-monitoring-board__indicator--pink {
+    background: #fce7f3;
+    color: #9d174d;
+}
+.call-monitoring-board__indicator--pink .call-monitoring-board__indicator-dot {
+    background: #db2777;
+}
+.call-monitoring-board__indicator--pink-long {
+    background: #fbcfe8;
+    color: #831843;
+}
+.call-monitoring-board__indicator--pink-long .call-monitoring-board__indicator-dot {
+    background: #be185d;
+}
+.call-monitoring-board__indicator--dead {
+    background: #0f172a;
+    color: #f8fafc;
+}
+.call-monitoring-board__indicator--dead .call-monitoring-board__indicator-dot {
+    background: #ef4444;
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.25);
+}
+.call-monitoring-board__indicator--disposition {
+    background: #ffedd5;
+    color: #9a3412;
+}
+.call-monitoring-board__indicator--disposition .call-monitoring-board__indicator-dot {
+    background: #ea580c;
+}
+.call-monitoring-board__indicator--idle {
+    background: #dcfce7;
+    color: #14532d;
+}
+.call-monitoring-board__indicator--idle .call-monitoring-board__indicator-dot {
+    background: #16a34a;
+}
+.call-monitoring-board__indicator--unified {
+    background: linear-gradient(90deg, #dbeafe 0%, #fce7f3 35%, #ffedd5 65%, #dcfce7 100%);
+    color: #0f172a;
+}
+.call-monitoring-board__indicator--unified .call-monitoring-board__indicator-dot {
+    background: #0f172a;
+}
+.call-monitoring-board--unified .call-monitoring-board__count {
+    background: #0f172a;
+    color: #f8fafc;
+}
+.call-monitoring-legend--inline {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0 0 0.55rem;
+}
+.call-monitoring-legend__item--dead {
+    background: #0f172a;
+    color: #f8fafc;
+}
+.call-monitoring-legend__item--disposition {
+    background: #ffedd5;
+    color: #9a3412;
+}
+.call-monitoring-legend__item--idle {
+    background: #dcfce7;
+    color: #14532d;
+}
+.call-monitoring-board__count--head {
+    display: none;
 }
 .call-monitoring-boards {
     display: flex;
@@ -11317,4 +11488,182 @@ body.app-sidebar-collapsed .sidebar-link-badges {
 .call-monitoring-board--pink-long .call-monitoring-board__count {
     background: #f9a8d4;
     color: #831843;
+}
+
+/* Call Notes history page */
+.call-notes-agent-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: min(100%, 280px);
+}
+.call-notes-agent-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #64748b;
+}
+.call-notes-agent-select {
+    min-width: 240px;
+}
+.call-notes-card__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+.call-notes-card__title {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: #0f172a;
+}
+.call-notes-card__role {
+    font-weight: 600;
+    color: #64748b;
+}
+.call-notes-card__count {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #64748b;
+}
+.call-notes-table-wrap {
+    overflow-x: auto;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.85rem;
+}
+.call-notes-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+.call-notes-table thead th {
+    text-align: left;
+    padding: 0.7rem 0.9rem;
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #64748b;
+}
+.call-notes-table tbody td {
+    padding: 0.85rem 0.9rem;
+    border-bottom: 1px solid #f1f5f9;
+    color: #334155;
+    vertical-align: top;
+}
+.call-notes-table tbody tr:last-child td {
+    border-bottom: none;
+}
+.call-notes-phone {
+    font-weight: 700;
+    color: #0f172a;
+    white-space: nowrap;
+}
+.call-notes-dispo {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    background: #ecfdf5;
+    color: #047857;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+.call-notes-body {
+    max-width: 28rem;
+    white-space: pre-wrap;
+    line-height: 1.45;
+    color: #0f172a;
+}
+.call-notes-muted {
+    color: #94a3b8;
+    font-size: 0.8rem;
+}
+.call-notes-empty,
+.call-notes-empty-row {
+    text-align: center;
+    padding: 2.5rem 1rem;
+    color: #64748b;
+}
+.call-notes-empty__title {
+    margin: 0 0 0.35rem;
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: #0f172a;
+}
+.call-notes-empty__text {
+    margin: 0;
+    font-size: 0.9rem;
+}
+.call-notes-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.75rem;
+}
+.call-notes-download {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    white-space: nowrap;
+}
+.call-notes-download svg {
+    width: 1rem;
+    height: 1rem;
+}
+.call-notes-pagination {
+    margin-top: 1rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid #e2e8f0;
+}
+.call-notes-pagination.app-pagination {
+    gap: 0.85rem;
+}
+.call-notes-pagination .app-pagination-summary {
+    font-size: 0.8rem;
+    color: #64748b;
+}
+.call-notes-pagination nav {
+    display: flex;
+    justify-content: flex-end;
+}
+.call-notes-pagination nav > div {
+    display: flex !important;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+}
+.call-notes-pagination span[aria-current="page"] > span,
+.call-notes-pagination a {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.1rem;
+    height: 2.1rem;
+    padding: 0 0.65rem !important;
+    border-radius: 0.55rem !important;
+    border: 1px solid #e2e8f0 !important;
+    background: #fff !important;
+    color: #334155 !important;
+    font-size: 0.8125rem !important;
+    font-weight: 600 !important;
+    line-height: 1 !important;
+    text-decoration: none !important;
+    box-shadow: none !important;
+}
+.call-notes-pagination span[aria-current="page"] > span {
+    background: #122e53 !important;
+    border-color: #122e53 !important;
+    color: #fff !important;
+}
+.call-notes-pagination a:hover {
+    background: #f8fafc !important;
+    border-color: #cbd5e1 !important;
+}
+.call-notes-pagination span[aria-disabled="true"] > span {
+    opacity: 0.45;
 }

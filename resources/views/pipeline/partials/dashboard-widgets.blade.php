@@ -114,7 +114,7 @@
                                     <a href="{{ route($dashRoute, ['focus' => 'member', 'member' => $row['user_id']]) }}"
                                         class="dash-breakdown-row dash-breakdown-row--leader">
                                         <span><span class="dash-rank">#{{ $i + 1 }}</span> {{ $row['name'] }}</span>
-                                        <span class="dash-breakdown-value">{{ $row['dials'] }} dials · {{ $row['meetings'] }} mtgs</span>
+                                        <span class="dash-breakdown-value">{{ (int) ($row['calls_taken'] ?? $row['calls'] ?? $row['dials'] ?? 0) }} calls · {{ $row['talk_label'] ?? '0s' }} · {{ $row['meetings'] }} mtgs</span>
                                     </a>
                                 @endforeach
                             </div>

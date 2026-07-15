@@ -3,8 +3,17 @@
     use App\Support\WorkflowAssignmentRoles;
 
     $teamLeads = $setterTeamLeads ?? $teamLeads ?? collect();
+    $activeSetters = collect($activeSetters ?? []);
+    $setterTeamMemberMap = $setterTeamMemberMap ?? [];
     $setterTeamLeadRole = WorkflowAssignmentRoles::setterTeamLeadRole();
-    $activeSetterCount = (int) ($activeSetterCount ?? 0);
+    $activeSetterCount = (int) ($activeSetterCount ?? $activeSetters->count());
+    $activeSettersPayload = $activeSetters->map(static function ($user) {
+        return [
+            'id' => (int) $user->id,
+            'name' => (string) $user->name,
+            'team_lead_user_id' => (int) ($user->pivot->team_lead_user_id ?? 0),
+        ];
+    })->values()->all();
 @endphp
 
 <div
@@ -80,6 +89,18 @@
                     <p class="text-xs text-zinc-500 mt-1">Only Appointment Setter Team Lead can receive enriched import leads.</p>
                 @endif
             </div>
+            <div class="app-field" id="import-assign-members-field">
+                <div class="flex items-center justify-between gap-2 mb-1">
+                    <label class="app-label mb-0">Team members</label>
+                    <button type="button" class="text-xs font-semibold text-indigo-700 hover:underline" id="import-assign-members-all" hidden>Select all</button>
+                </div>
+                <div id="import-assign-members" class="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 space-y-1 max-h-40 overflow-auto text-sm">
+                    <p class="text-zinc-500 text-xs" data-members-empty>Select a team lead to see their members.</p>
+                </div>
+                <p class="text-xs text-zinc-500 mt-1" id="import-assign-members-hint">
+                    Leave all selected to split leads across every member on that team.
+                </p>
+            </div>
             <div class="app-field">
                 <label for="import-assign-count" class="app-label">Number of leads</label>
                 <input type="number" name="lead_count" id="import-assign-count" class="app-input w-full" min="1" value="1" required>
@@ -110,7 +131,66 @@
     const activeSetterCount = Number(@json($activeSetterCount));
     const assignBase = @json(url('/admin/workflows'));
     const setterTeamLeadRole = @json($setterTeamLeadRole);
+    const setterTeamMemberMap = @json($setterTeamMemberMap);
+    const allActiveSetters = @json($activeSettersPayload);
+    const assignMembers = document.getElementById('import-assign-members');
+    const assignMembersAll = document.getElementById('import-assign-members-all');
+    const assignMembersHint = document.getElementById('import-assign-members-hint');
     let activeWorkflowId = null;
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function membersForLead(leadId) {
+        const mapped = setterTeamMemberMap[leadId] || setterTeamMemberMap[String(leadId)] || [];
+        if (Array.isArray(mapped) && mapped.length > 0) {
+            return mapped;
+        }
+        return allActiveSetters.filter((member) => !member.team_lead_user_id || Number(member.team_lead_user_id) === Number(leadId));
+    }
+
+    function renderTeamMembers() {
+        if (!assignMembers || !assignTeamLead) {
+            return;
+        }
+        const leadId = assignTeamLead.value;
+        if (!leadId) {
+            assignMembers.innerHTML = '<p class="text-zinc-500 text-xs" data-members-empty>Select a team lead to see their members.</p>';
+            if (assignMembersAll) assignMembersAll.hidden = true;
+            if (assignMembersHint) {
+                assignMembersHint.textContent = 'Leave all selected to split leads across every member on that team.';
+            }
+            return;
+        }
+
+        const members = membersForLead(leadId);
+        if (assignMembersAll) {
+            assignMembersAll.hidden = members.length === 0;
+        }
+
+        if (members.length === 0) {
+            assignMembers.innerHTML = '<p class="text-amber-700 text-xs">No team members linked to this lead yet. Link setters under User Management, or assignment will use all active setters in the workspace.</p>';
+            if (assignMembersHint) {
+                assignMembersHint.textContent = 'Link appointment setters to this team lead so they appear here.';
+            }
+            return;
+        }
+
+        assignMembers.innerHTML = members.map((member) => `
+            <label class="flex items-center gap-2 py-0.5 cursor-pointer">
+                <input type="checkbox" name="member_ids[]" value="${Number(member.id)}" checked class="rounded border-zinc-300 text-indigo-600 focus:ring-indigo-500">
+                <span>${escapeHtml(member.name)}</span>
+            </label>
+        `).join('');
+        if (assignMembersHint) {
+            assignMembersHint.textContent = 'Uncheck a member to exclude them from this assignment.';
+        }
+    }
 
     function showAssignAlert(message, type = 'error') {
         if (!assignAlert) {
@@ -185,6 +265,7 @@
         if (setterOption) {
             assignTeamLead.value = setterOption.value;
         }
+        renderTeamMembers();
     }
 
     function openAssignModal(button) {
@@ -199,7 +280,7 @@
         assignForm.action = `${assignBase}/${id}/assign-leads`;
         assignTitle.textContent = `Assign: ${name}`;
         assignDesc.textContent = remaining > 0
-            ? `${remaining.toLocaleString()} unassigned lead(s) ready to assign. Choose an Appointment Setter Team Lead — leads are split across their setters.`
+            ? `${remaining.toLocaleString()} unassigned lead(s) ready to assign. Choose a team lead, then confirm which team members should receive leads.`
             : 'No unassigned leads remain in this import.';
         assignStats.innerHTML = `
             <div class="rounded-lg border border-zinc-200 px-2 py-2"><span class="block text-zinc-500">Total</span><strong>${total.toLocaleString()}</strong></div>
@@ -264,6 +345,13 @@
             return;
         }
 
+        const memberBoxes = [...(assignMembers?.querySelectorAll('input[name="member_ids[]"]') || [])];
+        const checkedMembers = memberBoxes.filter((input) => input.checked);
+        if (memberBoxes.length > 0 && checkedMembers.length === 0) {
+            showAssignAlert('Select at least one team member to receive leads.');
+            return;
+        }
+
         const submitButton = assignSubmit;
         const originalText = submitButton?.textContent || 'Assign leads';
         if (submitButton) {
@@ -325,6 +413,16 @@
                 updateAssignButtonState(Number(document.getElementById('import-assign-remaining-value')?.textContent?.replace(/,/g, '') || 0));
             }
         }
+    });
+
+    assignTeamLead?.addEventListener('change', () => {
+        renderTeamMembers();
+        updateAssignButtonState(Number(assignCount?.max || 0));
+    });
+    assignMembersAll?.addEventListener('click', () => {
+        assignMembers?.querySelectorAll('input[name="member_ids[]"]').forEach((input) => {
+            input.checked = true;
+        });
     });
 
     document.addEventListener('click', (event) => {

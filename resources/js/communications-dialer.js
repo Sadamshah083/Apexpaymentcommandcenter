@@ -1792,7 +1792,8 @@ function buildCallLogRow(log) {
         : '';
     const notesPanel = log.phone
         ? `<div class="ghl-dialer-recent-notes hidden" data-log-notes-panel>
-            <textarea class="ghl-dialer-recent-notes-input" data-log-notes-input rows="4"
+            <textarea id="call-log-note-${callLogRef || 'row'}" name="call_log_note"
+                class="ghl-dialer-recent-notes-input" data-log-notes-input rows="4"
                 placeholder="Notes for this call (${escapeHtml(log.time_label || '—')})…" maxlength="5000">${displayNote}</textarea>
             <div class="ghl-dialer-recent-notes-actions">
                 <span class="ghl-dialer-recent-notes-status" data-log-notes-status aria-live="polite"></span>

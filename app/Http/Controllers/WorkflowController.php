@@ -240,6 +240,8 @@ class WorkflowController extends Controller
             $data = $request->validate([
                 'team_lead_id' => 'required|integer|exists:users,id',
                 'lead_count' => 'required|integer|min:1|max:5000',
+                'member_ids' => 'nullable|array',
+                'member_ids.*' => 'integer|exists:users,id',
             ]);
         } catch (\Illuminate\Validation\ValidationException $exception) {
             return $this->assignLeadsResponse($request, false, $exception->getMessage(), $exception->errors());
@@ -263,16 +265,22 @@ class WorkflowController extends Controller
             ]);
         }
 
-        $setterCount = $workspace->users()
-            ->wherePivot('role', 'appointment_setter')
-            ->wherePivot('status', 'active')
-            ->count();
+        $teamMembers = WorkflowAssignmentRoles::settersForTeamLead($workspace, (int) $teamLead->id);
+        $allSetters = WorkflowAssignmentRoles::activeSettersFor($workspace);
+        $setterCount = $teamMembers->isNotEmpty() ? $teamMembers->count() : $allSetters->count();
 
         if ($setterCount === 0) {
             return $this->assignLeadsResponse($request, false, 'No active appointment setters are available in this workspace.', [
                 'lead_count' => 'Add at least one active appointment setter before assigning leads.',
             ]);
         }
+
+        $memberIds = collect($data['member_ids'] ?? [])
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
 
         $available = $this->setterDistribution->unassignedWorkflowLeadCount($workflow);
         if ($available === 0) {
@@ -288,6 +296,7 @@ class WorkflowController extends Controller
             $teamLead,
             $requested,
             Auth::user(),
+            $memberIds,
         );
 
         if ($assigned === 0) {
@@ -296,10 +305,14 @@ class WorkflowController extends Controller
             ]);
         }
 
+        $memberLabel = $memberIds === []
+            ? "{$teamLead->name}'s setter team"
+            : (count($memberIds) === 1 ? 'the selected team member' : count($memberIds).' selected team members');
+
         return $this->assignLeadsResponse(
             $request,
             true,
-            "Assigned {$assigned} lead(s) to {$teamLead->name}'s setter team.",
+            "Assigned {$assigned} lead(s) to {$memberLabel}.",
             [],
             $assigned,
             $available - $assigned,

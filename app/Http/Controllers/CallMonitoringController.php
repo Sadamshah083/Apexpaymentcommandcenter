@@ -84,6 +84,8 @@ class CallMonitoringController extends Controller
             'auto_session_active' => ['nullable', 'boolean'],
             'auto_paused' => ['nullable', 'boolean'],
             'on_call' => ['nullable', 'boolean'],
+            'in_disposition' => ['nullable', 'boolean'],
+            'disposition_phone' => ['nullable', 'string', 'max:32'],
             'extension' => ['nullable', 'string', 'max:32'],
             'call_ended' => ['nullable', 'boolean'],
         ]);
@@ -96,6 +98,20 @@ class CallMonitoringController extends Controller
         $membership = $workspace->users()->where('users.id', $user->id)->first();
         $role = (string) ($membership?->pivot?->role ?? '');
         $extension = preg_replace('/\D/', '', (string) ($validated['extension'] ?? $membership?->pivot?->morpheus_extension_num ?? '')) ?: null;
+
+        // Super Admin / Admin (and other non-agent roles) never belong on Call Monitoring.
+        if (
+            AgentPresenceService::isExcludedFromMonitoring(
+                $role,
+                \App\Support\SalesOps::roleLabel($role),
+                $user,
+                (int) $workspace->id,
+            )
+        ) {
+            $this->presence->forgetUser($workspace, (int) $user->id);
+
+            return response()->json(['ok' => true, 'presence' => ['ignored' => true, 'role' => $role]]);
+        }
 
         if (! empty($validated['call_ended'])) {
             $this->presence->markCallEnded($user, $workspace);
@@ -114,6 +130,14 @@ class CallMonitoringController extends Controller
         ];
         if (array_key_exists('dial_mode', $validated) && filled($validated['dial_mode'])) {
             $payload['dial_mode'] = $validated['dial_mode'];
+        }
+        if (array_key_exists('in_disposition', $validated)) {
+            $payload['in_disposition'] = (bool) $validated['in_disposition'];
+        } elseif (! empty($validated['call_ended'])) {
+            $payload['in_disposition'] = true;
+        }
+        if (array_key_exists('disposition_phone', $validated) && filled($validated['disposition_phone'])) {
+            $payload['disposition_phone'] = $validated['disposition_phone'];
         }
 
         $entry = $this->presence->heartbeat($user, $workspace, $payload);
@@ -154,18 +178,22 @@ class CallMonitoringController extends Controller
             flush();
 
             $lastVersion = -1;
+            $lastPresenceVersion = -1;
             $lastFingerprint = '';
             $idleTicks = 0;
-            // Short cap: clients now prefer JSON polls. Do not pin FPM workers for hours.
-            $maxIdle = 120;
+            // Keep stream open longer so login/idle flips push in real time.
+            $maxIdle = 600;
             $ticksSinceFull = 0;
+            $presence = app(AgentPresenceService::class);
+            $workspaceId = (int) ($workspace?->id ?? 0);
 
             while (! connection_aborted() && $idleTicks < $maxIdle) {
                 try {
                     $version = $this->callEvents->monitoringVersion();
-                    $versionChanged = $version !== $lastVersion;
-                    // Full Morpheus probe rarely; light cache-based snapshot on most ticks.
-                    $shouldPush = $versionChanged || ($idleTicks % 8) === 0;
+                    $presenceVersion = $workspaceId > 0 ? $presence->presenceVersion($workspaceId) : 0;
+                    $versionChanged = $version !== $lastVersion || $presenceVersion !== $lastPresenceVersion;
+                    // Push on presence/login changes immediately; otherwise light refresh.
+                    $shouldPush = $versionChanged || ($idleTicks % 5) === 0;
 
                     if ($shouldPush) {
                         $useFull = $versionChanged || $ticksSinceFull >= 40;
@@ -182,19 +210,26 @@ class CallMonitoringController extends Controller
 
                         $fingerprint = md5(json_encode([
                             $snapshot['version'] ?? 0,
+                            $snapshot['presence_version'] ?? 0,
                             $snapshot['summary'] ?? [],
                             collect($snapshot['rows'] ?? [])->map(fn ($row) => [
                                 $row['id'] ?? null,
                                 $row['status_group'] ?? null,
                                 $row['bucket'] ?? null,
                                 $row['connected_at'] ?? null,
-                                $row['timer_sec'] ?? null,
                             ])->all(),
+                            collect($snapshot['tables']['not_in_call'] ?? [])->map(fn ($row) => [
+                                $row['id'] ?? null,
+                                $row['dial_mode'] ?? null,
+                            ])->all(),
+                            collect($snapshot['tables']['disposition'] ?? [])->map(fn ($row) => $row['id'] ?? null)->all(),
+                            collect($snapshot['tables']['not_logged_in'] ?? [])->map(fn ($row) => $row['id'] ?? null)->all(),
                         ]));
 
                         if ($fingerprint !== $lastFingerprint || $versionChanged) {
                             $lastFingerprint = $fingerprint;
                             $lastVersion = $version;
+                            $lastPresenceVersion = $presenceVersion;
                             echo 'data: '.json_encode($snapshot, JSON_THROW_ON_ERROR)."\n\n";
                             if (function_exists('ob_flush')) {
                                 @ob_flush();
@@ -222,7 +257,7 @@ class CallMonitoringController extends Controller
                     flush();
                 }
 
-                usleep(300000);
+                usleep(250000);
             }
         }, 200, [
             'Content-Type' => 'text/event-stream',

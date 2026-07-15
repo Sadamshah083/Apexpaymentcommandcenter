@@ -9,13 +9,16 @@
         'incall_short' => 'is-incall',
         'incall_long' => 'is-incall-long',
         'not_in_call', 'idle' => 'is-idle',
+        'disposition' => 'is-disposition',
+        'not_logged_in' => 'is-offline',
         'queue' => 'is-queue',
         'dead' => 'is-dead',
         default => 'is-waiting',
     };
-    $showTimer = in_array($bucket, ['incall_short', 'incall_long', 'not_in_call'], true);
+    $showTimer = in_array($bucket, ['incall_short', 'incall_long', 'not_in_call', 'disposition'], true);
     $idleSince = $row['idle_since'] ?? null;
     $isIdle = $bucket === 'not_in_call';
+    $isDisposition = $bucket === 'disposition';
     $dialMode = strtolower((string) ($row['dial_mode'] ?? ''));
     $dialLabel = trim((string) ($row['dial_mode_label'] ?? ''));
     if ($dialLabel === '' && $isIdle) {
@@ -41,7 +44,7 @@
     data-timer-sec="{{ $showTimer ? $timerSec : 0 }}"
     data-dial-mode="{{ $dialMode !== '' ? $dialMode : '' }}"
     @if ($showTimer && ! empty($row['connected_at'])) data-connected-at="{{ $row['connected_at'] }}" @endif
-    @if ($bucket === 'not_in_call' && ! empty($idleSince)) data-idle-since="{{ $idleSince }}" @endif>
+    @if (($bucket === 'not_in_call' || $bucket === 'disposition') && ! empty($idleSince)) data-idle-since="{{ $idleSince }}" @endif>
     <td class="call-monitoring-row__station">{{ $row['station'] ?? '—' }}</td>
     <td class="call-monitoring-row__user">
         <span class="call-monitoring-row__name">{{ $row['user'] ?? '—' }}</span>
@@ -69,7 +72,9 @@
         @endif
     </td>
     <td class="call-monitoring-row__campaign">
-        @if (! $isIdle && $dialLabel !== '' && (($row['campaign'] ?? '—') === '—' || ($row['campaign'] ?? '') === '' || ($row['campaign'] ?? '') === $dialLabel))
+        @if ($isDisposition && $dialLabel !== '')
+            <span class="call-monitoring-dial-pill {{ $dialPillClass }}">{{ $dialLabel }}</span>
+        @elseif (! $isIdle && $dialLabel !== '' && (($row['campaign'] ?? '—') === '—' || ($row['campaign'] ?? '') === '' || ($row['campaign'] ?? '') === $dialLabel))
             <span class="call-monitoring-dial-pill {{ $dialPillClass }}">{{ $dialLabel }}</span>
         @else
             {{ $row['campaign'] ?? '—' }}

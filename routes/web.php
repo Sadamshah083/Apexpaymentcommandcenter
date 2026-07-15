@@ -194,6 +194,8 @@ Route::prefix('admin')->name('admin.')->middleware([
         Route::get('/monitoring/live', [\App\Http\Controllers\CallMonitoringController::class, 'live'])->name('monitoring.live');
         Route::get('/monitoring/stream', [\App\Http\Controllers\CallMonitoringController::class, 'stream'])->name('monitoring.stream');
         Route::post('/monitoring/presence', [\App\Http\Controllers\CallMonitoringController::class, 'presenceHeartbeat'])->name('monitoring.presence');
+        Route::get('/notes', [\App\Http\Controllers\CallNotesController::class, 'index'])->name('notes');
+        Route::get('/notes/download', [\App\Http\Controllers\CallNotesController::class, 'download'])->name('notes.download');
         Route::get('/dialer/call-logs', [CommunicationsHubController::class, 'dialerCallLogs'])->name('dialer.call-logs');
         Route::get('/dialer/notes', [CommunicationsHubController::class, 'dialerPhoneNoteShow'])->name('dialer.notes.show');
         Route::put('/dialer/notes/phone', [CommunicationsHubController::class, 'dialerPhoneNoteSave'])->name('dialer.notes.phone.save');
@@ -282,6 +284,8 @@ Route::prefix('portal')->name('portal.')->middleware([\App\Http\Middleware\Marke
         Route::get('/monitoring/live', [\App\Http\Controllers\CallMonitoringController::class, 'live'])->name('monitoring.live');
         Route::get('/monitoring/stream', [\App\Http\Controllers\CallMonitoringController::class, 'stream'])->name('monitoring.stream');
         Route::post('/monitoring/presence', [\App\Http\Controllers\CallMonitoringController::class, 'presenceHeartbeat'])->name('monitoring.presence');
+        Route::get('/notes', [\App\Http\Controllers\CallNotesController::class, 'index'])->name('notes');
+        Route::get('/notes/download', [\App\Http\Controllers\CallNotesController::class, 'download'])->name('notes.download');
         Route::get('/dialer/call-logs', [CommunicationsHubController::class, 'dialerCallLogs'])->name('dialer.call-logs');
         Route::get('/dialer/notes', [CommunicationsHubController::class, 'dialerPhoneNoteShow'])->name('dialer.notes.show');
         Route::put('/dialer/notes/phone', [CommunicationsHubController::class, 'dialerPhoneNoteSave'])->name('dialer.notes.phone.save');

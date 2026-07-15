@@ -200,7 +200,9 @@
     </div>
     @if ($callbackPhone)
         <div class="ghl-dialer-recent-notes hidden" data-log-notes-panel>
-            <textarea class="ghl-dialer-recent-notes-input" data-log-notes-input rows="4"
+            <textarea id="call-log-note-{{ $callLogRef !== '' ? $callLogRef : uniqid('note') }}"
+                name="call_log_note"
+                class="ghl-dialer-recent-notes-input" data-log-notes-input rows="4"
                 placeholder="Notes for this call ({{ $timeLabel }})…" maxlength="5000">{{ $displayNote }}</textarea>
             <div class="ghl-dialer-recent-notes-actions">
                 <span class="ghl-dialer-recent-notes-status" data-log-notes-status aria-live="polite"></span>

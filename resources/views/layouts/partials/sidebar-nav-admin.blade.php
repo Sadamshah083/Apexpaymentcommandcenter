@@ -108,9 +108,13 @@
 @if ($can('communications') || auth()->user()?->canAccessAdminPortal())
     <x-sidebar.section title="Communications">
         <x-sidebar.link :href="route('admin.communications.index')" label="Communications Hub" icon-name="communications"
-            :exclude-prefixes="['/admin/communications/monitoring']"
-            :active="request()->routeIs('admin.communications.*') && ! request()->routeIs('admin.communications.monitoring*')">
+            :exclude-prefixes="['/admin/communications/monitoring', '/admin/communications/notes']"
+            :active="request()->routeIs('admin.communications.*') && ! request()->routeIs('admin.communications.monitoring*', 'admin.communications.notes')">
             <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'communications'])</x-slot:icon>
+        </x-sidebar.link>
+        <x-sidebar.link :href="route('admin.communications.notes')" label="Call Notes" icon-name="notes"
+            :active="request()->routeIs('admin.communications.notes')">
+            <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'notes'])</x-slot:icon>
         </x-sidebar.link>
         @if (app(\App\Services\Communications\CommunicationsAccessService::class)->canViewCallMonitoring(auth()->user(), 'admin.'))
             <x-sidebar.link

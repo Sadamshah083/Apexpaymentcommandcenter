@@ -1,14 +1,30 @@
 @php
     $dispositions = config('integrations.communications.dispositions', [
-        'No Answer',
-        'Voicemail',
+        'Answer Machine',
+        'Call Back',
+        'Corporate Business',
+        'Owner Not Available',
+        'Wrong Number/Business',
+        'Owner Hang up',
         'Follow Up',
-        'Requested Appointment',
         'Not Interested',
-        'Incorrect Number',
-        'Not Available',
-        'Call me Later',
+        'Requested Appointment',
+        'No Answer',
     ]);
+    $dispositionTones = [
+        'Answer Machine' => 'amber',
+        'Answering Machine' => 'amber',
+        'Call Back' => 'indigo',
+        'Corporate Business' => 'violet',
+        'Owner Not Available' => 'cyan',
+        'Wrong Number/Business' => 'orange',
+        'Owner Hang up' => 'teal',
+        'Owner Hangup' => 'teal',
+        'Follow Up' => 'sky',
+        'Not Interested' => 'rose',
+        'Requested Appointment' => 'emerald',
+        'No Answer' => 'slate',
+    ];
     $dispositionUrl = url((request()->is('admin*') ? '/admin' : '/portal') . '/communications/dialer/disposition');
 @endphp
 
@@ -42,12 +58,16 @@
             <section class="ch-call-summary__dispositions">
                 <div class="ch-call-summary__section-head">
                     <h3>Disposition <span class="ch-call-summary__required">required</span></h3>
-                    <p class="ch-call-summary__hint">Pick a quick outcome or write your own — you can’t continue without one.</p>
+                    <p class="ch-call-summary__hint">Pick a quick outcome or write your own — double-click a disposition to save &amp; close.</p>
                 </div>
                 <div class="ch-call-summary__grid" data-call-summary-dispositions>
                     @foreach ($dispositions as $label)
-                        <button type="button" class="ch-call-summary__dispo-btn"
-                            data-disposition-value="{{ $label }}">{{ $label }}</button>
+                        @php $tone = $dispositionTones[$label] ?? 'slate'; @endphp
+                        <button type="button"
+                            class="ch-call-summary__dispo-btn ch-call-summary__dispo-btn--{{ $tone }}"
+                            data-disposition-value="{{ $label }}"
+                            data-disposition-tone="{{ $tone }}"
+                            title="Double-click to save &amp; close">{{ $label }}</button>
                     @endforeach
                 </div>
 
@@ -57,6 +77,7 @@
                             Your disposition
                         </label>
                         <input type="text" id="ch-call-summary-custom-disposition"
+                            name="custom_disposition"
                             class="ch-call-summary__input"
                             data-call-summary-custom-disposition
                             maxlength="120"
@@ -67,7 +88,8 @@
                         <label class="ch-call-summary__field-label" for="ch-call-summary-note">
                             Comment
                         </label>
-                        <textarea id="ch-call-summary-note" class="ch-call-summary__notes" data-call-summary-note
+                        <textarea id="ch-call-summary-note" name="call_comment"
+                            class="ch-call-summary__notes" data-call-summary-note
                             rows="3" maxlength="5000" placeholder="Add a comment for this call…"></textarea>
                     </div>
                 </div>

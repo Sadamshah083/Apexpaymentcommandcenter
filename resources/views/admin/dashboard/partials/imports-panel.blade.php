@@ -173,6 +173,8 @@
 
     @include('workflows.partials.import-modals', [
         'setterTeamLeads' => $setterTeamLeads ?? $team ?? collect(),
+        'activeSetters' => $activeSetters ?? collect(),
+        'setterTeamMemberMap' => $setterTeamMemberMap ?? [],
         'activeSetterCount' => $activeSetterCount ?? 0,
     ])
 </div>

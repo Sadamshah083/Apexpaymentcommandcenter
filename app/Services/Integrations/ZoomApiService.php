@@ -296,7 +296,7 @@ class ZoomApiService
                 return true;
             }
 
-            if ($answeredState && $billsec >= 2) {
+            if ($answeredState && $billsec >= 1) {
                 return true;
             }
 
@@ -910,7 +910,7 @@ class ZoomApiService
                 $destinationConnected = $this->destinationAnsweredOnCall($bridgedTo, $destination);
             }
 
-            if (! $destinationConnected && filled($bridgedTo) && $billsec >= 2 && $live && $hangup === '') {
+            if (! $destinationConnected && filled($bridgedTo) && $billsec >= 1 && $live && $hangup === '') {
                 // Bridged live call with talk time — destination has answered.
                 $destinationConnected = true;
             }
@@ -930,7 +930,7 @@ class ZoomApiService
                 }
             }
 
-            if (! $destinationConnected && $billsec >= 2) {
+            if (! $destinationConnected && $billsec >= 1) {
                 $snapshotDest = preg_replace('/\D/', '', (string) ($snapshot['destination_number'] ?? '')) ?? '';
                 $requestedDest = preg_replace('/\D/', '', (string) $destination) ?? '';
                 $hasAnswerTime = filled($snapshot['answer_time'] ?? $snapshot['answered_at'] ?? null);
@@ -2177,31 +2177,84 @@ class ZoomApiService
      */
     protected function postOriginate(string $path, array $body): array
     {
-        try {
-            $response = $this->originateClient()->post($this->url($path), $body);
+        $attempts = 0;
+        $lastError = null;
 
-            if ($response->successful()) {
-                $json = $response->json() ?? [];
+        while ($attempts < 2) {
+            $attempts++;
 
-                app(MorpheusCircuitBreaker::class)->recordSuccess();
+            try {
+                $response = $this->originateClient()->post($this->url($path), $body);
 
-                return array_merge([
-                    'ok' => (bool) ($json['ok'] ?? true),
-                    'action' => 'originate',
-                ], $json);
+                if ($response->successful()) {
+                    $json = $response->json() ?? [];
+
+                    app(MorpheusCircuitBreaker::class)->recordSuccess();
+
+                    return array_merge([
+                        'ok' => (bool) ($json['ok'] ?? true),
+                        'action' => 'originate',
+                    ], $json);
+                }
+
+                if ($response->status() === 403) {
+                    return ['ok' => false, 'error' => 'API key lacks calls:originate permission.'];
+                }
+
+                return [
+                    'ok' => false,
+                    'error' => (string) ($response->json('error') ?? 'Originate failed (HTTP '.$response->status().').'),
+                ];
+            } catch (\Throwable $e) {
+                $lastError = $e;
+
+                // One quick retry for transient SSL / connect blips to Morpheus.
+                if ($attempts < 2 && $this->isTransientOriginateHttpFailure($e)) {
+                    usleep(250_000);
+
+                    continue;
+                }
+
+                return ['ok' => false, 'error' => $this->friendlyOriginateHttpError($e)];
             }
-
-            if ($response->status() === 403) {
-                return ['ok' => false, 'error' => 'API key lacks calls:originate permission.'];
-            }
-
-            return [
-                'ok' => false,
-                'error' => (string) ($response->json('error') ?? 'Originate failed (HTTP '.$response->status().').'),
-            ];
-        } catch (\Throwable $e) {
-            return ['ok' => false, 'error' => $e->getMessage()];
         }
+
+        return [
+            'ok' => false,
+            'error' => $lastError ? $this->friendlyOriginateHttpError($lastError) : 'Originate failed.',
+        ];
+    }
+
+    protected function isTransientOriginateHttpFailure(\Throwable $exception): bool
+    {
+        $message = strtolower($exception->getMessage());
+
+        return str_contains($message, 'timed out')
+            || str_contains($message, 'timeout')
+            || str_contains($message, 'curl error 28')
+            || str_contains($message, 'ssl')
+            || str_contains($message, 'failed to connect')
+            || str_contains($message, 'connection refused');
+    }
+
+    protected function friendlyOriginateHttpError(\Throwable $exception): string
+    {
+        $message = strtolower($exception->getMessage());
+
+        if (str_contains($message, 'timed out')
+            || str_contains($message, 'timeout')
+            || str_contains($message, 'curl error 28')
+            || str_contains($message, 'ssl')) {
+            return 'Morpheus did not respond in time. Wait a moment and dial again.';
+        }
+
+        if (str_contains($message, 'failed to connect')
+            || str_contains($message, 'connection refused')
+            || str_contains($message, 'could not resolve')) {
+            return 'Could not reach Morpheus. Check connectivity and try again.';
+        }
+
+        return $exception->getMessage();
     }
 
     /**
@@ -2418,17 +2471,63 @@ class ZoomApiService
             return ['ok' => false, 'error' => 'Missing call uuid.'];
         }
 
+        $extensionDigits = preg_replace('/\D/', '', (string) $fromExtension) ?: '';
+        $destinationDigits = preg_replace('/\D/', '', (string) $destination) ?: '';
+        // Match dialer normalize (drop leading US country code) for destination matching.
+        if (strlen($destinationDigits) === 11 && str_starts_with($destinationDigits, '1')) {
+            $destinationDigits = substr($destinationDigits, 1);
+        }
+
+        $hungup = [];
+        $lastError = null;
+        $onlyAlreadyEnded = true;
+
+        // 1) Instant priority: hang up every live leg that touches this destination.
+        //    This is what drops the PSTN party when the agent clicks End Call.
+        if ($destinationDigits !== '') {
+            try {
+                foreach ($this->listActiveCalls() as $call) {
+                    if (! is_array($call) || ! $this->activeCallTouchesDestination($call, $destinationDigits)) {
+                        continue;
+                    }
+
+                    $candidateUuid = (string) ($call['uuid'] ?? $call['call_uuid'] ?? '');
+                    if ($candidateUuid === '' || in_array($candidateUuid, $hungup, true)) {
+                        continue;
+                    }
+
+                    $result = $this->hangup($candidateUuid);
+                    if ($result['ok'] ?? false) {
+                        $hungup[] = $candidateUuid;
+                        $onlyAlreadyEnded = false;
+                    } else {
+                        $error = (string) ($result['error'] ?? '');
+                        $lastError = $error !== '' ? $error : $lastError;
+                        if (! $this->isCallAlreadyEndedError($error)) {
+                            $onlyAlreadyEnded = false;
+                        } else {
+                            $hungup[] = $candidateUuid;
+                        }
+                    }
+                }
+            } catch (\Throwable) {
+                // Continue with UUID hangups.
+            }
+        }
+
         $targets = array_values(array_unique(array_filter(array_merge(
             [$uuid],
             array_map(static fn ($id) => trim((string) $id), $relatedUuids),
             $this->collectBridgeLinkedUuids($uuid),
+            $hungup,
         ), static fn (string $id) => $id !== '')));
 
-        $hungup = [];
-        $lastError = null;
-        $onlyAlreadyEnded = $targets !== [];
-
+        // 2) Hang up known UUIDs (originate / bridge / related).
         foreach ($targets as $targetUuid) {
+            if (in_array($targetUuid, $hungup, true)) {
+                continue;
+            }
+
             $result = $this->hangup($targetUuid);
             if ($result['ok'] ?? false) {
                 $hungup[] = $targetUuid;
@@ -2444,9 +2543,7 @@ class ZoomApiService
             }
         }
 
-        $extensionDigits = preg_replace('/\D/', '', (string) $fromExtension) ?: '';
-        $destinationDigits = preg_replace('/\D/', '', (string) $destination) ?: '';
-
+        // 3) Aggressive extension release (kills agent + remaining linked legs).
         if ($extensionDigits !== '') {
             try {
                 $preReleased = $this->releaseCallsForExtension($fromExtension, aggressive: true);
@@ -2459,60 +2556,51 @@ class ZoomApiService
             }
         }
 
-        $passes = 0;
-        while ($passes < 3) {
-            $passes++;
-            try {
-                foreach ($this->listActiveCalls() as $call) {
-                    if (! is_array($call)) {
-                        continue;
-                    }
-
-                    $relatedByUuid = collect($targets)->contains(
-                        fn (string $target) => $this->callRowMatchesUuid($call, $target)
-                    );
-                    $matchesExtension = $extensionDigits !== ''
-                        && $this->activeCallTouchesExtension($call, $extensionDigits);
-                    $matchesDestination = $destinationDigits !== ''
-                        && $this->activeCallTouchesDestination($call, $destinationDigits);
-
-                    $relatedByContext = match (true) {
-                        $extensionDigits !== '' && $destinationDigits !== '' => $matchesExtension || $matchesDestination,
-                        $extensionDigits !== '' => $matchesExtension,
-                        $destinationDigits !== '' => $matchesDestination,
-                        default => false,
-                    };
-
-                    if (! $relatedByUuid && ! $relatedByContext) {
-                        continue;
-                    }
-
-                    $candidateUuid = (string) ($call['uuid'] ?? $call['call_uuid'] ?? '');
-                    if ($candidateUuid === '' || in_array($candidateUuid, $hungup, true)) {
-                        continue;
-                    }
-
-                    try {
-                        $result = $this->hangup($candidateUuid);
-                        if ($result['ok'] ?? false) {
-                            $hungup[] = $candidateUuid;
-                            $onlyAlreadyEnded = false;
-                        } else {
-                            $lastError = (string) ($result['error'] ?? $lastError);
-                        }
-                    } catch (\Throwable) {
-                        // Keep primary hangup successful even if related-leg cleanup fails.
-                    }
+        // 4) One more destination+extension sweep (fast, no multi-pass sleep).
+        try {
+            foreach ($this->listActiveCalls() as $call) {
+                if (! is_array($call)) {
+                    continue;
                 }
-            } catch (\Throwable) {
-                // Keep primary hangup successful even if active-call lookup fails.
-            }
 
-            if ($hungup !== [] || $passes >= 3) {
-                break;
-            }
+                $relatedByUuid = collect($targets)->contains(
+                    fn (string $target) => $this->callRowMatchesUuid($call, $target)
+                );
+                $matchesExtension = $extensionDigits !== ''
+                    && $this->activeCallTouchesExtension($call, $extensionDigits);
+                $matchesDestination = $destinationDigits !== ''
+                    && $this->activeCallTouchesDestination($call, $destinationDigits);
 
-            usleep(250_000);
+                $relatedByContext = match (true) {
+                    $extensionDigits !== '' && $destinationDigits !== '' => $matchesExtension || $matchesDestination,
+                    $extensionDigits !== '' => $matchesExtension,
+                    $destinationDigits !== '' => $matchesDestination,
+                    default => false,
+                };
+
+                if (! $relatedByUuid && ! $relatedByContext) {
+                    continue;
+                }
+
+                $candidateUuid = (string) ($call['uuid'] ?? $call['call_uuid'] ?? '');
+                if ($candidateUuid === '' || in_array($candidateUuid, $hungup, true)) {
+                    continue;
+                }
+
+                try {
+                    $result = $this->hangup($candidateUuid);
+                    if ($result['ok'] ?? false) {
+                        $hungup[] = $candidateUuid;
+                        $onlyAlreadyEnded = false;
+                    } else {
+                        $lastError = (string) ($result['error'] ?? $lastError);
+                    }
+                } catch (\Throwable) {
+                    // Keep primary hangup successful even if related-leg cleanup fails.
+                }
+            }
+        } catch (\Throwable) {
+            // Keep primary hangup successful even if active-call lookup fails.
         }
 
         if ($extensionDigits !== '') {
@@ -2521,6 +2609,42 @@ class ZoomApiService
                 $hungup = array_values(array_unique(array_merge($hungup, $released)));
             } catch (\Throwable) {
                 // Keep primary hangup successful even if extension release fails.
+            }
+        }
+
+        // Final destination-only pass to catch leftover PSTN legs.
+        if ($destinationDigits !== '') {
+            try {
+                if ($extensionDigits !== '') {
+                    $byDestination = $this->releaseExtensionCallsWithDestination(
+                        (string) $fromExtension,
+                        $destination,
+                    );
+                    $hungup = array_values(array_unique(array_merge(
+                        $hungup,
+                        $byDestination['hungup'] ?? [],
+                    )));
+                    if (($byDestination['hungup'] ?? []) !== []) {
+                        $onlyAlreadyEnded = false;
+                    }
+                } else {
+                    foreach ($this->listActiveCalls() as $call) {
+                        if (! is_array($call) || ! $this->activeCallTouchesDestination($call, $destinationDigits)) {
+                            continue;
+                        }
+                        $candidateUuid = (string) ($call['uuid'] ?? $call['call_uuid'] ?? '');
+                        if ($candidateUuid === '' || in_array($candidateUuid, $hungup, true)) {
+                            continue;
+                        }
+                        $result = $this->hangup($candidateUuid);
+                        if ($result['ok'] ?? false) {
+                            $hungup[] = $candidateUuid;
+                            $onlyAlreadyEnded = false;
+                        }
+                    }
+                }
+            } catch (\Throwable) {
+                // Best-effort.
             }
         }
 
@@ -4178,17 +4302,22 @@ class ZoomApiService
     }
 
     /**
-     * Faster dial-path client: short connect, keep request timeout for Morpheus place-call.
+     * Dial-path client: allow longer connect/SSL and request windows — place-call
+     * must not fail on brief Morpheus blips (1s connect was causing sporadic 422s).
      */
     private function originateClient(): PendingRequest
     {
         app(MorpheusCircuitBreaker::class)->guard();
 
-        $timeout = max(4, (int) config('integrations.communications.http_timeout_seconds', 6));
+        $timeout = max(
+            15,
+            (int) config('integrations.communications.originate_http_timeout_seconds', 0)
+                ?: (int) config('integrations.communications.http_timeout_seconds', 6)
+        );
 
         return Http::withHeaders($this->morpheusAuthHeaders())
             ->acceptJson()
-            ->connectTimeout(1)
+            ->connectTimeout(5)
             ->timeout($timeout);
     }
 

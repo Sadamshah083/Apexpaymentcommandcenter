@@ -3,6 +3,7 @@
 namespace App\Services\Workflow;
 
 use App\Models\WorkflowLead;
+use App\Support\LeadDialablePhone;
 use App\Services\BusinessResearch\BusinessResearchPrompt;
 use App\Services\BusinessResearch\GeminiClient;
 use App\Services\BusinessResearch\MarkdownReportParser;
@@ -219,6 +220,20 @@ class WorkflowExtractor
 
         if (filled($parsed['physical_address'] ?? null)) {
             $updates['address'] = $parsed['physical_address'];
+        }
+
+        // Persist a real dialable number when enrichment left a placeholder.
+        $temp = $lead->replicate();
+        $temp->forceFill([
+            'markdown_report' => $report['content'],
+            'direct_phone' => $updates['direct_phone'] ?? $lead->direct_phone,
+            'input_phone' => $lead->input_phone,
+            'normalized_phone' => $lead->normalized_phone,
+            'raw_row' => $lead->raw_row,
+        ]);
+        $phoneUpdates = LeadDialablePhone::syncAttributes($temp);
+        if ($phoneUpdates !== []) {
+            $updates = array_merge($updates, $phoneUpdates);
         }
 
         return $updates;
