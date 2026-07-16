@@ -99,6 +99,10 @@
             <div class="ghl-dialer-active-screen__hero">
                 <p class="ghl-dialer-active-screen__number" data-dialer-active-peer></p>
                 <p class="ghl-dialer-active-screen__status" data-dialer-active-status>Ringing</p>
+                <p class="ghl-dialer-active-screen__mic-muted hidden" data-dialer-mic-muted-indicator aria-live="polite">
+                    <span class="ghl-dialer-active-screen__mic-muted-line" aria-hidden="true"></span>
+                    Mic muted
+                </p>
                 <p class="ghl-dialer-active-screen__timer hidden" data-dialer-active-timer>00:00</p>
             </div>
             <div class="ghl-dialer-active-screen__tools">
@@ -143,6 +147,8 @@
                         <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
                         <line x1="12" y1="19" x2="12" y2="23" />
                         <line x1="8" y1="23" x2="16" y2="23" />
+                        <line x1="3" y1="3" x2="21" y2="21" stroke-width="2.5" stroke-linecap="round"
+                            data-dialer-call-mute-slash style="display:none" />
                     </svg>
                     <span data-dialer-call-mute-label>Mute</span>
                 </button>
@@ -192,7 +198,7 @@
                     <button type="button" class="ghl-dialer-active-keypad__hide" data-dialer-active-keypad-hide>Hide keypad</button>
                     <button type="button" class="ghl-dialer-active-keypad__amd" data-dialer-answering-machine
                         title="Mark as answering machine and end call">
-                        Answering machine
+                        Answering Machine
                     </button>
                 </div>
             </div>
@@ -203,11 +209,6 @@
                     class="ghl-dialer-active-notes-input"
                     data-dialer-active-notes-input rows="3"
                     placeholder="Notes for this call…" maxlength="5000"></textarea>
-                <label class="ghl-dialer-active-notes__label" for="dialer-active-comment-field">Comment</label>
-                <textarea id="dialer-active-comment-field" name="active_call_comment"
-                    class="ghl-dialer-active-notes-input"
-                    data-dialer-active-comment-input rows="2"
-                    placeholder="Comment for this call…" maxlength="5000"></textarea>
                 <div class="ghl-dialer-active-notes-actions">
                     <span class="ghl-dialer-active-notes-status" data-dialer-active-notes-status aria-live="polite">Auto-saves to call log</span>
                     <button type="button" class="ch-btn ch-btn--secondary ch-btn--sm" data-dialer-active-notes-save>Save</button>

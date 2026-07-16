@@ -434,46 +434,67 @@ class MorpheusHubController extends Controller
             $relatedUuids[] = $bridgedUuid;
         }
 
+        $primary = $originateUuid !== '' ? $originateUuid : $uuid;
+        $related = array_values(array_filter(array_map(
+            static fn ($id) => trim((string) $id),
+            $relatedUuids,
+        )));
+        $ended = array_values(array_unique(array_filter([$primary, $uuid, ...$related])));
+
         \Illuminate\Support\Facades\Log::info('Comm hub hangup requested', [
             'path_uuid' => $uuid,
             'originate_uuid' => $originateUuid,
             'from_extension' => $fromExtension,
             'destination' => $destination,
-            'related_uuids' => $relatedUuids,
+            'related_uuids' => $related,
         ]);
 
-        return $this->executeCallAction(
-            $request,
-            function () use ($originateUuid, $uuid, $fromExtension, $destination, $relatedUuids) {
-                $primary = $originateUuid !== '' ? $originateUuid : $uuid;
-
-                // Clear wallboard LIVE state first so Monitoring hides immediately,
-                // even if Morpheus hangup HTTP is slow or fails.
-                $ended = array_values(array_unique(array_filter([
-                    $primary,
-                    $uuid,
-                    ...array_map(static fn ($id) => (string) $id, $relatedUuids),
-                ])));
-                foreach ($ended as $endedUuid) {
-                    $this->callEvents->markCallEnded($endedUuid, 'NORMAL_CLEARING');
-                    $this->touchCallLogEnded($endedUuid);
-                }
-                $this->callEvents->endLiveCallsForLeg(
-                    is_string($fromExtension) ? $fromExtension : null,
-                    is_string($destination) ? $destination : null,
-                    'NORMAL_CLEARING',
-                );
-                $this->markAgentPresenceIdle();
-
-                return $this->morpheus->hangupWithContext(
-                    $primary,
-                    is_string($fromExtension) ? $fromExtension : null,
-                    is_string($destination) ? $destination : null,
-                    array_map(static fn ($id) => (string) $id, $relatedUuids),
-                );
-            },
-            'Call ended.'
+        // Clear wallboard LIVE state immediately — never wait on Morpheus HTTP.
+        foreach ($ended as $endedUuid) {
+            $this->callEvents->markCallEnded($endedUuid, 'NORMAL_CLEARING');
+            $this->touchCallLogEnded($endedUuid);
+        }
+        $this->callEvents->endLiveCallsForLeg(
+            is_string($fromExtension) ? $fromExtension : null,
+            is_string($destination) ? $destination : null,
+            'NORMAL_CLEARING',
         );
+        $this->markAgentPresenceIdle();
+
+        $ext = is_string($fromExtension) ? $fromExtension : null;
+        $dest = is_string($destination) ? $destination : null;
+
+        // Tear down PSTN/SIP legs after the browser gets 200 (background).
+        dispatch(function () use ($primary, $ext, $dest, $related): void {
+            try {
+                app(\App\Services\Integrations\ZoomApiService::class)->hangupWithContext(
+                    $primary,
+                    $ext,
+                    $dest,
+                    $related,
+                );
+            } catch (\Throwable $e) {
+                report($e);
+            }
+
+            try {
+                app(\App\Services\Communications\CommunicationsDataService::class)->bustCache();
+                app(\App\Services\Communications\MorpheusHubService::class)->bustCache();
+            } catch (\Throwable) {
+                // Cache bust is best-effort.
+            }
+        })->afterResponse();
+
+        if ($request->wantsJson() || $request->ajax() || $request->expectsJson()) {
+            return response()->json([
+                'ok' => true,
+                'message' => 'Call ended.',
+                'hungup' => $ended,
+                'async' => true,
+            ]);
+        }
+
+        return $this->redirectBack($request, 'Call ended.');
     }
 
     /**
@@ -680,8 +701,9 @@ class MorpheusHubController extends Controller
             $lastFingerprint = '';
             $idleTicks = 0;
             $maxTicks = 1800;
-            $apiEveryTicks = 8; // full hub status ~800ms
-            $destProbeEveryTicks = 3; // destination active-call probe ~300ms
+            // SSE fallback is webhook-cache only. Rare Morpheus API check (every ~15s)
+            // so the CRM worker is not flooded when dialers fall back from WebSocket.
+            $apiEveryTicks = 75;
             $tick = 0;
             $apiStatus = ['ok' => true, 'pending' => true, 'live' => true];
 
@@ -695,27 +717,15 @@ class MorpheusHubController extends Controller
                 $tick++;
 
                 try {
-                    // Real-time path: webhook cache only (no Morpheus HTTP).
+                    // Primary path: webhook / destination-connected cache only.
                     $overlay = $this->callEvents->hubStatusOverlay($uuid, $destination);
+                    $connectedOrEnded =
+                        ($overlay['destination_connected'] ?? false) === true
+                        || ($overlay['call_ended'] ?? false) === true
+                        || (($overlay['live'] ?? true) === false);
 
-                    // Slower fallback: Morpheus API / active-calls analysis.
-                    if ($tick === 1 || ($tick % $apiEveryTicks) === 0) {
+                    if (! $connectedOrEnded && ($tick === 1 || ($tick % $apiEveryTicks) === 0)) {
                         $apiStatus = $this->morpheus->hubLiveCallStatus($uuid, $destination);
-                    } elseif (
-                        ($tick % $destProbeEveryTicks) === 0
-                        && ($apiStatus['destination_connected'] ?? false) !== true
-                        && ($apiStatus['call_ended'] ?? false) !== true
-                        && filled($destination)
-                    ) {
-                        // Fast path while UUID is 404: watch PSTN destination on /calls.
-                        $destLive = $this->morpheus->probeDestinationOnActiveCalls($destination);
-                        if (is_array($destLive) && ($destLive['destination_connected'] ?? false) === true) {
-                            $apiStatus = array_merge($apiStatus, $destLive, [
-                                'ok' => true,
-                                'pending' => false,
-                                'source' => 'active_calls_destination',
-                            ]);
-                        }
                     }
 
                     $status = $this->mergeLiveCallStatus($apiStatus, $overlay);

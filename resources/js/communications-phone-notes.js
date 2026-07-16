@@ -285,6 +285,7 @@ function toggleRowNotes(row, forceOpen = null) {
 
 export function teardownPhoneNotesForTurbo() {
     delete document.documentElement.dataset.commPhoneNotesBound;
+    delete document.documentElement.dataset.activeCallNotesBound;
     delete document.body.dataset.notesDrawerGlobalBound;
     document.querySelectorAll('[data-dialer-notes-panel]').forEach((panel) => {
         delete panel.dataset.notesBound;
@@ -605,32 +606,97 @@ export function initCommunicationsPhoneNotes(root = document) {
     }
 
     function bindActiveCallNotes() {
+        function resolveActiveScreen(fromEl = null) {
+            return fromEl?.closest?.('[data-dialer-active-screen]')
+                || document.querySelector('[data-dialer-active-screen]:not(.hidden)')
+                || document.querySelector('[data-dialer-active-screen]');
+        }
+
         function activeNotesFields(screen = null) {
-            const root = screen || scope.querySelector('[data-dialer-active-screen]');
+            const root = screen || resolveActiveScreen();
             return {
                 screen: root,
                 notesInput: root?.querySelector('[data-dialer-active-notes-input]'),
-                commentInput: root?.querySelector('[data-dialer-active-comment-input]'),
                 status: root?.querySelector('[data-dialer-active-notes-status]'),
+                block: root?.querySelector('[data-dialer-active-notes]'),
+                toggle: root?.querySelector('[data-dialer-active-notes-toggle]'),
             };
         }
 
         function readActiveNotes(screen = null) {
             const fields = activeNotesFields(screen);
+            const notes = String(fields.notesInput?.value || '').trim();
             return {
-                notes: String(fields.notesInput?.value || '').trim(),
-                comment: String(fields.commentInput?.value || '').trim(),
+                notes,
+                comment: '',
             };
         }
 
-        async function saveActiveNotes({ silent = false, screen = null } = {}) {
+        function restoreConnectedTimer(screen = null) {
+            const root = screen || resolveActiveScreen();
+            if (!root) {
+                return;
+            }
+            const phone = typeof getWebphone === 'function' ? getWebphone() : null;
+            const timerEl = root.querySelector('[data-dialer-active-timer]');
+            if (!timerEl) {
+                return;
+            }
+            const connected = phone?.timerPhase === 'connected'
+                || root.classList.contains('is-connected')
+                || phone?.state === 'in-call';
+            if (connected) {
+                timerEl.classList.remove('hidden');
+                const live = phone?.currentFormattedTimer?.();
+                if (live) {
+                    timerEl.textContent = live;
+                }
+            }
+        }
+
+        function closeNotesPanel(screen = null) {
             const fields = activeNotesFields(screen);
-            const { notes, comment } = readActiveNotes(screen);
+            fields.block?.classList.add('hidden');
+            fields.block?.setAttribute('aria-hidden', 'true');
+            fields.toggle?.classList.remove('is-active');
+            fields.toggle?.setAttribute('aria-expanded', 'false');
+            fields.screen?.classList.remove('is-notes-open');
+            restoreConnectedTimer(fields.screen);
+        }
+
+        function openNotesPanel(screen = null) {
+            const fields = activeNotesFields(screen);
+            if (!fields.block || !fields.screen) {
+                return;
+            }
+            // Hide keypad while notes are open so hero/timer stay visible.
+            try {
+                getWebphone()?.setActiveKeypadOpen?.(false);
+            } catch {
+                // ignore
+            }
+            fields.block.classList.remove('hidden');
+            fields.block.setAttribute('aria-hidden', 'false');
+            fields.toggle?.classList.add('is-active');
+            fields.toggle?.setAttribute('aria-expanded', 'true');
+            fields.screen.classList.add('is-notes-open');
+            restoreConnectedTimer(fields.screen);
+            try {
+                fields.block.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+            } catch {
+                // ignore
+            }
+            window.setTimeout(() => fields.notesInput?.focus?.(), 0);
+        }
+
+        async function saveActiveNotes({ silent = false, screen = null, closeAfter = true } = {}) {
+            const fields = activeNotesFields(screen);
+            const { notes } = readActiveNotes(screen);
             const phone = currentPhone() || state.phone;
             const callUuid = currentCallUuid();
             const callLogRef = callUuid || state.callLogRef || '';
 
-            if (!phone || (!notes && !comment)) {
+            if (!phone || !notes) {
                 if (!silent) {
                     setStatus(fields.status, 'Nothing to save', 'muted');
                 }
@@ -649,7 +715,7 @@ export function initCommunicationsPhoneNotes(root = document) {
 
                 await saveCallNote(urls, {
                     phone,
-                    note: comment,
+                    note: notes,
                     in_call_notes: notes,
                     call_uuid: callUuid || undefined,
                     call_log_ref: callLogRef || undefined,
@@ -658,6 +724,9 @@ export function initCommunicationsPhoneNotes(root = document) {
 
                 state.dirty = false;
                 setStatus(fields.status, silent ? 'Auto-saved' : 'Saved to call log', 'success');
+                if (closeAfter) {
+                    window.setTimeout(() => closeNotesPanel(fields.screen), silent ? 350 : 120);
+                }
                 return true;
             } catch (error) {
                 console.warn('[communications-phone-notes] active notes save failed', error);
@@ -671,23 +740,36 @@ export function initCommunicationsPhoneNotes(root = document) {
         window.__apexActiveCallNotes = {
             read: () => readActiveNotes(),
             save: (opts) => saveActiveNotes(opts),
+            open: () => openNotesPanel(),
+            close: () => closeNotesPanel(),
             clear: () => {
-                scope.querySelectorAll('[data-dialer-active-notes-input], [data-dialer-active-comment-input]').forEach((el) => {
+                document.querySelectorAll('[data-dialer-active-notes-input]').forEach((el) => {
                     el.value = '';
                 });
-                scope.querySelectorAll('[data-dialer-active-notes]').forEach((block) => block.classList.add('hidden'));
+                closeNotesPanel();
             },
         };
 
-        scope.addEventListener('click', (event) => {
+        if (document.documentElement.dataset.activeCallNotesBound === '1') {
+            return;
+        }
+        document.documentElement.dataset.activeCallNotesBound = '1';
+
+        // Capture phase so Notes still opens even if another handler stops bubbling.
+        document.addEventListener('click', (event) => {
             const toggle = event.target.closest('[data-dialer-active-notes-toggle]');
             if (toggle) {
                 event.preventDefault();
-                const screen = toggle.closest('[data-dialer-active-screen]');
+                event.stopPropagation();
+                const screen = resolveActiveScreen(toggle);
                 const block = screen?.querySelector('[data-dialer-active-notes]');
-                block?.classList.toggle('hidden');
-                if (block && !block.classList.contains('hidden')) {
-                    window.setTimeout(() => block.querySelector('[data-dialer-active-notes-input]')?.focus(), 0);
+                const opening = !block || block.classList.contains('hidden');
+                if (opening) {
+                    openNotesPanel(screen);
+                } else if (state.dirty) {
+                    void saveActiveNotes({ silent: true, screen, closeAfter: true });
+                } else {
+                    closeNotesPanel(screen);
                 }
                 return;
             }
@@ -698,25 +780,30 @@ export function initCommunicationsPhoneNotes(root = document) {
             }
 
             event.preventDefault();
+            event.stopPropagation();
             void saveActiveNotes({
                 silent: false,
-                screen: saveBtn.closest('[data-dialer-active-screen]'),
+                screen: resolveActiveScreen(saveBtn),
+                closeAfter: true,
             });
-        });
+        }, true);
 
-        scope.querySelectorAll('[data-dialer-active-notes-input], [data-dialer-active-comment-input]').forEach((input) => {
-            input.addEventListener('input', () => {
-                state.dirty = true;
-                const fields = activeNotesFields(input.closest('[data-dialer-active-screen]'));
-                setStatus(fields.status, 'Saving…');
-                if (state.saveTimer) {
-                    window.clearTimeout(state.saveTimer);
-                }
-                state.saveTimer = window.setTimeout(() => {
-                    void saveActiveNotes({ silent: true, screen: input.closest('[data-dialer-active-screen]') });
-                }, SAVE_DEBOUNCE_MS);
-            });
-        });
+        document.addEventListener('input', (event) => {
+            const input = event.target?.closest?.('[data-dialer-active-notes-input]');
+            if (!input) {
+                return;
+            }
+            state.dirty = true;
+            const screen = resolveActiveScreen(input);
+            const fields = activeNotesFields(screen);
+            setStatus(fields.status, 'Saving…');
+            if (state.saveTimer) {
+                window.clearTimeout(state.saveTimer);
+            }
+            state.saveTimer = window.setTimeout(() => {
+                void saveActiveNotes({ silent: true, screen, closeAfter: true });
+            }, SAVE_DEBOUNCE_MS);
+        }, true);
     }
 
     function bindCallLifecycle() {
@@ -737,7 +824,7 @@ export function initCommunicationsPhoneNotes(root = document) {
             const phone = normalizePhone(detail.phone || state.phone);
             const notesApi = window.__apexActiveCallNotes;
             const active = notesApi?.read?.() || { notes: '', comment: '' };
-            const noteText = active.comment || '';
+            const noteText = active.notes || active.comment || '';
             const inCallNotes = active.notes || '';
 
             if (phone && (noteText || inCallNotes)) {
@@ -778,6 +865,8 @@ export function initCommunicationsPhoneNotes(root = document) {
     if (document.documentElement.dataset.commPhoneNotesBound === '1') {
         bindMainPanel();
         bindLogRows();
+        // Active-call Notes must stay available after Turbo visits.
+        bindActiveCallNotes();
 
         return;
     }

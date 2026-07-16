@@ -1,0 +1,19 @@
+[Unit]
+Description=ApexOne production stack watchdog (auto-restart)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+Environment=APP_ROOT=/var/www/apexone
+Environment=WATCHDOG_DOMAIN=crm.apexonepayments.com
+Environment=WATCHDOG_HEALTH_URL=https://127.0.0.1/up
+Environment=WATCHDOG_WS_HEALTH_URL=http://127.0.0.1:8787/health
+Environment=WATCHDOG_FAIL_THRESHOLD=2
+ExecStart=/bin/bash /var/www/apexone/scripts/apexone_watchdog.sh
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

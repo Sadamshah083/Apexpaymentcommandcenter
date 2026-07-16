@@ -25,6 +25,7 @@
         data-transfer-url="{{ route($routePrefix . 'communications.morpheus.calls.transfer', ['uuid' => '__UUID__']) }}"
         data-call-status-url="{{ route($routePrefix . 'communications.morpheus.calls.status', ['uuid' => '__UUID__']) }}"
         data-call-events-url="{{ route($routePrefix . 'communications.morpheus.calls.events', ['uuid' => '__UUID__']) }}"
+        data-call-events-ws-url="{{ (request()->secure() ? 'wss' : 'ws') }}://{{ request()->getHost() }}{{ config('integrations.morpheus.call_events_ws_public_path', '/communications-ws/ws') }}?uuid=__UUID__"
         data-destination-connected-url="{{ route($routePrefix . 'communications.morpheus.calls.destination-connected', ['uuid' => '__UUID__']) }}"
         data-call-ended-url="{{ route($routePrefix . 'communications.morpheus.calls.ended', ['uuid' => '__UUID__']) }}"
         data-originate-url="{{ route($routePrefix . 'communications.morpheus.calls.originate') }}"

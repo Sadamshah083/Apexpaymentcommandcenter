@@ -9,16 +9,19 @@
         'incall_short' => 'is-incall',
         'incall_long' => 'is-incall-long',
         'not_in_call', 'idle' => 'is-idle',
+        'break' => 'is-break',
+        'lunch' => 'is-lunch',
         'disposition' => 'is-disposition',
         'not_logged_in' => 'is-offline',
         'queue' => 'is-queue',
         'dead' => 'is-dead',
         default => 'is-waiting',
     };
-    $showTimer = in_array($bucket, ['incall_short', 'incall_long', 'not_in_call', 'disposition'], true);
+    $showTimer = in_array($bucket, ['incall_short', 'incall_long', 'not_in_call', 'disposition', 'break', 'lunch'], true);
     $idleSince = $row['idle_since'] ?? null;
     $isIdle = $bucket === 'not_in_call';
     $isDisposition = $bucket === 'disposition';
+    $isBreak = in_array($bucket, ['break', 'lunch'], true);
     $dialMode = strtolower((string) ($row['dial_mode'] ?? ''));
     $dialLabel = trim((string) ($row['dial_mode_label'] ?? ''));
     if ($dialLabel === '' && $isIdle) {
@@ -44,13 +47,17 @@
     data-timer-sec="{{ $showTimer ? $timerSec : 0 }}"
     data-dial-mode="{{ $dialMode !== '' ? $dialMode : '' }}"
     @if ($showTimer && ! empty($row['connected_at'])) data-connected-at="{{ $row['connected_at'] }}" @endif
-    @if (($bucket === 'not_in_call' || $bucket === 'disposition') && ! empty($idleSince)) data-idle-since="{{ $idleSince }}" @endif>
+    @if (in_array($bucket, ['not_in_call', 'disposition', 'break', 'lunch'], true) && ! empty($idleSince)) data-idle-since="{{ $idleSince }}" @endif
+    @if ($isBreak && ! empty($row['break_ends_at'])) data-break-ends-at="{{ $row['break_ends_at'] }}" @endif>
     <td class="call-monitoring-row__station">{{ $row['station'] ?? '—' }}</td>
     <td class="call-monitoring-row__user">
-        <span class="call-monitoring-row__name">{{ $row['user'] ?? '—' }}</span>
-        @if (! empty($row['role_label']))
-            <span class="call-monitoring-row__role">{{ $row['role_label'] }}</span>
-        @endif
+        <div class="call-monitoring-row__user-inner">
+            @php $displayUser = trim((string) ($row['user'] ?? '')); @endphp
+            <span class="call-monitoring-row__name" title="{{ $displayUser !== '' ? $displayUser : '—' }}">{{ $displayUser !== '' ? $displayUser : '—' }}</span>
+            @if (! empty($row['role_label']))
+                <span class="call-monitoring-row__role">{{ $row['role_label'] }}</span>
+            @endif
+        </div>
     </td>
     <td class="call-monitoring-row__status">
         <span class="call-monitoring-status-pill">{{ $row['status'] ?? '—' }}</span>
@@ -63,7 +70,18 @@
         @endif
     </td>
     <td class="call-monitoring-row__dest">
-        @if ($isIdle && $dialLabel !== '')
+        @if ($isBreak)
+            @php
+                $remaining = max(0, (int) ($row['remaining_sec'] ?? 0));
+                $breakKind = ($bucket === 'lunch') ? 'Lunch · 30 min' : 'Break · 5 min';
+                $remainLabel = sprintf('%02d:%02d', intdiv($remaining, 60), $remaining % 60);
+            @endphp
+            @if ($remaining > 0)
+                {{ $breakKind }} · Ends in {{ $remainLabel }}
+            @else
+                {{ ($bucket === 'lunch') ? 'Lunch' : 'Break' }} · Ending…
+            @endif
+        @elseif ($isIdle && $dialLabel !== '')
             <span class="call-monitoring-dial-pill {{ $dialPillClass }}">{{ $dialLabel }}</span>
         @elseif (($row['destination'] ?? '') !== '')
             {{ $row['destination'] }}
@@ -72,7 +90,9 @@
         @endif
     </td>
     <td class="call-monitoring-row__campaign">
-        @if ($isDisposition && $dialLabel !== '')
+        @if ($isBreak)
+            —
+        @elseif ($isDisposition && $dialLabel !== '')
             <span class="call-monitoring-dial-pill {{ $dialPillClass }}">{{ $dialLabel }}</span>
         @elseif (! $isIdle && $dialLabel !== '' && (($row['campaign'] ?? '—') === '—' || ($row['campaign'] ?? '') === '' || ($row['campaign'] ?? '') === $dialLabel))
             <span class="call-monitoring-dial-pill {{ $dialPillClass }}">{{ $dialLabel }}</span>

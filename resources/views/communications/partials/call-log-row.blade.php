@@ -68,11 +68,12 @@
         ?? data_get($log, 'meta.disposition')
         ?? ''
     ));
-    $resultAsDispositionSkip = ['—', '-', 'Completed', 'completed', 'Initiated', 'initiated', 'connected', 'Connected', 'answered', 'Answered', 'no-answer', 'No Answer', 'busy', 'Busy', 'failed', 'Failed', 'missed', 'Missed', 'unknown', 'Unknown'];
-    if ($dispositionLabel !== '' && in_array($dispositionLabel, $resultAsDispositionSkip, true)) {
+    // CDR technical statuses only — never treat agent disposition "No Answer" as a status.
+    $resultAsDispositionSkip = ['—', '-', 'completed', 'initiated', 'connected', 'answered', 'no-answer', 'busy', 'failed', 'missed', 'unknown'];
+    if ($dispositionLabel !== '' && in_array(strtolower($dispositionLabel), $resultAsDispositionSkip, true)) {
         $dispositionLabel = '';
     }
-    if ($dispositionLabel === '' && $resultLabel !== '' && ! in_array($resultLabel, $resultAsDispositionSkip, true)) {
+    if ($dispositionLabel === '' && $resultLabel !== '' && ! in_array(strtolower($resultLabel), $resultAsDispositionSkip, true)) {
         $dispositionLabel = $resultLabel;
     }
 

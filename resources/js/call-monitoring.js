@@ -54,6 +54,8 @@ function rowClassFor(bucket) {
     if (bucket === 'incall_short') return 'is-incall';
     if (bucket === 'incall_long') return 'is-incall-long';
     if (bucket === 'not_in_call' || bucket === 'idle') return 'is-idle';
+    if (bucket === 'break') return 'is-break';
+    if (bucket === 'lunch') return 'is-lunch';
     if (bucket === 'disposition') return 'is-disposition';
     if (bucket === 'not_logged_in') return 'is-offline';
     if (bucket === 'queue') return 'is-queue';
@@ -65,6 +67,8 @@ function statusLabelFor(bucket) {
     if (bucket === 'incall_short') return 'INCALL ≤2M';
     if (bucket === 'incall_long') return 'INCALL >2M';
     if (bucket === 'not_in_call' || bucket === 'idle') return 'NOT IN CALL';
+    if (bucket === 'break') return 'BREAK';
+    if (bucket === 'lunch') return 'LUNCH';
     if (bucket === 'disposition') return 'DISPOSITION';
     if (bucket === 'not_logged_in') return 'NOT LOGGED IN';
     if (bucket === 'ringing') return 'RINGING';
@@ -117,7 +121,11 @@ function destinationCellHtml(row, { idle = false } = {}) {
     return row.destination ? escapeHtml(row.destination) : '—';
 }
 
-function campaignCellHtml(row, { idle = false } = {}) {
+function campaignCellHtml(row, { idle = false, onBreak = false } = {}) {
+    if (onBreak || row.bucket === 'break' || row.bucket === 'lunch'
+        || row.status_group === 'break' || row.status_group === 'lunch') {
+        return '—';
+    }
     if (!idle) {
         const meta = dialModeMeta(row);
         const campaign = String(row.campaign || '').trim();
@@ -130,10 +138,12 @@ function campaignCellHtml(row, { idle = false } = {}) {
 
 function buildRowHtml(row, nowMs = Date.now()) {
     const idle = row.bucket === 'not_in_call' || row.status_group === 'idle';
+    const onBreak = row.bucket === 'break' || row.status_group === 'break'
+        || row.bucket === 'lunch' || row.status_group === 'lunch';
     const disposition = row.bucket === 'disposition' || row.status_group === 'disposition';
     const offline = row.bucket === 'not_logged_in' || row.status_group === 'not_logged_in';
     const dead = row.bucket === 'dead' || row.status_group === 'dead';
-    const connected = !idle && !disposition && !offline && !dead && (
+    const connected = !idle && !onBreak && !disposition && !offline && !dead && (
         row.status_group === 'incall'
         || row.bucket === 'incall_short'
         || row.bucket === 'incall_long'
@@ -141,7 +151,7 @@ function buildRowHtml(row, nowMs = Date.now()) {
     let timerSec = 0;
     if (connected) {
         timerSec = timerSecForRow(row, nowMs);
-    } else if (idle || disposition) {
+    } else if (idle || disposition || onBreak) {
         const idleMs = parseConnectedAtMs(row.idle_since);
         timerSec = idleMs
             ? Math.max(0, Math.floor((nowMs - idleMs) / 1000))
@@ -151,37 +161,54 @@ function buildRowHtml(row, nowMs = Date.now()) {
         ? 'not_logged_in'
         : (idle
             ? 'not_in_call'
-            : (disposition
-                ? 'disposition'
-                : (dead ? 'dead' : (connected ? (timerSec > 120 ? 'incall_long' : 'incall_short') : bucketFor(row, timerSec)))));
+            : (onBreak
+                ? (row.bucket === 'lunch' || row.status_group === 'lunch' ? 'lunch' : 'break')
+                : (disposition
+                    ? 'disposition'
+                    : (dead ? 'dead' : (connected ? (timerSec > 120 ? 'incall_long' : 'incall_short') : bucketFor(row, timerSec))))));
     const colorClass = rowClassFor(bucket);
     const role = row.role_label
         ? `<span class="call-monitoring-row__role">${escapeHtml(row.role_label)}</span>`
         : '';
     const status = escapeHtml(row.status || statusLabelFor(bucket));
     const connectedAt = connected && row.connected_at ? escapeHtml(row.connected_at) : '';
-    const idleSince = (idle || disposition) && row.idle_since ? escapeHtml(row.idle_since) : '';
+    const idleSince = (idle || disposition || onBreak) && row.idle_since ? escapeHtml(row.idle_since) : '';
+    const breakEndsAt = onBreak && (row.break_ends_at || row.ends_at)
+        ? escapeHtml(row.break_ends_at || row.ends_at)
+        : '';
     const dialMeta = dialModeMeta(row, { idle });
+    const statusGroup = offline
+        ? 'not_logged_in'
+        : (idle
+            ? 'idle'
+            : (onBreak
+                ? bucket
+                : (disposition
+                    ? 'disposition'
+                    : (dead ? 'dead' : (connected ? 'incall' : (row.status_group || 'ringing'))))));
 
     return `<tr class="call-monitoring-row ${colorClass}"
         data-row-id="${escapeHtml(row.id || '')}"
-        data-status-group="${escapeHtml(offline ? 'not_logged_in' : (idle ? 'idle' : (disposition ? 'disposition' : (dead ? 'dead' : (connected ? 'incall' : (row.status_group || 'ringing'))))))}"
+        data-status-group="${escapeHtml(statusGroup)}"
         data-bucket="${escapeHtml(bucket)}"
         data-timer-sec="${timerSec}"
         data-dial-mode="${escapeHtml(dialMeta.mode || '')}"
         ${connectedAt ? `data-connected-at="${connectedAt}"` : ''}
-        ${idleSince ? `data-idle-since="${idleSince}"` : ''}>
+        ${idleSince ? `data-idle-since="${idleSince}"` : ''}
+        ${breakEndsAt ? `data-break-ends-at="${breakEndsAt}"` : ''}>
         <td class="call-monitoring-row__station">${escapeHtml(row.station || '—')}</td>
         <td class="call-monitoring-row__user">
-            <span class="call-monitoring-row__name">${escapeHtml(row.user || '—')}</span>
-            ${role}
+            <div class="call-monitoring-row__user-inner">
+                <span class="call-monitoring-row__name" title="${escapeHtml(row.user || '—')}">${escapeHtml(row.user || '—')}</span>
+                ${role}
+            </div>
         </td>
         <td class="call-monitoring-row__status">
             <span class="call-monitoring-status-pill">${status}</span>
         </td>
-        <td class="call-monitoring-row__timer" data-row-timer>${(connected || idle || disposition) ? formatTimer(timerSec) : '00:00'}</td>
-        <td class="call-monitoring-row__dest">${destinationCellHtml(row, { idle })}</td>
-        <td class="call-monitoring-row__campaign">${campaignCellHtml(row, { idle: idle || disposition })}</td>
+        <td class="call-monitoring-row__timer" data-row-timer>${(connected || idle || disposition || onBreak) ? formatTimer(timerSec) : '00:00'}</td>
+        <td class="call-monitoring-row__dest">${onBreak ? escapeHtml(breakDestinationLabel(row, nowMs)) : destinationCellHtml(row, { idle })}</td>
+        <td class="call-monitoring-row__campaign">${campaignCellHtml(row, { idle: idle || disposition, onBreak })}</td>
     </tr>`;
 }
 
@@ -239,7 +266,7 @@ function rememberStickyRows(root, rows, nowMs = Date.now()) {
         if (!id) return;
         const bucket = bucketFor(row);
         // Only pin statuses that briefly disappear between light/full polls.
-        if (!['ringing', 'waiting', 'queue', 'incall_short', 'incall_long', 'disposition', 'not_in_call', 'idle'].includes(bucket)) {
+        if (!['ringing', 'waiting', 'queue', 'incall_short', 'incall_long', 'disposition', 'not_in_call', 'idle', 'break', 'lunch'].includes(bucket)) {
             return;
         }
         root._stickyRows[id] = {
@@ -370,16 +397,44 @@ function fillTable(root, bucket, rows, nowMs = Date.now()) {
     }
 }
 
+function rowStatusClasses() {
+    return ['is-waiting', 'is-incall', 'is-incall-long', 'is-idle', 'is-break', 'is-lunch', 'is-offline', 'is-queue', 'is-dead', 'is-disposition'];
+}
+
+function applyRowColorClass(el, nextClass) {
+    if (!el || el.classList.contains(nextClass)) {
+        return;
+    }
+    el.classList.remove(...rowStatusClasses());
+    el.classList.add(nextClass);
+}
+
+function remainingEndsInSec(row, nowMs = Date.now()) {
+    const endsMs = parseConnectedAtMs(row.break_ends_at || row.ends_at);
+    if (endsMs) {
+        return Math.max(0, Math.floor((endsMs - nowMs) / 1000));
+    }
+    return Math.max(0, Math.floor(Number(row.remaining_sec) || 0));
+}
+
+function breakDestinationLabel(row, nowMs = Date.now()) {
+    const remaining = remainingEndsInSec(row, nowMs);
+    const kind = (row.bucket === 'lunch' || row.status_group === 'lunch') ? 'Lunch · 30 min' : 'Break · 5 min';
+    return remaining > 0 ? `${kind} · Ends in ${formatTimer(remaining)}` : `${kind.split(' · ')[0]} · Ending…`;
+}
+
 function patchRow(el, row, nowMs = Date.now()) {
     if (!el || !row) {
         return;
     }
 
     const idle = row.bucket === 'not_in_call' || row.status_group === 'idle';
+    const onBreak = row.bucket === 'break' || row.status_group === 'break'
+        || row.bucket === 'lunch' || row.status_group === 'lunch';
     const disposition = row.bucket === 'disposition' || row.status_group === 'disposition';
     const offline = row.bucket === 'not_logged_in' || row.status_group === 'not_logged_in';
     const dead = row.bucket === 'dead' || row.status_group === 'dead';
-    const connected = !idle && !disposition && !offline && !dead && (
+    const connected = !idle && !onBreak && !disposition && !offline && !dead && (
         row.status_group === 'incall'
         || row.bucket === 'incall_short'
         || row.bucket === 'incall_long'
@@ -387,7 +442,7 @@ function patchRow(el, row, nowMs = Date.now()) {
     let timerSec = 0;
     if (connected) {
         timerSec = timerSecForRow(row, nowMs);
-    } else if (idle || disposition) {
+    } else if (idle || disposition || onBreak) {
         const idleMs = parseConnectedAtMs(row.idle_since);
         timerSec = idleMs
             ? Math.max(0, Math.floor((nowMs - idleMs) / 1000))
@@ -397,15 +452,19 @@ function patchRow(el, row, nowMs = Date.now()) {
         ? 'not_logged_in'
         : (idle
             ? 'not_in_call'
-            : (disposition
-                ? 'disposition'
-                : (dead ? 'dead' : (connected ? (timerSec > 120 ? 'incall_long' : 'incall_short') : bucketFor(row, timerSec)))));
+            : (onBreak
+                ? (row.bucket === 'lunch' || row.status_group === 'lunch' ? 'lunch' : 'break')
+                : (disposition
+                    ? 'disposition'
+                    : (dead ? 'dead' : (connected ? (timerSec > 120 ? 'incall_long' : 'incall_short') : bucketFor(row, timerSec))))));
 
     el.dataset.statusGroup = offline
         ? 'not_logged_in'
         : (idle
             ? 'idle'
-            : (disposition ? 'disposition' : (dead ? 'dead' : (connected ? 'incall' : (row.status_group || 'ringing')))));
+            : (onBreak
+                ? bucket
+                : (disposition ? 'disposition' : (dead ? 'dead' : (connected ? 'incall' : (row.status_group || 'ringing'))))));
     el.dataset.bucket = bucket;
     el.dataset.timerSec = String(timerSec);
     if (connected && row.connected_at) {
@@ -413,21 +472,22 @@ function patchRow(el, row, nowMs = Date.now()) {
     } else {
         delete el.dataset.connectedAt;
     }
-    if ((idle || disposition) && row.idle_since) {
+    if ((idle || disposition || onBreak) && row.idle_since) {
         el.dataset.idleSince = String(row.idle_since);
     } else {
         delete el.dataset.idleSince;
     }
-
-    const nextClass = rowClassFor(bucket);
-    if (!el.classList.contains(nextClass)) {
-        el.classList.remove('is-waiting', 'is-incall', 'is-incall-long', 'is-idle', 'is-offline', 'is-queue', 'is-dead', 'is-disposition');
-        el.classList.add(nextClass);
+    if (onBreak && (row.break_ends_at || row.ends_at)) {
+        el.dataset.breakEndsAt = String(row.break_ends_at || row.ends_at);
+    } else {
+        delete el.dataset.breakEndsAt;
     }
+
+    applyRowColorClass(el, rowClassFor(bucket));
 
     const timerEl = el.querySelector('[data-row-timer]');
     if (timerEl) {
-        const nextTimer = (connected || idle || disposition) ? formatTimer(timerSec) : '00:00';
+        const nextTimer = (connected || idle || disposition || onBreak) ? formatTimer(timerSec) : '00:00';
         if (timerEl.textContent !== nextTimer) {
             timerEl.textContent = nextTimer;
         }
@@ -445,34 +505,47 @@ function patchRow(el, row, nowMs = Date.now()) {
         if (nextStation && nextStation !== '—' && station.textContent !== nextStation) {
             station.textContent = nextStation;
         }
-        // Never blank a known station during light polls.
     }
     const name = el.querySelector('.call-monitoring-row__name');
-    if (name && name.textContent !== (row.user || '—')) {
-        name.textContent = row.user || '—';
+    if (name) {
+        const nextName = String(row.user || '—').trim() || '—';
+        if (name.textContent !== nextName) {
+            name.textContent = nextName;
+        }
+        if (name.getAttribute('title') !== nextName) {
+            name.setAttribute('title', nextName);
+        }
     }
     const userCell = el.querySelector('.call-monitoring-row__user');
+    const userInner = el.querySelector('.call-monitoring-row__user-inner') || userCell;
     const roleLabel = String(row.role_label || '').trim();
     let roleEl = el.querySelector('.call-monitoring-row__role');
     if (roleLabel) {
-        if (!roleEl && userCell) {
+        if (!roleEl && userInner) {
             roleEl = document.createElement('span');
             roleEl.className = 'call-monitoring-row__role';
-            userCell.appendChild(roleEl);
+            userInner.appendChild(roleEl);
         }
         if (roleEl) {
             roleEl.textContent = roleLabel;
             roleEl.hidden = false;
         }
     }
-    // Keep an existing Appointment Setter (etc.) badge if this poll omitted role_label.
     const dest = el.querySelector('.call-monitoring-row__dest');
     if (dest) {
-        dest.innerHTML = destinationCellHtml(row, { idle });
+        const nextDest = onBreak
+            ? escapeHtml(breakDestinationLabel(row, nowMs))
+            : destinationCellHtml(row, { idle });
+        if (dest.innerHTML !== nextDest) {
+            dest.innerHTML = nextDest;
+        }
     }
     const campaign = el.querySelector('.call-monitoring-row__campaign');
     if (campaign) {
-        campaign.innerHTML = campaignCellHtml(row, { idle });
+        const nextCampaign = campaignCellHtml(row, { idle: idle || disposition, onBreak });
+        if (campaign.innerHTML !== nextCampaign) {
+            campaign.innerHTML = nextCampaign;
+        }
     }
     const dialMeta = dialModeMeta(row, { idle });
     if (dialMeta.mode) {
@@ -486,14 +559,16 @@ function sortUnifiedRows(rows) {
     const rank = {
         not_in_call: 0,
         idle: 0,
-        ringing: 1,
-        waiting: 1,
-        queue: 1,
-        incall_short: 2,
-        incall_long: 3,
-        disposition: 4,
-        not_logged_in: 5,
-        dead: 6,
+        break: 1,
+        lunch: 2,
+        ringing: 3,
+        waiting: 3,
+        queue: 3,
+        incall_short: 4,
+        incall_long: 5,
+        disposition: 6,
+        not_logged_in: 7,
+        dead: 8,
     };
 
     return [...rows].sort((a, b) => {
@@ -571,15 +646,21 @@ function applySnapshot(root, payload) {
     const dispositionRaw = Array.isArray(tables.disposition)
         ? tables.disposition
         : enriched.filter((row) => bucketFor(row) === 'disposition');
+    const breakRaw = Array.isArray(tables.break)
+        ? tables.break
+        : enriched.filter((row) => bucketFor(row) === 'break');
+    const lunchRaw = Array.isArray(tables.lunch)
+        ? tables.lunch
+        : enriched.filter((row) => bucketFor(row) === 'lunch');
     const queueRows = Array.isArray(tables.queue)
         ? tables.queue
         : enriched.filter((row) => bucketFor(row) === 'queue');
 
-    // Pin live / idle rows briefly so light polls cannot flash them to NOT LOGGED IN.
-    rememberStickyRows(root, [...shortFinal, ...longFinal, ...ringing, ...queueRows, ...dispositionRaw, ...notInCallRaw], nowMs);
+    // Pin live / idle / break rows briefly so light polls cannot flash them to NOT LOGGED IN.
+    rememberStickyRows(root, [...shortFinal, ...longFinal, ...ringing, ...queueRows, ...dispositionRaw, ...breakRaw, ...lunchRaw, ...notInCallRaw], nowMs);
     const stickyLive = mergeStickyRows(
         root,
-        [...shortFinal, ...longFinal, ...ringing, ...queueRows, ...dispositionRaw, ...notInCallRaw],
+        [...shortFinal, ...longFinal, ...ringing, ...queueRows, ...dispositionRaw, ...breakRaw, ...lunchRaw, ...notInCallRaw],
         nowMs,
     );
     const stickyShort = stickyLive.filter((row) => bucketFor(row, timerSecForRow(row, nowMs)) === 'incall_short');
@@ -589,16 +670,28 @@ function applySnapshot(root, payload) {
         return bucket === 'ringing' || bucket === 'waiting' || bucket === 'queue';
     });
     const stickyDisposition = stickyLive.filter((row) => bucketFor(row) === 'disposition');
+    const stickyBreak = stickyLive.filter((row) => bucketFor(row) === 'break');
+    const stickyLunch = stickyLive.filter((row) => bucketFor(row) === 'lunch');
     const stickyNotInCall = stickyLive.filter((row) => {
         const bucket = bucketFor(row);
         return bucket === 'not_in_call' || bucket === 'idle';
     });
 
-    const occupied = occupyKeySet([...stickyShort, ...stickyLong, ...stickyRinging, ...stickyDisposition, ...stickyNotInCall]);
+    const occupied = occupyKeySet([
+        ...stickyShort,
+        ...stickyLong,
+        ...stickyRinging,
+        ...stickyDisposition,
+        ...stickyBreak,
+        ...stickyLunch,
+        ...stickyNotInCall,
+    ]);
     const notLoggedIn = notLoggedInRaw.filter((row) => !isOccupied(row, occupied));
 
     const unified = sortUnifiedRows([
         ...stickyNotInCall,
+        ...stickyBreak,
+        ...stickyLunch,
         ...stickyRinging,
         ...stickyShort,
         ...stickyLong,
@@ -615,34 +708,38 @@ function applySnapshot(root, payload) {
         fillTable(root, 'incall_long', stickyLong, nowMs);
         fillTable(root, 'dead', deadRows, nowMs);
         fillTable(root, 'disposition', stickyDisposition, nowMs);
+        fillTable(root, 'break', stickyBreak, nowMs);
+        fillTable(root, 'lunch', stickyLunch, nowMs);
         fillTable(root, 'not_in_call', stickyNotInCall, nowMs);
         fillTable(root, 'not_logged_in', notLoggedIn, nowMs);
     }
 
-    const shortStat = root.querySelector('[data-stat="in_call_short"]');
-    const longStat = root.querySelector('[data-stat="in_call_long"]');
-    const totalStat = root.querySelector('[data-stat="in_call"]');
-    const idleStat = root.querySelector('[data-stat="not_in_call"]');
-    const deadStat = root.querySelector('[data-stat="dead"]');
-    const dispositionStat = root.querySelector('[data-stat="disposition"]');
-    const loggedInStat = root.querySelector('[data-stat="logged_in"]');
-    const notLoggedInStat = root.querySelector('[data-stat="not_logged_in"]');
-    const agentsStat = root.querySelector('[data-stat="total"]');
-    if (shortStat) shortStat.textContent = String(stickyShort.length);
-    if (longStat) longStat.textContent = String(stickyLong.length);
-    if (totalStat) totalStat.textContent = String(stickyShort.length + stickyLong.length);
-    if (idleStat) idleStat.textContent = String(stickyNotInCall.length);
-    if (deadStat) deadStat.textContent = String(deadRows.length);
-    if (dispositionStat) dispositionStat.textContent = String(stickyDisposition.length);
-    if (loggedInStat) {
-        loggedInStat.textContent = String(
-            stickyShort.length + stickyLong.length + stickyRinging.length + stickyDisposition.length + stickyNotInCall.length
-        );
-    }
-    if (notLoggedInStat) notLoggedInStat.textContent = String(notLoggedIn.length);
-    if (agentsStat) {
-        agentsStat.textContent = String(Number(summary.total ?? unified.length));
-    }
+    const setStat = (key, value) => {
+        root.querySelectorAll(`[data-stat="${key}"]`).forEach((el) => {
+            el.textContent = String(value);
+        });
+    };
+    setStat('in_call_short', stickyShort.length);
+    setStat('in_call_long', stickyLong.length);
+    setStat('in_call', stickyShort.length + stickyLong.length);
+    setStat('not_in_call', stickyNotInCall.length);
+    setStat('dead', deadRows.length);
+    setStat('disposition', stickyDisposition.length);
+    setStat('break', stickyBreak.length);
+    setStat('lunch', stickyLunch.length);
+    setStat(
+        'logged_in',
+        stickyShort.length
+            + stickyLong.length
+            + stickyRinging.length
+            + stickyDisposition.length
+            + stickyBreak.length
+            + stickyLunch.length
+            + stickyNotInCall.length
+    );
+    setStat('not_logged_in', notLoggedIn.length);
+    setStat('ringing', stickyRinging.length);
+    setStat('total', Number(summary.total ?? unified.length));
 
     syncSidebarFromBoard(root);
 }
@@ -653,8 +750,7 @@ function rebucketConnectedRows(root) {
             const sec = Number(row.dataset.timerSec) || 0;
             const bucket = sec > 120 ? 'incall_long' : 'incall_short';
             row.dataset.bucket = bucket;
-            row.classList.remove('is-waiting', 'is-incall', 'is-incall-long', 'is-idle', 'is-offline', 'is-queue', 'is-dead', 'is-disposition');
-            row.classList.add(rowClassFor(bucket));
+            applyRowColorClass(row, rowClassFor(bucket));
             const pill = row.querySelector('.call-monitoring-status-pill');
             if (pill) {
                 pill.textContent = statusLabelFor(bucket);
@@ -662,12 +758,9 @@ function rebucketConnectedRows(root) {
         });
         const shortCount = root.querySelectorAll('.call-monitoring-row[data-bucket="incall_short"]').length;
         const longCount = root.querySelectorAll('.call-monitoring-row[data-bucket="incall_long"]').length;
-        const shortStat = root.querySelector('[data-stat="in_call_short"]');
-        const longStat = root.querySelector('[data-stat="in_call_long"]');
-        const totalStat = root.querySelector('[data-stat="in_call"]');
-        if (shortStat) shortStat.textContent = String(shortCount);
-        if (longStat) longStat.textContent = String(longCount);
-        if (totalStat) totalStat.textContent = String(shortCount + longCount);
+        root.querySelectorAll('[data-stat="in_call_short"]').forEach((el) => { el.textContent = String(shortCount); });
+        root.querySelectorAll('[data-stat="in_call_long"]').forEach((el) => { el.textContent = String(longCount); });
+        root.querySelectorAll('[data-stat="in_call"]').forEach((el) => { el.textContent = String(shortCount + longCount); });
         return;
     }
 
@@ -740,11 +833,7 @@ function tickTimers(root) {
         }
         const bucket = next > 120 ? 'incall_long' : 'incall_short';
         row.dataset.bucket = bucket;
-        const nextClass = rowClassFor(bucket);
-        if (!row.classList.contains(nextClass)) {
-            row.classList.remove('is-waiting', 'is-incall', 'is-incall-long', 'is-idle', 'is-offline', 'is-queue', 'is-dead', 'is-disposition');
-            row.classList.add(nextClass);
-        }
+        applyRowColorClass(row, rowClassFor(bucket));
         const pill = row.querySelector('.call-monitoring-status-pill');
         if (pill) {
             const label = statusLabelFor(bucket);
@@ -767,10 +856,7 @@ function tickTimers(root) {
             }
         }
         row.dataset.bucket = 'not_in_call';
-        if (!row.classList.contains('is-idle')) {
-            row.classList.remove('is-waiting', 'is-incall', 'is-incall-long', 'is-offline', 'is-queue', 'is-dead', 'is-disposition');
-            row.classList.add('is-idle');
-        }
+        applyRowColorClass(row, 'is-idle');
         const pill = row.querySelector('.call-monitoring-status-pill');
         if (pill && pill.textContent !== 'NOT IN CALL') {
             pill.textContent = 'NOT IN CALL';
@@ -790,13 +876,52 @@ function tickTimers(root) {
             }
         }
         row.dataset.bucket = 'disposition';
-        if (!row.classList.contains('is-disposition')) {
-            row.classList.remove('is-waiting', 'is-incall', 'is-incall-long', 'is-idle', 'is-offline', 'is-queue', 'is-dead');
-            row.classList.add('is-disposition');
+        applyRowColorClass(row, 'is-disposition');
+        const pill = row.querySelector('.call-monitoring-status-pill');
+        if (pill && pill.textContent !== 'DISPOSITION') {
+            pill.textContent = 'DISPOSITION';
+        }
+    });
+    // Break / lunch: tick elapsed + "Ends in" without rewriting the whole row (stops flicker).
+    root.querySelectorAll('.call-monitoring-row[data-status-group="break"], .call-monitoring-row[data-status-group="lunch"], .call-monitoring-row[data-bucket="break"], .call-monitoring-row[data-bucket="lunch"]').forEach((row) => {
+        const bucket = row.dataset.bucket === 'lunch' || row.dataset.statusGroup === 'lunch' ? 'lunch' : 'break';
+        const sinceMs = parseConnectedAtMs(row.dataset.idleSince);
+        const next = sinceMs
+            ? Math.max(0, Math.floor((nowMs - sinceMs) / 1000))
+            : (Number(row.dataset.timerSec) || 0) + 1;
+        row.dataset.timerSec = String(next);
+        row.dataset.bucket = bucket;
+        row.dataset.statusGroup = bucket;
+        applyRowColorClass(row, rowClassFor(bucket));
+        const timerEl = row.querySelector('[data-row-timer]');
+        if (timerEl) {
+            const label = formatTimer(next);
+            if (timerEl.textContent !== label) {
+                timerEl.textContent = label;
+            }
         }
         const pill = row.querySelector('.call-monitoring-status-pill');
-        if (pill) {
-            pill.textContent = 'DISPOSITION';
+        const statusLabel = statusLabelFor(bucket);
+        if (pill && pill.textContent !== statusLabel) {
+            pill.textContent = statusLabel;
+        }
+        const dest = row.querySelector('.call-monitoring-row__dest');
+        if (dest) {
+            const endsMs = parseConnectedAtMs(row.dataset.breakEndsAt);
+            const remaining = endsMs
+                ? Math.max(0, Math.floor((endsMs - nowMs) / 1000))
+                : 0;
+            const kind = bucket === 'lunch' ? 'Lunch · 30 min' : 'Break · 5 min';
+            const nextDest = remaining > 0
+                ? `${kind} · Ends in ${formatTimer(remaining)}`
+                : `${bucket === 'lunch' ? 'Lunch' : 'Break'} · Ending…`;
+            if (dest.textContent !== nextDest) {
+                dest.textContent = nextDest;
+            }
+        }
+        const campaign = row.querySelector('.call-monitoring-row__campaign');
+        if (campaign && campaign.textContent !== '—') {
+            campaign.textContent = '—';
         }
     });
     rebucketConnectedRows(root);
@@ -849,11 +974,11 @@ let monitoringRuntime = null;
  * Timers tick locally every 1s from connected_at (matches dialer).
  * When the board has live rows, poll fast so hangup disappears in real time.
  */
-const BOARD_POLL_ACTIVE_MS = 2500;
-const BOARD_POLL_IDLE_MS = 5000;
-const BOARD_POLL_SSE_MS = 12000;
-const BOARD_FULL_EVERY = 6;
-const NAV_POLL_MS = 12000;
+const BOARD_POLL_ACTIVE_MS = 8000;
+const BOARD_POLL_IDLE_MS = 20000;
+const BOARD_POLL_SSE_MS = 30000;
+const BOARD_FULL_EVERY = 10;
+const NAV_POLL_MS = 30000;
 
 function digitsOnly(value) {
     return String(value ?? '').replace(/\D/g, '');

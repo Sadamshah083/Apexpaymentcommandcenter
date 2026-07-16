@@ -11,10 +11,27 @@ class ApexPaymentsWorkspaceSeeder extends Seeder
 {
     public function run(): void
     {
-        $superAdmin = User::updateOrCreate(
-            ['email' => 'admin_super_91a@apexpayments.com'],
-            ['name' => 'admin_super_91a', 'password' => Hash::make('K9#mQ2!vX4$zY7*p')]
-        );
+        // Prefer migrating the legacy super-admin row when present.
+        $legacySuper = User::query()
+            ->where(function ($q) {
+                $q->where('email', 'admin_super_91a@apexpayments.com')
+                    ->orWhere('name', 'admin_super_91a');
+            })
+            ->first();
+
+        if ($legacySuper) {
+            $legacySuper->forceFill([
+                'email' => 'superadmin@apexonepayment.com',
+                'name' => 'superadmin',
+                'password' => Hash::make('123456'),
+            ])->save();
+            $superAdmin = $legacySuper;
+        } else {
+            $superAdmin = User::updateOrCreate(
+                ['email' => 'superadmin@apexonepayment.com'],
+                ['name' => 'superadmin', 'password' => Hash::make('123456')]
+            );
+        }
 
         $workspace = Workspace::firstOrCreate(
             ['name' => 'ApexPayments'],
@@ -28,10 +45,12 @@ class ApexPaymentsWorkspaceSeeder extends Seeder
 
         $accounts = [
             [
-                'username' => 'admin_ops_74b',
-                'email' => 'admin_ops_74b@apexpayments.com',
+                'username' => 'admin',
+                'email' => 'admin@apexonepayment.com',
                 'role' => 'admin',
-                'password' => 'L5&tW9^rP1%qJ4#n'
+                'password' => '123456',
+                'legacy_emails' => ['admin_ops_74b@apexpayments.com'],
+                'legacy_names' => ['admin_ops_74b'],
             ],
             [
                 'username' => 'setter_tl_48c',
@@ -96,6 +115,26 @@ class ApexPaymentsWorkspaceSeeder extends Seeder
         ];
 
         foreach ($accounts as $account) {
+            $legacyEmails = $account['legacy_emails'] ?? [];
+            $legacyNames = $account['legacy_names'] ?? [];
+            if ($legacyEmails !== [] || $legacyNames !== []) {
+                User::query()
+                    ->where(function ($q) use ($legacyEmails, $legacyNames, $account) {
+                        if ($legacyEmails !== []) {
+                            $q->orWhereIn('email', $legacyEmails);
+                        }
+                        if ($legacyNames !== []) {
+                            $q->orWhereIn('name', $legacyNames);
+                        }
+                        $q->orWhere('email', $account['email']);
+                    })
+                    ->update([
+                        'email' => $account['email'],
+                        'name' => $account['username'],
+                        'password' => Hash::make($account['password']),
+                    ]);
+            }
+
             $user = User::updateOrCreate(
                 ['email' => $account['email']],
                 ['name' => $account['username'], 'password' => Hash::make($account['password'])]

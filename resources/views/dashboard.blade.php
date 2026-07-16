@@ -21,9 +21,9 @@
                 <p class="text-xs text-zinc-500 mt-1">Total upload lists</p>
             </div>
             <div class="app-card app-card-padded">
-                <p class="text-sm text-zinc-500 font-semibold">Legacy Leads</p>
-                <p class="text-3xl font-bold text-zinc-500 mt-1">{{ number_format($stats['crm_leads']) }}</p>
-                <p class="text-xs text-emerald-600 font-bold mt-1">{{ number_format($stats['crm_enriched']) }} enriched</p>
+                <p class="text-sm text-zinc-500 font-semibold">Invalid Emails</p>
+                <p class="text-3xl font-bold text-zinc-500 mt-1">{{ number_format($stats['invalid_emails']) }}</p>
+                <p class="text-xs text-zinc-500 mt-1">Failed verification</p>
             </div>
             <div class="app-card app-card-padded">
                 <p class="text-sm text-zinc-500 font-semibold">Valid Emails</p>

@@ -2397,10 +2397,12 @@
     color: #92400e !important;
 }
 
-.ghl-webphone-btn-mute.is-active {
-    background: #ecfdf5;
-    border-color: #6ee7b7;
-    color: #047857 !important;
+.ghl-webphone-btn-mute.is-active,
+.ghl-webphone-btn-mute.is-muted {
+    background: #fef2f2;
+    border-color: #f87171;
+    color: #b91c1c !important;
+    box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.15);
 }
 
 .ghl-webphone-call-controls .ghl-webphone-btn-hold.hidden,

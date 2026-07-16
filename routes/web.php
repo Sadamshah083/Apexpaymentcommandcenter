@@ -1,9 +1,7 @@
 <?php
 
-use App\Http\Controllers\BusinessResearchController;
 use App\Http\Controllers\CommunicationsHubController;
 use App\Http\Controllers\ContentAnalyzerController;
-use App\Http\Controllers\CrmCampaignController;
 use App\Http\Controllers\CampaignController;
 use App\Http\Controllers\DeliverabilityController;
 use App\Http\Controllers\EmailListController;
@@ -93,28 +91,6 @@ Route::prefix('admin')->name('admin.')->middleware([
     Route::post('reputation/warmup', [ReputationController::class, 'warmupCalculator'])->name('reputation.warmup');
     Route::post('reputation/compliance', [ReputationController::class, 'complianceCheck'])->name('reputation.compliance');
 
-    Route::prefix('crm')->name('crm.')->group(function () {
-        Route::get('/', [CrmCampaignController::class, 'index'])->name('index');
-        Route::get('/create', [CrmCampaignController::class, 'create'])->name('create');
-        Route::post('/', [CrmCampaignController::class, 'store'])->name('store');
-        Route::get('/{crm}', [CrmCampaignController::class, 'show'])->name('show');
-        Route::get('/{crm}/progress', [CrmCampaignController::class, 'progress'])->name('progress');
-        Route::post('/{crm}/reupload', [CrmCampaignController::class, 'reupload'])->name('reupload');
-        Route::post('/{crm}/retry-failed', [CrmCampaignController::class, 'retryFailed'])->name('retry-failed');
-        Route::get('/{crm}/export', [CrmCampaignController::class, 'export'])->name('export');
-        Route::delete('/{crm}', [CrmCampaignController::class, 'destroy'])->name('destroy');
-        Route::get('/{crm}/leads/{lead}', [CrmCampaignController::class, 'leadShow'])->name('leads.show');
-        Route::get('/{crm}/leads/{lead}/status', [CrmCampaignController::class, 'leadStatus'])->name('leads.status');
-        Route::post('/{crm}/leads/{lead}/retry', [CrmCampaignController::class, 'retryLead'])->name('leads.retry');
-    });
-
-    Route::get('business-research', [BusinessResearchController::class, 'index'])->name('business-research.index');
-    Route::post('business-research', [BusinessResearchController::class, 'store'])->name('business-research.store');
-    Route::get('business-research/{businessResearch}', [BusinessResearchController::class, 'show'])->name('business-research.show');
-    Route::get('business-research/{businessResearch}/status', [BusinessResearchController::class, 'status'])->name('business-research.status');
-    Route::post('business-research/{businessResearch}/retry', [BusinessResearchController::class, 'retry'])->name('business-research.retry');
-    Route::delete('business-research/{businessResearch}', [BusinessResearchController::class, 'destroy'])->name('business-research.destroy');
-
     Route::prefix('workflows')->name('workflows.')->group(function () {
         Route::get('/', [WorkflowController::class, 'index'])->name('index');
         Route::get('/create', [WorkflowController::class, 'create'])->name('create');
@@ -194,8 +170,14 @@ Route::prefix('admin')->name('admin.')->middleware([
         Route::get('/monitoring/live', [\App\Http\Controllers\CallMonitoringController::class, 'live'])->name('monitoring.live');
         Route::get('/monitoring/stream', [\App\Http\Controllers\CallMonitoringController::class, 'stream'])->name('monitoring.stream');
         Route::post('/monitoring/presence', [\App\Http\Controllers\CallMonitoringController::class, 'presenceHeartbeat'])->name('monitoring.presence');
+        Route::get('/monitoring/break/status', [\App\Http\Controllers\CallMonitoringController::class, 'breakStatus'])->name('monitoring.break.status');
+        Route::post('/monitoring/break/start', [\App\Http\Controllers\CallMonitoringController::class, 'breakStart'])->name('monitoring.break.start');
+        Route::post('/monitoring/break/end', [\App\Http\Controllers\CallMonitoringController::class, 'breakEnd'])->name('monitoring.break.end');
         Route::get('/notes', [\App\Http\Controllers\CallNotesController::class, 'index'])->name('notes');
         Route::get('/notes/download', [\App\Http\Controllers\CallNotesController::class, 'download'])->name('notes.download');
+        Route::get('/agent-status', [\App\Http\Controllers\AgentStatusReportController::class, 'index'])->name('agent-status');
+        Route::get('/agent-status/export', [\App\Http\Controllers\AgentStatusReportController::class, 'export'])->name('agent-status.export');
+        Route::get('/agent-status/export-logs', [\App\Http\Controllers\AgentStatusReportController::class, 'exportLogs'])->name('agent-status.export-logs');
         Route::get('/dialer/call-logs', [CommunicationsHubController::class, 'dialerCallLogs'])->name('dialer.call-logs');
         Route::get('/dialer/notes', [CommunicationsHubController::class, 'dialerPhoneNoteShow'])->name('dialer.notes.show');
         Route::put('/dialer/notes/phone', [CommunicationsHubController::class, 'dialerPhoneNoteSave'])->name('dialer.notes.phone.save');
@@ -284,8 +266,14 @@ Route::prefix('portal')->name('portal.')->middleware([\App\Http\Middleware\Marke
         Route::get('/monitoring/live', [\App\Http\Controllers\CallMonitoringController::class, 'live'])->name('monitoring.live');
         Route::get('/monitoring/stream', [\App\Http\Controllers\CallMonitoringController::class, 'stream'])->name('monitoring.stream');
         Route::post('/monitoring/presence', [\App\Http\Controllers\CallMonitoringController::class, 'presenceHeartbeat'])->name('monitoring.presence');
+        Route::get('/monitoring/break/status', [\App\Http\Controllers\CallMonitoringController::class, 'breakStatus'])->name('monitoring.break.status');
+        Route::post('/monitoring/break/start', [\App\Http\Controllers\CallMonitoringController::class, 'breakStart'])->name('monitoring.break.start');
+        Route::post('/monitoring/break/end', [\App\Http\Controllers\CallMonitoringController::class, 'breakEnd'])->name('monitoring.break.end');
         Route::get('/notes', [\App\Http\Controllers\CallNotesController::class, 'index'])->name('notes');
         Route::get('/notes/download', [\App\Http\Controllers\CallNotesController::class, 'download'])->name('notes.download');
+        Route::get('/agent-status', [\App\Http\Controllers\AgentStatusReportController::class, 'index'])->name('agent-status');
+        Route::get('/agent-status/export', [\App\Http\Controllers\AgentStatusReportController::class, 'export'])->name('agent-status.export');
+        Route::get('/agent-status/export-logs', [\App\Http\Controllers\AgentStatusReportController::class, 'exportLogs'])->name('agent-status.export-logs');
         Route::get('/dialer/call-logs', [CommunicationsHubController::class, 'dialerCallLogs'])->name('dialer.call-logs');
         Route::get('/dialer/notes', [CommunicationsHubController::class, 'dialerPhoneNoteShow'])->name('dialer.notes.show');
         Route::put('/dialer/notes/phone', [CommunicationsHubController::class, 'dialerPhoneNoteSave'])->name('dialer.notes.phone.save');

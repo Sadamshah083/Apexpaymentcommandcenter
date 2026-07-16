@@ -462,7 +462,7 @@
     line-height: 1.15;
 }
 
-/* Colorful light stat tiles — cycles 6 tints across KPI / stat grids */
+/* Colorful light stat tiles â€” cycles 6 tints across KPI / stat grids */
 .app-stat-grid > *:nth-child(6n + 1),
 .um-stats-grid > *:nth-child(6n + 1),
 .admin-dash-grid-4 > *:nth-child(6n + 1),
@@ -915,7 +915,7 @@ a.admin-dash-stat-card:hover,
 }
 
 .app-details > summary::before {
-    content: '▸';
+    content: 'â-¸';
     display: inline-block;
     margin-right: 0.35rem;
     transition: transform 0.15s ease;
@@ -1067,7 +1067,7 @@ a.admin-dash-stat-card:hover,
     color: #3f3f46 !important;
 }
 
-/* App sidebar — shared admin + portal */
+/* App sidebar â€” shared admin + portal */
 .app-sidebar-wrap {
     --app-sidebar-width: 16.5rem;
     --app-sidebar-collapsed-width: 5rem;
@@ -2590,7 +2590,7 @@ html {
     background: #10b981;
 }
 
-/* Legacy alias — use .app-filter-pills in markup */
+/* Legacy alias â€” use .app-filter-pills in markup */
 .pipeline-lead-filters {
     display: flex;
     flex-wrap: wrap;
@@ -2721,7 +2721,7 @@ body.app-loading-open {
     }
 }
 
-/* Pagination — avoids global .bg-white card overrides on page links */
+/* Pagination â€” avoids global .bg-white card overrides on page links */
 .pag-nav .pag-nav-group {
     border-radius: 0.75rem;
     overflow: hidden;
@@ -4203,7 +4203,7 @@ body.member-confirm-open {
     padding: 1rem;
 }
 
-/* GHL-inspired Communications Hub — shared utilities (inbox layout lives in communications-inbox.css) */
+/* GHL-inspired Communications Hub â€” shared utilities (inbox layout lives in communications-inbox.css) */
 .comm-hub-input-sm {
     padding: 0.4rem 0.6rem;
     font-size: 0.8125rem;
@@ -5095,7 +5095,7 @@ body.member-confirm-open {
 }
 
 .setter-status-details summary::before {
-    content: '▸';
+    content: 'â-¸';
     display: inline-block;
     margin-right: 0.35rem;
     transition: transform 0.15s ease;
@@ -5483,7 +5483,7 @@ body.member-confirm-open {
     background: linear-gradient(90deg, #6ee7b7, #34d399) !important;
 }
 
-/* Import workflows — responsive table + mobile cards */
+/* Import workflows â€” responsive table + mobile cards */
 .import-workflows-page {
     color: #64748b;
     font-size: 0.8125rem;
@@ -5838,7 +5838,7 @@ body.member-confirm-open {
     }
 }
 
-/* Bulk Email Verifier — lists index */
+/* Bulk Email Verifier â€” lists index */
 .email-lists-page {
     color: #64748b;
     font-size: 0.8125rem;
@@ -7099,7 +7099,7 @@ body.member-confirm-open {
 }
 
 .business-research-findings-list li::before {
-    content: '•';
+    content: 'â€¢';
     position: absolute;
     left: 0;
     color: #94a3b8;
@@ -7461,13 +7461,14 @@ body.member-confirm-open {
 
 .pag-btn-page {
     min-width: auto;
-    padding: 0.375rem 0.5rem;
+    padding: 0.375rem 0.75rem;
     font-size: 0.6875rem;
-    font-weight: 600;
-    color: #71717a;
-    background: transparent;
-    border: none;
+    font-weight: 700;
+    color: #0f172a !important;
+    background: #e2e8f0 !important;
+    border: 1px solid #cbd5e1 !important;
     cursor: default;
+    opacity: 1 !important;
 }
 
 .app-pagination-summary {
@@ -7716,7 +7717,7 @@ body.member-confirm-open {
     background: #f8fafc;
 }
 
-/* CRM shell — neutral theme, soft gray typography */
+/* CRM shell â€” neutral theme, soft gray typography */
 .app-shell {
     background: #f8fafc;
     color: #64748b;
@@ -7761,7 +7762,7 @@ body.member-confirm-open {
     font-weight: 500;
 }
 
-/* CRM polish — typography, scrollable table, stable layout */
+/* CRM polish â€” typography, scrollable table, stable layout */
 html {
     scrollbar-gutter: stable;
 }
@@ -8847,7 +8848,7 @@ html:has(body.ghl-comm-mode) {
     }
 }
 
-/* Admin dashboard — gray, small-text CRM style */
+/* Admin dashboard â€” gray, small-text CRM style */
 .admin-dashboard-page {
     color: #475569;
     font-size: 0.8125rem;
@@ -9277,7 +9278,7 @@ a.admin-dash-row:hover .admin-dash-row-label {
     padding: 0.25rem 0.5rem !important;
 }
 
-/* User management — full-width sections */
+/* User management â€” full-width sections */
 .um-page-header-actions {
     display: flex;
     flex-wrap: wrap;
@@ -9389,9 +9390,9 @@ a.admin-dash-row:hover .admin-dash-row-label {
     }
 }
 
-/* Global button brand — small text, #122e53, rounded-lg */
+/* Global button brand â€” small text, #122e53, rounded-lg */
 .app-shell button:not(.app-sidebar-edge-toggle):not(.app-floating-menu-btn):not(.app-floating-notify-btn):not(.app-topnav-icon-btn):not(.app-modal-close):not(.um-role-dropdown-trigger):not(.um-module-picker-trigger):not(.um-role-dropdown-option):not(.ghl-line-dropdown__trigger):not(.ghl-line-dropdown__option):not(.ghl-dialer-key):not(.ghl-dialer-backspace-btn):not(.ghl-dialer-call-icon-btn),
-/* User management — compact page polish */
+/* User management â€” compact page polish */
 .um-page {
     color: #64748b;
     font-size: 0.8125rem;
@@ -10289,7 +10290,7 @@ a.campaign-chip:hover {
     border: 1px solid var(--app-btn-brand) !important;
 }
 
-/* Dashboard — clickable cards & detail views */
+/* Dashboard â€” clickable cards & detail views */
 .admin-dash-stat-card--clickable {
     position: relative;
     padding-right: 2rem;
@@ -10806,7 +10807,7 @@ a.admin-dash-stat-card:hover .admin-dash-stat-chevron {
     background: rgba(255, 255, 255, 0.2);
 }
 
-/* ── User Management (/admin/workspaces) — match Communications Hub greens ── */
+/* â”€â”€ User Management (/admin/workspaces) â€” match Communications Hub greens â”€â”€ */
 #workspace-member-management .um-btn,
 body:has(#workspace-member-management) .member-confirm-modal .um-btn,
 body:has(#workspace-member-management) .member-confirm-modal .member-confirm-submit,
@@ -10816,7 +10817,7 @@ body:has(#workspace-member-management) .member-confirm-modal .member-confirm-can
     box-shadow: none !important;
 }
 
-/* Primary — light green fill + green border */
+/* Primary â€” light green fill + green border */
 #workspace-member-management .um-btn-primary,
 #workspace-member-management .um-btn-dark,
 #workspace-member-management .um-role-cell-form .um-btn.um-manage-btn,
@@ -10841,7 +10842,7 @@ body:has(#workspace-member-management) .member-confirm-modal .um-btn-primary:hov
     color: #047857 !important;
 }
 
-/* Secondary / ghost / soft — white + green border */
+/* Secondary / ghost / soft â€” white + green border */
 #workspace-member-management .um-btn-ghost,
 #workspace-member-management .um-btn-soft,
 body:has(#workspace-member-management) .member-confirm-modal .member-confirm-cancel,
@@ -10885,7 +10886,7 @@ body:has(#workspace-member-management) .member-confirm-modal .um-btn-ghost:hover
     border-color: #34d399 !important;
 }
 
-/* Inputs / role triggers — soft green focus border */
+/* Inputs / role triggers â€” soft green focus border */
 #workspace-member-management .um-input,
 #workspace-member-management .um-search-input,
 #workspace-member-management .um-role-dropdown-trigger,
@@ -10961,6 +10962,10 @@ body.app-sidebar-collapsed .sidebar-link-badges {
     display: flex;
     flex-direction: column;
     gap: 1rem;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 .call-monitoring-live-badge {
@@ -11006,8 +11011,26 @@ body.app-sidebar-collapsed .sidebar-link-badges {
 
 .call-monitoring-summary {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
-    gap: 0.75rem;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.65rem;
+}
+
+@media (min-width: 900px) {
+    .call-monitoring-summary {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+}
+
+@media (min-width: 1280px) {
+    .call-monitoring-summary {
+        grid-template-columns: repeat(9, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 640px) {
+    .call-monitoring-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }
 
 .call-monitoring-stat {
@@ -11066,7 +11089,7 @@ body.app-sidebar-collapsed .sidebar-link-badges {
     padding: 0.3rem 0.65rem;
     border-radius: 0.5rem;
     font-size: 0.72rem;
-    font-weight: 700;
+    font-weight: 500;
 }
 
 .call-monitoring-legend__item--blue { background: #bfdbfe; color: #1e3a8a; }
@@ -11087,10 +11110,19 @@ body.app-sidebar-collapsed .sidebar-link-badges {
 
 .call-monitoring-table {
     width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     table-layout: fixed;
     font-size: 0.85rem;
+    font-weight: 400;
 }
+
+.call-monitoring-table col.cm-col-station { width: 7%; }
+.call-monitoring-table col.cm-col-user { width: 26%; }
+.call-monitoring-table col.cm-col-status { width: 13%; }
+.call-monitoring-table col.cm-col-timer { width: 8%; }
+.call-monitoring-table col.cm-col-dest { width: 26%; }
+.call-monitoring-table col.cm-col-campaign { width: 20%; }
 
 .call-monitoring-table th {
     position: sticky;
@@ -11099,45 +11131,53 @@ body.app-sidebar-collapsed .sidebar-link-badges {
     background: #bbf7d0;
     color: #14532d;
     text-align: left;
-    padding: 0.7rem 0.85rem;
+    padding: 0.7rem 0.75rem;
     font-size: 0.72rem;
+    font-weight: 500;
     letter-spacing: 0.04em;
     text-transform: uppercase;
     border-bottom: 1px solid #86efac;
+    box-sizing: border-box;
+    vertical-align: middle;
 }
 
 .call-monitoring-table th:nth-child(1),
-.call-monitoring-table td:nth-child(1) {
-    width: 5.5rem;
-}
-
+.call-monitoring-table td:nth-child(1),
+.call-monitoring-table th:nth-child(2),
+.call-monitoring-table td:nth-child(2),
 .call-monitoring-table th:nth-child(3),
-.call-monitoring-table td:nth-child(3) {
-    width: 7.5rem;
-}
-
+.call-monitoring-table td:nth-child(3),
 .call-monitoring-table th:nth-child(4),
-.call-monitoring-table td:nth-child(4) {
-    width: 5rem;
-}
-
+.call-monitoring-table td:nth-child(4),
 .call-monitoring-table th:nth-child(5),
-.call-monitoring-table td:nth-child(5) {
-    width: 9.5rem;
-}
-
+.call-monitoring-table td:nth-child(5),
 .call-monitoring-table th:nth-child(6),
 .call-monitoring-table td:nth-child(6) {
-    width: 7rem;
+    width: auto; /* column widths come from <colgroup> */
+    text-align: left;
 }
 
 .call-monitoring-table td {
-    padding: 0.65rem 0.85rem;
+    padding: 0.65rem 0.75rem;
     border-bottom: 1px solid rgba(15, 23, 42, 0.06);
     vertical-align: middle;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    box-sizing: border-box;
+    text-align: left;
+    font-weight: 400;
+}
+
+.call-monitoring-row__dest,
+.call-monitoring-row__campaign,
+.call-monitoring-table th:nth-child(5),
+.call-monitoring-table th:nth-child(6),
+.call-monitoring-table td:nth-child(5),
+.call-monitoring-table td:nth-child(6) {
+    text-align: left !important;
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
 }
 
 .call-monitoring-row.is-waiting {
@@ -11169,30 +11209,41 @@ body.app-sidebar-collapsed .sidebar-link-badges {
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum" 1;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-    font-weight: 800;
+    font-weight: 400;
     letter-spacing: 0.02em;
     white-space: nowrap;
-    min-width: 4.25rem;
 }
 
 .call-monitoring-table th:nth-child(2),
 .call-monitoring-table td:nth-child(2) {
-    width: auto;
     white-space: normal;
-    overflow: visible;
-    text-overflow: clip;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-.call-monitoring-row__user {
+/* Name on top, role/badge below — consistent for every agent row. */
+.call-monitoring-row__user-inner {
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.3rem;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 0.2rem;
     min-width: 0;
+    max-width: 100%;
 }
 
 .call-monitoring-row__name {
-    font-weight: 700;
+    display: block;
+    font-weight: 600;
+    font-size: 0.9rem;
+    line-height: 1.25;
+    letter-spacing: 0.01em;
+    color: inherit;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .call-monitoring-row__role {
@@ -11204,9 +11255,12 @@ body.app-sidebar-collapsed .sidebar-link-badges {
     background: rgba(255, 255, 255, 0.55);
     color: #334155;
     font-size: 0.68rem;
-    font-weight: 700;
+    font-weight: 400;
     letter-spacing: 0.01em;
     white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .call-monitoring-dial-pill {
@@ -11216,7 +11270,7 @@ body.app-sidebar-collapsed .sidebar-link-badges {
     padding: 0.2rem 0.55rem;
     border-radius: 999px;
     font-size: 0.72rem;
-    font-weight: 800;
+    font-weight: 400;
     letter-spacing: 0.02em;
     white-space: nowrap;
     line-height: 1.2;
@@ -11251,7 +11305,7 @@ body.app-sidebar-collapsed .sidebar-link-badges {
     border-radius: 0.4rem;
     background: rgba(15, 23, 42, 0.08);
     font-size: 0.72rem;
-    font-weight: 800;
+    font-weight: 500;
     letter-spacing: 0.03em;
 }
 
@@ -11297,9 +11351,39 @@ body.app-sidebar-collapsed .sidebar-link-badges {
 .call-monitoring-stat--disposition .call-monitoring-stat__value {
     color: #c2410c;
 }
+.call-monitoring-stat--break {
+    background: #eff6ff;
+    border-color: #93c5fd;
+}
+.call-monitoring-stat--break .call-monitoring-stat__value {
+    color: #1d4ed8;
+}
+.call-monitoring-stat--lunch {
+    background: #faf5ff;
+    border-color: #d8b4fe;
+}
+.call-monitoring-stat--lunch .call-monitoring-stat__value {
+    color: #7e22ce;
+}
 .call-monitoring-row.is-idle {
     background: #dcfce7;
     color: #14532d;
+}
+.call-monitoring-row.is-break {
+    background: #dbeafe;
+    color: #1e3a8a;
+}
+.call-monitoring-row.is-break .call-monitoring-status-pill {
+    background: #2563eb;
+    color: #fff;
+}
+.call-monitoring-row.is-lunch {
+    background: #f3e8ff;
+    color: #581c87;
+}
+.call-monitoring-row.is-lunch .call-monitoring-status-pill {
+    background: #9333ea;
+    color: #fff;
 }
 .call-monitoring-row.is-offline {
     background: #f1f5f9;
@@ -11439,6 +11523,14 @@ body.app-sidebar-collapsed .sidebar-link-badges {
 .call-monitoring-legend__item--disposition {
     background: #ffedd5;
     color: #9a3412;
+}
+.call-monitoring-legend__item--break {
+    background: #dbeafe;
+    color: #1e3a8a;
+}
+.call-monitoring-legend__item--lunch {
+    background: #f3e8ff;
+    color: #581c87;
 }
 .call-monitoring-legend__item--idle {
     background: #dcfce7;
@@ -11666,4 +11758,617 @@ body.app-sidebar-collapsed .sidebar-link-badges {
 }
 .call-notes-pagination span[aria-disabled="true"] > span {
     opacity: 0.45;
+}
+
+/* Campaigns overview table (workflows / command center) */
+.campaigns-overview-table-wrap {
+    border: 1px solid #e2e8f0;
+    border-radius: 0.75rem;
+    overflow: hidden;
+    background: #fff;
+}
+
+.campaigns-overview-table-wrap .app-table-wrap {
+    border: 0;
+    overflow-x: auto;
+}
+
+.campaigns-overview-table {
+    width: 100%;
+    min-width: 640px;
+    border-collapse: collapse;
+}
+
+.campaigns-overview-table thead th {
+    background: #f1f5f9;
+    border-bottom: 1px solid #cbd5e1;
+    border-right: 1px solid #e2e8f0;
+    color: #64748b;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.65rem 0.85rem;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.campaigns-overview-table thead th:last-child,
+.campaigns-overview-table tbody td:last-child {
+    border-right: 0;
+}
+
+.campaigns-overview-table tbody td {
+    border-bottom: 1px solid #e2e8f0;
+    border-right: 1px solid #f1f5f9;
+    padding: 0.75rem 0.85rem;
+    font-size: 0.8125rem;
+    color: #475569;
+    vertical-align: middle;
+}
+
+.campaigns-overview-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.campaigns-overview-table tbody tr:hover {
+    background: #f8fafc;
+}
+
+.campaigns-overview-name {
+    font-weight: 600;
+    color: #0f172a;
+    text-decoration: none;
+}
+
+.campaigns-overview-name:hover {
+    color: #047857;
+    text-decoration: underline;
+}
+
+.campaigns-overview-assigned {
+    font-weight: 700;
+    color: #1d4ed8;
+}
+
+/* Global pagination polish */
+.app-pagination {
+    gap: 0.75rem;
+    padding: 0.75rem 0.25rem 0.25rem;
+}
+
+.app-pagination-summary {
+    font-size: 0.75rem;
+    color: #64748b;
+}
+
+.pag-nav-compact-inner {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.25rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.75rem;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.pag-btn-compact {
+    min-width: 4.75rem;
+    padding: 0.45rem 0.75rem;
+    border-radius: 0.55rem;
+    border: 1px solid transparent;
+    background: transparent;
+    color: #334155;
+    font-size: 0.75rem;
+    font-weight: 650;
+    text-decoration: none;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+a.pag-btn-compact:hover {
+    background: #f1f5f9;
+    border-color: #e2e8f0;
+    color: #0f172a;
+}
+
+.pag-btn-page {
+    min-width: 4.5rem;
+    padding: 0.45rem 0.65rem;
+    border-radius: 0.55rem;
+    background: #e2e8f0 !important;
+    color: #0f172a !important;
+    border: 1px solid #cbd5e1 !important;
+    font-size: 0.75rem;
+    font-weight: 700;
+    cursor: default;
+    opacity: 1 !important;
+}
+
+.pag-btn-disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* User Management table / modal polish */
+.um-page .um-panel {
+    border: 1px solid #dbe3ee;
+    border-radius: 0.9rem;
+    overflow: hidden;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.um-page .um-workspaces-table-wrap,
+.um-page .um-members-table-wrap.app-data-table {
+    border: 0;
+    border-radius: 0;
+}
+
+.um-page .um-members-table-wrap .app-table-wrap,
+.um-page .um-workspaces-table-wrap .app-table-wrap {
+    border: 0;
+    border-top: 1px solid #e2e8f0;
+}
+
+.um-page .um-members-table-wrap .app-table-wrap thead th,
+.um-page .um-workspaces-table thead th {
+    background: #eef4ff !important;
+    border-bottom: 1px solid #cbd5e1 !important;
+    border-right: 1px solid #dbe3ee !important;
+}
+
+.um-page .um-members-table-wrap .app-table-wrap tbody td,
+.um-page .um-workspaces-table tbody td {
+    border-bottom: 1px solid #e8eef5 !important;
+    border-right: 1px solid #eef2f7 !important;
+}
+
+.um-page .member-confirm-modal {
+    backdrop-filter: blur(2px);
+}
+
+.um-page .member-confirm-panel {
+    border: 1.5px solid #cbd5e1;
+    border-radius: 1rem;
+    box-shadow: 0 28px 70px rgba(15, 23, 42, 0.2);
+    animation: member-confirm-slide-in 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.um-page .um-input,
+.um-page .um-select,
+.um-page select.um-input {
+    border: 1.5px solid #cbd5e1;
+    border-radius: 0.55rem;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.um-page .um-input:focus,
+.um-page .um-select:focus,
+.um-page select.um-input:focus {
+    border-color: #64748b;
+    box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.12);
+    outline: none;
+}
+
+/* Soft green primary actions (matches User Management " Add account\) */
+.app-shell .app-btn-success,
+.app-btn.app-btn-success {
+ background: #ecfdf5 !important;
+ border: 1px solid #6ee7b7 !important;
+ color: #065f46 !important;
+}
+.app-shell .app-btn-success:hover:not(:disabled),
+.app-btn.app-btn-success:hover:not(:disabled) {
+ background: #d1fae5 !important;
+ border-color: #34d399 !important;
+ color: #047857 !important;
+}
+
+/* Deployment patience notice */
+.deployment-notice {
+ position: fixed;
+ inset: 0;
+ z-index: 80;
+ display: grid;
+ place-items: center;
+ padding: 1.25rem;
+}
+.deployment-notice[hidden] { display: none !important; }
+.deployment-notice__backdrop {
+ position: absolute;
+ inset: 0;
+ background: rgba(15, 23, 42, 0.45);
+}
+.deployment-notice__card {
+ position: relative;
+ z-index: 1;
+ width: min(28rem, 100%);
+ border-radius: 1rem;
+ background: #fff;
+ border: 1px solid #d1fae5;
+ box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22);
+ padding: 1.5rem 1.35rem 1.25rem;
+}
+.deployment-notice__eyebrow {
+ margin: 0;
+ font-size: 0.7rem;
+ font-weight: 700;
+ letter-spacing: 0.06em;
+ text-transform: uppercase;
+ color: #059669;
+}
+.deployment-notice__title {
+ margin: 0.4rem 0 0.65rem;
+ font-size: 1.25rem;
+ font-weight: 700;
+ color: #0f172a;
+}
+.deployment-notice__body {
+ margin: 0 0 1.15rem;
+ color: #475569;
+ line-height: 1.5;
+ font-size: 0.95rem;
+}
+.deployment-notice__btn { width: 100%; justify-content: center; }
+html.deployment-notice-open { overflow: hidden; }
+
+/* Call monitoring + agent status — fit at 100% zoom (no nested side column) */
+.call-monitoring-page,
+.agent-status-page {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    box-sizing: border-box;
+    overflow-x: clip;
+}
+
+.call-monitoring-main,
+.agent-status-main {
+    min-width: 0;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+.call-monitoring-toolbar,
+.agent-status-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.65rem 0.85rem;
+    padding: 0.7rem 0.85rem;
+    border: 1px solid #d1fae5;
+    background: linear-gradient(90deg, #f0fdf4 0%, #ffffff 42%);
+    border-radius: 0.85rem;
+    box-sizing: border-box;
+}
+
+.call-monitoring-toolbar__intro,
+.agent-status-toolbar__intro {
+    min-width: 0;
+}
+
+.call-monitoring-toolbar__eyebrow,
+.agent-status-toolbar__eyebrow {
+    margin: 0;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #059669;
+}
+
+.call-monitoring-toolbar__title,
+.agent-status-toolbar__title {
+    margin: 0.1rem 0 0;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #0f172a;
+    line-height: 1.2;
+}
+
+.call-monitoring-toolbar__stats,
+.agent-status-toolbar__stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.call-monitoring-toolbar__stat,
+.agent-status-toolbar__stat {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.55rem;
+    border-radius: 0.5rem;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+    font-size: 0.72rem;
+    color: #64748b;
+    white-space: nowrap;
+}
+
+.call-monitoring-toolbar__stat strong,
+.agent-status-toolbar__stat strong {
+    color: #0f172a;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.82rem;
+}
+
+.agent-status-toolbar__nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.agent-status-toolbar__link {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.35rem 0.65rem;
+    border-radius: 999px;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+    color: #334155;
+    font-size: 0.75rem;
+    font-weight: 650;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.agent-status-toolbar__link.is-active {
+    border-color: #6ee7b7;
+    background: #ecfdf5;
+    color: #065f46;
+}
+
+.agent-status-toolbar__actions,
+.call-monitoring-toolbar__cta {
+    margin-left: auto;
+}
+
+.agent-status-toolbar__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.agent-status-header {
+    gap: 0.5rem;
+}
+
+.agent-status-header .app-page-title {
+    font-size: clamp(1.15rem, 1.8vw, 1.45rem);
+}
+
+.agent-status-filters.app-card-padded {
+    padding: 0.75rem 0.9rem;
+}
+
+.agent-status-filters__grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.65rem;
+    align-items: end;
+}
+
+.agent-status-field {
+    min-width: 0;
+}
+
+.agent-status-field .app-input,
+.agent-status-field input,
+.agent-status-field select {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    min-height: 2.25rem;
+}
+
+.agent-status-field__label {
+    display: block;
+    margin-bottom: 0.25rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #475569;
+}
+
+.agent-status-filters__submit {
+    display: flex;
+    align-items: end;
+}
+
+.agent-status-filters__submit .app-btn {
+    width: 100%;
+    justify-content: center;
+}
+
+.agent-status-panels {
+    display: grid;
+    grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
+    gap: 0.85rem;
+    align-items: stretch;
+    width: 100%;
+    min-width: 0;
+}
+
+.agent-status-talk,
+.agent-status-logs {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.agent-status-talk.app-card-padded,
+.agent-status-logs.app-card-padded {
+    padding: 0.75rem 0.85rem;
+}
+
+.agent-status-section-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-bottom: 0.55rem;
+    flex-wrap: wrap;
+}
+
+.agent-status-section-head .app-section-title {
+    font-size: 0.95rem;
+    margin: 0;
+}
+
+.agent-status-muted {
+    font-size: 0.75rem;
+    color: #64748b;
+}
+
+.agent-status-table-wrap {
+    overflow: auto;
+    min-width: 0;
+    -webkit-overflow-scrolling: touch;
+}
+
+.agent-status-table-wrap--scroll {
+    max-height: min(28rem, 52vh);
+    flex: 1;
+}
+
+.agent-status-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+    table-layout: auto;
+}
+
+.agent-status-table--logs {
+    min-width: 36rem;
+}
+
+.agent-status-table th,
+.agent-status-table td {
+    padding: 0.4rem 0.5rem;
+    border-bottom: 1px solid #e2e8f0;
+    text-align: left;
+    vertical-align: middle;
+}
+
+.agent-status-table thead th {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #64748b;
+    background: #f8fafc;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.agent-status-table tbody tr:nth-child(even) {
+    background: #f0fdf4;
+}
+
+.agent-status-table tfoot th,
+.agent-status-table tfoot td {
+    font-weight: 700;
+    background: #ecfdf5;
+    border-top: 1px solid #a7f3d0;
+}
+
+.agent-status-empty {
+    text-align: center !important;
+    color: #64748b;
+    padding: 1rem !important;
+}
+
+.agent-status-pill {
+    display: inline-flex;
+    align-items: center;
+    max-width: 9rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 999px;
+    background: #e0f2fe;
+    color: #075985;
+    font-size: 0.68rem;
+    font-weight: 650;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.call-monitoring-board--unified,
+.call-monitoring-table-wrap {
+    min-width: 0;
+}
+
+.call-monitoring-summary {
+    gap: 0.5rem;
+}
+
+.call-monitoring-stat {
+    padding: 0.65rem 0.75rem;
+}
+
+@media (max-width: 1280px) {
+    .agent-status-panels {
+        grid-template-columns: 1fr;
+    }
+
+    .agent-status-table-wrap--scroll {
+        max-height: min(24rem, 48vh);
+    }
+}
+
+@media (max-width: 900px) {
+    .agent-status-filters__grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .agent-status-filters__submit {
+        grid-column: 1 / -1;
+    }
+
+    .agent-status-toolbar__actions,
+    .call-monitoring-toolbar__cta {
+        margin-left: 0;
+        width: 100%;
+    }
+
+    .agent-status-toolbar__actions .app-btn,
+    .call-monitoring-toolbar__cta {
+        flex: 1 1 auto;
+        justify-content: center;
+    }
+}
+
+@media (max-width: 640px) {
+    .agent-status-filters__grid {
+        grid-template-columns: 1fr;
+    }
+
+    .call-monitoring-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .agent-status-table--logs {
+        min-width: 32rem;
+    }
+}
+
+/* Legacy class hooks (no left rail layout) */
+.call-monitoring-shell,
+.agent-status-layout {
+    display: contents;
+}
+
+.call-monitoring-sidebar,
+.agent-status-sidebar {
+    display: none;
 }

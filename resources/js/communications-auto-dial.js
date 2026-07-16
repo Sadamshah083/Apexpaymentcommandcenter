@@ -4,7 +4,8 @@ import { showToast, dismissAllToasts } from './toast.js';
 
 const STORAGE_MODE_KEY = 'communications.dial_mode';
 const STORAGE_PAUSED_KEY = 'communications.auto_dial_paused';
-const AUTO_DIAL_DELAY_MS = 10000;
+/** Fallback only — prefer API / data-next-call-delay-sec from the server. */
+const DEFAULT_NEXT_CALL_DELAY_MS = 6000;
 
 let state = {
     mode: 'manual',
@@ -15,20 +16,80 @@ let state = {
     pendingDisposition: null,
     selectedDisposition: null,
     sessionActive: false,
+    /** Phone last dispositioned — never redial it for the next auto-dial step. */
+    lastDisposedPhone: '',
+    /** Last successful disposition API delay (ms) for the next auto-dial hop. */
+    nextCallDelayMs: null,
 };
+
+/** Leads/phones already dispositioned this session — exclude from queue permanently. */
+const disposedLeadIds = new Set();
+const disposedPhoneKeys = new Set();
 
 let autoDialDelayTimer = null;
 let autoDialCountdownTimer = null;
+let autoDialUiSyncTimer = null;
 let presenceTimer = null;
 let presenceOnCall = false;
 let presenceInDisposition = false;
+/** Latest presence payload waiting while a request is in flight. */
+let presenceQueuedExtra = null;
+/** Deduplicate identical heartbeats (setDialMode + start + call-active stacked). */
+let lastPresenceSignature = '';
+let lastPresenceAt = 0;
+
+/** Active break/lunch session from DB APIs (null when idle). */
+let breakActivity = null;
+let breakCountdownTimer = null;
+let breakRequestInFlight = false;
 
 let autoDialListenersBound = false;
 let callSummaryModalBound = false;
+/** Tracks rapid chip clicks so double-click / double-tap always saves (not just native dblclick). */
+let dispositionChipTap = { value: '', at: 0 };
 /** Set while Save/Redial is in flight so late hangup events cannot reopen the popup. */
 let dispositionSaveInFlight = false;
 /** After a successful dismiss, ignore matching call-ended echoes for a short window. */
 let dispositionDismissGuard = { key: '', until: 0 };
+/**
+ * After disposition is saved (auto or manual), ignore ALL call-ended echoes until
+ * the next real outbound call starts — late hangup cleanup must not cancel the
+ * next-call countdown or reopen the popup.
+ */
+let suppressCallEndedUntilActive = false;
+/** Prevent reopening Call Summary for the same hangup identity. */
+let lastDispositionOpenKey = '';
+/** Remember closed disposition call identities so late hangups cannot reopen them. */
+const closedDispositionKeys = new Map();
+/**
+ * Hard lock once Call Summary opens — hangup API / websocket echoes a few seconds
+ * later must never open a second popup until Save completes (or force reopen).
+ */
+let dispositionPopupLock = { locked: false, until: 0 };
+
+function lockDispositionPopup(ms = 180000) {
+    dispositionPopupLock = { locked: true, until: Date.now() + ms };
+    document.body.classList.add('ch-disposition-locked');
+}
+
+function unlockDispositionPopup() {
+    dispositionPopupLock = { locked: false, until: 0 };
+    document.body.classList.remove('ch-disposition-locked');
+}
+
+function isDispositionPopupLocked() {
+    if (!dispositionPopupLock.locked) {
+        return false;
+    }
+    if (Date.now() > dispositionPopupLock.until) {
+        dispositionPopupLock = { locked: false, until: 0 };
+        document.body.classList.remove('ch-disposition-locked');
+
+        return false;
+    }
+
+    return true;
+}
 
 function dispositionContextKey(context = {}) {
     const uuid = String(context?.callUuid || '').trim();
@@ -40,16 +101,64 @@ function dispositionContextKey(context = {}) {
     return phone ? `phone:${phone}` : '';
 }
 
+function dispositionContextKeys(context = {}) {
+    const keys = [];
+    const uuid = String(context?.callUuid || '').trim();
+    if (uuid) {
+        keys.push(`uuid:${uuid}`);
+    }
+    const phone = normalizePhoneDigits(context?.phone || context?.lead?.phone || '');
+    if (phone) {
+        keys.push(`phone:${phone}`);
+    }
+
+    return keys;
+}
+
+function rememberClosedDisposition(context = {}) {
+    const until = Date.now() + 180000;
+    dispositionContextKeys(context).forEach((key) => {
+        closedDispositionKeys.set(key, until);
+    });
+    // Prune expired entries.
+    const now = Date.now();
+    closedDispositionKeys.forEach((expires, key) => {
+        if (expires <= now) {
+            closedDispositionKeys.delete(key);
+        }
+    });
+}
+
+function isClosedDisposition(context = {}) {
+    const now = Date.now();
+    return dispositionContextKeys(context).some((key) => (closedDispositionKeys.get(key) || 0) > now);
+}
+
 function armDispositionDismissGuard(context = {}) {
     const key = dispositionContextKey(context);
     dispositionDismissGuard = {
         key,
-        until: Date.now() + 12000,
+        until: Date.now() + 45000,
     };
+    rememberClosedDisposition(context);
 }
 
 function shouldSuppressDispositionReopen(context = {}) {
-    if (dispositionSaveInFlight) {
+    // Hard lock: first hangup opened Call Summary — ignore hangup-API / SSE echoes.
+    if (isDispositionPopupLocked()) {
+        return true;
+    }
+
+    // Once Call Summary is open / pending, never reopen from hangup echoes.
+    if (dispositionSaveInFlight || suppressCallEndedUntilActive || state.pendingDisposition || isSummaryModalVisible()) {
+        return true;
+    }
+
+    if (document.body.classList.contains('ch-call-summary-open')) {
+        return true;
+    }
+
+    if (isClosedDisposition(context)) {
         return true;
     }
 
@@ -64,6 +173,55 @@ function shouldSuppressDispositionReopen(context = {}) {
     }
 
     return key === dispositionDismissGuard.key;
+}
+
+/** Clear "Dialing…" / "Connected" highlight from every imported-lead row. */
+function clearDialingLeadHighlight() {
+    document.querySelectorAll('[data-dialer-lead-row].is-dialing, [data-dialer-lead-row].is-connected-call').forEach((row) => {
+        row.classList.remove('is-dialing', 'is-connected-call');
+    });
+}
+
+/** Mark the active dialing row so disposition can relocate it even after highlight clears. */
+function markPendingDispositionLeadRows(context = {}) {
+    const root = hubRoot() || document;
+    const targetId = Number.parseInt(String(context?.lead?.id || '0'), 10) || null;
+    const targetPhone = String(context?.phone || context?.lead?.phone || '').trim();
+
+    root.querySelectorAll('[data-dialer-lead-row]').forEach((row) => {
+        const rowId = Number.parseInt(row.dataset.leadId || '0', 10) || null;
+        const rowPhone = row.dataset.leadPhone || '';
+        const matchId = targetId && rowId && rowId === targetId;
+        const matchPhone = targetPhone && phonesMatch(rowPhone, targetPhone);
+        const dialing = row.classList.contains('is-dialing');
+        if (matchId || matchPhone || dialing) {
+            row.dataset.pendingDisposition = '1';
+            row.classList.remove('is-dialing');
+        }
+    });
+}
+
+function isStaleHangupWhileLive(context = {}) {
+    const phone = getWebphone();
+    if (!phone || !['dialing', 'ringing', 'in-call'].includes(phone.state)) {
+        return false;
+    }
+
+    const activeUuid = String(
+        phone.hangupCallUuid?.() || phone.originateCallUuid || phone.morpheusCallUuid || '',
+    ).trim();
+    const endedUuid = String(context?.callUuid || '').trim();
+    if (activeUuid && endedUuid && activeUuid !== endedUuid) {
+        return true;
+    }
+
+    const activePhone = normalizePhoneDigits(phone.currentCallPeer || phone.lastDialedDestination || '');
+    const endedPhone = normalizePhoneDigits(context?.phone || context?.lead?.phone || '');
+    if (activePhone && endedPhone && activePhone !== endedPhone) {
+        return true;
+    }
+
+    return false;
 }
 
 /**
@@ -97,9 +255,306 @@ function hubRoot() {
     return document.querySelector('[data-auto-dial-hub]');
 }
 
+function breakRoot() {
+    return document.querySelector('[data-break-controls], [data-break-status-url], [data-phone-workspace]');
+}
+
+function isOnBreakOrLunch() {
+    return Boolean(breakActivity?.type === 'break' || breakActivity?.type === 'lunch');
+}
+
+function formatBreakCountdown(seconds) {
+    const sec = Math.max(0, Math.floor(Number(seconds) || 0));
+    const minutes = Math.floor(sec / 60);
+    const remain = sec % 60;
+    return `${String(minutes).padStart(2, '0')}:${String(remain).padStart(2, '0')}`;
+}
+
+function remainingBreakSeconds() {
+    if (!breakActivity?.ends_at) {
+        return Math.max(0, Math.floor(Number(breakActivity?.remaining_seconds) || 0));
+    }
+    const endsMs = Date.parse(String(breakActivity.ends_at));
+    if (!Number.isFinite(endsMs)) {
+        return Math.max(0, Math.floor(Number(breakActivity?.remaining_seconds) || 0));
+    }
+    return Math.max(0, Math.floor((endsMs - Date.now()) / 1000));
+}
+
+function applyBreakDialingLock(locked) {
+    document.body.classList.toggle('ch-on-break', locked);
+    document.querySelectorAll(
+        '.ghl-dialer-originate-form button[type="submit"], .ghl-dialer-originate-form [data-morpheus-dial-btn], [id^="morpheus-dial-btn"]'
+    ).forEach((btn) => {
+        btn.disabled = locked;
+        btn.setAttribute('aria-disabled', locked ? 'true' : 'false');
+        if (locked) {
+            btn.title = 'Finish break/lunch before dialing';
+        } else if (btn.title === 'Finish break/lunch before dialing') {
+            btn.removeAttribute('title');
+        }
+    });
+}
+
+function syncBreakControlsUi() {
+    const roots = document.querySelectorAll('[data-break-controls]');
+    const active = isOnBreakOrLunch();
+    const remaining = remainingBreakSeconds();
+    const isLunch = breakActivity?.type === 'lunch';
+    const label = isLunch ? 'Lunch' : 'Break';
+
+    roots.forEach((root) => {
+        root.classList.toggle('is-active', active);
+        root.dataset.breakType = active ? (isLunch ? 'lunch' : 'break') : '';
+        root.querySelectorAll('[data-break-start]').forEach((btn) => {
+            btn.classList.toggle('hidden', active);
+            btn.disabled = breakRequestInFlight || active;
+        });
+        const endBtn = root.querySelector('[data-break-end]');
+        if (endBtn) {
+            endBtn.classList.toggle('hidden', !active);
+            endBtn.disabled = breakRequestInFlight || !active;
+            endBtn.textContent = isLunch ? 'End Lunch' : 'Break Out';
+        }
+        const status = root.querySelector('[data-break-status]');
+        const statusLabel = root.querySelector('[data-break-status-label]');
+        const countdown = root.querySelector('[data-break-countdown]');
+        if (status) {
+            status.classList.toggle('hidden', !active);
+            status.style.background = isLunch ? '#f3e8ff' : '';
+            status.style.color = isLunch ? '#581c87' : '';
+        }
+        if (statusLabel) {
+            statusLabel.textContent = active ? `${label} · ` : '';
+        }
+        if (countdown) {
+            countdown.textContent = active ? formatBreakCountdown(remaining) : '';
+        }
+    });
+
+    applyBreakDialingLock(active);
+    // Avoid re-entrancy when syncAutoDialControls is mid-flight.
+    if (!window.__apexSyncingBreakUi) {
+        window.__apexSyncingBreakUi = true;
+        try {
+            syncAutoDialControls();
+        } finally {
+            window.__apexSyncingBreakUi = false;
+        }
+    }
+}
+
+function clearBreakCountdown() {
+    if (breakCountdownTimer) {
+        window.clearInterval(breakCountdownTimer);
+        breakCountdownTimer = null;
+    }
+}
+
+function startBreakCountdown() {
+    clearBreakCountdown();
+    if (!isOnBreakOrLunch()) {
+        return;
+    }
+    breakCountdownTimer = window.setInterval(() => {
+        const remaining = remainingBreakSeconds();
+        syncBreakControlsUi();
+        if (remaining <= 0 && !breakRequestInFlight) {
+            void endAgentBreak({ reason: 'auto', toast: true });
+        }
+    }, 1000);
+}
+
+function setBreakActivity(session) {
+    if (!session || !['break', 'lunch'].includes(String(session.type || '')) || session.status !== 'active') {
+        breakActivity = null;
+        clearBreakCountdown();
+        syncBreakControlsUi();
+        return;
+    }
+    breakActivity = {
+        id: session.id || null,
+        type: session.type,
+        status: session.status,
+        started_at: session.started_at || null,
+        ends_at: session.ends_at || null,
+        remaining_seconds: session.remaining_seconds ?? null,
+        planned_seconds: session.planned_seconds ?? null,
+        label: session.label || (session.type === 'lunch' ? 'Lunch' : 'Break'),
+    };
+    startBreakCountdown();
+    syncBreakControlsUi();
+}
+
+function breakApiUrls() {
+    const node = breakRoot();
+    return {
+        status: node?.getAttribute('data-break-status-url') || '',
+        start: node?.getAttribute('data-break-start-url') || '',
+        end: node?.getAttribute('data-break-end-url') || '',
+    };
+}
+
+async function refreshBreakStatus() {
+    const { status: url } = breakApiUrls();
+    if (!url) {
+        return;
+    }
+    try {
+        const res = await fetch(url, {
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            credentials: 'same-origin',
+        });
+        if (!res.ok) {
+            return;
+        }
+        const data = await res.json();
+        setBreakActivity(data?.session || null);
+    } catch {
+        // best-effort
+    }
+}
+
+async function startAgentBreak(type) {
+    const { start: url } = breakApiUrls();
+    if (!url || breakRequestInFlight) {
+        return;
+    }
+    if (presenceOnCall) {
+        showToast('End the active call before starting break/lunch.', 'warning');
+        return;
+    }
+    if (state.pendingDisposition || isSummaryModalVisible()) {
+        showToast('Save disposition before starting break/lunch.', 'warning');
+        return;
+    }
+
+    const kind = type === 'lunch' ? 'lunch' : 'break';
+    breakRequestInFlight = true;
+    syncBreakControlsUi();
+
+    if (state.sessionActive) {
+        stopAutoDialSession({ toast: false });
+    }
+
+    try {
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+                'X-CSRF-TOKEN': csrfToken(),
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+                type: kind,
+                extension: currentExtension() || null,
+                dial_mode: state.mode === 'auto' ? 'auto' : 'manual',
+                auto_session_active: false,
+            }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data?.ok) {
+            showToast(data?.message || 'Could not start break/lunch.', 'error');
+            return;
+        }
+        setBreakActivity(data.session || null);
+        showToast(kind === 'lunch' ? 'Lunch started (30 min).' : 'Break In started (5 min).', 'success');
+        sendPresenceHeartbeat({
+            break_status: kind,
+            break_ends_at: data.session?.ends_at || null,
+            auto_paused: true,
+            on_call: false,
+            in_disposition: false,
+            force: true,
+        });
+    } catch {
+        showToast('Could not start break/lunch.', 'error');
+    } finally {
+        breakRequestInFlight = false;
+        syncBreakControlsUi();
+    }
+}
+
+async function endAgentBreak({ reason = 'manual', toast = true } = {}) {
+    const { end: url } = breakApiUrls();
+    if (!url || breakRequestInFlight) {
+        return;
+    }
+    breakRequestInFlight = true;
+    syncBreakControlsUi();
+    try {
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+                'X-CSRF-TOKEN': csrfToken(),
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({ reason: reason === 'auto' ? 'auto' : 'manual' }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data?.ok) {
+            showToast(data?.message || 'Could not end break/lunch.', 'error');
+            return;
+        }
+        setBreakActivity(null);
+        if (toast) {
+            showToast(reason === 'auto' ? 'Break/lunch ended automatically.' : 'Back from break/lunch.', 'info');
+        }
+        sendPresenceHeartbeat({
+            break_status: 'none',
+            break_ends_at: null,
+            auto_paused: false,
+            force: true,
+        });
+    } catch {
+        showToast('Could not end break/lunch.', 'error');
+    } finally {
+        breakRequestInFlight = false;
+        syncBreakControlsUi();
+    }
+}
+
+export function initAgentBreakControls() {
+    if (document.documentElement.dataset.agentBreakInit === '1') {
+        return;
+    }
+    if (!document.querySelector('[data-break-controls], [data-break-status-url]')) {
+        return;
+    }
+    document.documentElement.dataset.agentBreakInit = '1';
+
+    document.querySelectorAll('[data-break-start]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            void startAgentBreak(btn.getAttribute('data-break-start') || 'break');
+        });
+    });
+    document.querySelectorAll('[data-break-end]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            void endAgentBreak({ reason: 'manual', toast: true });
+        });
+    });
+
+    void refreshBreakStatus();
+}
+
 function syncAutoDialControls() {
-    // Recover sticky disposition state when the popup is already gone.
-    if (state.pendingDisposition && !isSummaryModalVisible() && !dispositionSaveInFlight) {
+    // Do NOT clear pendingDisposition while the popup lock / body flag is active —
+    // hangup API echoes used to wipe it and reopen Call Summary a few seconds later.
+    if (
+        state.pendingDisposition
+        && !isSummaryModalVisible()
+        && !dispositionSaveInFlight
+        && !isDispositionPopupLocked()
+        && !document.body.classList.contains('ch-call-summary-open')
+    ) {
         state.pendingDisposition = null;
         state.selectedDisposition = null;
         presenceInDisposition = false;
@@ -107,6 +562,7 @@ function syncAutoDialControls() {
 
     const running = state.mode === 'auto' && state.sessionActive && !state.paused;
     const waitingNext = Boolean(autoDialDelayTimer);
+    const onBreak = isOnBreakOrLunch();
     const startBtns = document.querySelectorAll('[data-auto-dial-start]');
     const stopBtns = document.querySelectorAll('[data-auto-dial-stop]');
     const statusEls = document.querySelectorAll('[data-auto-dial-status]');
@@ -114,8 +570,8 @@ function syncAutoDialControls() {
     startBtns.forEach((btn) => {
         btn.classList.toggle('hidden', running);
         btn.classList.toggle('is-running', false);
-        btn.disabled = false;
-        btn.textContent = 'Start auto dial';
+        btn.disabled = onBreak;
+        btn.textContent = onBreak ? 'On break' : 'Start auto dial';
     });
 
     stopBtns.forEach((btn) => {
@@ -124,13 +580,19 @@ function syncAutoDialControls() {
     });
 
     statusEls.forEach((el) => {
-        if (isSummaryModalVisible() || state.pendingDisposition) {
+        if (onBreak) {
+            const label = breakActivity?.type === 'lunch' ? 'Lunch' : 'Break';
+            const left = formatBreakCountdown(remainingBreakSeconds());
+            el.textContent = `${label} · ${left} left`;
+            el.classList.remove('hidden');
+            el.classList.add('is-active');
+        } else if (isSummaryModalVisible() || state.pendingDisposition) {
             el.textContent = 'Set disposition to continue';
             el.classList.remove('hidden');
             el.classList.add('is-active');
         } else if (waitingNext) {
             const countdownText = document.querySelector('[data-auto-dial-countdown-text]')?.textContent;
-            el.textContent = countdownText || 'Next call in 10s…';
+            el.textContent = countdownText || 'Starting call in 6s…';
             el.classList.remove('hidden');
             el.classList.add('is-active');
         } else if (running) {
@@ -157,11 +619,11 @@ function syncAutoDialControls() {
 function stopAutoDialSession({ toast = true } = {}) {
     state.sessionActive = false;
     state.paused = false;
+    awaitingNextCallAfterDisposition = false;
     localStorage.setItem(STORAGE_PAUSED_KEY, '0');
     clearAutoDialDelay();
-    hubRoot()?.querySelectorAll('[data-dialer-lead-row].is-dialing').forEach((row) => {
-        row.classList.remove('is-dialing');
-    });
+    stopAutoDialUiSync();
+    clearDialingLeadHighlight();
     syncAutoDialControls();
     sendPresenceHeartbeat();
     if (toast) {
@@ -193,7 +655,7 @@ function showAutoDialCountdown(seconds, message) {
 
     countdown.classList.remove('hidden');
     text.textContent = `${message} in ${seconds}s…`;
-    // Keep the Imported leads status in sync with the 10s timer.
+    // Keep the Imported leads status in sync with the countdown timer.
     document.querySelectorAll('[data-auto-dial-status]').forEach((el) => {
         if (isSummaryModalVisible() || state.pendingDisposition) {
             return;
@@ -209,7 +671,17 @@ function isSummaryModalVisible() {
         .some((el) => el.isConnected && !el.classList.contains('hidden'));
 }
 
+/**
+ * After a successful disposition Save, allow the 6s next-call countdown to run
+ * even if a late hangup echo briefly toggles disposition UI state.
+ */
+let awaitingNextCallAfterDisposition = false;
+
 function isDispositionBlocking() {
+    if (awaitingNextCallAfterDisposition) {
+        return false;
+    }
+
     // Only block while the Call Summary is actually open / pending — not during
     // background save after the popup already closed (that stuck the status text).
     return Boolean(state.pendingDisposition) || isSummaryModalVisible();
@@ -229,7 +701,7 @@ function suggestedDispositionFromResult(result, connected) {
         return 'Owner Not Available';
     }
     if (normalized.includes('voicemail') || normalized.includes('answering')) {
-        return 'Answer Machine';
+        return 'Answering Machine';
     }
     if (normalized.includes('wrong') || normalized.includes('invalid')) {
         return 'Wrong Number/Business';
@@ -241,14 +713,38 @@ function suggestedDispositionFromResult(result, connected) {
     return 'No Answer';
 }
 
-function scheduleAutoDial(action, message = 'Next call') {
+function resolveNextCallDelayMs(payload = null) {
+    const fromPayload = Number(payload?.next_call_delay_sec);
+    if (Number.isFinite(fromPayload) && fromPayload >= 0) {
+        return Math.round(fromPayload * 1000);
+    }
+
+    if (Number.isFinite(state.nextCallDelayMs) && state.nextCallDelayMs >= 0) {
+        return Math.round(state.nextCallDelayMs);
+    }
+
+    const hubDelay = Number(
+        hubRoot()?.dataset?.nextCallDelaySec
+        || document.querySelector('[data-call-summary-modal]')?.dataset?.nextCallDelaySec
+        || '',
+    );
+    if (Number.isFinite(hubDelay) && hubDelay >= 0) {
+        return Math.round(hubDelay * 1000);
+    }
+
+    return DEFAULT_NEXT_CALL_DELAY_MS;
+}
+
+function scheduleAutoDial(action, message = 'Next call', delayMs = null) {
     clearAutoDialDelay();
 
     if (state.mode !== 'auto' || state.paused || isDispositionBlocking()) {
         return Promise.resolve(false);
     }
 
-    let remaining = Math.ceil(AUTO_DIAL_DELAY_MS / 1000);
+    const waitMs = Math.max(0, Number.isFinite(delayMs) ? delayMs : resolveNextCallDelayMs());
+    const waitSec = Math.max(1, Math.ceil(waitMs / 1000));
+    let remaining = waitSec;
     showAutoDialCountdown(remaining, message);
     syncAutoDialControls();
 
@@ -279,7 +775,7 @@ function scheduleAutoDial(action, message = 'Next call') {
             const result = await action();
             syncAutoDialControls();
             resolve(result);
-        }, AUTO_DIAL_DELAY_MS);
+        }, waitMs);
     });
 }
 
@@ -365,8 +861,10 @@ function buildLeadRow(lead) {
     `;
 }
 
-function setDialMode(mode) {
-    state.mode = mode === 'auto' ? 'auto' : 'manual';
+function setDialMode(mode, { announcePresence = true } = {}) {
+    const nextMode = mode === 'auto' ? 'auto' : 'manual';
+    const modeChanged = state.mode !== nextMode;
+    state.mode = nextMode;
     localStorage.setItem(STORAGE_MODE_KEY, state.mode);
 
     document.querySelectorAll('[data-dial-mode-switch] [data-dial-mode]').forEach((btn) => {
@@ -385,7 +883,10 @@ function setDialMode(mode) {
     }
 
     syncAutoDialControls();
-    sendPresenceHeartbeat();
+    // Only announce when the dial mode actually changed — avoids double presence on Start.
+    if (announcePresence && modeChanged) {
+        sendPresenceHeartbeat();
+    }
 }
 
 function presenceUrl() {
@@ -418,12 +919,54 @@ async function sendPresenceHeartbeat(extra = {}) {
         return;
     }
 
+    // Don't spam presence while the tab is hidden.
+    if (document.hidden && !extra.call_ended && !extra.force) {
+        return;
+    }
+
+    const onCall = Boolean(extra.on_call ?? presenceOnCall);
+    const inDisposition = Boolean(extra.in_disposition ?? presenceInDisposition);
+    const breakStatus = isOnBreakOrLunch()
+        ? (breakActivity.type === 'lunch' ? 'lunch' : 'break')
+        : (extra.break_status === 'none' ? 'none' : (extra.break_status || 'none'));
+    const breakEndsAt = isOnBreakOrLunch()
+        ? (breakActivity.ends_at || extra.break_ends_at || null)
+        : (extra.break_status === 'none' ? null : (extra.break_ends_at || null));
+    const signature = [
+        state.mode === 'auto' ? 'auto' : 'manual',
+        state.sessionActive ? '1' : '0',
+        state.paused ? '1' : '0',
+        onCall ? '1' : '0',
+        inDisposition ? '1' : '0',
+        breakStatus,
+        breakEndsAt || '',
+        currentExtension() || '',
+        extra.call_ended ? 'ended' : '',
+    ].join('|');
+
+    // Same status within 2s → one Network row (mode switch + start + call-active).
+    if (
+        !extra.call_ended
+        && signature === lastPresenceSignature
+        && (Date.now() - lastPresenceAt) < 2000
+    ) {
+        return;
+    }
+
+    // One in-flight presence at a time — keep the newest state and send it after.
+    if (window.__apexPresenceInFlight && !extra.call_ended) {
+        presenceQueuedExtra = { ...extra };
+        return;
+    }
+
     const body = {
         dial_mode: state.mode === 'auto' ? 'auto' : 'manual',
         auto_session_active: Boolean(state.sessionActive && state.mode === 'auto'),
-        auto_paused: Boolean(state.paused && state.mode === 'auto'),
-        on_call: Boolean(extra.on_call ?? presenceOnCall),
-        in_disposition: Boolean(extra.in_disposition ?? presenceInDisposition),
+        auto_paused: Boolean((state.paused && state.mode === 'auto') || isOnBreakOrLunch()),
+        on_call: onCall,
+        in_disposition: inDisposition,
+        break_status: breakStatus,
+        break_ends_at: breakEndsAt,
         disposition_phone: extra.disposition_phone
             || state.pendingDisposition?.phone
             || state.pendingDisposition?.lead?.phone
@@ -431,8 +974,29 @@ async function sendPresenceHeartbeat(extra = {}) {
         extension: currentExtension() || null,
         ...extra,
     };
+    // Keep DB break as source of truth when active — don't let sparse extras wipe it.
+    if (isOnBreakOrLunch()) {
+        body.break_status = breakActivity.type === 'lunch' ? 'lunch' : 'break';
+        body.break_ends_at = breakActivity.ends_at || breakEndsAt;
+        body.auto_paused = true;
+        body.on_call = false;
+    } else if (!Object.prototype.hasOwnProperty.call(extra, 'break_status')) {
+        body.break_status = 'none';
+        body.break_ends_at = null;
+    }
 
+    window.__apexPresenceInFlight = true;
+    lastPresenceSignature = signature;
+    lastPresenceAt = Date.now();
     try {
+        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const timeoutId = window.setTimeout(() => {
+            try {
+                controller?.abort();
+            } catch {
+                // ignore
+            }
+        }, 4000);
         await fetch(url, {
             method: 'POST',
             headers: {
@@ -444,9 +1008,18 @@ async function sendPresenceHeartbeat(extra = {}) {
             credentials: 'same-origin',
             body: JSON.stringify(body),
             keepalive: Boolean(extra.call_ended),
+            signal: controller?.signal,
         });
+        window.clearTimeout(timeoutId);
     } catch {
         // Presence is best-effort for monitoring.
+    } finally {
+        window.__apexPresenceInFlight = false;
+        const queued = presenceQueuedExtra;
+        presenceQueuedExtra = null;
+        if (queued) {
+            void sendPresenceHeartbeat(queued);
+        }
     }
 }
 
@@ -467,7 +1040,7 @@ export function initAgentPresence() {
     window.addEventListener('comm:call-active', () => {
         presenceOnCall = true;
         presenceInDisposition = false;
-        sendPresenceHeartbeat({ on_call: true, in_disposition: false });
+        sendPresenceHeartbeat({ on_call: true, in_disposition: false, force: true });
     });
 
     window.addEventListener('comm:call-ended', (event) => {
@@ -479,17 +1052,19 @@ export function initAgentPresence() {
             call_ended: true,
             in_disposition: true,
             disposition_phone: phone || null,
+            force: true,
         });
     });
 
     // Immediate login signal → Call Monitoring moves agent from Not logged in → Not in call.
-    sendPresenceHeartbeat({ on_call: false, in_disposition: false });
+    sendPresenceHeartbeat({ on_call: false, in_disposition: false, force: true });
+    // Presence every 25s is enough for monitoring; dialer must not compete with call APIs.
     presenceTimer = window.setInterval(() => {
         sendPresenceHeartbeat({
             on_call: presenceOnCall,
             in_disposition: presenceInDisposition,
         });
-    }, 12000);
+    }, 25000);
 
     window.addEventListener('visibilitychange', () => {
         if (!document.hidden) {
@@ -518,27 +1093,59 @@ function showSummaryModal(context, { force = false } = {}) {
         return;
     }
 
-    // Same hangup can emit call-ended more than once — never reopen / restack UI.
-    if (!modal.classList.contains('hidden') && state.pendingDisposition) {
-        const openUuid = String(state.pendingDisposition.callUuid || '');
-        const nextUuid = String(context?.callUuid || '');
-        const openPhone = String(state.pendingDisposition.phone || state.pendingDisposition.lead?.phone || '');
-        const nextPhone = String(context?.phone || context?.lead?.phone || '');
-        if ((openUuid && nextUuid && openUuid === nextUuid) || (openPhone && nextPhone && openPhone === nextPhone)) {
-            return;
-        }
+    const openKey = dispositionContextKey(context);
+    // Same hangup already showing — never flash/reopen the popup.
+    if (
+        !force
+        && openKey
+        && openKey === lastDispositionOpenKey
+        && (isSummaryModalVisible() || state.pendingDisposition)
+    ) {
+        return;
     }
 
-    // Intentional reopen (failed save) clears the dismiss guard.
+    // Hard rule: disposition popup must never open twice for the same hangup.
+    if (!force && (isDispositionPopupLocked() || !modal.classList.contains('hidden') || state.pendingDisposition)) {
+        return;
+    }
+
+    // Intentional reopen (failed save) clears the dismiss guard / lock briefly.
     if (force) {
         dispositionDismissGuard = { key: '', until: 0 };
+        unlockDispositionPopup();
     }
+
+    // Lock immediately — before any async hangup-API teardown can echo call-ended.
+    lockDispositionPopup();
 
     // Never continue the queue while disposition is required.
     clearAutoDialDelay();
     clearDialerDestinationInput();
+    clearDialingLeadHighlight();
     dismissAllToasts();
-    getWebphone()?.restoreDialerAfterCall?.();
+    // Kill ringing audio + active-call UI immediately (PSTN/SIP can lag behind the popup).
+    // Always clear click-to-call flags; avoid double SIP kill while hangup() is already in flight.
+    const phone = getWebphone();
+    if (phone) {
+        phone.clickToCallActive = false;
+        phone.awaitingDestinationBridge = false;
+        phone.pendingClickToCall = false;
+        phone.outboundWaitingActive = false;
+        phone.cancelOutboundAttempt?.('disposition');
+        if (!phone.hangupInFlight) {
+            phone.forceTeardownForDisposition?.();
+        } else {
+            phone.restoreDialerAfterCall?.({ force: true });
+            phone.stopAllLocalRingers?.();
+            phone.flushCallUiInstant?.();
+        }
+    }
+    // Mark this hangup closed immediately so websocket/hangup API echoes cannot reopen.
+    rememberClosedDisposition(context);
+    armDispositionDismissGuard(context);
+    if (openKey) {
+        lastDispositionOpenKey = openKey;
+    }
 
     // Keep the popup above topbar icons / floating call UI (those use z-index 10k+).
     if (modal.parentElement !== document.body) {
@@ -587,11 +1194,14 @@ function showSummaryModal(context, { force = false } = {}) {
         customDispositionEl.value = '';
     }
     if (nextLabel) {
-        nextLabel.textContent = state.mode === 'auto' && state.sessionActive ? 'Save & Next' : 'Save';
+        nextLabel.textContent = state.mode === 'auto' && state.sessionActive && !state.paused
+            ? 'Save & Next'
+            : 'Save';
     }
     if (pauseBtn) {
         pauseBtn.classList.toggle('hidden', state.mode !== 'auto');
         pauseBtn.classList.toggle('is-paused', state.paused);
+        pauseBtn.hidden = state.mode !== 'auto';
     }
     modal.classList.toggle('ch-call-summary--manual', state.mode !== 'auto');
     modal.dataset.dispositionBusy = '';
@@ -613,12 +1223,18 @@ function showSummaryModal(context, { force = false } = {}) {
         customDispositionEl.value = suggested;
     }
 
-    modal.classList.remove('hidden');
+    modal.classList.remove('hidden', 'is-closing');
+    modal.classList.add('is-opening');
     modal.setAttribute('aria-hidden', 'false');
     document.body.classList.add('ch-call-summary-open');
     syncAutoDialControls();
 
-    // Focus selected disposition so agents can confirm and continue quickly.
+    window.requestAnimationFrame(() => {
+        modal.classList.add('is-visible');
+        modal.classList.remove('is-opening');
+    });
+
+    // Focus selected disposition so agents can confirm quickly.
     window.setTimeout(() => {
         const live = resolveSummaryModalElement() || modal;
         live.querySelector('[data-disposition-value].is-selected')?.focus?.()
@@ -648,6 +1264,7 @@ function hideSummaryModal({ force = false, context = null } = {}) {
     }
 
     modals.forEach((modal) => {
+        modal.classList.remove('is-visible', 'is-opening');
         modal.classList.add('hidden');
         modal.setAttribute('aria-hidden', 'true');
         modal.dataset.dispositionBusy = '';
@@ -657,7 +1274,10 @@ function hideSummaryModal({ force = false, context = null } = {}) {
     document.body.classList.remove('ch-call-summary-open');
     state.pendingDisposition = null;
     state.selectedDisposition = null;
+    lastDispositionOpenKey = '';
     presenceInDisposition = false;
+    // Keep popup lock until Save finishes — only unlock when Save/Redial explicitly ends the flow.
+    // Failed save reopens with force; successful Save sets suppressCallEndedUntilActive.
     sendPresenceHeartbeat({ in_disposition: false, on_call: presenceOnCall });
     syncAutoDialControls();
 }
@@ -688,7 +1308,7 @@ async function saveDisposition(disposition, contextOverride = null, noteOverride
                 'X-CSRF-TOKEN': csrfToken(),
             },
             credentials: 'same-origin',
-            signal: AbortSignal.timeout(15000),
+            signal: AbortSignal.timeout(8000),
             body: JSON.stringify({
                 disposition,
                 note: note || null,
@@ -701,7 +1321,7 @@ async function saveDisposition(disposition, contextOverride = null, noteOverride
         });
 
         const payload = await response.json().catch(() => ({}));
-        if (!response.ok) {
+        if (!response.ok || payload.saved !== true) {
             throw new Error(payload.message || 'Could not save disposition.');
         }
 
@@ -739,37 +1359,62 @@ function phonesMatch(a, b) {
     return Boolean(left && right && left === right);
 }
 
+function rememberDisposedLead(leadId, phone) {
+    const id = Number.parseInt(String(leadId || '0'), 10) || null;
+    if (id) {
+        disposedLeadIds.add(id);
+    }
+    const phoneKey = normalizePhoneDigits(phone);
+    if (phoneKey) {
+        disposedPhoneKeys.add(phoneKey);
+        state.lastDisposedPhone = phoneKey;
+    }
+}
+
+function isDisposedLead(lead) {
+    if (!lead) {
+        return false;
+    }
+    const id = Number.parseInt(String(lead.id || '0'), 10) || null;
+    if (id && disposedLeadIds.has(id)) {
+        return true;
+    }
+    const phoneKey = normalizePhoneDigits(lead.phone);
+    if (phoneKey && disposedPhoneKeys.has(phoneKey)) {
+        return true;
+    }
+
+    return false;
+}
+
 function removeLeadFromQueue(leadId, phone) {
     const root = hubRoot() || document;
     const targetId = Number.parseInt(String(leadId || '0'), 10) || null;
     const targetPhone = String(phone || '').trim();
+    rememberDisposedLead(targetId, targetPhone);
 
     root.querySelectorAll('[data-dialer-lead-row]').forEach((row) => {
         const rowId = Number.parseInt(row.dataset.leadId || '0', 10) || null;
         const rowPhone = row.dataset.leadPhone || '';
         const matchId = targetId && rowId && rowId === targetId;
         const matchPhone = targetPhone && phonesMatch(rowPhone, targetPhone);
-        if (matchId || matchPhone) {
+        const disposed = isDisposedLead({ id: rowId, phone: rowPhone });
+        if (matchId || matchPhone || disposed) {
             row.classList.remove('is-dialing');
             row.remove();
         }
     });
 
-    state.queue = state.queue.filter((lead) => {
-        if (targetId && Number(lead.id) === targetId) {
-            return false;
-        }
-        if (targetPhone && phonesMatch(lead.phone, targetPhone)) {
-            return false;
-        }
+    state.queue = state.queue.filter((lead) => !isDisposedLead(lead) && !(
+        (targetId && Number(lead.id) === targetId)
+        || (targetPhone && phonesMatch(lead.phone, targetPhone))
+    ));
 
-        return true;
-    });
-
+    // Always clear current after a dispositioned remove for this target.
     if (state.currentLead) {
         const currentMatchId = targetId && Number(state.currentLead.id) === targetId;
         const currentMatchPhone = targetPhone && phonesMatch(state.currentLead.phone, targetPhone);
-        if (currentMatchId || currentMatchPhone) {
+        if (currentMatchId || currentMatchPhone || isDisposedLead(state.currentLead)) {
             state.currentLead = null;
         }
     }
@@ -782,15 +1427,53 @@ function removeLeadFromQueue(leadId, phone) {
     syncAutoDialControls();
 }
 
+/** Move the active dialing imported lead into Call logs (DOM). */
+function relocateDialingLeadToCallLog(context = {}, callLog = {}, disposition = '') {
+    const root = hubRoot() || document;
+    const pendingRows = Array.from(root.querySelectorAll(
+        '[data-dialer-lead-row].is-dialing, [data-dialer-lead-row][data-pending-disposition="1"]',
+    ));
+    const leadId = context?.lead?.id || callLog?.lead_id || null;
+    const phone = context?.phone || context?.lead?.phone || callLog?.phone || '';
+
+    pendingRows.forEach((row) => {
+        rememberDisposedLead(row.dataset.leadId, row.dataset.leadPhone);
+        row.classList.remove('is-dialing');
+        delete row.dataset.pendingDisposition;
+        row.remove();
+    });
+
+    removeLeadFromQueue(leadId, phone);
+    clearDialingLeadHighlight();
+    state.currentLead = null;
+
+    const enriched = {
+        ...callLog,
+        // Never fall back disposition → CDR result (connected / no-answer) — that hid agent outcomes.
+        disposition: String(disposition || callLog.disposition || '').trim(),
+        lead_name: callLog.lead_name || context?.lead?.name || '',
+        lead_contact: callLog.lead_contact || context?.lead?.contact || '',
+        lead_file_name: callLog.lead_file_name || context?.lead?.file_name || '',
+        phone: callLog.phone || phone,
+        phone_display: callLog.phone_display || context?.lead?.phone_display || phone,
+        time_ago: callLog.time_ago || 'just now',
+        duration_label: callLog.duration_label
+            || (callLog.duration_sec ? `${callLog.duration_sec}s` : '0s'),
+    };
+
+    prependCallLog(enriched);
+}
+
 function prependCallLog(callLog) {
     if (!callLog) {
         return;
     }
 
     // Ensure disposition / lead labels survive even if API omit some display fields.
+    const disposition = String(callLog.disposition || '').trim();
     const enriched = {
         ...callLog,
-        disposition: callLog.disposition || callLog.result || '',
+        disposition,
         lead_name: callLog.lead_name || callLog.name || '',
         phone_display: callLog.phone_display || callLog.phone || '',
         time_ago: callLog.time_ago || 'just now',
@@ -816,7 +1499,8 @@ function prependCallLog(callLog) {
             return;
         }
 
-        const statusLike = ['', '—', '-', 'completed', 'initiated', 'connected', 'answered', 'no-answer', 'no answer', 'busy', 'failed', 'missed', 'unknown'];
+        // CDR statuses only — keep agent disposition "No Answer".
+        const statusLike = ['', '—', '-', 'completed', 'initiated', 'connected', 'answered', 'no-answer', 'busy', 'failed', 'missed', 'unknown'];
         let disposition = String(enriched.disposition || '').trim();
         if (disposition && statusLike.includes(disposition.toLowerCase())) {
             disposition = '';
@@ -865,8 +1549,15 @@ function prependCallLog(callLog) {
 }
 
 function applyDispositionSideEffects(payload, context, disposition) {
-    const leadId = context?.lead?.id || payload?.lead?.id || null;
-    const phone = context?.phone || context?.lead?.phone || payload?.call_log?.phone || '';
+    const leadId = context?.lead?.id
+        || payload?.lead?.id
+        || state.currentLead?.id
+        || null;
+    const phone = context?.phone
+        || context?.lead?.phone
+        || payload?.call_log?.phone
+        || state.currentLead?.phone
+        || '';
     const callLog = {
         ...(payload?.call_log || {}),
         disposition: disposition || payload?.disposition || payload?.call_log?.disposition || '',
@@ -875,14 +1566,30 @@ function applyDispositionSideEffects(payload, context, disposition) {
         lead_file_name: payload?.call_log?.lead_file_name || context?.lead?.file_name || context?.lead?.workflow || '',
         phone: payload?.call_log?.phone || phone,
         phone_display: payload?.call_log?.phone_display || context?.lead?.phone_display || phone,
+        duration_sec: payload?.call_log?.duration_sec ?? context?.durationSec ?? 0,
+        time_ago: payload?.call_log?.time_ago || 'just now',
     };
 
-    removeLeadFromQueue(leadId, phone);
-    prependCallLog(callLog);
-    window.__apexActiveCallNotes?.clear?.();
-    clearDialerDestinationInput();
+    // Remove from Imported leads + prepend to Call logs immediately.
+    relocateDialingLeadToCallLog(
+        { lead: context?.lead || { id: leadId, phone, name: callLog.lead_name }, phone },
+        callLog,
+        disposition,
+    );
 
-    // Always stay on Imported leads — never jump to Call logs after disposition.
+    clearDialerDestinationInput();
+    document.querySelectorAll('.ghl-dialer-originate-form').forEach((form) => {
+        delete form.dataset.dialLeadId;
+        delete form.dataset.dialLeadName;
+        delete form.dataset.dialLeadPhone;
+        const dest = form.querySelector('[name="destination"]');
+        if (dest) {
+            dest.value = '';
+        }
+    });
+    window.__apexActiveCallNotes?.clear?.();
+
+    // Stay on Imported leads so the 6s next-call countdown is visible.
     switchToLeadsTab();
     syncAutoDialControls();
 
@@ -890,12 +1597,20 @@ function applyDispositionSideEffects(payload, context, disposition) {
 }
 
 async function dialLead(lead) {
-    if (!lead?.phone) {
+    if (!lead?.phone || isDisposedLead(lead)) {
+        return false;
+    }
+
+    // Never place the just-dispositioned number again on the next hop.
+    if (state.lastDisposedPhone && phonesMatch(lead.phone, state.lastDisposedPhone)) {
+        removeLeadFromQueue(lead.id, lead.phone);
+
         return false;
     }
 
     state.currentLead = lead;
     state.callStartedAt = Date.now();
+    markLeadRowActive(lead, 'dialing');
 
     const form = document.querySelector('.ghl-dialer-originate-form');
     if (form) {
@@ -904,16 +1619,49 @@ async function dialLead(lead) {
         form.dataset.dialLeadPhone = String(lead.phone || '');
     }
 
-    return placeOutboundCall(lead.phone, lead);
+    const dialed = await placeOutboundCall(lead.phone, lead);
+    if (!dialed) {
+        state.currentLead = null;
+        markLeadRowActive({ id: null, phone: '' }, '');
+
+        return false;
+    }
+
+    // Re-assert Ringing/Connected UI if the pad was cleared while auto dial is still live.
+    const phone = getWebphone();
+    if (phone && !phone.hangupInFlight && !phone._outboundCancelled) {
+        phone.liveCallUiActive = true;
+        phone._callEndedDispatched = false;
+        phone.userInitiatedHangup = false;
+        phone.remoteHangupHandled = false;
+        if (phone.state === 'in-call' || phone.timerPhase === 'connected') {
+            phone.refreshDialerCallOverlay?.('in-call');
+            markLeadRowActive(lead, 'connected');
+        } else {
+            phone.refreshOutboundRingingUi?.(lead.phone);
+            phone.refreshDialerCallOverlay?.('dialing');
+            markLeadRowActive(lead, 'dialing');
+        }
+    }
+    startAutoDialUiSync();
+
+    return true;
 }
 
-async function dialNextInQueue({ withDelay = false, delayMessage = 'Next call' } = {}) {
+async function dialNextInQueue({ withDelay = false, delayMessage = 'Next call', delayMs = null } = {}) {
     if (state.mode !== 'auto' || state.paused || isDispositionBlocking()) {
         return false;
     }
 
-    const placeNext = async () => {
+    const placeNext = async (attempt = 0) => {
         if (isDispositionBlocking()) {
+            return false;
+        }
+        if (attempt > 8) {
+            state.sessionActive = false;
+            syncAutoDialControls();
+            showToast('No more callable imported leads in the queue.', 'info');
+
             return false;
         }
 
@@ -924,9 +1672,31 @@ async function dialNextInQueue({ withDelay = false, delayMessage = 'Next call' }
             }
         }
 
-        // Always take from the front of the queue (built last→first).
-        const next = state.queue.shift();
+        // Skip disposed / just-dispositioned numbers until a fresh lead is found.
+        let next = null;
+        while (state.queue.length > 0) {
+            const candidate = state.queue.shift();
+            if (!candidate?.phone || isDisposedLead(candidate)) {
+                if (candidate) {
+                    removeLeadFromQueue(candidate.id, candidate.phone);
+                }
+                continue;
+            }
+            if (state.lastDisposedPhone && phonesMatch(candidate.phone, state.lastDisposedPhone)) {
+                removeLeadFromQueue(candidate.id, candidate.phone);
+                continue;
+            }
+            next = candidate;
+            break;
+        }
+
         if (!next) {
+            const list = hubRoot()?.querySelector('[data-imported-leads-list]');
+            if (list && list.dataset.importedLeadsHasMore !== '0') {
+                await fetchImportedLeads(list, false);
+
+                return placeNext(attempt + 1);
+            }
             state.sessionActive = false;
             syncAutoDialControls();
             showToast('No more callable imported leads in the queue.', 'info');
@@ -934,28 +1704,122 @@ async function dialNextInQueue({ withDelay = false, delayMessage = 'Next call' }
             return false;
         }
 
-        markLeadRowActive(next);
+        markLeadRowActive(next, 'dialing');
 
         const dialed = await dialLead(next);
         syncAutoDialControls();
+        if (!dialed) {
+            // Cooldown / originate miss — advance to the following lead.
+            return placeNext(attempt + 1);
+        }
 
         return dialed;
     };
 
     if (withDelay) {
-        return scheduleAutoDial(placeNext, delayMessage);
+        return scheduleAutoDial(placeNext, delayMessage, delayMs);
     }
 
     return placeNext();
 }
 
-function markLeadRowActive(lead) {
+function markLeadRowActive(lead, phase = 'dialing') {
     const root = hubRoot();
     root?.querySelectorAll('[data-dialer-lead-row]').forEach((row) => {
-        const match = (lead.id && Number(row.dataset.leadId) === Number(lead.id))
-            || (lead.phone && row.dataset.leadPhone === lead.phone);
-        row.classList.toggle('is-dialing', Boolean(match));
+        const match = Boolean(lead)
+            && (
+                (lead.id && Number(row.dataset.leadId) === Number(lead.id))
+                || (lead.phone && row.dataset.leadPhone === lead.phone)
+            );
+        row.classList.toggle('is-dialing', Boolean(match) && phase === 'dialing');
+        row.classList.toggle('is-connected-call', Boolean(match) && phase === 'connected');
     });
+}
+
+/**
+ * Keep Ringing/Connected pad UI aligned with auto-dial lead state while a session runs.
+ */
+function syncAutoDialLiveCallUi() {
+    if (state.mode !== 'auto' || !state.sessionActive || state.paused) {
+        return;
+    }
+    if (isDispositionBlocking() || dispositionSaveInFlight) {
+        return;
+    }
+
+    const phone = getWebphone();
+    if (!phone || phone.hangupInFlight) {
+        return;
+    }
+
+    const phoneLive = ['dialing', 'ringing', 'in-call'].includes(phone.state)
+        || phone.liveCallUiActive
+        || phone.awaitingDestinationBridge
+        || phone.clickToCallActive
+        || phone.timerPhase === 'ringing'
+        || phone.timerPhase === 'connected';
+
+    const layer = document.querySelector('[data-dialer-call-layer]');
+    const layerHidden = !layer || layer.classList.contains('hidden');
+
+    if (phoneLive && state.currentLead) {
+        const connected = phone.state === 'in-call'
+            || phone.timerPhase === 'connected'
+            || phone._serverConfirmedDestination;
+        markLeadRowActive(state.currentLead, connected ? 'connected' : 'dialing');
+
+        if (layerHidden && !phone._outboundCancelled) {
+            phone.liveCallUiActive = true;
+            phone._callEndedDispatched = false;
+            if (connected) {
+                phone.refreshDialerCallOverlay?.('in-call');
+            } else {
+                phone.refreshOutboundRingingUi?.(state.currentLead.phone);
+                phone.refreshDialerCallOverlay?.('dialing');
+            }
+        }
+
+        return;
+    }
+
+    // Pad idle + lead stuck Dialing… after the call really ended → require disposition.
+    if (
+        !phoneLive
+        && state.currentLead
+        && !autoDialDelayTimer
+        && !awaitingNextCallAfterDisposition
+        && (phone.state === 'registered' || phone.state === 'offline')
+        && !isSummaryModalVisible()
+        && !isDispositionPopupLocked()
+    ) {
+        const context = {
+            phone: state.currentLead.phone,
+            lead: state.currentLead,
+            callUuid: phone.hangupCallUuid?.() || phone._lastEndedUuid || '',
+            durationSec: 0,
+            connected: false,
+            result: 'No answer',
+        };
+        clearDialingLeadHighlight();
+        showSummaryModal(context);
+    }
+}
+
+function startAutoDialUiSync() {
+    if (autoDialUiSyncTimer) {
+        return;
+    }
+    autoDialUiSyncTimer = window.setInterval(() => {
+        syncAutoDialLiveCallUi();
+    }, 800);
+}
+
+function stopAutoDialUiSync() {
+    if (!autoDialUiSyncTimer) {
+        return;
+    }
+    window.clearInterval(autoDialUiSyncTimer);
+    autoDialUiSyncTimer = null;
 }
 
 /**
@@ -964,20 +1828,31 @@ function markLeadRowActive(lead) {
  */
 function loadQueueFromDom(root = hubRoot(), { rebuild = true } = {}) {
     const rows = root?.querySelectorAll('[data-dialer-lead-row]') || [];
-    const skipIds = new Set();
-    const skipPhones = new Set();
+    const skipIds = new Set(disposedLeadIds);
+    const skipPhoneKeys = new Set(disposedPhoneKeys);
 
     if (state.currentLead?.id) {
         skipIds.add(Number(state.currentLead.id));
     }
     if (state.currentLead?.phone) {
-        skipPhones.add(String(state.currentLead.phone));
+        const key = normalizePhoneDigits(state.currentLead.phone);
+        if (key) {
+            skipPhoneKeys.add(key);
+        }
     }
     if (state.pendingDisposition?.lead?.id) {
         skipIds.add(Number(state.pendingDisposition.lead.id));
     }
     if (state.pendingDisposition?.phone || state.pendingDisposition?.lead?.phone) {
-        skipPhones.add(String(state.pendingDisposition.phone || state.pendingDisposition.lead.phone));
+        const key = normalizePhoneDigits(
+            state.pendingDisposition.phone || state.pendingDisposition.lead.phone,
+        );
+        if (key) {
+            skipPhoneKeys.add(key);
+        }
+    }
+    if (state.lastDisposedPhone) {
+        skipPhoneKeys.add(state.lastDisposedPhone);
     }
 
     const leads = Array.from(rows).map((row) => ({
@@ -990,10 +1865,14 @@ function loadQueueFromDom(root = hubRoot(), { rebuild = true } = {}) {
         if (!lead.phone) {
             return false;
         }
+        if (isDisposedLead(lead)) {
+            return false;
+        }
         if (lead.id && skipIds.has(Number(lead.id))) {
             return false;
         }
-        if (skipPhones.has(String(lead.phone))) {
+        const phoneKey = normalizePhoneDigits(lead.phone);
+        if (phoneKey && skipPhoneKeys.has(phoneKey)) {
             return false;
         }
 
@@ -1066,7 +1945,8 @@ async function fetchImportedLeads(list, reset = false) {
         } else {
             items.querySelector('[data-imported-leads-empty]')?.remove();
             const wrapper = document.createElement('div');
-            wrapper.innerHTML = leads.map((lead) => buildLeadRow(lead)).join('');
+            const freshLeads = leads.filter((lead) => !isDisposedLead(lead));
+            wrapper.innerHTML = freshLeads.map((lead) => buildLeadRow(lead)).join('');
             wrapper.childNodes.forEach((node) => {
                 if (node.nodeType === Node.ELEMENT_NODE) {
                     items.appendChild(node);
@@ -1274,12 +2154,12 @@ function finishDispositionSaveUi(previousLabel = 'Save') {
     syncAutoDialControls();
 }
 
-async function submitDispositionAction(modal, { redial = false } = {}) {
+async function submitDispositionAction(modal, { redial = false, dispositionOverride = null } = {}) {
     if (!modal || modal.dataset.dispositionBusy === '1' || dispositionSaveInFlight) {
         return;
     }
 
-    const disposition = resolveSummaryDisposition(modal);
+    const disposition = String(dispositionOverride || resolveSummaryDisposition(modal) || '').trim();
     if (!disposition) {
         dispositionToast(
             redial ? 'Select or write a disposition before redialing.' : 'Select or write a disposition first.',
@@ -1288,12 +2168,15 @@ async function submitDispositionAction(modal, { redial = false } = {}) {
         return;
     }
 
+    state.selectedDisposition = disposition;
+
     const context = { ...(state.pendingDisposition || {}) };
     const note = modal.querySelector('[data-call-summary-note]')?.value?.trim() || '';
     const nextBtn = modal.querySelector('[data-call-summary-next]');
     const redialBtn = modal.querySelector('[data-call-summary-redial]');
     const nextLabel = modal.querySelector('[data-call-summary-next-label]');
-    const previousLabel = nextLabel?.textContent || (state.mode === 'auto' && state.sessionActive ? 'Save & Next' : 'Save');
+    const previousLabel = nextLabel?.textContent
+        || (state.mode === 'auto' && state.sessionActive && !state.paused ? 'Save & Next' : 'Save');
     const continueAutoDial = state.mode === 'auto' && state.sessionActive && !state.paused && !redial;
 
     dispositionSaveInFlight = true;
@@ -1306,6 +2189,10 @@ async function submitDispositionAction(modal, { redial = false } = {}) {
 
     // Instant close so agents never wait on the popup.
     clearDialerDestinationInput();
+    // Block hangup echoes before modal close / SIP cleanup races.
+    suppressCallEndedUntilActive = !redial;
+    rememberClosedDisposition(context);
+    armDispositionDismissGuard(context);
     hideSummaryModal({ force: true, context });
 
     let payload = null;
@@ -1316,10 +2203,11 @@ async function submitDispositionAction(modal, { redial = false } = {}) {
         payload = null;
     }
 
-    // Clear save flag BEFORE the 10s next-call wait — otherwise status stuck on "Saving…".
     finishDispositionSaveUi(previousLabel);
 
     if (!payload) {
+        suppressCallEndedUntilActive = false;
+        unlockDispositionPopup();
         showSummaryModal(context, { force: true });
         return;
     }
@@ -1327,6 +2215,9 @@ async function submitDispositionAction(modal, { redial = false } = {}) {
     applyDispositionSideEffects(payload, context, disposition);
 
     if (redial) {
+        suppressCallEndedUntilActive = false;
+        unlockDispositionPopup();
+        lastDispositionOpenKey = '';
         if (context?.lead) {
             await dialLead(context.lead);
         } else if (context?.phone) {
@@ -1335,10 +2226,33 @@ async function submitDispositionAction(modal, { redial = false } = {}) {
         return;
     }
 
-    // Auto dial: wait 10 seconds, then place the next call.
+    // Keep auto dial running: wait after successful Save (delay from API / config), then dial next.
     if (continueAutoDial) {
-        void dialNextInQueue({ withDelay: true, delayMessage: 'Next call' });
+        const delayMs = resolveNextCallDelayMs(payload);
+        state.nextCallDelayMs = delayMs;
+        const delaySec = Math.max(1, Math.ceil(delayMs / 1000));
+        showToast(`Disposition saved: ${disposition}. Next call in ${delaySec}s…`, 'success');
+        // Re-assert session + suppress hangup echoes through the countdown.
+        state.sessionActive = true;
+        state.paused = false;
+        suppressCallEndedUntilActive = true;
+        // Unlock popup lock (Save done) but keep call-ended suppress until next dial starts.
+        unlockDispositionPopup();
+        lastDispositionOpenKey = '';
+        // Ensure disposed lead/phone cannot sit at the front of the rebuilt queue.
+        state.currentLead = null;
+        clearDialingLeadHighlight();
+        switchToLeadsTab();
+        loadQueueFromDom(hubRoot(), { rebuild: true });
+        awaitingNextCallAfterDisposition = true;
+        void dialNextInQueue({ withDelay: true, delayMessage: 'Next call', delayMs })
+            .finally(() => {
+                awaitingNextCallAfterDisposition = false;
+            });
     } else {
+        unlockDispositionPopup();
+        lastDispositionOpenKey = '';
+        awaitingNextCallAfterDisposition = false;
         showToast(`Disposition saved: ${disposition}`, 'success');
     }
 }
@@ -1373,7 +2287,25 @@ function initCallSummaryModal() {
                 return;
             }
             event.preventDefault();
+            event.stopPropagation();
             selectDispositionChip(modal, dispositionBtn);
+
+            const value = String(dispositionBtn.dataset.dispositionValue || '').trim();
+            const now = Date.now();
+            // Double-click / double-tap same chip → save immediately (more reliable than native dblclick).
+            if (
+                value
+                && dispositionChipTap.value === value
+                && (now - dispositionChipTap.at) > 0
+                && (now - dispositionChipTap.at) <= 500
+            ) {
+                dispositionChipTap = { value: '', at: 0 };
+                void submitDispositionAction(modal, { redial: false, dispositionOverride: value });
+
+                return;
+            }
+
+            dispositionChipTap = { value, at: now };
             return;
         }
 
@@ -1417,7 +2349,7 @@ function initCallSummaryModal() {
         }
     });
 
-    // Double-click a disposition chip → save & close (same as Save / Save & Next).
+    // Double-click a disposition chip → save & close (same as Save).
     document.addEventListener('dblclick', (event) => {
         const dispositionBtn = event.target.closest('[data-disposition-value]');
         if (!dispositionBtn) {
@@ -1428,8 +2360,11 @@ function initCallSummaryModal() {
             return;
         }
         event.preventDefault();
+        event.stopPropagation();
+        const value = String(dispositionBtn.dataset.dispositionValue || '').trim();
         selectDispositionChip(modal, dispositionBtn);
-        void submitDispositionAction(modal, { redial: false });
+        dispositionChipTap = { value: '', at: 0 };
+        void submitDispositionAction(modal, { redial: false, dispositionOverride: value });
     });
 
     document.addEventListener('input', (event) => {
@@ -1523,7 +2458,7 @@ function initDialModeSwitch() {
 }
 
 export function markAnsweringMachineDisposition() {
-    window.__apexForceDisposition = 'Answer Machine';
+    window.__apexForceDisposition = 'Answering Machine';
 }
 
 function resolveLeadContext(phone) {
@@ -1600,30 +2535,95 @@ function initAutoDialListeners() {
     });
 
     window.addEventListener('comm:call-active', (event) => {
+        // Do not unlock while disposition is still required.
+        if (!isSummaryModalVisible() && !document.body.classList.contains('ch-disposition-locked')) {
+            unlockDispositionPopup();
+        }
         state.callStartedAt = Date.now();
-        // New live call — allow the next hangup to open disposition again.
-        dispositionDismissGuard = { key: '', until: 0 };
+        startAutoDialUiSync();
+        const phone = getWebphone();
+        if (phone?.state === 'in-call' || phone?.timerPhase === 'connected') {
+            markLeadRowActive(state.currentLead || resolveLeadContext(event.detail?.phone || ''), 'connected');
+        } else if (state.currentLead || event.detail?.phone) {
+            markLeadRowActive(state.currentLead || resolveLeadContext(event.detail?.phone || ''), 'dialing');
+        }
+        // Keep prior-leg hangup echoes suppressed a few seconds after the next dial starts.
+        window.setTimeout(() => {
+            suppressCallEndedUntilActive = false;
+        }, 10000);
         dispositionSaveInFlight = false;
-        const phone = event.detail?.phone || '';
-        if (phone && !state.currentLead) {
-            state.currentLead = resolveLeadContext(phone);
+        const detailPhone = event.detail?.phone || '';
+        if (detailPhone && !state.currentLead) {
+            state.currentLead = resolveLeadContext(detailPhone);
+        }
+    });
+
+    window.addEventListener('comm:dial-started', (event) => {
+        // Never unlock while Call Summary is still open (late echoes used to reopen it).
+        if (isSummaryModalVisible() || document.body.classList.contains('ch-disposition-locked') || state.pendingDisposition) {
+            return;
+        }
+        unlockDispositionPopup();
+        lastDispositionOpenKey = '';
+        dispositionSaveInFlight = false;
+        suppressCallEndedUntilActive = false;
+        const detailPhone = event.detail?.phone || '';
+        if (detailPhone && !state.currentLead) {
+            state.currentLead = resolveLeadContext(detailPhone);
+        }
+        if (state.currentLead || detailPhone) {
+            markLeadRowActive(state.currentLead || resolveLeadContext(detailPhone), 'dialing');
         }
     });
 
     window.addEventListener('comm:call-ended', (event) => {
-        // Capture lead/phone before clearing form context.
-        const context = resolveEndedCallContext(event.detail || {});
-        state.callStartedAt = null;
-        // Stop any pending "next call" countdown — disposition is required first.
-        clearAutoDialDelay();
-        formClearLeadContext();
+        const detail = event.detail || {};
+        const phone = getWebphone();
 
-        // After Save, ignore hangup echoes so the popup stays closed.
-        if (shouldSuppressDispositionReopen(context)) {
+        const leadBeforeClear = state.currentLead;
+        const context = resolveEndedCallContext(detail);
+        if (!context.lead && leadBeforeClear) {
+            context.lead = leadBeforeClear;
+        }
+        if (!context.phone && leadBeforeClear?.phone) {
+            context.phone = leadBeforeClear.phone;
+        }
+
+        // Drop duplicate hangup echoes before any UI teardown.
+        if (shouldSuppressDispositionReopen(context) || isStaleHangupWhileLive(context)) {
+            clearDialingLeadHighlight();
             return;
         }
 
-        // Always require a disposition after every hangup (manual or auto).
+        // Call Summary already open for this hangup — never stack another popup.
+        if (isSummaryModalVisible() || state.pendingDisposition) {
+            clearDialingLeadHighlight();
+            return;
+        }
+
+        // Never open disposition / tear UI while a call is still live (premature ended echoes).
+        // Destination hangup sets remoteHangupHandled — that MUST still open Call Summary.
+        if (
+            phone?.isLiveCallUiActive?.()
+            && !phone.hangupInFlight
+            && !phone.userInitiatedHangup
+            && !phone.remoteHangupHandled
+        ) {
+            clearDialingLeadHighlight();
+
+            return;
+        }
+
+        // Capture lead/phone before clearing form context.
+        state.callStartedAt = null;
+        // Stop any pending "next call" countdown — disposition is required first.
+        clearAutoDialDelay();
+        // Drop Dialing… immediately on hangup (lead stays until disposition moves it).
+        markPendingDispositionLeadRows(context);
+        clearDialingLeadHighlight();
+        formClearLeadContext();
+
+        // Always require a disposition after every hangup (manual or auto) — once only.
         showSummaryModal(context);
     });
 }
@@ -1654,6 +2654,7 @@ export function initAutoDialHub(root = document) {
 
     initDialModeSwitch();
     initAgentPresence();
+    initAgentBreakControls();
 
     if (!hasHub && !hasSummary) {
         return;
@@ -1674,6 +2675,10 @@ export function initAutoDialHub(root = document) {
         }
         btn.dataset.autoDialStartBound = '1';
         btn.addEventListener('click', async () => {
+            if (isOnBreakOrLunch()) {
+                showToast('Finish break/lunch before starting auto dial.', 'warning');
+                return;
+            }
             if (isDispositionBlocking()) {
                 dispositionToast('Save the pending disposition before starting auto dial.', 'warning');
                 return;
@@ -1711,15 +2716,13 @@ export async function startAutoDialSession() {
         return false;
     }
 
-    if (state.mode !== 'auto') {
-        setDialMode('auto');
-    }
+    // UI only — don't spam presence here; call-active announces on_call when dialing starts.
+    setDialMode('auto', { announcePresence: false });
 
     state.paused = false;
     state.sessionActive = true;
     state.currentLead = null;
     localStorage.setItem(STORAGE_PAUSED_KEY, '0');
-    setDialMode('auto');
     switchToLeadsTab();
 
     loadQueueFromDom(hubRoot(), { rebuild: true });
@@ -1734,13 +2737,20 @@ export async function startAutoDialSession() {
     if (state.queue.length === 0) {
         state.sessionActive = false;
         syncAutoDialControls();
-        sendPresenceHeartbeat();
+        sendPresenceHeartbeat({ on_call: false });
         showToast('No callable imported leads available for auto dial.', 'info');
 
         return false;
     }
 
     syncAutoDialControls();
-    sendPresenceHeartbeat();
-    return dialNextInQueue({ withDelay: true, delayMessage: 'Starting call' });
+    // Tell monitoring "auto dial running" once. Dialing fires call-active → on_call
+    // with a different signature (not a duplicate of this row).
+    sendPresenceHeartbeat({ on_call: false, in_disposition: false });
+    startAutoDialUiSync();
+    return dialNextInQueue({
+        withDelay: true,
+        delayMessage: 'Starting call',
+        delayMs: resolveNextCallDelayMs(),
+    });
 }

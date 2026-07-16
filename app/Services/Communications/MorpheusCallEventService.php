@@ -57,13 +57,19 @@ class MorpheusCallEventService
                 continue;
             }
 
-            $sameExt = $fromDigits === '' || $this->digits((string) ($state['from_extension'] ?? '')) === $fromDigits;
-            $sameDest = $destDigits === '' || $this->digits((string) ($state['destination'] ?? '')) === $destDigits;
-            if (! $sameExt || ! $sameDest) {
+            $sameExt = $fromDigits !== ''
+                && $this->digits((string) ($state['from_extension'] ?? '')) === $fromDigits;
+            $sameDest = $destDigits !== ''
+                && $this->digits((string) ($state['destination'] ?? '')) === $destDigits;
+
+            // Same extension on a new destination always supersedes older live legs
+            // (prevents duplicate INCALL rows for one agent / station).
+            if (! $sameExt && ! $sameDest) {
                 continue;
             }
-
-            $this->markCallEnded($existingUuid, 'SUPERSEDED', isset($state['billsec']) ? (int) $state['billsec'] : null);
+            if ($sameExt || $sameDest) {
+                $this->markCallEnded($existingUuid, 'SUPERSEDED', isset($state['billsec']) ? (int) $state['billsec'] : null);
+            }
         }
     }
 
@@ -455,6 +461,49 @@ class MorpheusCallEventService
         Cache::put($this->stateKey($uuid), $state, self::CACHE_TTL_SECONDS);
         $this->syncLiveIndex($uuid, (bool) ($state['live'] ?? false));
         $this->bumpMonitoringVersion();
+        $this->publishRealtimeWebSocket($state);
+    }
+
+    /**
+     * Push call state to the local WebSocket bridge (dialer listens; no HTTP polling).
+     *
+     * @param  array<string, mixed>  $state
+     */
+    public function publishRealtimeWebSocket(array $state): void
+    {
+        $uuid = trim((string) ($state['uuid'] ?? ''));
+        $url = trim((string) config('integrations.morpheus.call_events_ws_push_url', ''));
+        if ($uuid === '' || $url === '') {
+            return;
+        }
+
+        $payload = json_encode([
+            'ok' => true,
+            ...$state,
+            'uuid' => $uuid,
+        ], JSON_THROW_ON_ERROR);
+
+        $secret = trim((string) config('integrations.morpheus.call_events_ws_secret', ''));
+        $headers = "Content-Type: application/json\r\nContent-Length: ".strlen($payload)."\r\n";
+        if ($secret !== '') {
+            $headers .= 'X-Call-Events-Secret: '.$secret."\r\n";
+        }
+
+        try {
+            // Fire-and-forget — never block originate/webhook/disposition on Node.
+            $context = stream_context_create([
+                'http' => [
+                    'method' => 'POST',
+                    'header' => $headers,
+                    'content' => $payload,
+                    'timeout' => 0.25,
+                    'ignore_errors' => true,
+                ],
+            ]);
+            @file_get_contents($url, false, $context);
+        } catch (\Throwable) {
+            // Bridge may be restarting; dialer still has SIP + hangup API.
+        }
     }
 
     /**

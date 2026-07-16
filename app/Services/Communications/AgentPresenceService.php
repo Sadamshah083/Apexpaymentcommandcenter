@@ -120,9 +120,54 @@ class AgentPresenceService
             $inDisposition = false;
         }
 
-        $nowIso = now()->utc()->toIso8601String();
-        $idleSince = $existing['idle_since'] ?? $nowIso;
+        $breakStatus = strtolower(trim((string) ($payload['break_status'] ?? $existing['break_status'] ?? 'none')));
+        if (! in_array($breakStatus, ['none', 'break', 'lunch'], true)) {
+            $breakStatus = 'none';
+        }
+        // Live call clears break/lunch immediately.
         if ($onCall) {
+            $breakStatus = 'none';
+        }
+
+        $now = now()->utc();
+        $nowIso = $now->toIso8601String();
+        $breakEndsAt = null;
+        $breakSince = null;
+        if ($breakStatus === 'break' || $breakStatus === 'lunch') {
+            $breakSince = $existing['break_since'] ?? $nowIso;
+            if (($existing['break_status'] ?? '') !== $breakStatus) {
+                $breakSince = $nowIso;
+            }
+            if (array_key_exists('break_ends_at', $payload) && filled($payload['break_ends_at'])) {
+                $breakEndsAt = (string) $payload['break_ends_at'];
+            } elseif (($existing['break_status'] ?? '') === $breakStatus && filled($existing['break_ends_at'] ?? null)) {
+                $breakEndsAt = (string) $existing['break_ends_at'];
+            } else {
+                $minutes = $breakStatus === 'lunch' ? 30 : 5;
+                $breakEndsAt = $now->copy()->addMinutes($minutes)->toIso8601String();
+            }
+
+            // Auto-expire on heartbeat if the timer already elapsed.
+            try {
+                if (\Carbon\Carbon::parse($breakEndsAt)->lte($now)) {
+                    $breakStatus = 'none';
+                    $breakEndsAt = null;
+                    $breakSince = null;
+                }
+            } catch (\Throwable) {
+                $breakStatus = 'none';
+                $breakEndsAt = null;
+                $breakSince = null;
+            }
+        }
+
+        // Break/lunch takes the agent off disposition + not-in-call availability.
+        if ($breakStatus !== 'none') {
+            $inDisposition = false;
+        }
+
+        $idleSince = $existing['idle_since'] ?? $nowIso;
+        if ($onCall || $breakStatus !== 'none') {
             $idleSince = null;
         } elseif (! filled($idleSince)) {
             $idleSince = $nowIso;
@@ -143,7 +188,10 @@ class AgentPresenceService
         $entry = [
             'user_id' => (int) $user->id,
             'workspace_id' => (int) $workspace->id,
-            'name' => (string) ($payload['name'] ?? $existing['name'] ?? $user->name),
+            // Always prefer the live User record so renames show on Call Monitoring immediately.
+            'name' => trim((string) $user->name) !== ''
+                ? (string) $user->name
+                : (string) ($payload['name'] ?? $existing['name'] ?? 'Agent'),
             'extension' => preg_replace('/\D/', '', (string) ($payload['extension'] ?? $existing['extension'] ?? '')) ?: null,
             'role' => (string) ($payload['role'] ?? $existing['role'] ?? ''),
             'role_label' => (string) ($payload['role_label'] ?? $existing['role_label'] ?? SalesOps::roleLabel($payload['role'] ?? $existing['role'] ?? null)),
@@ -155,6 +203,9 @@ class AgentPresenceService
             'in_disposition' => $inDisposition,
             'disposition_since' => $dispositionSince,
             'disposition_phone' => $dispositionPhone,
+            'break_status' => $breakStatus,
+            'break_since' => $breakSince,
+            'break_ends_at' => $breakEndsAt,
             'last_seen_at' => $nowIso,
             'idle_since' => $idleSince,
         ];

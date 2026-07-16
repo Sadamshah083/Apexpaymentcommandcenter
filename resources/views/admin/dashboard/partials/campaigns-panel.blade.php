@@ -8,20 +8,39 @@
             </div>
             <a href="{{ route('admin.campaigns.index') }}" class="app-btn app-btn-secondary app-btn-sm">Manage campaigns</a>
         </div>
-        <div id="dashboard-campaigns-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            @foreach ($campaigns->take(6) as $campaign)
-                <a href="{{ route('admin.campaigns.show', $campaign) }}" class="campaign-card">
-                    <div class="campaign-card-head">
-                        <span class="campaign-card-name">{{ $campaign->name }}</span>
-                        <span class="campaign-card-count">{{ number_format($campaign->leads_count) }} leads</span>
-                    </div>
-                    <dl class="campaign-card-stats">
-                        <div><dt>Imports</dt><dd>{{ $campaign->imports_count }}</dd></div>
-                        <div><dt>Enriched</dt><dd>{{ number_format($campaign->enriched_count) }}</dd></div>
-                        <div><dt>Assigned</dt><dd>{{ number_format($campaign->assigned_count) }}</dd></div>
-                    </dl>
-                </a>
-            @endforeach
+        <div class="app-data-table campaigns-overview-table-wrap">
+            <div class="app-table-wrap">
+                <table class="campaigns-overview-table" id="dashboard-campaigns-table">
+                    <thead>
+                        <tr>
+                            <th>Campaign</th>
+                            <th>Leads</th>
+                            <th>Imports</th>
+                            <th>Enriched</th>
+                            <th>Assigned</th>
+                            <th class="text-right">Open</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dashboard-campaigns-grid">
+                        @foreach ($campaigns->take(12) as $campaign)
+                            <tr>
+                                <td>
+                                    <a href="{{ route('admin.campaigns.show', $campaign) }}" class="campaigns-overview-name">
+                                        {{ $campaign->name }}
+                                    </a>
+                                </td>
+                                <td>{{ number_format($campaign->leads_count) }}</td>
+                                <td>{{ number_format($campaign->imports_count) }}</td>
+                                <td>{{ number_format($campaign->enriched_count) }}</td>
+                                <td class="campaigns-overview-assigned">{{ number_format($campaign->assigned_count) }}</td>
+                                <td class="text-right">
+                                    <a href="{{ route('admin.campaigns.show', $campaign) }}" class="app-btn app-btn-secondary app-btn-sm">View</a>
+                                </td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 </div>

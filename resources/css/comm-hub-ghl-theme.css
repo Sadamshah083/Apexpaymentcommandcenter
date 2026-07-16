@@ -316,6 +316,21 @@ body.ghl-comm-mode .app-shell > .flex {
     color: #065f46;
 }
 
+.ghl-comm-btn--success {
+    background: #ecfdf5;
+    border-color: #6ee7b7;
+    color: #065f46;
+    padding: 0.4rem 0.75rem;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.ghl-comm-btn--success:hover {
+    background: #d1fae5;
+    border-color: #34d399;
+    color: #047857;
+}
+
 .ghl-comm-pill {
     display: inline-flex;
     align-items: center;
@@ -2894,6 +2909,10 @@ body.ghl-comm-mode .ghl-comm-global-line__status {
     color: var(--ghl-text-muted);
 }
 
+.ghl-dialer-recent-loading.hidden {
+    display: none !important;
+}
+
 .ghl-dialer-recent-sentinel {
     width: 100%;
     height: 0;
@@ -4292,8 +4311,61 @@ body.ch-dial-auto-mode .ghl-dialer-lead-call-btn {
     position: relative;
 }
 
+@media (max-height: 760px) {
+    .ghl-dialer-active-screen {
+        gap: 0.35rem;
+        padding: 0.55rem 0.55rem 0.5rem;
+    }
+
+    .ghl-dialer-active-screen__number {
+        font-size: 1.05rem;
+    }
+
+    .ghl-dialer-active-screen__status {
+        font-size: 0.72rem;
+    }
+
+    .ghl-dialer-active-screen__timer {
+        font-size: 0.9rem;
+    }
+}
+
+@media (max-width: 900px) {
+    .ghl-dialer-active-screen {
+        padding: 0.65rem 0.5rem;
+    }
+
+    .ghl-dialer-active-keypad__amd {
+        margin-left: 0;
+        width: 100%;
+        text-align: center;
+    }
+}
+
 .ghl-dialer-active-screen:not(.hidden) {
     display: flex;
+}
+
+/* While Call Summary is open, hide the ringing/active card underneath —
+   unless a new outbound ring has already started (body class can lag behind). */
+body.ch-call-summary-open [data-dialer-active-screen].hidden {
+    display: none !important;
+}
+
+body.ch-call-summary-open:not(.ch-outbound-ringing) [data-dialer-active-screen]:not(.hidden) {
+    display: none !important;
+}
+
+body.ch-call-summary-open.ch-outbound-ringing [data-dialer-active-screen]:not(.hidden) {
+    display: flex !important;
+}
+
+body.ch-call-summary-open [data-dialer-phone-stage] {
+    display: flex !important;
+}
+
+body.ch-call-summary-open [data-dialer-phone-stage].is-hidden-during-call {
+    display: flex !important;
 }
 
 .ghl-dialer-phone-stage.is-hidden-during-call {
@@ -4334,6 +4406,39 @@ body.ch-dial-auto-mode .ghl-dialer-lead-call-btn {
 
 .ghl-dialer-active-screen.is-connected .ghl-dialer-active-screen__status {
     color: #86efac;
+}
+
+.ghl-dialer-active-screen__mic-muted {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    margin: 0.2rem 0 0;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: #fca5a5;
+}
+
+.ghl-dialer-active-screen__mic-muted.hidden {
+    display: none !important;
+}
+
+.ghl-dialer-active-screen__mic-muted-line {
+    display: inline-block;
+    width: 1.65rem;
+    height: 2px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, transparent 0%, #ef4444 15%, #ef4444 85%, transparent 100%);
+    box-shadow: 0 0 6px rgba(239, 68, 68, 0.55);
+}
+
+.ghl-dialer-active-screen.is-mic-muted .ghl-dialer-active-screen__tool[data-dialer-call-mute] {
+    color: #f87171;
+}
+
+.ghl-dialer-active-screen.is-mic-muted .ghl-dialer-active-screen__tool[data-dialer-call-mute] span {
+    color: #fca5a5;
 }
 
 .ghl-dialer-active-screen__timer {
@@ -4786,18 +4891,66 @@ body.ch-call-summary-open .app-toast-container {
     display: inline-flex;
 }
 
+.ghl-dialer-active-screen__tool[data-dialer-active-notes-toggle].is-active {
+    color: #6ee7b7;
+}
+
+.ghl-dialer-active-screen__tool[data-dialer-active-notes-toggle].is-active span {
+    color: #a7f3d0;
+}
+
+/* Keep number / Connected / timer visible while notes are open */
+.ghl-dialer-active-screen.is-notes-open {
+    overflow: auto !important;
+}
+
+.ghl-dialer-active-screen.is-notes-open .ghl-dialer-active-screen__hero {
+    flex: 0 0 auto;
+}
+
+.ghl-dialer-active-screen.is-notes-open .ghl-dialer-active-screen__timer:not(.hidden) {
+    display: block !important;
+}
+
+.ghl-dialer-active-screen.is-notes-open .ghl-dialer-active-notes {
+    display: block !important;
+    flex: 1 1 auto;
+    min-height: 7rem;
+    max-height: min(42vh, 16rem);
+    overflow: auto;
+}
+
 .ghl-dialer-active-screen__tool[data-dialer-active-keypad-toggle].is-active,
 .ghl-dialer-active-screen__tool[data-dialer-call-hold].is-active,
-.ghl-dialer-active-screen__tool[data-dialer-call-mute].is-active,
 .ghl-dialer-active-screen__tool[data-dialer-call-record].is-active {
     color: #6ee7b7;
 }
 
+.ghl-dialer-active-screen__tool[data-dialer-call-mute].is-active,
+.ghl-dialer-active-screen__tool[data-dialer-call-mute].is-muted {
+    color: #f87171 !important;
+}
+
 .ghl-dialer-active-screen__tool[data-dialer-active-keypad-toggle].is-active span,
 .ghl-dialer-active-screen__tool[data-dialer-call-hold].is-active span,
-.ghl-dialer-active-screen__tool[data-dialer-call-mute].is-active span,
 .ghl-dialer-active-screen__tool[data-dialer-call-record].is-active span {
     color: #a7f3d0;
+}
+
+.ghl-dialer-active-screen__tool[data-dialer-call-mute].is-active span,
+.ghl-dialer-active-screen__tool[data-dialer-call-mute].is-muted span {
+    color: #fca5a5 !important;
+}
+
+.ghl-dialer-active-screen__tool[data-dialer-call-mute].is-active [data-dialer-call-mute-icon],
+.ghl-dialer-active-screen__tool[data-dialer-call-mute].is-muted [data-dialer-call-mute-icon] {
+    color: #ef4444;
+}
+
+.ghl-dialer-active-screen__tool[data-dialer-call-mute].is-active [data-dialer-call-mute-slash],
+.ghl-dialer-active-screen__tool[data-dialer-call-mute].is-muted [data-dialer-call-mute-slash] {
+    display: block !important;
+    stroke: #ef4444;
 }
 
 .ghl-dialer-active-keypad {
@@ -5618,3 +5771,207 @@ body.ch-call-summary-open .app-toast-container {
         gap: 0.5rem 0.55rem !important;
     }
 }
+
+/* ── 110% zoom / short viewport: fit active call + keypad without cut-off ──
+   Browser zoom ~110% shrinks usable CSS height; compact dialer so hangup,
+   timer, and DTMF keys stay visible without inner scrollbars. */
+@media (max-height: 980px) {
+    .ghl-comm-phone-mode.ghl-inbox {
+        max-height: 100dvh;
+    }
+
+    .ghl-comm-phone-mode .ghl-comm-topbar {
+        padding-top: 0.35rem;
+        padding-bottom: 0.35rem;
+    }
+
+    .ghl-comm-phone-mode .ghl-inbox-body-wide {
+        min-height: 0;
+    }
+
+    .ghl-dialer-active-screen,
+    .ch-dial-workspace--admin .ghl-dialer-active-screen:not(.hidden),
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-active-screen:not(.hidden) {
+        gap: 0.3rem !important;
+        padding: 0.55rem 0.5rem 0.45rem !important;
+        overflow: hidden !important;
+    }
+
+    .ghl-dialer-active-screen__hero {
+        gap: 0.1rem;
+        padding-top: 0;
+    }
+
+    .ghl-dialer-active-screen__number {
+        font-size: 1.05rem;
+        line-height: 1.2;
+    }
+
+    .ghl-dialer-active-screen__status {
+        font-size: 0.7rem;
+    }
+
+    .ghl-dialer-active-screen__timer {
+        font-size: 0.9rem;
+        margin-top: 0;
+    }
+
+    .ghl-dialer-active-screen__tools {
+        gap: 0.05rem;
+        margin-top: 0;
+    }
+
+    .ghl-dialer-active-screen__tool svg {
+        width: 1rem;
+        height: 1rem;
+    }
+
+    .ghl-dialer-active-screen__tool span {
+        font-size: 0.52rem;
+    }
+
+    .ghl-dialer-active-keypad,
+    .ch-dial-workspace--admin .ghl-dialer-active-keypad,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-active-keypad {
+        gap: 0.25rem !important;
+        padding: 0.35rem 0.35rem 0.4rem !important;
+        max-width: min(14.5rem, 100%) !important;
+        overflow: hidden !important;
+        overflow-y: hidden !important;
+        flex: 1 1 auto !important;
+        min-height: 0 !important;
+    }
+
+    .ghl-dialer-active-keypad__display {
+        min-height: 1.85rem;
+        gap: 0.25rem;
+    }
+
+    .ghl-dialer-active-keypad__digits {
+        min-height: 1.7rem;
+        padding: 0.25rem 0.4rem;
+        font-size: 0.85rem;
+    }
+
+    .ghl-dialer-active-keypad__delete {
+        height: 1.7rem;
+        min-width: 2.15rem;
+        padding: 0 0.35rem;
+    }
+
+    .ghl-dialer-active-keypad__grid {
+        gap: 0.22rem;
+        flex: 1 1 auto;
+        min-height: 0;
+        align-content: center;
+    }
+
+    .ghl-dialer-active-keypad__key {
+        min-height: clamp(1.55rem, 3.2vh, 2rem);
+        font-size: 0.88rem;
+        border-radius: 0.45rem;
+        border-width: 1px;
+    }
+
+    .ghl-dialer-active-keypad__footer {
+        flex-wrap: wrap;
+        gap: 0.25rem 0.35rem;
+        margin-top: 0;
+        justify-content: center;
+    }
+
+    .ghl-dialer-active-keypad__clear,
+    .ghl-dialer-active-keypad__hide,
+    .ghl-dialer-active-keypad__delete--text {
+        font-size: 0.62rem;
+    }
+
+    .ghl-dialer-active-keypad__amd {
+        flex: 1 1 100%;
+        margin: 0;
+        width: 100%;
+        text-align: center;
+        font-size: 0.65rem;
+        padding: 0.28rem 0.4rem;
+        min-height: 0;
+    }
+
+    .ghl-dialer-active-screen__footer {
+        margin-top: 0.15rem !important;
+        padding-top: 0.15rem;
+        padding-bottom: 0 !important;
+    }
+
+    .ghl-dialer-active-screen__end,
+    .ch-dial-workspace--admin .ghl-dialer-active-screen__end,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-active-screen__end {
+        width: 3rem !important;
+        height: 3rem !important;
+    }
+
+    .ghl-dialer-active-notes {
+        padding: 0.55rem 0.6rem 0.6rem;
+        margin-top: 0.25rem;
+    }
+
+    .ghl-dialer-active-notes .ghl-dialer-active-notes-input {
+        min-height: 2.5rem;
+        font-size: 0.75rem;
+        padding: 0.4rem 0.5rem;
+    }
+}
+
+@media (max-height: 860px) {
+    .ghl-dialer-active-screen,
+    .ch-dial-workspace--admin .ghl-dialer-active-screen:not(.hidden),
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-active-screen:not(.hidden) {
+        gap: 0.2rem !important;
+        padding: 0.4rem 0.4rem 0.35rem !important;
+    }
+
+    .ghl-dialer-active-screen__number {
+        font-size: 0.98rem;
+    }
+
+    .ghl-dialer-active-screen__tool span {
+        font-size: 0.48rem;
+    }
+
+    .ghl-dialer-active-keypad__key {
+        min-height: clamp(1.35rem, 2.8vh, 1.75rem);
+        font-size: 0.8rem;
+    }
+
+    .ghl-dialer-active-keypad__amd {
+        font-size: 0.58rem;
+        padding: 0.2rem 0.35rem;
+    }
+
+    .ghl-dialer-active-screen__end,
+    .ch-dial-workspace--admin .ghl-dialer-active-screen__end,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-active-screen__end {
+        width: 2.75rem !important;
+        height: 2.75rem !important;
+    }
+
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ch-dial-workspace__grid--phone-split,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ch-dial-workspace__grid--admin-split {
+        gap: 0.55rem !important;
+        column-gap: 0.55rem !important;
+    }
+}
+
+/* Narrower usable width under 110% zoom on smaller laptops */
+@media (max-width: 1280px) and (max-height: 980px) {
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ch-dial-workspace__grid--phone-split,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ch-dial-workspace__grid--admin-split {
+        gap: 0.55rem !important;
+        column-gap: 0.55rem !important;
+    }
+
+    .ghl-comm-phone-mode .ghl-inbox-conversation-scroll--center {
+        padding-left: 0.55rem;
+        padding-right: 0.55rem;
+    }
+}
+

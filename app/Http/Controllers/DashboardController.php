@@ -1,41 +1,24 @@
 <?php
 
-
-
 namespace App\Http\Controllers;
 
-
-
-use App\Models\BusinessResearch;
-
 use App\Models\ContentAnalysis;
-
-use App\Models\CrmCampaign;
-
-use App\Models\CrmLead;
-
 use App\Models\DeliverabilityTest;
-
 use App\Models\EmailList;
-
 use Illuminate\Support\Facades\DB;
 
-
-
 class DashboardController extends Controller
-
 {
-
     public function index()
     {
         $user = auth()->user();
 
-        if (!$user->current_workspace_id) {
+        if (! $user->current_workspace_id) {
             $workspace = $user->workspaces()->first();
-            if (!$workspace) {
+            if (! $workspace) {
                 $workspace = \App\Models\Workspace::create([
-                    'name' => $user->name . "'s Workspace",
-                    'admin_id' => $user->id
+                    'name' => $user->name."'s Workspace",
+                    'admin_id' => $user->id,
                 ]);
                 $workspace->users()->attach($user->id, ['role' => 'admin']);
             }
@@ -53,9 +36,6 @@ class DashboardController extends Controller
             'invalid_emails' => EmailList::sum('invalid_count'),
             'pending_jobs' => DB::table('jobs')->count(),
             'failed_jobs' => DB::table('failed_jobs')->count(),
-            'crm_campaigns' => CrmCampaign::count(),
-            'crm_leads' => CrmLead::count(),
-            'crm_enriched' => CrmLead::where('status', 'completed')->count(),
             'workflows_count' => $workflowsCount,
             'workspace_leads_count' => $leadsCount,
         ];
@@ -63,12 +43,8 @@ class DashboardController extends Controller
         $recentLists = EmailList::latest()->take(5)->get();
         $recentDeliverability = DeliverabilityTest::latest()->take(3)->get();
         $recentContent = ContentAnalysis::latest()->take(3)->get();
-        $recentCampaigns = CrmCampaign::latest()->take(5)->get();
         $recentWorkflows = $workspace ? $workspace->workflows()->latest()->take(5)->get() : collect();
 
-        return view('dashboard', compact('stats', 'recentLists', 'recentDeliverability', 'recentContent', 'recentCampaigns', 'recentWorkflows', 'workspace'));
+        return view('dashboard', compact('stats', 'recentLists', 'recentDeliverability', 'recentContent', 'recentWorkflows', 'workspace'));
     }
-
 }
-
-

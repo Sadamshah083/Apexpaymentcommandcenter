@@ -7,7 +7,7 @@
 @php
     $href = route('admin.workflows.create');
     $classes = trim(implode(' ', array_filter([
-        'app-btn app-btn-primary',
+        'app-btn app-btn-success',
         $sm ? 'app-btn-sm' : '',
         'w-full sm:w-auto shrink-0',
         $class,

@@ -87,29 +87,11 @@
     </x-sidebar.section>
 @endif
 
-@if ($can('crm'))
-    <x-sidebar.section title="CRM">
-        <x-sidebar.link :href="route('admin.crm.index')" label="Campaigns" icon-name="campaigns"
-            :active="request()->routeIs('admin.crm.*')">
-            <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'campaigns'])</x-slot:icon>
-        </x-sidebar.link>
-    </x-sidebar.section>
-@endif
-
-@if ($can('business_research'))
-    <x-sidebar.section title="Research">
-        <x-sidebar.link :href="route('admin.business-research.index')" label="Business Research" icon-name="research"
-            :active="request()->routeIs('admin.business-research.*')">
-            <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'research'])</x-slot:icon>
-        </x-sidebar.link>
-    </x-sidebar.section>
-@endif
-
 @if ($can('communications') || auth()->user()?->canAccessAdminPortal())
     <x-sidebar.section title="Communications">
         <x-sidebar.link :href="route('admin.communications.index')" label="Communications Hub" icon-name="communications"
-            :exclude-prefixes="['/admin/communications/monitoring', '/admin/communications/notes']"
-            :active="request()->routeIs('admin.communications.*') && ! request()->routeIs('admin.communications.monitoring*', 'admin.communications.notes')">
+            :exclude-prefixes="['/admin/communications/monitoring', '/admin/communications/notes', '/admin/communications/agent-status']"
+            :active="request()->routeIs('admin.communications.*') && ! request()->routeIs('admin.communications.monitoring*', 'admin.communications.notes', 'admin.communications.agent-status*')">
             <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'communications'])</x-slot:icon>
         </x-sidebar.link>
         <x-sidebar.link :href="route('admin.communications.notes')" label="Call Notes" icon-name="notes"
@@ -119,8 +101,9 @@
         @if (app(\App\Services\Communications\CommunicationsAccessService::class)->canViewCallMonitoring(auth()->user(), 'admin.'))
             <x-sidebar.link
                 :href="route('admin.communications.monitoring')"
-                label="Call Monitoring"
+                label="Team Lead Status"
                 icon-name="phone"
+                :exclude-prefixes="['/admin/communications/agent-status']"
                 :active="request()->routeIs('admin.communications.monitoring*')"
                 data-call-monitoring-nav
                 data-call-monitoring-poll-url="{{ route('admin.communications.monitoring.live') }}"
@@ -130,6 +113,13 @@
                     <span class="sidebar-live-chip sidebar-live-chip--pink is-empty" title="Active in call" data-call-monitoring-nav-incall hidden>0</span>
                     <span class="sidebar-live-chip sidebar-live-chip--blue is-empty" title="Ringing" data-call-monitoring-nav-waiting hidden>0</span>
                 </x-slot:badge>
+            </x-sidebar.link>
+            <x-sidebar.link
+                :href="route('admin.communications.agent-status')"
+                label="Agent Status"
+                icon-name="notes"
+                :active="request()->routeIs('admin.communications.agent-status*')">
+                <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'notes'])</x-slot:icon>
             </x-sidebar.link>
         @endif
     </x-sidebar.section>

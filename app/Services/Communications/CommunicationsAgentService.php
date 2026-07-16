@@ -96,6 +96,55 @@ class CommunicationsAgentService
             ->all();
     }
 
+    /**
+     * Monitorable workspace agents for Call Monitoring roster (extension optional).
+     * Ensures Admin / Team Lead always see NOT LOGGED IN rows with real usernames.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function listMonitorableDirectory(Workspace $workspace): array
+    {
+        return $workspace->users()
+            ->wherePivot('status', 'active')
+            ->orderBy('name')
+            ->get()
+            ->map(function (User $user) use ($workspace) {
+                $pivot = $user->pivot;
+                $role = (string) ($pivot->role ?? '');
+                $label = \App\Support\SalesOps::roleLabel($role);
+                $ext = trim((string) ($pivot->morpheus_extension_num ?? ''));
+
+                return [
+                    'user_id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'role' => $role,
+                    'role_label' => $label,
+                    'morpheus_extension_num' => $ext !== '' ? $ext : null,
+                    '_excluded' => AgentPresenceService::isExcludedFromMonitoring(
+                        $role,
+                        $label,
+                        $user,
+                        (int) $workspace->id
+                    ),
+                ];
+            })
+            ->filter(function (array $agent) {
+                if ($agent['_excluded'] ?? false) {
+                    return false;
+                }
+
+                return AgentPresenceService::isMonitorableRole((string) ($agent['role'] ?? ''));
+            })
+            ->map(function (array $agent) {
+                unset($agent['_excluded']);
+
+                return $agent;
+            })
+            ->values()
+            ->all();
+    }
+
     public function suggestExtensionNum(): string
     {
         $nums = collect($this->hub->extensions())

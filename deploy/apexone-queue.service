@@ -1,15 +1,21 @@
 [Unit]
 Description=ApexOne queue workers
-After=network.target mysql.service
+After=network.target mysql.service mariadb.service
+Wants=mysql.service mariadb.service
+StartLimitIntervalSec=60
+StartLimitBurst=8
 
 [Service]
+Type=simple
 User=www-data
 Group=www-data
 Restart=always
-RestartSec=5
+RestartSec=3
 WorkingDirectory=/var/www/apexone
 ExecStart=/usr/bin/php artisan queue:pool --tries=3 --timeout=0
 TimeoutStopSec=30
+KillMode=mixed
+KillSignal=SIGTERM
 
 [Install]
 WantedBy=multi-user.target

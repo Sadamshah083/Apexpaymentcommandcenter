@@ -73,10 +73,8 @@
         @endif
 
         <a href="{{ route($routePrefix . 'communications.zoom.export.logs', ['from' => $filters['from'], 'to' => $filters['to']]) }}"
-            class="ghl-comm-icon-btn" title="Export logs" aria-label="Export">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
+            class="ghl-comm-btn ghl-comm-btn--success" title="Export logs" aria-label="Export">
+            Export
         </a>
 
         @if ($hubAccess['canConfigure'] ?? true)
@@ -104,12 +102,8 @@
             'morpheusExtensions' => $morpheusExtensions ?? [],
             'phoneUsers' => $phoneUsers ?? [],
             'defaultCallerId' => $defaultCallerId ?? null,
+            'connection' => $connection ?? [],
             'placement' => 'toolbar',
         ])
-
-        <span class="ghl-comm-live {{ ($connection['connected'] ?? false) ? 'ghl-comm-live--on' : 'ghl-comm-live--off' }}">
-            <span class="ghl-comm-live-dot" aria-hidden="true"></span>
-            {{ ($connection['connected'] ?? false) ? 'Live' : 'Off' }}
-        </span>
     </div>
 </header>

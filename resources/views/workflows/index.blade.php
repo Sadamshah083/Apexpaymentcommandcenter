@@ -84,6 +84,9 @@
                         </tbody>
                     </table>
                 </div>
+                @if (!empty($workflowSummariesPaginator) && $workflowSummariesPaginator->hasPages())
+                    <x-pagination :paginator="$workflowSummariesPaginator" class="mt-4" />
+                @endif
             </div>
 
             @include('admin.dashboard.partials.campaigns-panel')

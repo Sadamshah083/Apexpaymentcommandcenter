@@ -1,4 +1,4 @@
-﻿import { showToast } from './toast.js';
+import { showToast } from './toast.js';
 import { updateMemberRows } from './member-management.js';
 import { isOsNotificationsEnabled, showOsNotification } from './system-notifications.js';
 import { applyWorkspaceAdminState } from './workspace-admin.js';
@@ -136,7 +136,7 @@ function renderWorkflowAssignButton(workflow, remaining = null) {
 
     return `<button
             type="button"
-            class="app-btn app-btn-primary app-btn-sm import-assign-btn"
+            class="app-btn app-btn-success app-btn-sm import-assign-btn"
             data-import-assign-open
             data-workflow-id="${workflow.id}"
             data-workflow-name="${escapeHtml(workflow.name)}"
@@ -1487,7 +1487,7 @@ function renderHandoffQueueRow(lead, closers, leadShowBase) {
                         <option value="">Select closer…</option>
                         ${closerOptions}
                     </select>
-                    <button type="submit" class="app-btn app-btn-primary app-btn-sm">Assign</button>
+                    <button type="submit" class="app-btn app-btn-success app-btn-sm">Assign</button>
                 </form>
             </td>
         </tr>

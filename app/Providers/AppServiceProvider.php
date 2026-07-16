@@ -2,10 +2,7 @@
 
 namespace App\Providers;
 
-use App\Models\BusinessResearch;
 use App\Models\ContentAnalysis;
-use App\Models\CrmCampaign;
-use App\Models\CrmLead;
 use App\Models\DeliverabilityTest;
 use App\Models\WorkflowLead;
 use App\Policies\WorkflowLeadPolicy;
@@ -40,9 +37,6 @@ class AppServiceProvider extends ServiceProvider
 
         Route::model('deliverability', DeliverabilityTest::class);
         Route::model('contentAnalysis', ContentAnalysis::class);
-        Route::model('businessResearch', BusinessResearch::class);
-        Route::model('crm', CrmCampaign::class);
-        Route::model('crmLead', CrmLead::class);
 
         Route::bind('lead', function (string $value) {
             return WorkflowLead::findOrFail($value);

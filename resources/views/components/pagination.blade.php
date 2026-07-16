@@ -1,5 +1,5 @@
 @if ($paginator->total() > 0)
-    <div {{ $attributes->merge(['class' => 'app-pagination']) }}>
+    <div {{ $attributes->merge(['class' => 'app-pagination']) }} data-pagination>
         <p class="app-pagination-summary">
             Showing
             <span

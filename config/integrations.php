@@ -31,6 +31,10 @@ return [
         'circuit_breaker_seconds' => (int) env('MORPHEUS_CIRCUIT_BREAKER_SECONDS', 120),
         'webhook_secret' => env('MORPHEUS_WEBHOOK_SECRET'),
         'webhook_path' => env('MORPHEUS_WEBHOOK_PATH', '/webhooks/morpheus/calls'),
+        // Local Node WebSocket bridge — webhook pushes here, dialer listens (no polling).
+        'call_events_ws_push_url' => env('CALL_EVENTS_WS_PUSH_URL', 'http://127.0.0.1:8787/push'),
+        'call_events_ws_secret' => env('CALL_EVENTS_WS_SECRET', ''),
+        'call_events_ws_public_path' => env('CALL_EVENTS_WS_PUBLIC_PATH', '/communications-ws/ws'),
     ],
 
     'communications' => [
@@ -50,13 +54,15 @@ return [
         'default_caller_id_name' => env('COMMUNICATIONS_DEFAULT_CALLER_ID_NAME', 'ApexOne Payments'),
         'default_dial_destination' => env('COMMUNICATIONS_DEFAULT_DIAL_DESTINATION'),
         'dialer_leads_page_size' => (int) env('COMMUNICATIONS_DIALER_LEADS_PAGE_SIZE', 25),
+        // Seconds to wait after a successful disposition save before the next auto-dial.
+        'next_call_delay_sec' => max(0, (int) env('COMMUNICATIONS_NEXT_CALL_DELAY_SEC', 6)),
         'dispositions' => [
-            'Answer Machine',
+            'Answering Machine',
             'Call Back',
             'Corporate Business',
             'Owner Not Available',
             'Wrong Number/Business',
-            'Owner Hang up',
+            'Owner Hung Up',
             'Follow Up',
             'Not Interested',
             'Requested Appointment',

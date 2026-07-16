@@ -7,7 +7,7 @@ import {
 } from './communications-webphone.js';
 import { initCommunicationsPhoneNotes } from './communications-phone-notes.js';
 const STORAGE_KEY = 'communications.dialer_extension';
-const DIAL_COOLDOWN_MS = 12000;
+const DIAL_COOLDOWN_MS = 2500;
 let lastDialAt = 0;
 let dialInFlight = false;
 
@@ -84,7 +84,14 @@ function handleDialerNumberChange(form) {
     const dialBtn = form.querySelector('button[type="submit"]');
     const backspace = form.querySelector('[data-dial-backspace]');
 
-    refreshDialButton(numberInput, callerSelect, dialBtn);
+    // Keep End Call / hangup-mode dial button intact while Ringing/Connected UI is live.
+    const phone = getWebphone();
+    const liveCall = phone?.isLiveCallUiActive?.()
+        || phone?.isOutboundRingingUiActive?.()
+        || ['dialing', 'ringing', 'in-call'].includes(phone?.state || '');
+    if (!liveCall) {
+        refreshDialButton(numberInput, callerSelect, dialBtn);
+    }
     refreshBackspaceVisibility(numberInput, backspace);
 }
 
@@ -243,18 +250,30 @@ async function originateViaJson(form, dialBtn) {
     hideLoadingOverlay();
 
     const phone = getWebphone();
+    const attempt = phone.beginOutboundAttempt?.() || { generation: 0, signal: null };
     phone.setCustomerFirstOutbound(false);
     phone.setCallContext('outbound', destination);
     phone.clickToCallActive = true;
     phone.awaitingDestinationBridge = true;
     phone.markClickToCallPending();
+    // Show ringing UI immediately — do not wait on Morpheus HTTP round-trip.
+    phone.showClickToCallRinging(destination, { customerFirst: false });
+
+    // Keep End Call usable during originate — never leave the dial button disabled while ringing.
+    if (dialBtn) {
+        dialBtn.removeAttribute('disabled');
+        dialBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        dialBtn.removeAttribute('aria-disabled');
+    }
 
     try {
         await phone.assertTransportForOriginate();
     } catch (error) {
+        phone.cancelOutboundAttempt?.('transport-failed');
         showToast(error?.message || 'Connect your Phone line (WebSocket) before calling.', 'error');
         phone.clickToCallActive = false;
         phone.awaitingDestinationBridge = false;
+        phone.forceTeardownForDisposition?.();
         if (dialBtn) {
             dialBtn.removeAttribute('disabled');
             dialBtn.classList.remove('opacity-50', 'cursor-not-allowed');
@@ -264,23 +283,61 @@ async function originateViaJson(form, dialBtn) {
         return false;
     }
 
+    // Instant hangup while connecting the line.
+    if (phone.isOutboundAttemptCurrent && !phone.isOutboundAttemptCurrent(attempt.generation)) {
+        return false;
+    }
+
     formData.set('webphone_transport_connected', '1');
     dialInFlight = true;
     lastDialAt = Date.now();
 
     try {
-        const response = await fetch(form.action, {
-            method: 'POST',
-            headers: {
-                Accept: 'application/json',
-                'X-Requested-With': 'XMLHttpRequest',
-                'X-CSRF-TOKEN': csrfToken(),
-            },
-            credentials: 'same-origin',
-            body: formData,
-        });
+        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const timeoutId = window.setTimeout(() => {
+            try {
+                controller?.abort('timeout');
+            } catch {
+                // ignore
+            }
+        }, 12000);
+        const onHangupAbort = () => {
+            try {
+                controller?.abort('hangup');
+            } catch {
+                // ignore
+            }
+        };
+        attempt.signal?.addEventListener?.('abort', onHangupAbort, { once: true });
+
+        let response;
+        try {
+            response = await fetch(form.action, {
+                method: 'POST',
+                headers: {
+                    Accept: 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': csrfToken(),
+                },
+                credentials: 'same-origin',
+                body: formData,
+                signal: controller?.signal,
+            });
+        } finally {
+            window.clearTimeout(timeoutId);
+            attempt.signal?.removeEventListener?.('abort', onHangupAbort);
+        }
 
         const data = await response.json().catch(() => ({}));
+
+        // Agent hung up while originate was in flight — kill the late UUID and exit.
+        if (phone.isOutboundAttemptCurrent && !phone.isOutboundAttemptCurrent(attempt.generation)) {
+            if (data.call_uuid) {
+                await phone.killLateOriginate?.(data.call_uuid, destination);
+            }
+
+            return false;
+        }
 
         if (!response.ok || data.ok === false) {
             const message = data.extension_busy
@@ -288,8 +345,21 @@ async function originateViaJson(form, dialBtn) {
                 : (data.error || 'Could not place the call. Check your extension and try again.');
 
             showToast(message, 'error');
+            phone.cancelOutboundAttempt?.('originate-failed');
+            // Manual dial still needs Call Summary after a failed/ringing attempt.
+            const failedPhone = destination || phone.currentCallPeer || phone.lastDialedDestination || '';
+            if (failedPhone && usesCallSummaryFlow() && !document.body.classList.contains('ch-call-summary-open')) {
+                phone.dispatchCallEndedOnce?.({
+                    phone: failedPhone,
+                    callUuid: data.call_uuid || '',
+                    result: 'No answer',
+                    connected: false,
+                    durationSec: 0,
+                });
+            }
             phone.clickToCallActive = false;
             phone.awaitingDestinationBridge = false;
+            phone.forceTeardownForDisposition?.();
 
             return false;
         }
@@ -301,6 +371,13 @@ async function originateViaJson(form, dialBtn) {
         if (data.line_reset) {
             showToast('Line was reset to clear a busy extension — reconnecting…', 'warning');
             await phone.connect(phone.currentExtension || undefined).catch(() => {});
+            if (phone.isOutboundAttemptCurrent && !phone.isOutboundAttemptCurrent(attempt.generation)) {
+                if (data.call_uuid) {
+                    await phone.killLateOriginate?.(data.call_uuid, destination);
+                }
+
+                return false;
+            }
             phone.markClickToCallPending();
         }
 
@@ -309,8 +386,18 @@ async function originateViaJson(form, dialBtn) {
                 ? `+${String(data.to).replace(/\D/g, '')}`
                 : destination;
 
+        // Instant hangup after UUID arrived — do not restart ringing UI.
+        if (phone.isOutboundAttemptCurrent && !phone.isOutboundAttemptCurrent(attempt.generation)) {
+            if (data.call_uuid) {
+                await phone.killLateOriginate?.(data.call_uuid, dialTarget);
+            }
+
+            return false;
+        }
+
         phone.setCustomerFirstOutbound(Boolean(data.customer_first));
-        phone.showClickToCallRinging(dialTarget, { customerFirst: Boolean(data.customer_first) });
+        // Soft refresh only — never call showClickToCallRinging again (that resets hangup guards).
+        phone.refreshOutboundRingingUi?.(dialTarget);
 
         const fromExt = data.from ? String(data.from) : formData.get('from_extension');
         if (fromExt) {
@@ -332,8 +419,17 @@ async function originateViaJson(form, dialBtn) {
 
         return true;
     } catch (error) {
+        const aborted = error?.name === 'AbortError'
+            || String(error?.message || error || '').toLowerCase().includes('abort');
+        if (aborted || (phone.isOutboundAttemptCurrent && !phone.isOutboundAttemptCurrent(attempt.generation))) {
+            // Instant hangup aborted originate — Call Summary already owns the UI.
+            return false;
+        }
+
+        phone.cancelOutboundAttempt?.('originate-error');
         phone.clickToCallActive = false;
         phone.awaitingDestinationBridge = false;
+        phone.forceTeardownForDisposition?.();
         showToast(error.message || 'Could not place the call.', 'error');
 
         return false;
@@ -1735,11 +1831,13 @@ function buildCallLogRow(log) {
         ? `<span class="ghl-dialer-recent-file" title="${leadFileName}">${leadFileName}</span>`
         : '';
     const result = escapeHtml(log.result || '—');
-    const statusLikeDispositions = ['', '—', '-', 'completed', 'initiated', 'connected', 'answered', 'no-answer', 'no answer', 'busy', 'failed', 'missed', 'unknown'];
+    // CDR statuses only — agent disposition "No Answer" must still render.
+    const statusLikeDispositions = ['', '—', '-', 'completed', 'initiated', 'connected', 'answered', 'no-answer', 'busy', 'failed', 'missed', 'unknown'];
     let rawDisposition = String(log.disposition || '').trim();
     if (rawDisposition && statusLikeDispositions.includes(rawDisposition.toLowerCase())) {
         rawDisposition = '';
     }
+    // Prefer explicit agent disposition for the call-log row body.
     const disposition = escapeHtml(rawDisposition);
     const timeAgo = escapeHtml(log.time_ago || '—');
     const durationLabel = escapeHtml(log.duration_label || '0s');
@@ -1903,13 +2001,28 @@ function initCallLogsInfiniteScroll(root = document) {
                 const url = new URL(apiUrl, window.location.origin);
                 url.searchParams.set('offset', String(offset));
 
-                const response = await fetch(url.toString(), {
-                    credentials: 'same-origin',
-                    headers: {
-                        Accept: 'application/json',
-                        'X-Requested-With': 'XMLHttpRequest',
-                    },
-                });
+                const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+                const timeoutId = window.setTimeout(() => {
+                    try {
+                        controller?.abort('timeout');
+                    } catch {
+                        // ignore
+                    }
+                }, 12000);
+
+                let response;
+                try {
+                    response = await fetch(url.toString(), {
+                        credentials: 'same-origin',
+                        headers: {
+                            Accept: 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest',
+                        },
+                        signal: controller?.signal,
+                    });
+                } finally {
+                    window.clearTimeout(timeoutId);
+                }
 
                 if (!response.ok) {
                     throw new Error(`Call logs request failed (${response.status})`);
@@ -1928,6 +2041,13 @@ function initCallLogsInfiniteScroll(root = document) {
             } finally {
                 loading = false;
                 loadingEl?.classList.add('hidden');
+                const emptyEl = itemsContainer?.querySelector('[data-call-logs-empty]');
+                if (
+                    emptyEl
+                    && !itemsContainer?.querySelector('[data-phone-log-row], .ghl-dialer-recent-row')
+                ) {
+                    emptyEl.textContent = 'No recent calls yet.';
+                }
             }
         };
 
@@ -1959,6 +2079,19 @@ function initCallLogsInfiniteScroll(root = document) {
                 },
             );
             observer.observe(sentinel);
+        }
+
+        // Fast SSR shell ships empty logs — always hydrate the first page.
+        const hasRows = Boolean(itemsContainer?.querySelector('[data-phone-log-row], .ghl-dialer-recent-row'));
+        if (apiUrl && (!hasRows || (hasMore && offset === 0))) {
+            hasMore = true;
+            list.dataset.callLogsHasMore = '1';
+            void loadMore().then(() => {
+                const emptyEl = itemsContainer?.querySelector('[data-call-logs-empty]');
+                if (itemsContainer?.querySelector('[data-phone-log-row], .ghl-dialer-recent-row')) {
+                    emptyEl?.remove();
+                }
+            });
         }
 
         const workspace = list.closest('[data-phone-workspace]');
@@ -2012,8 +2145,10 @@ export async function placeOutboundCall(phone, meta = {}) {
         placed = true;
     }
 
-    // Once dialing/ringing starts, keep the pad empty (number lives on the call card).
-    clearDialerDestinationInput();
+    // Keep pad empty while call card owns the number — do not touch lead dataset or hangup UI.
+    if (placed) {
+        clearDialerDestinationInput();
+    }
 
     return placed;
 }

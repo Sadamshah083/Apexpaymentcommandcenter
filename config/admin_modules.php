@@ -88,24 +88,6 @@ return [
                 'admin.leads.activities.store',
             ],
         ],
-        'crm' => [
-            'label' => 'CRM Campaigns',
-            'description' => 'CRM-style campaign imports and lead management',
-            'section' => 'CRM',
-            'default_route' => 'admin.crm.index',
-            'routes' => [
-                'admin.crm.*',
-            ],
-        ],
-        'business_research' => [
-            'label' => 'Business Research',
-            'description' => 'AI-assisted company and contact research',
-            'section' => 'Research',
-            'default_route' => 'admin.business-research.index',
-            'routes' => [
-                'admin.business-research.*',
-            ],
-        ],
         'communications' => [
             'label' => 'Communications Hub',
             'description' => 'Calls, dialer, recordings, voicemails, and Morpheus telephony',

@@ -52,30 +52,44 @@ class WorkflowController extends Controller
 
             $data['importsWorkflows'] = $data['workflows'];
             $data['campaigns'] = $this->campaignService->campaignsWithStats($workspace);
+
+            // Use denormalized workflow counters — never GROUP BY all leads on every page click
+            // (that was hanging /admin/workflows?page=N with 3k+ leads).
+            $perPage = (int) config('pagination.workflows_per_page', 20);
             $summaryWorkflows = $workspace->workflows()
                 ->latest()
-                ->get(['id', 'name', 'original_filename', 'created_at', 'total_leads', 'failed_leads']);
-            $workflowLeadStats = $summaryWorkflows->isEmpty()
+                ->paginate($perPage, [
+                    'id',
+                    'name',
+                    'original_filename',
+                    'created_at',
+                    'total_leads',
+                    'enriched_leads',
+                    'failed_leads',
+                ], 'files_page')
+                ->withQueryString();
+
+            $summaryIds = $summaryWorkflows->getCollection()->modelKeys();
+            $closedByWorkflow = $summaryIds === []
                 ? collect()
                 : WorkflowLead::query()
-                    ->selectRaw(
-                        "workflow_id,
-                        SUM(CASE WHEN pipeline_phase IN ('enriched', 'with_setter', 'appointment_settled', 'with_closer', 'closed')
-                            AND status IN ('enriched', 'completed') THEN 1 ELSE 0 END) as enriched_count,
-                        SUM(CASE WHEN ((pipeline_phase = 'closed' AND closer_status = 'sale_made') OR stage = 'closed_won')
-                            THEN 1 ELSE 0 END) as closed_count"
-                    )
-                    ->whereIn('workflow_id', $summaryWorkflows->modelKeys())
+                    ->selectRaw('workflow_id, COUNT(*) as closed_count')
+                    ->whereIn('workflow_id', $summaryIds)
+                    ->where(function ($query) {
+                        $query->where(function ($inner) {
+                            $inner->where('pipeline_phase', 'closed')
+                                ->where('closer_status', 'sale_made');
+                        })->orWhere('stage', 'closed_won');
+                    })
                     ->groupBy('workflow_id')
-                    ->get()
-                    ->keyBy('workflow_id');
+                    ->pluck('closed_count', 'workflow_id');
 
             $data['workflowSummaries'] = $summaryWorkflows
-                ->map(function (Workflow $workflow) use ($workflowLeadStats) {
-                    $stats = $workflowLeadStats->get($workflow->id);
-                    $closedCount = (int) ($stats->closed_count ?? 0);
-                    $enrichedCount = (int) ($stats->enriched_count ?? 0);
+                ->getCollection()
+                ->map(function (Workflow $workflow) use ($closedByWorkflow) {
                     $totalLeadsCount = (int) ($workflow->total_leads ?? 0);
+                    $enrichedCount = (int) ($workflow->enriched_leads ?? 0);
+                    $closedCount = (int) ($closedByWorkflow[$workflow->id] ?? 0);
 
                     return [
                         'id' => $workflow->id,
@@ -91,6 +105,7 @@ class WorkflowController extends Controller
                     ];
                 })
                 ->all();
+            $data['workflowSummariesPaginator'] = $summaryWorkflows;
             $data['activeSection'] = 'imports';
 
             return view('workflows.index', $data);

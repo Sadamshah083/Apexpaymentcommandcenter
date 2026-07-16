@@ -328,23 +328,26 @@
         }
 
         function updateCampaignCards(campaigns) {
-            const grid = document.getElementById('dashboard-campaigns-grid');
-            if (!grid) {
+            const body = document.getElementById('dashboard-campaigns-grid');
+            if (!body) {
                 return;
             }
 
-            grid.innerHTML = campaigns.map((campaign) => `
-                <a href="${escapeDashboardHtml(campaign.show_url)}" class="campaign-card">
-                    <div class="campaign-card-head">
-                        <span class="campaign-card-name">${escapeDashboardHtml(campaign.name)}</span>
-                        <span class="campaign-card-count">${Number(campaign.leads_count || 0).toLocaleString()} leads</span>
-                    </div>
-                    <dl class="campaign-card-stats">
-                        <div><dt>Imports</dt><dd>${campaign.imports_count ?? 0}</dd></div>
-                        <div><dt>Enriched</dt><dd>${Number(campaign.enriched_count || 0).toLocaleString()}</dd></div>
-                        <div><dt>Assigned</dt><dd>${Number(campaign.assigned_count || 0).toLocaleString()}</dd></div>
-                    </dl>
-                </a>
+            body.innerHTML = campaigns.map((campaign) => `
+                <tr>
+                    <td>
+                        <a href="${escapeDashboardHtml(campaign.show_url)}" class="campaigns-overview-name">
+                            ${escapeDashboardHtml(campaign.name)}
+                        </a>
+                    </td>
+                    <td>${Number(campaign.leads_count || 0).toLocaleString()}</td>
+                    <td>${Number(campaign.imports_count || 0).toLocaleString()}</td>
+                    <td>${Number(campaign.enriched_count || 0).toLocaleString()}</td>
+                    <td class="campaigns-overview-assigned">${Number(campaign.assigned_count || 0).toLocaleString()}</td>
+                    <td class="text-right">
+                        <a href="${escapeDashboardHtml(campaign.show_url)}" class="app-btn app-btn-secondary app-btn-sm">View</a>
+                    </td>
+                </tr>
             `).join('');
         }
 

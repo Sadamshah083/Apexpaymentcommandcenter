@@ -20,14 +20,22 @@
     <div class="app-card call-monitoring-table-wrap">
         <div class="call-monitoring-table-scroll">
             <table class="call-monitoring-table">
+                <colgroup>
+                    <col class="cm-col-station">
+                    <col class="cm-col-user">
+                    <col class="cm-col-status">
+                    <col class="cm-col-timer">
+                    <col class="cm-col-dest">
+                    <col class="cm-col-campaign">
+                </colgroup>
                 <thead>
                     <tr>
-                        <th>Station</th>
-                        <th>User</th>
-                        <th>Status</th>
-                        <th>{{ $timerLabel }}</th>
-                        <th>{{ $destinationLabel }}</th>
-                        <th>Campaign</th>
+                        <th scope="col">Station</th>
+                        <th scope="col">User</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">{{ $timerLabel }}</th>
+                        <th scope="col">{{ $destinationLabel }}</th>
+                        <th scope="col">Campaign</th>
                     </tr>
                 </thead>
                 <tbody data-call-monitoring-rows="{{ $bucket }}">

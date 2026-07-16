@@ -19,25 +19,40 @@ class WorkflowDashboardService
     public function buildIndexData(Workspace $workspace, User $user, array $filters = []): array
     {
         $workflows = $workspace->workflows()
-            ->with(['leadList', 'campaign'])
+            ->with(['leadList:id,name', 'campaign:id,name'])
             ->withCount([
                 'leads as assigned_leads_count' => fn ($query) => $query->whereNotNull('assigned_user_id'),
                 'leads as enriched_leads_count' => fn ($query) => $query->where('status', 'enriched'),
                 'leads as ready_to_assign_count' => fn ($query) => $query->readyToAssign(),
             ])
-            ->latest()
+            ->latest('workflows.id')
             ->paginate(config('pagination.workflows_per_page', 8), ['*'], 'pipelines_page')
             ->withQueryString();
-
-        $workflowIds = $workspace->workflows()->pluck('id');
-
-        $leadsQuery = WorkflowLead::query()
-            ->with(['workflow', 'campaign', 'leadList'])
-            ->whereIn('workflow_id', $workflowIds);
 
         if (! $user->canAccessAdminPortal($workspace->id)) {
             abort(403);
         }
+
+        // Faster than pluck-all + whereIn when many files exist.
+        $leadsQuery = WorkflowLead::query()
+            ->select([
+                'id',
+                'workflow_id',
+                'campaign_id',
+                'business_name',
+                'city',
+                'state',
+                'pipeline_phase',
+                'direct_phone',
+                'input_phone',
+                'normalized_phone',
+                'created_at',
+            ])
+            ->with([
+                'workflow:id,name',
+                'campaign:id,name',
+            ])
+            ->whereIn('workflow_id', $workspace->workflows()->select('id'));
 
         if (! empty($filters['search'])) {
             $search = $filters['search'];
@@ -64,7 +79,7 @@ class WorkflowDashboardService
         return [
             'workspace' => $workspace,
             'workflows' => $workflows,
-            'leads' => $leadsQuery->latest()->paginate(config('pagination.leads_per_page', 20))->withQueryString(),
+            'leads' => $leadsQuery->latest('id')->paginate(config('pagination.leads_per_page', 20))->withQueryString(),
             'team' => $workspace->users()
                 ->wherePivot('status', 'active')
                 ->wherePivotIn('role', WorkflowAssignmentRoles::teamLeadRoles())

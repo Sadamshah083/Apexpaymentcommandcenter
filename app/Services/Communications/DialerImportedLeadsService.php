@@ -84,12 +84,12 @@ class DialerImportedLeadsService
     {
         return match (strtolower(trim($disposition))) {
             'no answer', 'no_answer', 'no-answer' => 'contacted',
-            'answering machine', 'answering machine', 'answering_machine', 'answering-machine', 'voicemail' => 'contacted',
+            'answering machine', 'answer machine', 'answering_machine', 'answering-machine', 'answer_machine', 'voicemail' => 'contacted',
             'call back', 'call_back', 'call-back', 'call me later', 'call_me_later', 'call-me-later' => 'follow_up',
             'corporate business', 'corporate_business' => 'contacted',
             'owner not available', 'owner_not_available', 'not available', 'not_available', 'not-available' => 'contacted',
             'wrong number/business', 'wrong number', 'incorrect number', 'incorrect_number', 'incorrect-number' => 'not_interested',
-            'owner hung up', 'owner hangup', 'owner_hangup' => 'contacted',
+            'owner hung up', 'owner hang up', 'owner hangup', 'owner_hangup' => 'contacted',
             'follow up', 'follow_up', 'follow-up' => 'follow_up',
             'requested appointment', 'requested_appointment', 'requested-appointment' => 'appointment_settled',
             'not interested', 'not_interested', 'not-interested' => 'not_interested',

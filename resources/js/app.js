@@ -6,6 +6,7 @@ import { initTopnav } from './topnav.js';
 import { initSidebar } from './sidebar.js';
 import { initFormLoading } from './form-loading.js';
 import { initFastImportNav } from './fast-import-nav.js';
+import { initPaginationPreserve } from './pagination-preserve.js';
 import { startProgressPoll } from './realtime-poll.js';
 import { updateAdminDetailPanel } from './admin-dashboard-detail.js';
 
@@ -121,6 +122,7 @@ async function bootCommunicationsFeatures() {
     if (needsDialer || needsWebphone) {
         void import('./communications-phone-notes.js').then((notesModule) => {
             phoneNotesModuleRef = notesModule;
+            notesModule.initCommunicationsPhoneNotes?.();
         }).catch(() => {});
     }
 }
@@ -155,7 +157,10 @@ async function bootDeferredFeatures() {
         tasks.push(import('./communications-auto-dial.js').then((module) => module.initAutoDialHub()));
     } else if (document.querySelector('[data-presence-url]')) {
         // Agent logged into portal — announce presence so Call Monitoring flips to Not in call.
-        tasks.push(import('./communications-auto-dial.js').then((module) => module.initAgentPresence()));
+        tasks.push(import('./communications-auto-dial.js').then((module) => {
+            module.initAgentPresence();
+            module.initAgentBreakControls?.();
+        }));
     }
 
     if (document.querySelector('[data-workflow-upload]')) {
@@ -218,6 +223,7 @@ function bootCore() {
     initFormLoading();
     initHorizontalWheelScroll();
     initFastImportNav();
+    initPaginationPreserve();
     scheduleDeferredBoot();
 }
 

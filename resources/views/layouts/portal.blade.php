@@ -55,6 +55,7 @@ data-workspace-id="{{ auth()->user()->current_workspace_id }}"
         </div>
     </div>
     @include('layouts.partials.toasts')
+    @include('layouts.partials.deployment-notice')
     @stack('scripts')
 </body>
 

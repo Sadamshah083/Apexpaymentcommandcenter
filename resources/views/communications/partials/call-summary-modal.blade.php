@@ -1,11 +1,11 @@
 @php
     $dispositions = config('integrations.communications.dispositions', [
-        'Answer Machine',
+        'Answering Machine',
         'Call Back',
         'Corporate Business',
         'Owner Not Available',
         'Wrong Number/Business',
-        'Owner Hang up',
+        'Owner Hung Up',
         'Follow Up',
         'Not Interested',
         'Requested Appointment',
@@ -18,6 +18,7 @@
         'Corporate Business' => 'violet',
         'Owner Not Available' => 'cyan',
         'Wrong Number/Business' => 'orange',
+        'Owner Hung Up' => 'teal',
         'Owner Hang up' => 'teal',
         'Owner Hangup' => 'teal',
         'Follow Up' => 'sky',
@@ -26,10 +27,12 @@
         'No Answer' => 'slate',
     ];
     $dispositionUrl = url((request()->is('admin*') ? '/admin' : '/portal') . '/communications/dialer/disposition');
+    $nextCallDelaySec = (int) config('integrations.communications.next_call_delay_sec', 6);
 @endphp
 
 <div class="ch-call-summary hidden" data-call-summary-modal aria-hidden="true" role="dialog" aria-modal="true"
-    aria-labelledby="ch-call-summary-title" data-disposition-url="{{ $dispositionUrl }}">
+    aria-labelledby="ch-call-summary-title" data-disposition-url="{{ $dispositionUrl }}"
+    data-next-call-delay-sec="{{ $nextCallDelaySec }}">
     <div class="ch-call-summary__backdrop" data-call-summary-close></div>
     <div class="ch-call-summary__card">
         <header class="ch-call-summary__header">
@@ -58,7 +61,7 @@
             <section class="ch-call-summary__dispositions">
                 <div class="ch-call-summary__section-head">
                     <h3>Disposition <span class="ch-call-summary__required">required</span></h3>
-                    <p class="ch-call-summary__hint">Pick a quick outcome or write your own — double-click a disposition to save &amp; close.</p>
+                    <p class="ch-call-summary__hint">Single-click to select — double-click (or double-tap) a disposition to save &amp; close.</p>
                 </div>
                 <div class="ch-call-summary__grid" data-call-summary-dispositions>
                     @foreach ($dispositions as $label)
@@ -67,7 +70,7 @@
                             class="ch-call-summary__dispo-btn ch-call-summary__dispo-btn--{{ $tone }}"
                             data-disposition-value="{{ $label }}"
                             data-disposition-tone="{{ $tone }}"
-                            title="Double-click to save &amp; close">{{ $label }}</button>
+                            title="Double-click / double-tap to save &amp; close">{{ $label }}</button>
                     @endforeach
                 </div>
 

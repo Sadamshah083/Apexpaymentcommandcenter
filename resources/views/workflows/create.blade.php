@@ -89,7 +89,7 @@
                 </div>
             </div>
 
-            <button type="submit" class="app-btn app-btn-primary w-full">Continue to column mapping</button>
+            <button type="submit" class="app-btn app-btn-success w-full">Continue to column mapping</button>
         </form>
     </div>
 </div>

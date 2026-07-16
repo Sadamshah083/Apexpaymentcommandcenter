@@ -36,10 +36,17 @@
     ])
 
     @if (($placement ?? 'toolbar') === 'toolbar')
-        <span class="ghl-comm-global-line__status ghl-comm-live {{ ($connection['connected'] ?? false) ? 'ghl-comm-live--on' : 'ghl-comm-live--off' }}"
-            title="{{ ($connection['connected'] ?? false) ? 'Morpheus telephony is connected' : 'Morpheus telephony is offline' }}">
+        @php
+            // Dialer login should never show Offline/Off when Morpheus is configured —
+            // the badge means the agent session is live, not a stale probe cache.
+            $morpheusConfigured = app(\App\Services\Integrations\ZoomApiService::class)->isConfigured();
+            $lineLive = $morpheusConfigured || (bool) ($connection['connected'] ?? false);
+        @endphp
+        <span class="ghl-comm-global-line__status ghl-comm-live {{ $lineLive ? 'ghl-comm-live--on' : 'ghl-comm-live--off' }}"
+            data-comm-live-badge
+            title="{{ $lineLive ? 'You are logged in — line ready' : 'Morpheus telephony is not configured' }}">
             <span class="ghl-comm-live-dot" aria-hidden="true"></span>
-            {{ ($connection['connected'] ?? false) ? 'Live' : 'Off' }}
+            <span data-comm-live-label>{{ $lineLive ? 'On' : 'Off' }}</span>
         </span>
     @endif
 

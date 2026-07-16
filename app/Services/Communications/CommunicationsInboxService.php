@@ -62,12 +62,13 @@ class CommunicationsInboxService
     $connection = $this->zoom->isConfigured()
       ? ($panel === 'settings'
         ? $this->zoom->connectionStatus()
-        : (($channel === 'inbox' && $panel === 'empty') || $channel === 'calls'
-          ? (Cache::get('integrations.morpheus.connection_status') ?? [
-            'connected' => false,
-            'message' => 'Morpheus status updates when telephony is available.',
+        : (($channel === 'inbox' && $panel === 'empty') || $channel === 'calls' || $panel === 'dialer'
+          // Dialer login: always On when Morpheus is configured (never stale Off from probe cache).
+          ? [
+            'connected' => true,
+            'message' => 'Logged in — telephony available.',
             'expires_at' => null,
-          ])
+          ]
           : $this->zoom->connectionStatus()))
       : ['connected' => false, 'message' => 'Morpheus CX is not configured.', 'expires_at' => null];
 
@@ -180,6 +181,7 @@ class CommunicationsInboxService
     $selectedCall = null;
     $selectedVoicemail = null;
     $selectedRecording = null;
+    $workspace = $user ? $this->workspaceContext->resolveActiveWorkspace($user) : null;
 
     if ($this->zoom->isConfigured()) {
       try {
@@ -247,8 +249,14 @@ class CommunicationsInboxService
           || $panel === 'dialer';
 
         if (in_array($channel, ['inbox', 'calls'], true)) {
-          if (auth()->check()) {
-            $workspace = $this->workspaceContext->resolveActiveWorkspace(auth()->user());
+          // Dialer document paint must stay local — Morpheus CDR/active calls load via AJAX.
+          if ($fastDialerShell) {
+            $callLogs = [];
+            $callStats = [];
+            $activeCalls = [];
+            $recentNumbers = [];
+          } elseif (auth()->check()) {
+            $workspace = $this->workspaceContext->resolveActiveWorkspace(auth()->user()) ?? $workspace;
             $scopedFilters = $this->applyCallLogActorScope($filters, $user, $routePrefix);
             $callLogs = $this->callHistory->listForHub($workspace, $scopedFilters);
             // Apply direction/missed/recorded filters to local history too
@@ -298,7 +306,7 @@ class CommunicationsInboxService
           $callStats = $this->data->callStatsFromLogs($callLogs);
           }
 
-          if ($loadDialerExtras) {
+          if ($loadDialerExtras && ! $fastDialerShell) {
             try {
               $recentNumbers = $this->data->recentDialNumbers($filters, 12, $callLogs);
             } catch (\Throwable $e) {
@@ -698,26 +706,16 @@ class CommunicationsInboxService
 
     if ($panel === 'dialer') {
       try {
-        $callLogs = $this->resolveDialerCallLogs($filters, (bool) ($connection['connected'] ?? false), $routePrefix);
-        $callLogs = $this->data->enrichCallLogsWithRecordings($callLogs, $filters);
-        if ($workspace) {
-          $callLogs = $this->enrichDialerCallLogsWithNotes($workspace, $callLogs);
-          $callLogs = $this->enrichDialerCallLogsWithLeadLabels($workspace, $callLogs);
-        }
-        $dialerCallLogsHasMore = count($callLogs) > (int) config('integrations.communications.list_page_size', 20);
+        // Fast first paint: no Morpheus CDR / recordings / lead COUNT on the HTML document.
+        // Call logs + leads hydrate immediately via existing AJAX endpoints.
+        $callLogs = [];
+        $activeCalls = [];
+        $dialerCallLogsHasMore = true;
 
         if (($hubAccess['canAutoDial'] ?? false) && $workspace) {
-          $importedLeads = app(DialerImportedLeadsService::class);
-          $leadPageSize = (int) config('integrations.communications.dialer_leads_page_size', 25);
-          $leadFilters = ['pool' => 'callable'];
-          if (($hubAccess['tier'] ?? '') === 'agent' && $user) {
-            $leadFilters['assigned_user_id'] = (int) $user->id;
-            $leadFilters['pool'] = 'assigned';
-          }
-          $leadPayload = $importedLeads->paginate($workspace, $leadFilters, 0, $leadPageSize);
-          $dialerImportedLeads = $leadPayload['leads'];
-          $dialerImportedLeadsHasMore = (bool) ($leadPayload['has_more'] ?? false);
-          $dialerCampaignOptions = $importedLeads->campaignOptions($workspace);
+          $dialerImportedLeads = [];
+          $dialerImportedLeadsHasMore = true;
+          $dialerCampaignOptions = app(DialerImportedLeadsService::class)->campaignOptions($workspace);
         }
       } catch (\Throwable $e) {
         $warnings[] = $this->zoom->humanizeError($e->getMessage());
@@ -792,7 +790,6 @@ class CommunicationsInboxService
       'clickToCall' => $this->clickToCall,
       'channelCounts' => $channelCounts,
       'hubAccess' => $hubAccess,
-      'dialerCallLogsHasMore' => $dialerCallLogsHasMore,
     ];
   }
 
@@ -1891,9 +1888,10 @@ class CommunicationsInboxService
       data_get($log, 'meta.disposition'),
     ];
 
+    // Hyphenated CDR statuses only — keep agent disposition "No Answer" visible.
     $statusLike = [
       '', '—', '-', 'completed', 'initiated', 'connected', 'answered',
-      'no-answer', 'no answer', 'busy', 'failed', 'missed', 'unknown',
+      'no-answer', 'busy', 'failed', 'missed', 'unknown',
     ];
 
     foreach ($candidates as $candidate) {

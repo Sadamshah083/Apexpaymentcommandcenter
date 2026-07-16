@@ -1060,6 +1060,25 @@ body.ghl-comm-mode .ghl-comm-app :is(h1, h2, h3, h4),
     overflow: hidden !important;
 }
 
+/* Notes open: allow the notes panel to show (override overflow:hidden) */
+.ch-dial-workspace--admin .ghl-dialer-active-screen.is-notes-open:not(.hidden),
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-active-screen.is-notes-open:not(.hidden),
+.ghl-dialer-active-screen.is-notes-open:not(.hidden) {
+    overflow: auto !important;
+    overflow-y: auto !important;
+}
+
+.ch-dial-workspace--admin .ghl-dialer-active-screen.is-notes-open .ghl-dialer-active-notes:not(.hidden),
+.ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-active-screen.is-notes-open .ghl-dialer-active-notes:not(.hidden),
+.ghl-dialer-active-screen.is-notes-open .ghl-dialer-active-notes:not(.hidden) {
+    display: block !important;
+    flex: 1 1 auto !important;
+    min-height: 7.5rem !important;
+    max-height: min(42vh, 16rem) !important;
+    overflow: auto !important;
+    margin-top: 0.35rem !important;
+}
+
 .ch-dial-workspace--admin .ghl-dialer-active-screen__tools,
 .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-active-screen__tools {
     flex-wrap: nowrap !important;
@@ -1078,8 +1097,38 @@ body.ghl-comm-mode .ghl-comm-app :is(h1, h2, h3, h4),
 .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-active-keypad {
     flex: 1 1 auto !important;
     min-height: 0 !important;
-    overflow-y: auto !important;
-    max-width: 15rem !important;
+    overflow: hidden !important;
+    overflow-y: hidden !important;
+    max-width: min(15rem, 100%) !important;
+}
+
+@media (max-height: 980px) {
+    .ch-dial-workspace--admin .ghl-dialer-active-keypad,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-active-keypad {
+        overflow: hidden !important;
+        overflow-y: hidden !important;
+        padding: 0.35rem 0.35rem 0.4rem !important;
+    }
+
+    .ch-dial-workspace--admin .ghl-dialer-active-screen:not(.hidden),
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-active-screen:not(.hidden) {
+        padding: 0.5rem 0.45rem 0.4rem !important;
+        gap: 0.28rem !important;
+    }
+
+    .ch-dial-workspace--admin .ghl-dialer-active-screen__end,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-active-screen__end {
+        width: 3rem !important;
+        height: 3rem !important;
+    }
+}
+
+@media (max-height: 860px) {
+    .ch-dial-workspace--admin .ghl-dialer-active-screen__end,
+    .ghl-comm-phone-mode .ch-dial-workspace--admin .ghl-dialer-active-screen__end {
+        width: 2.75rem !important;
+        height: 2.75rem !important;
+    }
 }
 
 .ch-dial-workspace--admin .ghl-dialer-active-screen__footer,
@@ -1745,6 +1794,28 @@ button.ghl-auto-dial-btn.hidden,
     letter-spacing: 0.02em;
 }
 
+.ghl-dialer-lead-row.is-connected-call {
+    background: #eff6ff !important;
+    box-shadow: inset 3px 0 0 #3b82f6;
+    border-bottom-color: #bfdbfe;
+}
+
+.ghl-dialer-lead-row.is-connected-call::after {
+    content: 'Connected';
+    grid-column: 1 / -1;
+    margin-top: -0.15rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #1d4ed8 !important;
+    letter-spacing: 0.02em;
+}
+
+.ghl-dialer-lead-row.is-connected-call .ghl-dialer-lead-name,
+.ghl-dialer-lead-row.is-connected-call .ghl-dialer-lead-number,
+.ghl-dialer-lead-row.is-connected-call .ghl-dialer-lead-contact {
+    color: #1e40af !important;
+}
+
 .ghl-dialer-lead-row.is-dialing .ghl-dialer-lead-name,
 .ghl-dialer-lead-row.is-dialing .ghl-dialer-lead-number,
 .ghl-dialer-lead-row.is-dialing .ghl-dialer-lead-contact {
@@ -1897,12 +1968,20 @@ button.ghl-auto-dial-btn.hidden,
 .ch-call-summary {
     position: fixed;
     inset: 0;
-    z-index: 10120;
+    z-index: 12050;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 1rem;
     pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.18s ease;
+}
+
+.ch-call-summary.is-visible,
+.ch-call-summary.is-opening {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 body.ch-call-summary-open {
@@ -1910,18 +1989,19 @@ body.ch-call-summary-open {
 }
 
 body > .ch-call-summary {
-    z-index: 10120;
+    z-index: 12050;
 }
 
 .ch-call-summary.hidden {
     display: none !important;
+    opacity: 0 !important;
 }
 
 .ch-call-summary__backdrop {
     position: absolute;
     inset: 0;
-    background: rgba(15, 23, 42, 0.42);
-    backdrop-filter: blur(2px);
+    background: rgba(15, 23, 42, 0.48);
+    backdrop-filter: blur(3px);
     pointer-events: auto;
 }
 
@@ -1942,6 +2022,13 @@ body > .ch-call-summary {
     padding: 0;
     pointer-events: auto;
     margin: 0 auto;
+    transform: translateY(10px) scale(0.98);
+    transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.ch-call-summary.is-visible .ch-call-summary__card,
+.ch-call-summary.is-opening .ch-call-summary__card {
+    transform: translateY(0) scale(1);
 }
 
 .ch-call-summary__header {
@@ -3468,13 +3555,21 @@ body.ghl-comm-mode .ghl-comm-topbar--dialer {
     white-space: pre-wrap;
 }
 
+.ghl-dialer-recent-field--disposition {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.4rem;
+    margin-top: 0.2rem;
+}
+
 .ghl-dialer-recent-field--disposition .ghl-dialer-recent-field__label {
-    color: #64748b;
+    color: #0f766e;
+    font-weight: 700;
 }
 
 .ghl-dialer-recent-field--disposition .ghl-dialer-recent-field__value {
-    color: #475569;
-    font-weight: 600;
+    color: #0f172a;
+    font-weight: 700;
 }
 
 /* ── Call logs + pad: clear borders + gray UI ───────────────────── */
@@ -4810,4 +4905,42 @@ body.ghl-comm-mode .ghl-dialer-backspace-btn,
     border-color: #6ee7b7 !important;
     background: #d1fae5 !important;
     color: #047857 !important;
+}
+
+/* Break In / Lunch controls (agent + team lead) */
+.ch-break-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-shrink: 0;
+    margin-left: 0.25rem;
+}
+.ch-break-controls__btn {
+    padding: 0.35rem 0.7rem;
+    font-size: 0.75rem;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+.ch-break-controls__status {
+    margin: 0;
+    padding: 0.3rem 0.55rem;
+    border-radius: 6px;
+    background: #dbeafe;
+    color: #1e3a8a;
+    font-size: 0.72rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.ch-break-controls.is-active[data-break-type="lunch"] .ch-break-controls__status,
+.ch-break-controls.is-active:has([data-break-end]:not(.hidden)) .ch-break-controls__status {
+    background: #dbeafe;
+    color: #1e3a8a;
+}
+body.ch-on-break .ch-break-controls__status {
+    background: #dbeafe;
+}
+body.ch-on-break .ghl-dialer-originate-form button[type="submit"],
+body.ch-on-break [id^="morpheus-dial-btn"] {
+    opacity: 0.55;
+    cursor: not-allowed;
 }

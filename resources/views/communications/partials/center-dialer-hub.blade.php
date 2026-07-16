@@ -3,12 +3,14 @@
     $compact = $compact ?? false;
     $autoDialer = (bool) ($hubAccess['canAutoDial'] ?? false);
     $canViewTeamRecordings = (bool) ($hubAccess['canViewTeamRecordings'] ?? false);
-    $isAgentDialer = ($hubAccess['tier'] ?? '') === 'agent';
+    $hubTier = (string) ($hubAccess['tier'] ?? '');
+    $isAgentDialer = $hubTier === 'agent';
+    $showBreakControls = in_array($hubTier, ['agent', 'team_lead'], true);
     $callLogsPerPage = (int) config('integrations.communications.list_page_size', 20);
     $allCallLogs = collect($callLogs ?? []);
     $recentLogs = $allCallLogs->take($callLogsPerPage);
     $liveCalls = collect($activeCalls ?? [])->take(5);
-    $hasMoreCallLogs = (bool) ($dialerCallLogsHasMore ?? $allCallLogs->count() > $callLogsPerPage);
+    $hasMoreCallLogs = (bool) ($dialerCallLogsHasMore ?? ($allCallLogs->isEmpty() || $allCallLogs->count() > $callLogsPerPage));
     $callLogsApiUrl = url((request()->is('admin*') ? '/admin' : '/portal') . '/communications/dialer/call-logs');
     $recordingSyncUrl = url((request()->is('admin*') ? '/admin' : '/portal') . '/communications/dialer/call-logs/recording/sync');
     $importedLeads = collect($dialerImportedLeads ?? []);
@@ -16,6 +18,9 @@
     $hasMoreImportedLeads = (bool) ($dialerImportedLeadsHasMore ?? $importedLeads->count() > $leadsPageSize);
     $importedLeadsApiUrl = $autoDialer ? route($routePrefix . 'communications.dialer.imported-leads') : '';
     $presenceUrl = route($routePrefix . 'communications.monitoring.presence');
+    $breakStatusUrl = $showBreakControls ? route($routePrefix . 'communications.monitoring.break.status') : '';
+    $breakStartUrl = $showBreakControls ? route($routePrefix . 'communications.monitoring.break.start') : '';
+    $breakEndUrl = $showBreakControls ? route($routePrefix . 'communications.monitoring.break.end') : '';
     $campaignOptions = collect($dialerCampaignOptions ?? []);
     $recordingLogs = $allCallLogs
         ->filter(fn ($log) => ! empty($log['has_recording_media']) && ! empty($log['recording_id']))
@@ -27,11 +32,17 @@
 <div class="ch-dial-workspace ch-dial-workspace--compact ghl-dialer-center {{ $compact ? 'ghl-dialer-center--compact' : '' }} {{ $autoDialer ? 'ch-dial-workspace--admin' : '' }}"
     data-phone-workspace
     data-presence-url="{{ $presenceUrl }}"
+    data-hub-tier="{{ $hubTier }}"
     data-phone-view="{{ $autoDialer ? 'logs' : 'dialer' }}"
     data-recording-role=""
     data-recording-sync-url="{{ $recordingSyncUrl }}"
-    @if ($autoDialer) data-auto-dial-hub data-imported-leads-url="{{ $importedLeadsApiUrl }}" @endif
-    @if ($isAgentDialer) data-agent-dialer="1" @endif>
+    @if ($autoDialer) data-auto-dial-hub data-imported-leads-url="{{ $importedLeadsApiUrl }}" data-next-call-delay-sec="{{ (int) config('integrations.communications.next_call_delay_sec', 6) }}" @endif
+    @if ($isAgentDialer) data-agent-dialer="1" @endif
+    @if ($showBreakControls)
+        data-break-status-url="{{ $breakStatusUrl }}"
+        data-break-start-url="{{ $breakStartUrl }}"
+        data-break-end-url="{{ $breakEndUrl }}"
+    @endif>
     <div class="ch-dial-workspace__toolbar">
         <div class="ch-dial-workspace__nav" data-phone-workspace-nav>
             @if ($autoDialer)
@@ -73,6 +84,23 @@
                         role="tab" aria-selected="false" aria-controls="ghl-phone-dial-pane-center">Dial pad</button>
                 @endif
             </div>
+            @if ($showBreakControls)
+                <div class="ch-break-controls" data-break-controls>
+                    <button type="button" class="ch-btn ch-btn--secondary ch-break-controls__btn" data-break-start="break">
+                        Break In
+                    </button>
+                    <button type="button" class="ch-btn ch-btn--secondary ch-break-controls__btn" data-break-start="lunch">
+                        Lunch
+                    </button>
+                    <button type="button" class="ch-btn ch-btn--primary ch-break-controls__btn hidden" data-break-end>
+                        Break Out
+                    </button>
+                    <p class="ch-break-controls__status hidden" data-break-status aria-live="polite">
+                        <span data-break-status-label></span>
+                        <span data-break-countdown></span>
+                    </p>
+                </div>
+            @endif
         </div>
         @if ($autoDialer)
             <p class="ch-auto-dial-countdown hidden" data-auto-dial-countdown aria-live="polite">
@@ -126,7 +154,7 @@
                             'routePrefix' => $routePrefix,
                         ])
                     @empty
-                        <p class="ghl-dialer-recent-empty" data-call-logs-empty>No recent calls yet.</p>
+                        <p class="ghl-dialer-recent-empty" data-call-logs-empty>Loading recent calls…</p>
                     @endforelse
                 </div>
 

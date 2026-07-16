@@ -245,6 +245,7 @@ class CommunicationsAccessService
             'canAutoDial' => $this->canAutoDial($user, $routePrefix),
             'canViewTeamRecordings' => $this->canViewTeamRecordings($user, $routePrefix),
             'canViewCallMonitoring' => $this->canViewCallMonitoring($user, $routePrefix),
+            'canUseBreakLunch' => $this->isAgentTier($user, $routePrefix),
             'roleLabel' => $this->roleLabel($tier),
         ];
     }

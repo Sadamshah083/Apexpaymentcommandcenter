@@ -57,8 +57,8 @@
 @if ($user?->canAccessPortalModule('communications', $user?->current_workspace_id))
     <x-sidebar.section title="Communications">
         <x-sidebar.link :href="route('portal.communications.index')" label="Communications" icon-name="phone"
-            :exclude-prefixes="['/portal/communications/monitoring', '/portal/communications/notes']"
-            :active="request()->routeIs('portal.communications.*') && ! request()->routeIs('portal.communications.monitoring*', 'portal.communications.notes')">
+            :exclude-prefixes="['/portal/communications/monitoring', '/portal/communications/notes', '/portal/communications/agent-status']"
+            :active="request()->routeIs('portal.communications.*') && ! request()->routeIs('portal.communications.monitoring*', 'portal.communications.notes', 'portal.communications.agent-status*')">
             <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'phone'])</x-slot:icon>
         </x-sidebar.link>
         <x-sidebar.link :href="route('portal.communications.notes')" label="Call Notes" icon-name="notes"
@@ -68,7 +68,7 @@
         @if (app(\App\Services\Communications\CommunicationsAccessService::class)->canViewCallMonitoring($user, 'portal.'))
             <x-sidebar.link
                 :href="route('portal.communications.monitoring')"
-                label="Call Monitoring"
+                label="Team Lead Status"
                 icon-name="phone"
                 :active="request()->routeIs('portal.communications.monitoring*')"
                 data-call-monitoring-nav
@@ -79,6 +79,13 @@
                     <span class="sidebar-live-chip sidebar-live-chip--pink is-empty" title="Active in call" data-call-monitoring-nav-incall hidden>0</span>
                     <span class="sidebar-live-chip sidebar-live-chip--blue is-empty" title="Ringing" data-call-monitoring-nav-waiting hidden>0</span>
                 </x-slot:badge>
+            </x-sidebar.link>
+            <x-sidebar.link
+                :href="route('portal.communications.agent-status')"
+                label="Agent Status"
+                icon-name="notes"
+                :active="request()->routeIs('portal.communications.agent-status*')">
+                <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'notes'])</x-slot:icon>
             </x-sidebar.link>
         @endif
     </x-sidebar.section>

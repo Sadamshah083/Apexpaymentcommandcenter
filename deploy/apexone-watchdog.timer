@@ -1,0 +1,13 @@
+[Unit]
+Description=Run ApexOne stack watchdog every 30 seconds
+Requires=apexone-watchdog.service
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Persistent=true
+Unit=apexone-watchdog.service
+
+[Install]
+WantedBy=timers.target

@@ -23,6 +23,57 @@ class CallMonitoringService
     ) {}
 
     /**
+     * Prefer the active workspace; if it has no monitorable agents, fall back to another
+     * membership (or any workspace for admins) that has a Call Monitoring roster.
+     */
+    public function resolveWorkspaceForMonitoring(?\App\Models\User $user = null, ?Workspace $preferred = null): ?Workspace
+    {
+        $user = $user ?: Auth::user();
+        $preferred = $preferred ?: ($user ? $this->workspaceContext->resolveActiveWorkspace($user) : null);
+        if (! $preferred) {
+            return null;
+        }
+
+        try {
+            if ($this->agents->listMonitorableDirectory($preferred) !== []) {
+                return $preferred;
+            }
+        } catch (\Throwable) {
+            // Fall through to alternate workspaces.
+        }
+
+        $candidates = collect();
+        if ($user) {
+            try {
+                $candidates = $user->workspaces()
+                    ->wherePivot('status', 'active')
+                    ->get();
+            } catch (\Throwable) {
+                $candidates = collect();
+            }
+        }
+
+        if ($candidates->isEmpty() && $user && method_exists($user, 'canAccessAdminPortal') && $user->canAccessAdminPortal()) {
+            $candidates = Workspace::query()->orderBy('id')->get();
+        }
+
+        foreach ($candidates as $candidate) {
+            if ((int) $candidate->id === (int) $preferred->id) {
+                continue;
+            }
+            try {
+                if ($this->agents->listMonitorableDirectory($candidate) !== []) {
+                    return $candidate;
+                }
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+
+        return $preferred;
+    }
+
+    /**
      * @return array{
      *   ok: bool,
      *   generated_at: string,
@@ -35,7 +86,9 @@ class CallMonitoringService
     public function snapshot(?Workspace $workspace = null, bool $light = false, bool $probeConnected = false): array
     {
         $user = Auth::user();
-        $workspace = $workspace ?: ($user ? $this->workspaceContext->resolveActiveWorkspace($user) : null);
+        $workspace = $workspace
+            ? $this->resolveWorkspaceForMonitoring($user instanceof \App\Models\User ? $user : null, $workspace)
+            : $this->resolveWorkspaceForMonitoring($user instanceof \App\Models\User ? $user : null);
         $warnings = [];
 
         // Drop abandoned ringing / missed-hangup connected states before painting the board.
@@ -47,6 +100,7 @@ class CallMonitoringService
         }
 
         $agentsByExt = collect();
+        $monitorRoster = [];
         $excludedExtensions = [];
         $excludedUserIds = [];
         if ($workspace) {
@@ -56,7 +110,15 @@ class CallMonitoringService
                     ? $this->agents->listLocalExtensionDirectory($workspace)
                     : $this->agents->listForWorkspace($workspace);
 
-                foreach ($agents as $agent) {
+                // Always load the full monitorable roster (extension optional) so Admin / Team Lead
+                // still see NOT LOGGED IN agents with real usernames when nobody is on a call.
+                try {
+                    $monitorRoster = $this->agents->listMonitorableDirectory($workspace);
+                } catch (\Throwable) {
+                    $monitorRoster = [];
+                }
+
+                foreach (array_merge($agents, $monitorRoster) as $agent) {
                     if (! is_array($agent)) {
                         continue;
                     }
@@ -85,10 +147,47 @@ class CallMonitoringService
                     ))
                     ->filter(fn (array $a) => AgentPresenceService::isMonitorableRole((string) ($a['role'] ?? '')))
                     ->keyBy(fn (array $a) => preg_replace('/\D/', '', (string) $a['morpheus_extension_num']));
+
+                // Prefer richer Morpheus-backed agent rows when available; fill gaps from roster.
+                if ($monitorRoster !== []) {
+                    $byUser = collect($agents)->keyBy(fn (array $a) => (int) ($a['user_id'] ?? 0));
+                    foreach ($monitorRoster as $rosterAgent) {
+                        $uid = (int) ($rosterAgent['user_id'] ?? 0);
+                        if ($uid <= 0 || $byUser->has($uid)) {
+                            continue;
+                        }
+                        $byUser->put($uid, $rosterAgent);
+                    }
+                    // Keep agentsByExt keyed by extension for live-call matching.
+                    foreach ($byUser as $agentRow) {
+                        if (! is_array($agentRow)) {
+                            continue;
+                        }
+                        $ext = preg_replace('/\D/', '', (string) ($agentRow['morpheus_extension_num'] ?? '')) ?? '';
+                        if ($ext === '' || $agentsByExt->has($ext)) {
+                            continue;
+                        }
+                        if (! AgentPresenceService::isMonitorableRole((string) ($agentRow['role'] ?? ''))) {
+                            continue;
+                        }
+                        if (AgentPresenceService::isExcludedFromMonitoring(
+                            (string) ($agentRow['role'] ?? ''),
+                            (string) ($agentRow['role_label'] ?? ''),
+                        )) {
+                            continue;
+                        }
+                        $agentsByExt->put($ext, $agentRow);
+                    }
+                }
             } catch (\Throwable $e) {
                 $warnings[] = 'Could not load workspace agents.';
             }
         }
+
+        // Roster used for idle / offline / break enrichment (always includes names).
+        $rosterAgents = $monitorRoster !== []
+            ? $monitorRoster
+            : $agentsByExt->values()->all();
 
         $activeCalls = [];
         if (! $light) {
@@ -140,7 +239,9 @@ class CallMonitoringService
             }
         }
 
-        $rows = $this->rejectExcludedMonitoringRows($this->dedupeRows(array_values($rowsById)));
+        $rows = $this->rejectExcludedMonitoringRows(
+            $this->dedupeByAgent($this->dedupeRows(array_values($rowsById)))
+        );
 
         usort($rows, function (array $a, array $b) {
             $rank = ['incall' => 0, 'queue' => 1, 'ringing' => 2, 'waiting' => 2, 'dead' => 3];
@@ -162,12 +263,29 @@ class CallMonitoringService
 
         $notInCall = [];
         $disposition = [];
+        $onBreak = [];
+        $onLunch = [];
         $notLoggedIn = [];
         $deadRecent = [];
         if ($workspace) {
             try {
+                $breakRows = $this->rejectExcludedMonitoringRows(
+                    $this->buildBreakLunchRows($workspace, $rosterAgents, $rows)
+                );
+                foreach ($breakRows as $breakRow) {
+                    if (($breakRow['bucket'] ?? '') === 'lunch') {
+                        $onLunch[] = $breakRow;
+                    } else {
+                        $onBreak[] = $breakRow;
+                    }
+                }
+            } catch (\Throwable) {
+                $warnings[] = 'Could not load break/lunch agents.';
+            }
+
+            try {
                 $notInCall = $this->rejectExcludedMonitoringRows(
-                    $this->buildNotInCallRows($workspace, $agentsByExt->values()->all(), $rows)
+                    $this->buildNotInCallRows($workspace, $rosterAgents, $rows)
                 );
             } catch (\Throwable) {
                 $warnings[] = 'Could not load idle agents.';
@@ -175,19 +293,38 @@ class CallMonitoringService
 
             try {
                 $disposition = $this->rejectExcludedMonitoringRows(
-                    $this->buildDispositionRows($workspace, $agentsByExt->values()->all(), $rows)
+                    $this->buildDispositionRows($workspace, $rosterAgents, $rows)
                 );
             } catch (\Throwable) {
                 $warnings[] = 'Could not load disposition agents.';
+            }
+
+            // DB break/lunch wins over presence-derived idle/disposition rows.
+            $breakUserIds = [];
+            foreach (array_merge($onBreak, $onLunch) as $breakRow) {
+                $uid = (int) ($breakRow['user_id'] ?? 0);
+                if ($uid > 0) {
+                    $breakUserIds[$uid] = true;
+                }
+            }
+            if ($breakUserIds !== []) {
+                $notInCall = array_values(array_filter(
+                    $notInCall,
+                    static fn (array $row): bool => ! isset($breakUserIds[(int) ($row['user_id'] ?? 0)])
+                ));
+                $disposition = array_values(array_filter(
+                    $disposition,
+                    static fn (array $row): bool => ! isset($breakUserIds[(int) ($row['user_id'] ?? 0)])
+                ));
             }
 
             try {
                 $notLoggedIn = $this->rejectExcludedMonitoringRows(
                     $this->buildNotLoggedInRows(
                         $workspace,
-                        $agentsByExt->values()->all(),
+                        $rosterAgents,
                         $rows,
-                        $notInCall,
+                        array_merge($notInCall, $onBreak, $onLunch),
                         $disposition
                     )
                 );
@@ -217,8 +354,10 @@ class CallMonitoringService
         $dead = count($deadRows);
         $notInCallCount = count($notInCall);
         $dispositionCount = count($disposition);
+        $breakCount = count($onBreak);
+        $lunchCount = count($onLunch);
         $notLoggedInCount = count($notLoggedIn);
-        $loggedInCount = $notInCallCount + $dispositionCount + count($rows);
+        $loggedInCount = $notInCallCount + $dispositionCount + $breakCount + $lunchCount + count($rows);
 
         // Attach dial mode onto live rows when presence knows it.
         $rows = $this->attachDialModeToLiveRows($workspace, $rows);
@@ -242,6 +381,8 @@ class CallMonitoringService
                 'queue' => $queue,
                 'dead' => $dead,
                 'disposition' => $dispositionCount,
+                'break' => $breakCount,
+                'lunch' => $lunchCount,
                 'not_in_call' => $notInCallCount,
                 'logged_in' => $loggedInCount,
                 'not_logged_in' => $notLoggedInCount,
@@ -255,6 +396,8 @@ class CallMonitoringService
                 'queue' => collect($rows)->where('bucket', 'queue')->values()->all(),
                 'dead' => $deadRows,
                 'disposition' => $disposition,
+                'break' => $onBreak,
+                'lunch' => $onLunch,
                 'not_in_call' => $notInCall,
                 'not_logged_in' => $notLoggedIn,
             ],
@@ -617,10 +760,13 @@ class CallMonitoringService
             return null;
         }
 
-        $userName = (string) (
-            $local['agent_name']
-            ?? ($agent['name'] ?? null)
-            ?? (filled($extension) ? 'Ext '.$extension : 'Unknown')
+        $userName = $this->resolveAgentDisplayName(
+            is_array($agent) ? $agent : null,
+            [
+                'name' => $local['agent_name'] ?? null,
+                'email' => $local['agent_email'] ?? null,
+            ],
+            $extension
         );
 
         return [
@@ -642,6 +788,45 @@ class CallMonitoringService
             'under_two_minutes' => $statusGroup === 'incall' && $timerSec <= 120,
             'connected_at' => $input['connected_at'] ?? null,
         ];
+    }
+
+    /**
+     * Prefer a real workspace display name over stale/blank call-log or presence labels.
+     *
+     * @param  array<string, mixed>|null  $agent
+     * @param  array<string, mixed>|null  $fallback
+     */
+    protected function resolveAgentDisplayName(?array $agent, ?array $fallback = null, ?string $extension = null): string
+    {
+        $candidates = [
+            $agent['name'] ?? null,
+            $agent['morpheus_username'] ?? null,
+            $agent['caller_id_name'] ?? null,
+            $fallback['name'] ?? null,
+            $agent['email'] ?? null,
+            $fallback['email'] ?? null,
+        ];
+
+        foreach ($candidates as $candidate) {
+            $name = trim((string) $candidate);
+            if ($name === '') {
+                continue;
+            }
+            if (strcasecmp($name, 'Agent') === 0 || strcasecmp($name, 'Unknown') === 0) {
+                continue;
+            }
+            if (str_contains($name, '@')) {
+                $local = strstr($name, '@', true);
+
+                return ($local !== false && $local !== '') ? $local : $name;
+            }
+
+            return $name;
+        }
+
+        $ext = preg_replace('/\D/', '', (string) ($extension ?? $agent['morpheus_extension_num'] ?? '')) ?? '';
+
+        return $ext !== '' ? 'Ext '.$ext : 'Unknown';
     }
 
     /**
@@ -833,6 +1018,74 @@ class CallMonitoringService
         return array_values($best);
     }
 
+    /**
+     * One live row per agent/station — old destination legs must not duplicate INCALL rows.
+     *
+     * @param  array<int, array<string, mixed>>  $rows
+     * @return array<int, array<string, mixed>>
+     */
+    protected function dedupeByAgent(array $rows): array
+    {
+        $liveGroups = ['incall', 'ringing', 'waiting', 'queue'];
+        $bestByAgent = [];
+        $passthrough = [];
+
+        foreach ($rows as $row) {
+            $group = (string) ($row['status_group'] ?? '');
+            if (! in_array($group, $liveGroups, true)) {
+                $passthrough[] = $row;
+                continue;
+            }
+
+            $uid = (int) ($row['user_id'] ?? 0);
+            $ext = preg_replace('/\D/', '', (string) ($row['station'] ?? $row['extension'] ?? '')) ?? '';
+            $key = $uid > 0 ? ('user:'.$uid) : ($ext !== '' ? ('ext:'.$ext) : '');
+            if ($key === '') {
+                $passthrough[] = $row;
+                continue;
+            }
+
+            if (! isset($bestByAgent[$key])) {
+                $bestByAgent[$key] = $row;
+                continue;
+            }
+
+            $bestByAgent[$key] = $this->preferFreshestLiveRow($bestByAgent[$key], $row);
+        }
+
+        return array_values(array_merge(array_values($bestByAgent), $passthrough));
+    }
+
+    /**
+     * Prefer the newest live leg when the same agent appears on multiple destinations.
+     *
+     * @param  array<string, mixed>  $a
+     * @param  array<string, mixed>  $b
+     * @return array<string, mixed>
+     */
+    protected function preferFreshestLiveRow(array $a, array $b): array
+    {
+        $rank = ['incall' => 0, 'queue' => 1, 'ringing' => 2, 'waiting' => 2];
+        $ra = $rank[$a['status_group'] ?? ''] ?? 9;
+        $rb = $rank[$b['status_group'] ?? ''] ?? 9;
+
+        if ($rb < $ra) {
+            return $this->preferRow($b, $a);
+        }
+        if ($ra < $rb) {
+            return $this->preferRow($a, $b);
+        }
+
+        // Same status: keep the shorter timer (newer call), not the ghost older leg.
+        $ta = (int) ($a['timer_sec'] ?? 0);
+        $tb = (int) ($b['timer_sec'] ?? 0);
+        if ($tb > 0 && ($ta === 0 || $tb < $ta)) {
+            return $this->preferRow($b, $a);
+        }
+
+        return $this->preferRow($a, $b);
+    }
+
     protected function legKey(string $stationOrExt, string $destination): string
     {
         $ext = preg_replace('/\D/', '', $stationOrExt) ?? '';
@@ -932,11 +1185,15 @@ class CallMonitoringService
             if ($userId <= 0 || isset($busyUserIds[$userId])) {
                 continue;
             }
-            if (($entry['on_call'] ?? false) === true) {
-                continue;
-            }
+            // Do not skip stale on_call here — without a live row the agent would vanish.
+            // Real live calls are already covered by $busyUserIds above.
             // Agents wrapping up a call belong on the Disposition board, not Not in call.
             if (($entry['in_disposition'] ?? false) === true) {
+                continue;
+            }
+            // Break / lunch agents belong on the Break board.
+            $breakStatus = strtolower((string) ($entry['break_status'] ?? 'none'));
+            if (in_array($breakStatus, ['break', 'lunch'], true)) {
                 continue;
             }
 
@@ -984,7 +1241,11 @@ class CallMonitoringService
                 'id' => 'idle:'.$userId,
                 'station' => $ext !== '' ? $ext : '—',
                 'extension' => $ext,
-                'user' => (string) ($entry['name'] ?? $agent['name'] ?? 'Agent'),
+                'user' => $this->resolveAgentDisplayName(
+                    is_array($agent) ? $agent : null,
+                    ['name' => $entry['name'] ?? null],
+                    $ext
+                ),
                 'user_id' => $userId,
                 'role_label' => (string) ($entry['role_label'] ?? $agent['role_label'] ?? \App\Support\SalesOps::roleLabel($role)),
                 'status' => 'NOT IN CALL',
@@ -1076,18 +1337,18 @@ class CallMonitoringService
 
             $userId = (int) ($agent['user_id'] ?? 0);
             $ext = preg_replace('/\D/', '', (string) ($agent['morpheus_extension_num'] ?? '')) ?? '';
-            if ($ext === '') {
+            if ($userId > 0 && isset($occupiedUserIds[$userId])) {
                 continue;
             }
-            if (($userId > 0 && isset($occupiedUserIds[$userId])) || isset($occupiedExts[$ext])) {
+            if ($ext !== '' && isset($occupiedExts[$ext])) {
                 continue;
             }
 
             $rows[] = [
-                'id' => 'offline:'.($userId > 0 ? $userId : $ext),
-                'station' => $ext,
+                'id' => 'offline:'.($userId > 0 ? $userId : ($ext !== '' ? $ext : md5(json_encode($agent)))),
+                'station' => $ext !== '' ? $ext : '—',
                 'extension' => $ext,
-                'user' => (string) ($agent['name'] ?? 'Agent'),
+                'user' => $this->resolveAgentDisplayName(is_array($agent) ? $agent : null, null, $ext !== '' ? $ext : null),
                 'user_id' => $userId,
                 'role_label' => $label !== '' ? $label : \App\Support\SalesOps::roleLabel($role),
                 'status' => 'NOT LOGGED IN',
@@ -1144,12 +1405,17 @@ class CallMonitoringService
                 continue;
             }
 
+            $breakStatus = strtolower((string) ($entry['break_status'] ?? 'none'));
+            if (in_array($breakStatus, ['break', 'lunch'], true)) {
+                continue;
+            }
+
             $userId = (int) ($entry['user_id'] ?? 0);
             if ($userId <= 0) {
                 continue;
             }
-            // Still live-talking overrides wrap-up state.
-            if (isset($busyUserIds[$userId]) || ($entry['on_call'] ?? false) === true) {
+            // Still live-talking overrides wrap-up state (matched live row only).
+            if (isset($busyUserIds[$userId])) {
                 continue;
             }
 
@@ -1174,7 +1440,11 @@ class CallMonitoringService
                 'id' => 'disposition:'.$userId,
                 'station' => $ext !== '' ? $ext : '—',
                 'extension' => $ext,
-                'user' => (string) ($entry['name'] ?? $agent['name'] ?? 'Agent'),
+                'user' => $this->resolveAgentDisplayName(
+                    is_array($agent) ? $agent : null,
+                    ['name' => $entry['name'] ?? null],
+                    $ext
+                ),
                 'user_id' => $userId,
                 'role_label' => (string) ($entry['role_label'] ?? $agent['role_label'] ?? \App\Support\SalesOps::roleLabel($role)),
                 'status' => 'DISPOSITION',
@@ -1191,6 +1461,96 @@ class CallMonitoringService
                 'under_two_minutes' => false,
                 'connected_at' => null,
                 'idle_since' => $since,
+            ];
+        }
+
+        usort($rows, static fn (array $a, array $b) => ($b['timer_sec'] ?? 0) <=> ($a['timer_sec'] ?? 0));
+
+        return $rows;
+    }
+
+    /**
+     * Agents currently on Break (5m) or Lunch (30m) — DB-backed.
+     *
+     * @param  array<int, array<string, mixed>>  $agents
+     * @param  array<int, array<string, mixed>>  $liveRows
+     * @return array<int, array<string, mixed>>
+     */
+    protected function buildBreakLunchRows(Workspace $workspace, array $agents, array $liveRows): array
+    {
+        $sessions = app(AgentBreakService::class)->activeSessions($workspace);
+        if ($sessions === []) {
+            return [];
+        }
+
+        $busyUserIds = [];
+        foreach ($liveRows as $row) {
+            if (in_array(($row['status_group'] ?? ''), ['incall', 'ringing', 'waiting', 'queue'], true)) {
+                $uid = (int) ($row['user_id'] ?? 0);
+                if ($uid > 0) {
+                    $busyUserIds[$uid] = true;
+                }
+            }
+        }
+
+        $agentsByUser = collect($agents)->keyBy(fn (array $a) => (int) ($a['user_id'] ?? 0));
+        $presenceByUser = collect(app(AgentPresenceService::class)->listOnline($workspace))
+            ->keyBy(fn (array $e) => (int) ($e['user_id'] ?? 0));
+
+        $rows = [];
+        foreach ($sessions as $session) {
+            $userId = (int) $session->user_id;
+            if ($userId <= 0 || isset($busyUserIds[$userId])) {
+                continue;
+            }
+
+            $agent = $agentsByUser->get($userId) ?: [];
+            $presence = $presenceByUser->get($userId) ?: [];
+            $role = (string) ($presence['role'] ?? $agent['role'] ?? '');
+            if ($role !== '' && ! AgentPresenceService::isMonitorableRole($role)) {
+                continue;
+            }
+
+            $ext = preg_replace('/\D/', '', (string) ($presence['extension'] ?? $agent['morpheus_extension_num'] ?? '')) ?? '';
+            $startedAt = $session->started_at?->utc()?->toIso8601String() ?? now()->utc()->toIso8601String();
+            $endsAt = $session->ends_at?->utc()?->toIso8601String();
+            $timerSec = max(0, (int) ($session->started_at ? now()->getTimestamp() - $session->started_at->getTimestamp() : 0));
+            $remaining = max(0, (int) ($session->ends_at ? $session->ends_at->getTimestamp() - time() : 0));
+            $isLunch = $session->type === \App\Models\AgentActivitySession::TYPE_LUNCH;
+            $label = $isLunch ? 'LUNCH' : 'BREAK';
+            $bucket = $isLunch ? 'lunch' : 'break';
+
+            $rows[] = [
+                'id' => $bucket.':'.$userId,
+                'station' => $ext !== '' ? $ext : '—',
+                'extension' => $ext,
+                'user' => $this->resolveAgentDisplayName(
+                    is_array($agent) ? $agent : null,
+                    [
+                        'name' => $session->user?->name ?? ($presence['name'] ?? null),
+                    ],
+                    $ext
+                ),
+                'user_id' => $userId,
+                'role_label' => (string) ($presence['role_label'] ?? $agent['role_label'] ?? \App\Support\SalesOps::roleLabel($role)),
+                'status' => $label,
+                'status_group' => $bucket,
+                'bucket' => $bucket,
+                'timer_sec' => $timerSec,
+                'timer_label' => $this->formatTimer($timerSec),
+                'remaining_sec' => $remaining,
+                'campaign' => '—',
+                'destination' => $remaining > 0
+                    ? (($isLunch ? 'Lunch · 30 min' : 'Break · 5 min').' · Ends in '.$this->formatTimer($remaining))
+                    : (($isLunch ? 'Lunch' : 'Break').' · Ending…'),
+                'dial_mode' => strtolower((string) ($presence['dial_mode'] ?? 'manual')) === 'auto' ? 'auto' : 'manual',
+                'dial_mode_label' => $isLunch ? 'Lunch' : 'Break',
+                'direction' => '',
+                'color' => $bucket,
+                'under_two_minutes' => false,
+                'connected_at' => null,
+                'idle_since' => $startedAt,
+                'break_ends_at' => $endsAt,
             ];
         }
 

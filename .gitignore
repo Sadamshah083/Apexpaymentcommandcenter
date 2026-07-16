@@ -33,3 +33,5 @@ Thumbs.db
 /reports/
 /deploy/__pycache__/
 .env.ci-test
+
+/deploy/_migrate_staging/

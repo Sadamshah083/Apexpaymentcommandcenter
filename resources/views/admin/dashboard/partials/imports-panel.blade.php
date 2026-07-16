@@ -13,7 +13,7 @@
                 <h3 class="admin-dash-section-title">Import leads</h3>
                 <p class="admin-dash-section-desc">Upload files under campaigns, enrich, and assign to your team.</p>
             </div>
-            <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-primary app-btn-sm shrink-0" data-turbo-preload data-import-file-nav>Import leads</a>
+            <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-success app-btn-sm shrink-0" data-turbo-preload data-import-file-nav>Import leads</a>
         </div>
 
         @if (isset($enrichmentStatus))
@@ -24,7 +24,7 @@
             <div class="app-empty-state">
                 <p class="app-empty-state-title">No imports yet</p>
                 <p class="app-empty-state-desc">Create a campaign and upload your first file.</p>
-                <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-primary app-btn-sm mt-4" data-turbo-preload data-import-file-nav>Import leads</a>
+                <a href="{{ route('admin.workflows.create') }}" class="app-btn app-btn-success app-btn-sm mt-4" data-turbo-preload data-import-file-nav>Import leads</a>
             </div>
         @else
             <x-data-table :paginator="$importsWorkflows" min-width="1080px" class="import-workflows-data-table">
@@ -90,7 +90,7 @@
                                 </td>
                                 <td>
                                     @if ($canAssign)
-                                        <button type="button" class="app-btn app-btn-primary app-btn-sm import-assign-btn"
+                                        <button type="button" class="app-btn app-btn-success app-btn-sm import-assign-btn"
                                             data-import-assign-open data-workflow-id="{{ $wf->id }}"
                                             data-workflow-name="{{ $wf->name }}" data-workflow-total="{{ $totalLeads }}"
                                             data-workflow-enriched="{{ $enrichedCount }}"
