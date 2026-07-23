@@ -9,14 +9,23 @@
                 <h1 class="app-page-title">Appointment Setter Team</h1>
                 <p class="app-page-subtitle">Assign enriched leads to setters and monitor team progress.</p>
             </div>
-            <button type="button" class="app-btn app-btn-primary" data-assign-leads-open>
-                Assign leads
-            </button>
+            <div class="flex items-center gap-2 flex-wrap">
+                <button type="button" class="app-btn app-btn-secondary" data-assign-leads-open data-assign-selected-open disabled>
+                    Assign selected
+                </button>
+                <button type="button" class="app-btn app-btn-primary" data-assign-leads-open>
+                    Assign leads
+                </button>
+            </div>
         </div>
 
         @include('pipeline.partials.dashboard-widgets', ['dashboard' => $dashboard ?? []])
 
-        @include('pipeline.partials.campaigns-overview', ['campaigns' => $campaigns ?? collect(), 'dashboard' => $dashboard ?? []])
+        @include('pipeline.partials.campaigns-overview', [
+            'campaigns' => $campaigns ?? collect(),
+            'dashboard' => $dashboard ?? [],
+            'campaignKpis' => $campaignKpis ?? [],
+        ])
 
         @include('pipeline.partials.portal-sync-context', ['portalView' => 'setter_team', 'leads' => $leads])
 
@@ -24,7 +33,7 @@
 
         <div id="portal-unassigned-alert" class="app-alert app-alert-info {{ ($unassignedLeads ?? 0) > 0 ? '' : 'hidden' }}">
             <p class="app-alert-title"><span id="portal-unassigned-count">{{ number_format($unassignedLeads ?? 0) }}</span> unassigned lead(s) ready for distribution</p>
-            <p class="app-alert-desc">Use Assign leads to choose how many go to each setter.</p>
+            <p class="app-alert-desc">Select leads in the table, or use Assign leads to distribute by count.</p>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -81,6 +90,7 @@
                 'showAssignee' => true,
                 'readOnly' => true,
                 'liveSync' => true,
+                'selectable' => true,
             ])
         </div>
     </div>

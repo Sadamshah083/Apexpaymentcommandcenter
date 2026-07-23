@@ -8,6 +8,7 @@ use App\Services\Communications\MorpheusHubService;
 use App\Services\Communications\ZoomClickToCallService;
 use App\Services\Integrations\ZoomApiService;
 use App\Support\MorpheusSipIdentity;
+use Illuminate\Support\Facades\Cache;
 
 class CommunicationsWebphoneService
 {
@@ -97,6 +98,11 @@ class CommunicationsWebphoneService
         }
 
         $normalized = preg_replace('/\D/', '', $extensionNum) ?: $extensionNum;
+        $cacheKey = 'webphone.prepare.ok.'.$workspace->id.'.'.$normalized;
+        if (Cache::get($cacheKey) === true) {
+            return ['ok' => true, 'message' => 'Browser phone already prepared.', 'cached' => true];
+        }
+
         $ext = $this->resolveExtension($user, $workspace, $normalized);
         $did = $this->configuredOutboundDidDigits();
         $warning = null;
@@ -121,7 +127,6 @@ class CommunicationsWebphoneService
             }
         }
 
-        $authUser = $this->sipAuthUser($normalized);
         $morpheusUser = null;
         if ($ext !== null && ! empty($ext['user_id'])) {
             $morpheusUser = $this->morpheus->getUser((string) $ext['user_id']);
@@ -136,7 +141,8 @@ class CommunicationsWebphoneService
             }
         }
 
-        app(MorpheusHubService::class)->bustCache();
+        // Avoid hub-wide cache bust on every Connect line — it forced expensive reloads.
+        Cache::put($cacheKey, true, now()->addMinutes(45));
 
         if ($warning) {
             return [

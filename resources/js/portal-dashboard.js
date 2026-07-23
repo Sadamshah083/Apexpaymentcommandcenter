@@ -278,7 +278,7 @@ export function initPortalDashboard() {
             stopPortalDashboardPoll = startPoll(
                 liveUrl,
                 (payload) => applyPortalLivePayload(payload),
-                { activeMs: 5000, hiddenMs: 15000 },
+                { activeMs: 20000, hiddenMs: 60000 },
             );
         }
         return;
@@ -296,6 +296,6 @@ export function initPortalDashboard() {
     stopPortalDashboardPoll = startPoll(
         url,
         (payload) => updatePortalDashboard(payload),
-        { activeMs: 5000, hiddenMs: 15000 },
+        { activeMs: 20000, hiddenMs: 60000 },
     );
 }

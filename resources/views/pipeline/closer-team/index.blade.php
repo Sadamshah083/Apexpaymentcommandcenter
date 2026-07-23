@@ -18,7 +18,11 @@
 
         @include('pipeline.partials.dashboard-widgets', ['dashboard' => $dashboard ?? []])
 
-        @include('pipeline.partials.campaigns-overview', ['campaigns' => $campaigns ?? collect(), 'dashboard' => $dashboard ?? []])
+        @include('pipeline.partials.campaigns-overview', [
+            'campaigns' => $campaigns ?? collect(),
+            'dashboard' => $dashboard ?? [],
+            'campaignKpis' => $campaignKpis ?? [],
+        ])
 
         @include('pipeline.partials.portal-sync-context', ['portalView' => 'closer_team', 'leads' => $leads])
 

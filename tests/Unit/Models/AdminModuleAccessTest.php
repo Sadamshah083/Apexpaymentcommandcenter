@@ -64,6 +64,7 @@ class AdminModuleAccessTest extends TestCase
     public function test_admin_modules_route_resolution(): void
     {
         $this->assertSame('lead_pipeline', AdminModules::moduleForRoute('admin.workflows.index'));
+        $this->assertSame('lead_pipeline', AdminModules::moduleForRoute('admin.assigned-leads'));
         $this->assertSame('email_lists', AdminModules::moduleForRoute('admin.lists.show'));
         $this->assertNull(AdminModules::moduleForRoute('admin.sync.poll'));
     }

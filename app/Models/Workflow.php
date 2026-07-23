@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Workflow extends Model
@@ -11,6 +12,8 @@ class Workflow extends Model
     protected $fillable = [
         'workspace_id',
         'campaign_id',
+        'import_tags',
+        'import_segment',
         'lead_list_id',
         'name',
         'status',
@@ -30,6 +33,7 @@ class Workflow extends Model
         'verification_toggles',
         'distribution_users',
         'auto_assign_setters',
+        'agent_restricted',
         'distribution_cursor',
         'ingestion_row_offset',
         'ingestion_complete',
@@ -38,9 +42,11 @@ class Workflow extends Model
     protected $casts = [
         'sheets' => 'array',
         'column_mapping' => 'array',
+        'import_tags' => 'array',
         'verification_toggles' => 'array',
         'distribution_users' => 'array',
         'auto_assign_setters' => 'boolean',
+        'agent_restricted' => 'boolean',
         'ingestion_complete' => 'boolean',
     ];
 
@@ -62,6 +68,17 @@ class Workflow extends Model
     public function leads(): HasMany
     {
         return $this->hasMany(WorkflowLead::class);
+    }
+
+    public function agentAccess(): HasMany
+    {
+        return $this->hasMany(WorkflowAgentAccess::class);
+    }
+
+    public function visibleAgents(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'workflow_agent_access', 'workflow_id', 'user_id')
+            ->withTimestamps();
     }
 
     public function isProcessing(): bool

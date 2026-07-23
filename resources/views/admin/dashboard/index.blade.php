@@ -6,8 +6,8 @@
 <div class="admin-dashboard-page {{ !empty($detail) ? 'admin-dashboard-page--detail' : '' }}">
     <div class="admin-dashboard-header">
         <div>
-            <h2 class="admin-dashboard-title">Command Center</h2>
-            <p class="admin-dashboard-subtitle">Workspace: <span>{{ $workspace->name }}</span> · Live monitoring, team activity, and pipeline reporting.</p>
+            <h2 class="admin-dashboard-title">Dashboard</h2>
+            <p class="admin-dashboard-subtitle">Workspace: <span>{{ $workspace->name }}</span> · Live calls, team activity, and pipeline KPIs.</p>
         </div>
         <div class="admin-dashboard-live-badge">
             <span class="relative flex h-2 w-2">
@@ -21,210 +21,169 @@
     @include('admin.dashboard.partials.detail-panel', ['detail' => $detail ?? null])
 
     @if (empty($detail))
-@if (!empty($ops))
-<div class="admin-dash-grid-4">
-    <a href="{{ $detailService->adminDetailUrl('ops-active') }}" class="admin-dash-card admin-dash-stat-card admin-dash-stat-card--clickable">
-        <p class="admin-dash-stat-label">Active CRM Leads</p>
-        <p id="ops-active-leads" class="admin-dash-stat-value">{{ $ops['overview']['total_active_leads'] ?? 0 }}</p>
-        <span class="admin-dash-stat-chevron" aria-hidden="true">→</span>
-    </a>
-    <a href="{{ $detailService->adminDetailUrl('ops-verification') }}" class="admin-dash-card admin-dash-stat-card admin-dash-stat-card--clickable">
-        <p class="admin-dash-stat-label">Awaiting Verification</p>
-        <p id="ops-pending-verification" class="admin-dash-stat-value is-warning">{{ $ops['overview']['pending_verification'] ?? 0 }}</p>
-        <span class="admin-dash-stat-chevron" aria-hidden="true">→</span>
-    </a>
-    <a href="{{ $detailService->adminDetailUrl('ops-reactivation') }}" class="admin-dash-card admin-dash-stat-card admin-dash-stat-card--clickable">
-        <p class="admin-dash-stat-label">Reactivation Queue</p>
-        <p id="ops-reactivation" class="admin-dash-stat-value">{{ $ops['overview']['reactivation_queue'] ?? 0 }}</p>
-        <span class="admin-dash-stat-chevron" aria-hidden="true">→</span>
-    </a>
-    <a href="{{ $detailService->adminDetailUrl('ops-handoff') }}" class="admin-dash-card admin-dash-stat-card admin-dash-stat-card--clickable">
-        <p class="admin-dash-stat-label">Handoff Queue</p>
-        <p id="ops-handoff-queue" class="admin-dash-stat-value is-accent">{{ $ops['handoff_queue'] ?? 0 }}</p>
-        <p class="admin-dash-stat-note">Settled, awaiting closer</p>
-        <span class="admin-dash-stat-chevron" aria-hidden="true">→</span>
-    </a>
+@php
+    $callsToday = max(0, (int) ($ops['total_calls_today'] ?? 0));
+    $connectedToday = max(0, (int) ($ops['connected_today'] ?? 0));
+    $dispositionedToday = max(0, (int) ($ops['dispositioned_today'] ?? 0));
+    $connectRate = $callsToday > 0 ? round(($connectedToday / $callsToday) * 100, 1) : 0;
+    $missedToday = max(0, $callsToday - $connectedToday);
+    $pendingCalls = max(0, $callsToday - $dispositionedToday);
+    $assignedLeads = (int) ($pipeline['assigned_leads'] ?? 0);
+    $totalLeads = (int) ($pipeline['total_leads'] ?? 0);
+    $successRate = $conversion_rates['overall_close_rate'] !== null
+        ? number_format((float) $conversion_rates['overall_close_rate'], 1).'%'
+        : '0.0%';
+    $teamDials = (int) (($ops['today_activity']['dials'] ?? 0));
+    $teamMeetings = (int) (($ops['today_activity']['meetings'] ?? 0));
+@endphp
+
+<div class="admin-dash-kpi-grid">
+    <div class="admin-dash-card admin-dash-stat-card admin-dash-stat-card--glass">
+        <p class="admin-dash-stat-label">Total leads</p>
+        <p id="stat-total_leads" class="admin-dash-stat-value">{{ number_format($totalLeads) }}</p>
+    </div>
+    <div class="admin-dash-card admin-dash-stat-card admin-dash-stat-card--glass">
+        <p class="admin-dash-stat-label">Assigned leads</p>
+        <p id="stat-assigned_leads" class="admin-dash-stat-value">{{ number_format($assignedLeads) }}</p>
+    </div>
+    <div class="admin-dash-card admin-dash-stat-card admin-dash-stat-card--glass">
+        <p class="admin-dash-stat-label">Today's calls</p>
+        <p id="ops-total-calls-today" class="admin-dash-stat-value is-accent">{{ number_format($callsToday) }}</p>
+    </div>
+    <div class="admin-dash-card admin-dash-stat-card admin-dash-stat-card--glass">
+        <p class="admin-dash-stat-label">Connected calls</p>
+        <p id="ops-connected-today" class="admin-dash-stat-value">{{ number_format($connectedToday) }}</p>
+    </div>
+    <div class="admin-dash-card admin-dash-stat-card admin-dash-stat-card--glass">
+        <p class="admin-dash-stat-label">Completed calls</p>
+        <p id="ops-dispositioned-today" class="admin-dash-stat-value">{{ number_format($dispositionedToday) }}</p>
+    </div>
+    <div class="admin-dash-card admin-dash-stat-card admin-dash-stat-card--glass">
+        <p class="admin-dash-stat-label">Pending calls</p>
+        <p id="ops-pending-calls" class="admin-dash-stat-value is-warning">{{ number_format($pendingCalls) }}</p>
+    </div>
+    <div class="admin-dash-card admin-dash-stat-card admin-dash-stat-card--glass">
+        <p class="admin-dash-stat-label">Missed calls</p>
+        <p id="ops-missed-today" class="admin-dash-stat-value">{{ number_format($missedToday) }}</p>
+    </div>
+    <div class="admin-dash-card admin-dash-stat-card admin-dash-stat-card--glass">
+        <p class="admin-dash-stat-label">Connect rate</p>
+        <p id="ops-connect-rate-today" class="admin-dash-stat-value">{{ number_format($connectRate, 1) }}%</p>
+    </div>
+    <div class="admin-dash-card admin-dash-stat-card admin-dash-stat-card--glass">
+        <p class="admin-dash-stat-label">Success rate</p>
+        <p id="stat-overall_close" class="admin-dash-stat-value is-success">{{ $successRate }}</p>
+    </div>
+    <div class="admin-dash-card admin-dash-stat-card admin-dash-stat-card--glass">
+        <p class="admin-dash-stat-label">Active CRM leads</p>
+        <p id="ops-active-leads" class="admin-dash-stat-value">{{ number_format((int) ($ops['overview']['total_active_leads'] ?? 0)) }}</p>
+    </div>
+    <div class="admin-dash-card admin-dash-stat-card admin-dash-stat-card--glass">
+        <p class="admin-dash-stat-label">Team dials today</p>
+        <p id="ops-today-dials" class="admin-dash-stat-value">{{ number_format($teamDials) }}</p>
+    </div>
+    <div class="admin-dash-card admin-dash-stat-card admin-dash-stat-card--glass">
+        <p class="admin-dash-stat-label">Meetings booked</p>
+        <p id="ops-today-meetings" class="admin-dash-stat-value">{{ number_format($teamMeetings) }}</p>
+    </div>
 </div>
 
-<div class="admin-dash-grid-2">
-    <div class="admin-dash-card">
-        <h3 class="admin-dash-section-title">Today's team activity</h3>
-        <div class="admin-dash-activity-grid">
-            @foreach (['dials' => 'Dials', 'conversations' => 'Conversations', 'discoveries' => 'Discoveries', 'meetings' => 'Meetings booked'] as $key => $label)
-                <a href="{{ $detailService->adminDetailUrl('activity', ['type' => $key]) }}" class="admin-dash-activity-item admin-dash-activity-item--clickable">
-                    <p class="admin-dash-stat-label">{{ $label }}</p>
-                    <p id="ops-today-{{ $key }}" class="admin-dash-stat-value">{{ $ops['today_activity'][$key] ?? 0 }}</p>
-                </a>
-            @endforeach
+@if (!empty($ops))
+<div id="team-performance" class="admin-dash-section admin-dash-section--team">
+    <div class="admin-dash-section-head admin-dash-section-head--page">
+        <div>
+            <h3 class="admin-dash-section-title">Team performance</h3>
+            <p class="admin-dash-section-desc">Live activity summary and weekly leaders.</p>
         </div>
-        @if (($ops['at_capacity_setters'] ?? 0) > 0)
-            <p class="admin-dash-alert">{{ $ops['at_capacity_setters'] }} setter(s) at book capacity — <a href="{{ route('admin.sales-ops.distribution') }}">view load</a></p>
-        @endif
+        <a href="{{ route('admin.sales-ops.performance') }}" class="app-btn app-btn-secondary app-btn-sm">Full report</a>
     </div>
-
-    <div class="admin-dash-card">
-        <div class="admin-dash-section-head">
-            <h3 class="admin-dash-section-title">Weekly leaderboard</h3>
-            <a href="{{ route('admin.sales-ops.performance') }}" class="admin-dash-section-link">Full report</a>
+    <div class="admin-dash-grid-2">
+        <div class="admin-dash-card admin-dash-card--panel admin-dash-card--glass">
+            <h3 class="admin-dash-section-title">Today's team activity</h3>
+            <div class="admin-dash-activity-grid">
+                @foreach ([
+                    'dials' => ['label' => 'Dials', 'tone' => 'dials'],
+                    'conversations' => ['label' => 'Conversations', 'tone' => 'conversations'],
+                    'discoveries' => ['label' => 'Discoveries', 'tone' => 'discoveries'],
+                    'meetings' => ['label' => 'Meetings booked', 'tone' => 'meetings'],
+                ] as $key => $tile)
+                    <a href="{{ $detailService->adminDetailUrl('activity', ['type' => $key]) }}"
+                        class="admin-dash-activity-item admin-dash-activity-item--{{ $tile['tone'] }} admin-dash-activity-item--clickable">
+                        <p class="admin-dash-stat-label">{{ $tile['label'] }}</p>
+                        <p id="ops-today-{{ $key }}" class="admin-dash-stat-value">{{ number_format((int) ($ops['today_activity'][$key] ?? 0)) }}</p>
+                    </a>
+                @endforeach
+            </div>
         </div>
-        <div id="ops-leaderboard" class="admin-dash-leaderboard">
-            @forelse ($ops['leaderboard'] ?? [] as $i => $row)
-                <a href="{{ $detailService->adminDetailUrl('performer', ['user_id' => $row['user_id']]) }}"
-                    class="admin-dash-leaderboard-row admin-dash-leaderboard-row--clickable"
-                    title="Open call details for {{ $row['name'] }}">
-                    <span>
-                        <span class="admin-dash-leaderboard-rank">#{{ $i + 1 }}</span>
-                        <span class="admin-dash-leaderboard-name">{{ $row['name'] }}</span>
-                        <span class="admin-dash-leaderboard-role">· {{ $row['role'] }}</span>
-                    </span>
-                    <span class="admin-dash-leaderboard-stats">
-                        {{ (int) ($row['calls_taken'] ?? $row['calls'] ?? $row['dials'] ?? 0) }} calls
-                        · {{ $row['talk_label'] ?? '0s' }} talk
-                        · {{ (int) ($row['meetings'] ?? 0) }} mtgs
-                        · {{ (int) ($row['deals_funded'] ?? 0) }} funded
-                    </span>
-                </a>
-            @empty
-                <p class="admin-dash-empty">No activity logged this week yet.</p>
-            @endforelse
+        <div class="admin-dash-card admin-dash-card--panel admin-dash-card--glass">
+            <div class="admin-dash-section-head">
+                <h3 class="admin-dash-section-title">Weekly leaderboard</h3>
+                <a href="{{ route('admin.sales-ops.performance') }}" class="admin-dash-section-link">Full report</a>
+            </div>
+            <div id="ops-leaderboard" class="admin-dash-leaderboard admin-dash-leaderboard--scroll">
+                @forelse ($ops['leaderboard'] ?? [] as $i => $row)
+                    @php
+                        $lbCalls = (int) ($row['calls_taken'] ?? $row['calls'] ?? $row['dials'] ?? 0);
+                        $lbMeetings = (int) ($row['meetings'] ?? 0);
+                        $lbFunded = (int) ($row['deals_funded'] ?? 0);
+                        $lbTalk = (string) ($row['talk_label'] ?? '0s');
+                    @endphp
+                    <a href="{{ $detailService->adminDetailUrl('performer', ['user_id' => $row['user_id']]) }}"
+                        class="admin-dash-leaderboard-row admin-dash-leaderboard-row--clickable">
+                        <span class="admin-dash-leaderboard-who">
+                            <span class="admin-dash-leaderboard-rank">#{{ $i + 1 }}</span>
+                            <span class="admin-dash-leaderboard-identity">
+                                <span class="admin-dash-leaderboard-name">{{ $row['name'] }}</span>
+                                <span class="admin-dash-leaderboard-role">{{ $row['role'] }}</span>
+                            </span>
+                        </span>
+                        <span class="admin-dash-leaderboard-stats">
+                            <span class="admin-dash-leaderboard-stat"><strong>{{ number_format($lbCalls) }}</strong> calls</span>
+                            <span class="admin-dash-leaderboard-stat"><strong>{{ $lbTalk }}</strong> talk</span>
+                            <span class="admin-dash-leaderboard-stat"><strong>{{ number_format($lbMeetings) }}</strong> mtgs</span>
+                            <span class="admin-dash-leaderboard-stat"><strong>{{ number_format($lbFunded) }}</strong> funded</span>
+                        </span>
+                    </a>
+                @empty
+                    <p class="admin-dash-empty">No activity logged this week yet.</p>
+                @endforelse
+            </div>
         </div>
     </div>
 </div>
 @endif
 
-<div class="admin-dash-grid-2">
-    <div class="admin-dash-card">
-        <h3 class="admin-dash-section-title">Pipeline (all-time)</h3>
-        <div class="admin-dash-rows">
-            <a href="{{ $detailService->adminDetailUrl('pipeline', ['metric' => 'total_leads']) }}" class="admin-dash-row admin-dash-row--clickable">
-                <span class="admin-dash-row-label">Total Leads</span>
-                <span id="stat-total_leads" class="admin-dash-row-value">{{ $pipeline['total_leads'] }}</span>
-            </a>
-            <a href="{{ $detailService->adminDetailUrl('pipeline', ['metric' => 'new']) }}" class="admin-dash-row admin-dash-row--clickable">
-                <span class="admin-dash-row-label">New</span>
-                <span id="stat-new" class="admin-dash-row-value">{{ $pipeline['new'] }}</span>
-            </a>
-            <a href="{{ $detailService->adminDetailUrl('pipeline', ['metric' => 'qualified']) }}" class="admin-dash-row admin-dash-row--clickable">
-                <span class="admin-dash-row-label">Qualified</span>
-                <span id="stat-qualified" class="admin-dash-row-value">{{ $pipeline['qualified'] }}</span>
-            </a>
-            <a href="{{ $detailService->adminDetailUrl('pipeline', ['metric' => 'booked']) }}" class="admin-dash-row admin-dash-row--clickable">
-                <span class="admin-dash-row-label">Booked</span>
-                <span id="stat-booked" class="admin-dash-row-value">{{ $pipeline['booked'] }}</span>
-            </a>
-            <a href="{{ $detailService->adminDetailUrl('pipeline', ['metric' => 'showed']) }}" class="admin-dash-row admin-dash-row--clickable">
-                <span class="admin-dash-row-label">Showed</span>
-                <span id="stat-showed" class="admin-dash-row-value">{{ $pipeline['showed'] }}</span>
-            </a>
-            <a href="{{ $detailService->adminDetailUrl('pipeline', ['metric' => 'closed_won']) }}" class="admin-dash-row admin-dash-row--clickable">
-                <span class="admin-dash-row-label">Closed (Won)</span>
-                <span id="stat-closed_won" class="admin-dash-row-value is-success">{{ $pipeline['closed_won'] }}</span>
-            </a>
-            <a href="{{ $detailService->adminDetailUrl('pipeline', ['metric' => 'not_now']) }}" class="admin-dash-row admin-dash-row--clickable">
-                <span class="admin-dash-row-label">Not Now</span>
-                <span id="stat-not_now" class="admin-dash-row-value">{{ $pipeline['not_now'] }}</span>
-            </a>
-            <a href="{{ $detailService->adminDetailUrl('pipeline', ['metric' => 'dead']) }}" class="admin-dash-row admin-dash-row--clickable">
-                <span class="admin-dash-row-label">Dead</span>
-                <span id="stat-dead" class="admin-dash-row-value is-danger">{{ $pipeline['dead'] }}</span>
-            </a>
+<div class="admin-dash-grid-charts admin-dash-grid-charts--analytics">
+    <div class="admin-dash-card admin-dash-card--panel admin-dash-card--glass">
+        <h3 class="admin-dash-section-title">Pipeline mix</h3>
+        <div class="admin-dash-chart-wrap" data-chart-wrap="pie">
+            <div class="admin-dash-chart-loading" data-chart-loading>Loading chart…</div>
+            <canvas id="pipelinePieChart" aria-label="Pipeline mix pie chart"></canvas>
+            <p class="admin-dash-chart-empty" data-chart-empty hidden>No data available</p>
         </div>
     </div>
-
-    <div class="admin-dash-card">
-        <h3 class="admin-dash-section-title">Conversion rates</h3>
-        <div class="admin-dash-rows">
-            <div class="admin-dash-row">
-                <span class="admin-dash-row-label">Book → Show Rate</span>
-                <span id="stat-book_to_show" class="admin-dash-row-value">{{ $conversion_rates['book_to_show_rate'] !== null ? $conversion_rates['book_to_show_rate'].'%' : '-' }}</span>
-            </div>
-            <div class="admin-dash-row">
-                <span class="admin-dash-row-label">Show → Close Rate</span>
-                <span id="stat-show_to_close" class="admin-dash-row-value">{{ $conversion_rates['show_to_close_rate'] !== null ? $conversion_rates['show_to_close_rate'].'%' : '-' }}</span>
-            </div>
-            <div class="admin-dash-row">
-                <span class="admin-dash-row-label">Overall Close Rate</span>
-                <span id="stat-overall_close" class="admin-dash-row-value is-success">{{ $conversion_rates['overall_close_rate'] !== null ? $conversion_rates['overall_close_rate'].'%' : '-' }}</span>
-            </div>
-            <div class="admin-dash-row">
-                <span class="admin-dash-row-label">Avg Closed Deal Volume</span>
-                <span id="stat-avg_deal_volume" class="admin-dash-row-value">${{ number_format($conversion_rates['avg_closed_volume'], 2) }}</span>
-            </div>
-            <div class="admin-dash-row">
-                <span class="admin-dash-row-label">Total Team Dials (period)</span>
-                <span id="stat-total_dials" class="admin-dash-row-value">{{ $conversion_rates['total_dials'] }}</span>
-            </div>
-            <div class="admin-dash-row">
-                <span class="admin-dash-row-label">Total Team Closes (period)</span>
-                <span id="stat-total_closes" class="admin-dash-row-value">{{ $conversion_rates['total_closes'] }}</span>
-            </div>
+    <div class="admin-dash-card admin-dash-card--panel admin-dash-card--glass">
+        <h3 class="admin-dash-section-title">Stage volume</h3>
+        <div class="admin-dash-chart-wrap" data-chart-wrap="bar">
+            <div class="admin-dash-chart-loading" data-chart-loading>Loading chart…</div>
+            <canvas id="pipelineBarChart" aria-label="Stage volume bar chart"></canvas>
+            <p class="admin-dash-chart-empty" data-chart-empty hidden>No data available</p>
         </div>
     </div>
-</div>
-
-<div class="admin-dash-grid-2">
-    <div class="admin-dash-card">
-        <h3 class="admin-dash-section-title">Leads by fronter (setters)</h3>
-        <div class="admin-dash-table-wrap">
-            <table class="admin-dash-table">
-                <thead>
-                    <tr>
-                        <th>Fronter (Setter)</th>
-                        <th class="text-right">Leads Logged</th>
-                    </tr>
-                </thead>
-                <tbody id="setters-table-body">
-                    @forelse ($setters as $setter)
-                        <tr class="is-clickable" onclick="window.location='{{ $detailService->adminDetailUrl('user', ['user_id' => $setter['id']]) }}'">
-                            <td>
-                                <a href="{{ $detailService->adminDetailUrl('user', ['user_id' => $setter['id']]) }}" class="admin-dash-table-link">{{ $setter['name'] }}</a>
-                            </td>
-                            <td class="text-right"><span class="admin-dash-table-num">{{ $setter['leads_logged'] }}</span></td>
-                        </tr>
-                    @empty
-                        <tr>
-                            <td colspan="2" class="admin-dash-empty">No active setters found.</td>
-                        </tr>
-                    @endforelse
-                </tbody>
-            </table>
+    <div class="admin-dash-card admin-dash-card--panel admin-dash-card--glass">
+        <h3 class="admin-dash-section-title">Conversion trend</h3>
+        <div class="admin-dash-chart-wrap" data-chart-wrap="line">
+            <div class="admin-dash-chart-loading" data-chart-loading>Loading chart…</div>
+            <canvas id="pipelineLineChart" aria-label="Conversion trend line chart"></canvas>
+            <p class="admin-dash-chart-empty" data-chart-empty hidden>No data available</p>
         </div>
     </div>
-
-    <div class="admin-dash-card">
-        <h3 class="admin-dash-section-title">Leads by closer</h3>
-        <div class="admin-dash-table-wrap">
-            <table class="admin-dash-table">
-                <thead>
-                    <tr>
-                        <th>Closer</th>
-                        <th class="text-right">Deals Closed</th>
-                    </tr>
-                </thead>
-                <tbody id="closers-table-body">
-                    @forelse ($closers as $closer)
-                        <tr class="is-clickable" onclick="window.location='{{ $detailService->adminDetailUrl('user', ['user_id' => $closer['id']]) }}'">
-                            <td>
-                                <a href="{{ $detailService->adminDetailUrl('user', ['user_id' => $closer['id']]) }}" class="admin-dash-table-link">{{ $closer['name'] }}</a>
-                            </td>
-                            <td class="text-right"><span class="admin-dash-table-num is-success">{{ $closer['deals_closed'] }}</span></td>
-                        </tr>
-                    @empty
-                        <tr>
-                            <td colspan="2" class="admin-dash-empty">No active closers found.</td>
-                        </tr>
-                    @endforelse
-                </tbody>
-            </table>
-        </div>
-    </div>
-</div>
-
-<div class="admin-dash-grid-charts">
-    <div class="admin-dash-card">
-        <h3 class="admin-dash-section-title">Pipeline conversion funnel</h3>
-        <div class="admin-dash-chart-wrap">
-            <canvas id="pipelineFunnelChart"></canvas>
+    <div class="admin-dash-card admin-dash-card--panel admin-dash-card--glass">
+        <h3 class="admin-dash-section-title">Close rate</h3>
+        <div class="admin-dash-chart-wrap" data-chart-wrap="donut">
+            <div class="admin-dash-chart-loading" data-chart-loading>Loading chart…</div>
+            <canvas id="pipelineDonutChart" aria-label="Close rate donut chart"></canvas>
+            <p class="admin-dash-chart-empty" data-chart-empty hidden>No data available</p>
         </div>
     </div>
 </div>
@@ -237,292 +196,366 @@
 @if (empty($detail))
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-    document.addEventListener('DOMContentLoaded', function () {
-        const funnelEl = document.getElementById('pipelineFunnelChart');
-        if (!funnelEl) return;
+(() => {
+    const detailBase = @json(url('/admin/dashboard'));
+    const stageLabels = ['New', 'Qualified', 'Booked', 'Showed', 'Closed (Won)', 'Dead'];
+    let stageData = [
+        {{ (int) ($pipeline['new'] ?? 0) }},
+        {{ (int) ($pipeline['qualified'] ?? 0) }},
+        {{ (int) ($pipeline['booked'] ?? 0) }},
+        {{ (int) ($pipeline['showed'] ?? 0) }},
+        {{ (int) ($pipeline['closed_won'] ?? 0) }},
+        {{ (int) ($pipeline['dead'] ?? 0) }}
+    ];
+    const funnelLabels = ['Total', 'New', 'Qualified', 'Booked', 'Showed', 'Closed'];
+    let funnelData = [
+        {{ (int) ($pipeline['total_leads'] ?? 0) }},
+        {{ (int) ($pipeline['new'] ?? 0) }},
+        {{ (int) ($pipeline['qualified'] ?? 0) }},
+        {{ (int) ($pipeline['booked'] ?? 0) }},
+        {{ (int) ($pipeline['showed'] ?? 0) }},
+        {{ (int) ($pipeline['closed_won'] ?? 0) }}
+    ];
+    let closedWon = {{ (int) ($pipeline['closed_won'] ?? 0) }};
+    let totalLeads = {{ (int) ($pipeline['total_leads'] ?? 0) }};
 
-        const funnelCtx = funnelEl.getContext('2d');
-        const detailBase = @json(url('/admin/dashboard'));
+    const charts = [];
+    let themeBound = false;
 
-        const funnelChart = new Chart(funnelCtx, {
-            type: 'bar',
-            data: {
-                labels: ['Total Leads', 'New', 'Qualified', 'Booked', 'Showed', 'Closed (Won)'],
-                datasets: [{
-                    label: 'Leads',
-                    data: [
-                        {{ $pipeline['total_leads'] }},
-                        {{ $pipeline['new'] }},
-                        {{ $pipeline['qualified'] }},
-                        {{ $pipeline['booked'] }},
-                        {{ $pipeline['showed'] }},
-                        {{ $pipeline['closed_won'] }}
-                    ],
-                    backgroundColor: [
-                        'rgba(100, 116, 139, 0.75)',
-                        'rgba(100, 116, 139, 0.65)',
-                        'rgba(100, 116, 139, 0.55)',
-                        'rgba(100, 116, 139, 0.45)',
-                        'rgba(100, 116, 139, 0.35)',
-                        'rgba(4, 120, 87, 0.75)'
-                    ],
-                    borderRadius: 4,
-                    borderWidth: 0,
-                    barPercentage: 0.6
-                }]
-            },
-            options: {
-                indexAxis: 'y',
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false }
-                },
-                scales: {
-                    x: {
-                        grid: { color: '#f1f5f9' },
-                        ticks: { precision: 0, color: '#94a3b8', font: { size: 10 } }
-                    },
-                    y: {
-                        grid: { display: false },
-                        ticks: { color: '#64748b', font: { size: 10 } }
-                    }
-                }
-            }
+    const isDark = () => document.documentElement.dataset.theme === 'dark'
+        || document.documentElement.classList.contains('theme-dark');
+
+    const chartColors = () => {
+        const dark = isDark();
+        return {
+            text: dark ? '#cbd5e1' : '#64748b',
+            grid: dark ? '#334155' : '#e2e8f0',
+            muted: dark ? '#94a3b8' : '#94a3b8',
+            line: dark ? '#4ade80' : '#16a34a',
+            area: dark ? 'rgba(74, 222, 128, 0.18)' : 'rgba(22, 163, 74, 0.14)',
+            pie: dark
+                ? ['#64748b', '#38bdf8', '#a78bfa', '#fbbf24', '#34d399', '#f87171']
+                : ['#94a3b8', '#0ea5e9', '#8b5cf6', '#f59e0b', '#10b981', '#ef4444'],
+            bar: dark
+                ? ['#64748b', '#475569', '#38bdf8', '#a78bfa', '#fbbf24', '#4ade80']
+                : ['#94a3b8', '#64748b', '#0ea5e9', '#8b5cf6', '#f59e0b', '#16a34a'],
+            donut: dark ? ['#4ade80', '#334155'] : ['#16a34a', '#e2e8f0'],
+        };
+    };
+
+    function setChartState(wrap, state) {
+        if (!wrap) return;
+        const loading = wrap.querySelector('[data-chart-loading]');
+        const empty = wrap.querySelector('[data-chart-empty]');
+        const canvas = wrap.querySelector('canvas');
+        if (loading) loading.hidden = state !== 'loading';
+        if (empty) empty.hidden = state !== 'empty';
+        if (canvas) canvas.hidden = state !== 'ready';
+    }
+
+    function sum(values) {
+        return values.reduce((a, b) => a + Number(b || 0), 0);
+    }
+
+    function buildCharts() {
+        if (typeof Chart === 'undefined') {
+            return false;
+        }
+
+        charts.forEach((c) => {
+            try { c.destroy(); } catch (_) {}
         });
+        charts.length = 0;
+        const c = chartColors();
 
-        const pollEndpoint = "{{ route('admin.dashboard.realtime-data') }}" + window.location.search;
-        let stopDashboardPoll = null;
+        const pieWrap = document.querySelector('[data-chart-wrap="pie"]');
+        const barWrap = document.querySelector('[data-chart-wrap="bar"]');
+        const lineWrap = document.querySelector('[data-chart-wrap="line"]');
+        const donutWrap = document.querySelector('[data-chart-wrap="donut"]');
 
-        function escapeDashboardHtml(value) {
-            return String(value ?? '')
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;');
+        const pieEl = document.getElementById('pipelinePieChart');
+        if (pieEl && pieWrap) {
+            if (sum(stageData) <= 0) {
+                setChartState(pieWrap, 'empty');
+            } else {
+                setChartState(pieWrap, 'ready');
+                charts.push(new Chart(pieEl.getContext('2d'), {
+                    type: 'pie',
+                    data: { labels: stageLabels, datasets: [{ data: stageData, backgroundColor: c.pie, borderWidth: 0 }] },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: { duration: 450 },
+                        plugins: { legend: { position: 'bottom', labels: { color: c.text, boxWidth: 10, font: { size: 10 } } } }
+                    }
+                }));
+            }
         }
 
-        function updateOpsLeaderboard(rows) {
-            const container = document.getElementById('ops-leaderboard');
-            if (!container) {
-                return;
-            }
-
-            if (!rows.length) {
-                container.innerHTML = '<p class="admin-dash-empty">No activity logged this week yet.</p>';
-                return;
-            }
-
-            container.innerHTML = rows.map((row, index) => `
-                <a href="${escapeDashboardHtml(row.detail_url || '#')}"
-                    class="admin-dash-leaderboard-row admin-dash-leaderboard-row--clickable"
-                    title="Open call details for ${escapeDashboardHtml(row.name)}">
-                    <span>
-                        <span class="admin-dash-leaderboard-rank">#${index + 1}</span>
-                        <span class="admin-dash-leaderboard-name">${escapeDashboardHtml(row.name)}</span>
-                        <span class="admin-dash-leaderboard-role">· ${escapeDashboardHtml(row.role)}</span>
-                    </span>
-                    <span class="admin-dash-leaderboard-stats">${row.calls_taken ?? row.calls ?? row.dials ?? 0} calls · ${escapeDashboardHtml(row.talk_label || '0s')} talk · ${row.meetings ?? 0} mtgs · ${row.deals_funded ?? 0} funded</span>
-                </a>
-            `).join('');
-        }
-
-        function updateCampaignCards(campaigns) {
-            const body = document.getElementById('dashboard-campaigns-grid');
-            if (!body) {
-                return;
-            }
-
-            body.innerHTML = campaigns.map((campaign) => `
-                <tr>
-                    <td>
-                        <a href="${escapeDashboardHtml(campaign.show_url)}" class="campaigns-overview-name">
-                            ${escapeDashboardHtml(campaign.name)}
-                        </a>
-                    </td>
-                    <td>${Number(campaign.leads_count || 0).toLocaleString()}</td>
-                    <td>${Number(campaign.imports_count || 0).toLocaleString()}</td>
-                    <td>${Number(campaign.enriched_count || 0).toLocaleString()}</td>
-                    <td class="campaigns-overview-assigned">${Number(campaign.assigned_count || 0).toLocaleString()}</td>
-                    <td class="text-right">
-                        <a href="${escapeDashboardHtml(campaign.show_url)}" class="app-btn app-btn-secondary app-btn-sm">View</a>
-                    </td>
-                </tr>
-            `).join('');
-        }
-
-        function updateDashboardMetrics(data) {
-            const setText = (id, value) => {
-                const el = document.getElementById(id);
-                if (el) {
-                    el.innerText = value;
-                }
-            };
-
-            setText('stat-total_leads', data.pipeline.total_leads);
-            setText('stat-new', data.pipeline.new);
-            setText('stat-qualified', data.pipeline.qualified);
-            setText('stat-booked', data.pipeline.booked);
-            setText('stat-showed', data.pipeline.showed);
-            setText('stat-closed_won', data.pipeline.closed_won);
-            setText('stat-not_now', data.pipeline.not_now);
-            setText('stat-dead', data.pipeline.dead);
-
-            setText('stat-book_to_show', data.conversion_rates.book_to_show_rate !== null ? data.conversion_rates.book_to_show_rate + '%' : '-');
-            setText('stat-show_to_close', data.conversion_rates.show_to_close_rate !== null ? data.conversion_rates.show_to_close_rate + '%' : '-');
-            setText('stat-overall_close', data.conversion_rates.overall_close_rate !== null ? data.conversion_rates.overall_close_rate + '%' : '-');
-            setText('stat-avg_deal_volume', '$' + data.conversion_rates.avg_closed_volume.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}));
-            setText('stat-total_dials', data.conversion_rates.total_dials);
-            setText('stat-total_closes', data.conversion_rates.total_closes);
-
-            if (data.ops) {
-                setText('ops-active-leads', data.ops.overview?.total_active_leads ?? 0);
-                setText('ops-pending-verification', data.ops.overview?.pending_verification ?? 0);
-                setText('ops-reactivation', data.ops.overview?.reactivation_queue ?? 0);
-                setText('ops-handoff-queue', data.ops.handoff_queue ?? 0);
-                setText('ops-today-dials', data.ops.today_activity?.dials ?? 0);
-                setText('ops-today-conversations', data.ops.today_activity?.conversations ?? 0);
-                setText('ops-today-discoveries', data.ops.today_activity?.discoveries ?? 0);
-                setText('ops-today-meetings', data.ops.today_activity?.meetings ?? 0);
-                updateOpsLeaderboard(data.ops.leaderboard || []);
-            }
-
-            if (Array.isArray(data.campaigns)) {
-                updateCampaignCards(data.campaigns);
-            }
-
-            if (Array.isArray(data.imports_leads) && window.applyCommandCenterLeadsPatch) {
-                const importsBody = document.getElementById('workspace-sync-leads-body');
-                if (importsBody) {
-                    window.applyCommandCenterLeadsPatch(importsBody, data.imports_leads);
-                }
-            }
-
-            if (!funnelChart) {
-                return;
-            }
-
-            funnelChart.data.datasets[0].data = [
-                data.pipeline.total_leads,
-                data.pipeline.new,
-                data.pipeline.qualified,
-                data.pipeline.booked,
-                data.pipeline.showed,
-                data.pipeline.closed_won
-            ];
-            funnelChart.update();
-
-            const settersBody = document.getElementById('setters-table-body');
-            if (settersBody) {
-                let settersHTML = '';
-                if (data.setters.length > 0) {
-                    data.setters.forEach(setter => {
-                        settersHTML += `
-                            <tr class="is-clickable" onclick="window.location='${detailBase}?detail=user&user_id=${setter.id}'">
-                                <td><a href="${detailBase}?detail=user&user_id=${setter.id}" class="admin-dash-table-link">${setter.name}</a></td>
-                                <td class="text-right"><span class="admin-dash-table-num">${setter.leads_logged}</span></td>
-                            </tr>
-                        `;
-                    });
-                } else {
-                    settersHTML = `<tr><td colspan="2" class="admin-dash-empty">No active setters found.</td></tr>`;
-                }
-                settersBody.innerHTML = settersHTML;
-            }
-
-            const closersBody = document.getElementById('closers-table-body');
-            if (closersBody) {
-                let closersHTML = '';
-                if (data.closers.length > 0) {
-                    data.closers.forEach(closer => {
-                        closersHTML += `
-                            <tr class="is-clickable" onclick="window.location='${detailBase}?detail=user&user_id=${closer.id}'">
-                                <td><a href="${detailBase}?detail=user&user_id=${closer.id}" class="admin-dash-table-link">${closer.name}</a></td>
-                                <td class="text-right"><span class="admin-dash-table-num is-success">${closer.deals_closed}</span></td>
-                            </tr>
-                        `;
-                    });
-                } else {
-                    closersHTML = `<tr><td colspan="2" class="admin-dash-empty">No active closers found.</td></tr>`;
-                }
-                closersBody.innerHTML = closersHTML;
-            }
-
-            const workflowsBody = document.getElementById('workflows-table-body');
-            if (workflowsBody) {
-                let workflowsHTML = '';
-                const newLabels = [];
-                const newTotals = [];
-                const newEnriched = [];
-                const newClosed = [];
-
-                if (data.workflows.length > 0) {
-                    data.workflows.forEach((wf, index) => {
-                        if (index < 5) {
-                            newLabels.push(wf.name);
-                            newTotals.push(wf.total_leads);
-                            newEnriched.push(wf.enriched_leads);
-                            newClosed.push(wf.closed_deals);
+        const barEl = document.getElementById('pipelineBarChart');
+        if (barEl && barWrap) {
+            if (sum(funnelData) <= 0) {
+                setChartState(barWrap, 'empty');
+            } else {
+                setChartState(barWrap, 'ready');
+                charts.push(new Chart(barEl.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: funnelLabels,
+                        datasets: [{ label: 'Leads', data: funnelData, backgroundColor: c.bar, borderRadius: 6, borderWidth: 0, barPercentage: 0.65 }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: { duration: 450 },
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            x: { grid: { display: false }, ticks: { color: c.text, font: { size: 10 } } },
+                            y: { grid: { color: c.grid }, ticks: { precision: 0, color: c.muted, font: { size: 10 } } }
                         }
-
-                        workflowsHTML += `
-                            <tr>
-                                <td>
-                                    <a href="${detailBase}?detail=workflow&workflow_id=${wf.id}" class="admin-dash-table-link">${wf.name}</a>
-                                    <span class="admin-dash-table-meta">${wf.filename || ''}</span>
-                                </td>
-                                <td>${wf.created_at}</td>
-                                <td class="text-right"><span class="admin-dash-table-num">${wf.total_leads}</span></td>
-                                <td class="text-right"><span class="admin-dash-table-num is-success">${wf.enriched_leads}</span></td>
-                                <td class="text-right"><span class="admin-dash-table-num is-danger">${wf.failed_leads}</span></td>
-                                <td class="text-right"><span class="admin-dash-table-num is-success">${wf.closed_deals}</span></td>
-                                <td class="text-right"><span class="admin-dash-badge is-success">${wf.enrichment_rate}%</span></td>
-                                <td class="text-right"><span class="admin-dash-badge is-success">${wf.close_rate}%</span></td>
-                                <td class="text-right">
-                                    <a href="${detailBase}?detail=workflow&workflow_id=${wf.id}" class="app-btn app-btn-secondary app-btn-sm">View details</a>
-                                </td>
-                            </tr>
-                        `;
-                    });
-                } else {
-                    workflowsHTML = `<tr><td colspan="9" class="admin-dash-empty">No workflow files uploaded yet.</td></tr>`;
-                }
-                workflowsBody.innerHTML = workflowsHTML;
-
-                if (workflowsChart) {
-                    workflowsChart.data.labels = newLabels;
-                    workflowsChart.data.datasets[0].data = newTotals;
-                    workflowsChart.data.datasets[1].data = newEnriched;
-                    workflowsChart.data.datasets[2].data = newClosed;
-                    workflowsChart.update();
-                }
+                    }
+                }));
             }
         }
 
-        if (window.startProgressPoll) {
-            stopDashboardPoll = window.startProgressPoll(pollEndpoint, (data) => {
-                updateDashboardMetrics(data);
-                return true;
-            }, { activeMs: 5000, hiddenMs: 15000 });
+        const lineEl = document.getElementById('pipelineLineChart');
+        if (lineEl && lineWrap) {
+            if (sum(funnelData) <= 0) {
+                setChartState(lineWrap, 'empty');
+            } else {
+                setChartState(lineWrap, 'ready');
+                charts.push(new Chart(lineEl.getContext('2d'), {
+                    type: 'line',
+                    data: {
+                        labels: funnelLabels,
+                        datasets: [{
+                            label: 'Pipeline flow',
+                            data: funnelData,
+                            borderColor: c.line,
+                            backgroundColor: c.area,
+                            fill: true,
+                            tension: 0.35,
+                            pointRadius: 3,
+                            pointBackgroundColor: c.line
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: { duration: 450 },
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            x: { grid: { display: false }, ticks: { color: c.text, font: { size: 10 } } },
+                            y: { grid: { color: c.grid }, ticks: { precision: 0, color: c.muted, font: { size: 10 } } }
+                        }
+                    }
+                }));
+            }
         }
 
-        document.addEventListener('turbo:before-cache', () => {
-            stopDashboardPoll?.();
-            stopDashboardPoll = null;
-        }, { once: true });
-    });
-</script>
-@else
-<script>
-    document.addEventListener('DOMContentLoaded', function () {
+        const donutEl = document.getElementById('pipelineDonutChart');
+        if (donutEl && donutWrap) {
+            const remaining = Math.max(0, totalLeads - closedWon);
+            if (totalLeads <= 0) {
+                setChartState(donutWrap, 'empty');
+            } else {
+                setChartState(donutWrap, 'ready');
+                charts.push(new Chart(donutEl.getContext('2d'), {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Closed won', 'Open pipeline'],
+                        datasets: [{ data: [closedWon, remaining], backgroundColor: c.donut, borderWidth: 0 }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        cutout: '68%',
+                        animation: { duration: 450 },
+                        plugins: { legend: { position: 'bottom', labels: { color: c.text, boxWidth: 10, font: { size: 10 } } } }
+                    }
+                }));
+            }
+        }
+
+        return true;
+    }
+
+    function waitForChartJs(attempt = 0) {
+        document.querySelectorAll('[data-chart-wrap]').forEach((wrap) => setChartState(wrap, 'loading'));
+        if (buildCharts()) {
+            return;
+        }
+        if (attempt > 40) {
+            document.querySelectorAll('[data-chart-wrap]').forEach((wrap) => setChartState(wrap, 'empty'));
+            return;
+        }
+        window.setTimeout(() => waitForChartJs(attempt + 1), 100);
+    }
+
+    function escapeDashboardHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function updateOpsLeaderboard(rows) {
+        const container = document.getElementById('ops-leaderboard');
+        if (!container) return;
+        if (!rows.length) {
+            container.innerHTML = '<p class="admin-dash-empty">No activity logged this week yet.</p>';
+            return;
+        }
+        const fmt = (value) => Number(value || 0).toLocaleString();
+        container.innerHTML = rows.map((row, index) => {
+            const calls = row.calls_taken ?? row.calls ?? row.dials ?? 0;
+            const meetings = row.meetings ?? 0;
+            const funded = row.deals_funded ?? 0;
+            const talk = row.talk_label || '0s';
+            const href = row.detail_url || `${detailBase}?detail=performer&user_id=${encodeURIComponent(row.user_id || '')}`;
+            return `
+                <a href="${escapeDashboardHtml(href)}" class="admin-dash-leaderboard-row admin-dash-leaderboard-row--clickable">
+                    <span class="admin-dash-leaderboard-who">
+                        <span class="admin-dash-leaderboard-rank">#${index + 1}</span>
+                        <span class="admin-dash-leaderboard-identity">
+                            <span class="admin-dash-leaderboard-name">${escapeDashboardHtml(row.name)}</span>
+                            <span class="admin-dash-leaderboard-role">${escapeDashboardHtml(row.role || '')}</span>
+                        </span>
+                    </span>
+                    <span class="admin-dash-leaderboard-stats">
+                        <span class="admin-dash-leaderboard-stat"><strong>${fmt(calls)}</strong> calls</span>
+                        <span class="admin-dash-leaderboard-stat"><strong>${escapeDashboardHtml(talk)}</strong> talk</span>
+                        <span class="admin-dash-leaderboard-stat"><strong>${fmt(meetings)}</strong> mtgs</span>
+                        <span class="admin-dash-leaderboard-stat"><strong>${fmt(funded)}</strong> funded</span>
+                    </span>
+                </a>`;
+        }).join('');
+    }
+
+    function updateDashboardMetrics(data) {
+        const fmt = (value) => Number(value || 0).toLocaleString();
+        const fmtRate = (value) => (value !== null && value !== undefined && value !== '')
+            ? `${Number(value).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 1 })}%`
+            : '0.0%';
+        const setText = (id, value) => {
+            const el = document.getElementById(id);
+            if (el) el.innerText = value;
+        };
+
+        if (data.pipeline) {
+            setText('stat-total_leads', fmt(data.pipeline.total_leads));
+            setText('stat-assigned_leads', fmt(data.pipeline.assigned_leads ?? 0));
+            setText('stat-overall_close', fmtRate(data.conversion_rates?.overall_close_rate));
+            stageData = [
+                Number(data.pipeline.new || 0),
+                Number(data.pipeline.qualified || 0),
+                Number(data.pipeline.booked || 0),
+                Number(data.pipeline.showed || 0),
+                Number(data.pipeline.closed_won || 0),
+                Number(data.pipeline.dead || 0),
+            ];
+            funnelData = [
+                Number(data.pipeline.total_leads || 0),
+                Number(data.pipeline.new || 0),
+                Number(data.pipeline.qualified || 0),
+                Number(data.pipeline.booked || 0),
+                Number(data.pipeline.showed || 0),
+                Number(data.pipeline.closed_won || 0),
+            ];
+            closedWon = Number(data.pipeline.closed_won || 0);
+            totalLeads = Number(data.pipeline.total_leads || 0);
+            buildCharts();
+        }
+
+        if (data.ops) {
+            const callsToday = Number(data.ops.total_calls_today ?? 0);
+            const connectedToday = Number(data.ops.connected_today ?? 0);
+            const dispositionedToday = Number(data.ops.dispositioned_today ?? 0);
+            setText('ops-active-leads', fmt(data.ops.overview?.total_active_leads ?? 0));
+            setText('ops-total-calls-today', fmt(callsToday));
+            setText('ops-connected-today', fmt(connectedToday));
+            setText('ops-dispositioned-today', fmt(dispositionedToday));
+            setText('ops-pending-calls', fmt(Math.max(0, callsToday - dispositionedToday)));
+            setText('ops-missed-today', fmt(Math.max(0, callsToday - connectedToday)));
+            const rate = callsToday > 0 ? ((connectedToday / callsToday) * 100).toFixed(1) + '%' : '0.0%';
+            setText('ops-connect-rate-today', rate);
+            setText('ops-today-dials', fmt(data.ops.today_activity?.dials ?? 0));
+            setText('ops-today-conversations', fmt(data.ops.today_activity?.conversations ?? 0));
+            setText('ops-today-discoveries', fmt(data.ops.today_activity?.discoveries ?? 0));
+            setText('ops-today-meetings', fmt(data.ops.today_activity?.meetings ?? 0));
+            updateOpsLeaderboard(data.ops.leaderboard || []);
+        }
+    }
+
+    function bindThemeRebuild() {
+        if (themeBound) return;
+        themeBound = true;
+        document.querySelectorAll('[data-theme-toggle], [data-comm-theme-toggle]').forEach((btn) => {
+            btn.addEventListener('click', () => setTimeout(buildCharts, 60));
+        });
+    }
+
+    function startPolling() {
+        if (window.__apexDashPollTimer) {
+            return;
+        }
         const pollEndpoint = "{{ route('admin.dashboard.realtime-data') }}" + window.location.search;
+        const poll = async () => {
+            try {
+                const res = await fetch(pollEndpoint, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+                if (!res.ok) return;
+                const data = await res.json();
+                updateDashboardMetrics(data);
+            } catch (_) {}
+        };
+        window.__apexDashPollTimer = window.setInterval(poll, 30000);
+    }
+
+    function boot() {
+        if (!document.getElementById('pipelinePieChart')) {
+            return;
+        }
+        waitForChartJs();
+        bindThemeRebuild();
+        startPolling();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', boot, { once: true });
+    } else {
+        boot();
+    }
+    document.addEventListener('turbo:load', boot);
+    document.addEventListener('turbo:render', () => {
+        if (document.getElementById('pipelinePieChart')) {
+            waitForChartJs();
+        }
+    });
+})();
+</script>
+@endif
+@endpush
+@push('scripts')
+@if (!empty($detail))
+<script>
+(() => {
+    const pollEndpoint = "{{ route('admin.dashboard.realtime-data') }}" + window.location.search;
+    const boot = () => {
         if (window.startProgressPoll && window.updateAdminDetailPanel) {
             window.startProgressPoll(pollEndpoint, (data) => {
                 window.updateAdminDetailPanel(data.detail);
                 return true;
-            }, { activeMs: 5000, hiddenMs: 15000 });
+            }, { activeMs: 30000, hiddenMs: 60000 });
         }
-    });
+    };
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', boot, { once: true });
+    } else {
+        boot();
+    }
+    document.addEventListener('turbo:load', boot);
+})();
 </script>
 @endif
 @endpush

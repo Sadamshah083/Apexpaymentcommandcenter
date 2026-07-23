@@ -40,6 +40,8 @@ class WorkflowLead extends Model
         'normalized_phone',
         'input_email',
         'raw_row',
+        'tags',
+        'segment',
         'owner_name',
         'direct_phone',
         'direct_email',
@@ -69,6 +71,7 @@ class WorkflowLead extends Model
         'followup_at',
         'schedule_at',
         'last_contacted_at',
+        'last_disposition',
         'error_message',
         'model_used',
         'tokens_used',
@@ -77,6 +80,7 @@ class WorkflowLead extends Model
 
     protected $casts = [
         'raw_row' => 'array',
+        'tags' => 'array',
         'verification_snapshot' => 'array',
         'verified_at' => 'datetime',
         'followup_at' => 'datetime',
@@ -133,13 +137,30 @@ class WorkflowLead extends Model
     }
 
     /**
-     * Enriched leads that can still be assigned to a setter team.
+     * Leads that finished enrichment successfully (still counts after assign moves status to completed).
+     */
+    public function scopeEnrichmentSucceeded(Builder $query): Builder
+    {
+        return $query
+            ->whereNotNull('researched_at')
+            ->where('status', '!=', 'failed');
+    }
+
+    /**
+     * Leads that can still be assigned to a setter team.
+     * Includes AI-enriched leads and upload-only (stored) imports.
      */
     public function scopeReadyToAssign(Builder $query): Builder
     {
         return $query
-            ->where('status', 'enriched')
             ->whereNull('assigned_user_id')
+            ->where(function (Builder $status) {
+                $status->where('status', 'enriched')
+                    ->orWhere(function (Builder $uploaded) {
+                        $uploaded->where('status', 'imported')
+                            ->where('import_mode', 'stored');
+                    });
+            })
             ->where(function (Builder $phase) {
                 $phase->whereNull('pipeline_phase')
                     ->orWhereNotIn('pipeline_phase', [

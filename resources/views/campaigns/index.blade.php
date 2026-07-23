@@ -4,13 +4,12 @@
 
 @section('content')
 <div class="app-page campaigns-page">
-    <div class="app-page-header flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
+    <div class="app-page-header flex flex-row items-center justify-between gap-3">
+        <div class="min-w-0">
             <h1 class="app-page-title">Campaigns</h1>
-            <p class="app-page-subtitle">Group imports and leads under campaigns. Batch enrich, assign, and report by campaign.</p>
         </div>
-        <div class="flex gap-2">
-            <a href="{{ route('admin.dashboard') }}" class="app-btn app-btn-secondary">Command Center</a>
+        <div class="flex flex-wrap gap-2 shrink-0">
+            <a href="{{ route('admin.dashboard') }}" class="app-btn app-btn-secondary">Dashboard</a>
             <x-import-file-link />
         </div>
     </div>
@@ -33,7 +32,7 @@
             <div class="app-data-table-header">
                 <h2 class="app-data-table-title">All campaigns</h2>
             </div>
-            <div class="app-table-wrap" data-min-width="960px">
+            <div class="app-table-wrap" data-min-width="1080px">
                 <table class="campaigns-table">
                     <thead>
                         <tr>
@@ -42,15 +41,18 @@
                             <th class="col-imports">Imports</th>
                             <th class="col-enriched">Enriched</th>
                             <th class="col-assigned">Assigned</th>
-                            <th class="col-failed">Failed</th>
+                            <th class="col-calls">Calls</th>
+                            <th class="col-connected">Connected</th>
+                            <th class="col-rate">Connect rate</th>
                             <th class="col-action text-right">Action</th>
                         </tr>
                     </thead>
                     <tbody>
                         @foreach ($campaigns as $campaign)
+                            @php $kpi = ($campaignKpis[$campaign->id] ?? null) ?: ['dials' => 0, 'connected' => 0, 'connect_rate' => 0]; @endphp
                             <tr>
                                 <td class="col-name">
-                                    <a href="{{ route('admin.campaigns.show', $campaign) }}" class="campaigns-table-name">
+                                    <a href="{{ route('admin.campaigns.show', $campaign) }}" class="campaigns-table-name" title="{{ $campaign->name }}">
                                         {{ $campaign->name }}
                                     </a>
                                 </td>
@@ -58,7 +60,9 @@
                                 <td class="col-imports">{{ number_format($campaign->imports_count) }}</td>
                                 <td class="col-enriched">{{ number_format($campaign->enriched_count) }}</td>
                                 <td class="col-assigned">{{ number_format($campaign->assigned_count) }}</td>
-                                <td class="col-failed">{{ number_format($campaign->failed_count) }}</td>
+                                <td class="col-calls">{{ number_format($kpi['dials'] ?? 0) }}</td>
+                                <td class="col-connected">{{ number_format($kpi['connected'] ?? 0) }}</td>
+                                <td class="col-rate">{{ number_format($kpi['connect_rate'] ?? 0, 1) }}%</td>
                                 <td class="col-action text-right">
                                     <div class="campaigns-table-actions">
                                         <a href="{{ route('admin.campaigns.show', $campaign) }}"

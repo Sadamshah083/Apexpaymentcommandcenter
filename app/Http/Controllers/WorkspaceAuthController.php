@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\User;
 use App\Models\Workspace;
+use App\Services\Auth\MemberJwtService;
 use App\Support\AdminModules;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -23,37 +24,49 @@ class WorkspaceAuthController extends Controller
 
                 return $this->redirectAfterAdminLogin($user);
             }
+
+            // Agent session on admin login page — clear so they can sign in as admin if needed.
+            Auth::logout();
+            request()->session()->forget('member_jwt');
+            request()->session()->invalidate();
+            request()->session()->regenerateToken();
         }
 
-        return view('auth.login_admin');
+        return response()
+            ->view('auth.login_admin')
+            ->header('Cache-Control', 'no-store, no-cache, must-revalidate');
     }
 
     public function adminLogin(Request $request)
     {
         $credentials = $request->validate([
-            'username' => 'required|string',
+            'email' => 'required|string',
             'password' => 'required|string',
         ]);
 
-        $user = User::where('name', $credentials['username'])->first();
+        $login = trim($credentials['email']);
+        $user = $this->findUserByLogin($login);
 
         if ($user && Hash::check($credentials['password'], $user->password)) {
-            Auth::login($user);
+            Auth::login($user, false);
+            $request->session()->regenerate();
 
             if (! $user->ensureAdminPortalWorkspace()) {
                 Auth::logout();
 
                 return back()->withErrors([
-                    'username' => 'Access denied. Agent accounts must use the agent sign-in page.',
+                    'email' => 'Access denied. Agent accounts must use the agent sign-in page.',
                 ]);
             }
+
+            $this->issueMemberJwt($user);
 
             return $this->redirectAfterAdminLogin($user)->with('success', 'Logged into Admin Portal.');
         }
 
         return back()->withErrors([
-            'username' => 'The provided credentials do not match our records.',
-        ])->withInput($request->only('username'));
+            'email' => 'The provided credentials do not match our records.',
+        ])->withInput($request->only('email'));
     }
 
     public function showRegister()
@@ -126,6 +139,7 @@ class WorkspaceAuthController extends Controller
     public function adminLogout(Request $request)
     {
         Auth::logout();
+        $request->session()->forget('member_jwt');
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 
@@ -136,19 +150,37 @@ class WorkspaceAuthController extends Controller
     public function showPortalLogin()
     {
         if (Auth::check()) {
-            return $this->redirectAfterPortalLogin(Auth::user());
+            $user = Auth::user();
+            $activeWorkspace = $user->firstPortalWorkspace() ?? $user->firstActiveWorkspace();
+            if ($activeWorkspace && $user->canAccessPortal($activeWorkspace->id)) {
+                if ((int) ($user->current_workspace_id ?? 0) !== (int) $activeWorkspace->id) {
+                    $user->update(['current_workspace_id' => $activeWorkspace->id]);
+                }
+
+                return $this->redirectAfterPortalLogin($user);
+            }
+
+            // Admin or inactive session on agent login — clear so agent login works cleanly.
+            Auth::logout();
+            request()->session()->forget('member_jwt');
+            request()->session()->invalidate();
+            request()->session()->regenerateToken();
         }
-        return view('auth.login_portal');
+
+        return response()
+            ->view('auth.login_portal')
+            ->header('Cache-Control', 'no-store, no-cache, must-revalidate');
     }
 
     public function portalLogin(Request $request)
     {
         $credentials = $request->validate([
-            'username' => 'required|string',
+            'email' => 'required|string',
             'password' => 'required|string',
         ]);
 
-        $user = User::where('name', $credentials['username'])->first();
+        $login = trim($credentials['email']);
+        $user = $this->findUserByLogin($login);
 
         if ($user && Hash::check($credentials['password'], $user->password)) {
             $activeWorkspace = $user->firstPortalWorkspace() ?? $user->firstActiveWorkspace();
@@ -157,16 +189,22 @@ class WorkspaceAuthController extends Controller
                 $suspended = $user->hasAnySuspendedMembership();
 
                 return back()->withErrors([
-                    'username' => $suspended
+                    'email' => $suspended
                         ? 'Your account has been suspended. Contact your workspace administrator to regain access.'
                         : 'Access denied. This account is not active in any workspace.',
-                ])->withInput($request->only('username'));
+                ])->withInput($request->only('email'));
             }
 
-            Auth::login($user);
-            $user->update(['current_workspace_id' => $activeWorkspace->id]);
+            Auth::login($user, false);
+            $request->session()->regenerate();
+
+            if ((int) ($user->current_workspace_id ?? 0) !== (int) $activeWorkspace->id) {
+                $user->update(['current_workspace_id' => $activeWorkspace->id]);
+            }
 
             if ($user->canAccessPortal($activeWorkspace->id)) {
+                $this->issueMemberJwt($user, (int) $activeWorkspace->id);
+
                 return $this->redirectAfterPortalLogin($user)->with('success', 'Signed in to '.config('app.name').'.');
             }
 
@@ -174,34 +212,75 @@ class WorkspaceAuthController extends Controller
 
             if ($user->isAdminOfAnyWorkspace()) {
                 return back()->withErrors([
-                    'username' => 'This is an admin account. Sign in at the admin portal instead: '.route('admin.login'),
-                ])->withInput($request->only('username'));
+                    'email' => 'This is an admin account. Sign in at the admin portal instead: '.route('admin.login'),
+                ])->withInput($request->only('email'));
             }
 
             return back()->withErrors([
-                'username' => 'Access denied. This account is not active in any workspace.',
-            ])->withInput($request->only('username'));
+                'email' => 'Access denied. This account is not active in any workspace.',
+            ])->withInput($request->only('email'));
         }
 
         return back()->withErrors([
-            'username' => 'The provided credentials do not match our records.',
-        ])->withInput($request->only('username'));
+            'email' => 'The provided credentials do not match our records.',
+        ])->withInput($request->only('email'));
+    }
+
+    /**
+     * Resolve a user by email (preferred) or legacy username.
+     */
+    protected function findUserByLogin(string $login): ?User
+    {
+        $login = trim($login);
+        if ($login === '') {
+            return null;
+        }
+
+        $needle = strtolower($login);
+
+        // Email logins: one indexed lookup. Username: single OR query.
+        if (str_contains($login, '@')) {
+            return User::query()
+                ->whereRaw('LOWER(email) = ?', [$needle])
+                ->first();
+        }
+
+        return User::query()
+            ->where(function ($query) use ($needle) {
+                $query->whereRaw('LOWER(email) = ?', [$needle])
+                    ->orWhereRaw('LOWER(name) = ?', [$needle]);
+            })
+            ->first();
     }
 
     public function portalLogout(Request $request)
     {
         Auth::logout();
+        $request->session()->forget('member_jwt');
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 
         return redirect()->route('portal.login');
     }
 
+    protected function issueMemberJwt(User $user, ?int $workspaceId = null): void
+    {
+        try {
+            $token = app(MemberJwtService::class)->issue($user, $workspaceId);
+            session([
+                'member_jwt' => $token,
+                'member_jwt_expires_at' => now()->addHours(app(MemberJwtService::class)->ttlHours())->toIso8601String(),
+            ]);
+        } catch (\Throwable) {
+            // Login must not fail if JWT secret is missing in a legacy env.
+        }
+    }
+
     public function showAcceptInvite(string $token)
     {
         return redirect()->route('portal.login')->with(
             'info',
-            'Email invitations are no longer used. Log in with the username and password your workspace owner created for you.'
+            'Email invitations are no longer used. Log in with the email and password your workspace owner created for you.'
         );
     }
 
@@ -209,7 +288,7 @@ class WorkspaceAuthController extends Controller
     {
         return redirect()->route('portal.login')->with(
             'info',
-            'Email invitations are no longer used. Log in with the username and password your workspace owner created for you.'
+            'Email invitations are no longer used. Log in with the email and password your workspace owner created for you.'
         );
     }
 }

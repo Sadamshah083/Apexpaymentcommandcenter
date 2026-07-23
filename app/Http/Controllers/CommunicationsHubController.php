@@ -78,6 +78,8 @@ class CommunicationsHubController extends Controller
 
     public function dialerCallLogs(Request $request)
     {
+        \App\Support\ReleaseSessionLock::now($request);
+
         $filters = $this->inbox->dialerCallLogFilters($this->filters($request));
         if ($request->boolean('recordings_only')) {
             $filters['recordings_only'] = true;
@@ -92,7 +94,7 @@ class CommunicationsHubController extends Controller
         $offset = max(0, (int) $request->query('offset', 0));
         $perPage = min(50, max(1, (int) $request->query(
             'per_page',
-            config('integrations.communications.list_page_size', 20),
+            config('integrations.communications.list_page_size', 30),
         )));
 
         if (! auth()->check()) {
@@ -121,11 +123,40 @@ class CommunicationsHubController extends Controller
         }
     }
 
+    public function dialerRecentByPhone(Request $request)
+    {
+        if (! auth()->check()) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        \App\Support\ReleaseSessionLock::now($request);
+
+        $phone = trim((string) $request->query('phone', ''));
+        if ($phone === '') {
+            return response()->json(['log' => null]);
+        }
+
+        $user = auth()->user();
+        $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
+        if (! $workspace) {
+            return response()->json(['log' => null]);
+        }
+
+        $tier = $this->access->tierFor($user, $this->routePrefix());
+        $scopeUserId = in_array($tier, ['agent', 'team_lead'], true) ? (int) $user->id : null;
+
+        $log = $this->callHistory->recentDialForPhone($workspace, $phone, $scopeUserId);
+
+        return response()->json(['log' => $log]);
+    }
+
     public function dialerImportedLeads(Request $request)
     {
         if (! auth()->check()) {
             return response()->json(['message' => 'Unauthorized'], 401);
         }
+
+        \App\Support\ReleaseSessionLock::now($request);
 
         $user = auth()->user();
         $routePrefix = $this->routePrefix();
@@ -140,21 +171,31 @@ class CommunicationsHubController extends Controller
 
         $offset = max(0, (int) $request->query('offset', 0));
         $perPage = min(100, max(1, (int) $request->query('per_page', 25)));
+        $workflowIds = $request->query('workflow_ids', $request->input('workflow_ids', []));
+        if (! is_array($workflowIds)) {
+            $workflowIds = filled($workflowIds) ? [(int) $workflowIds] : [];
+        }
         $filters = [
             'campaign_id' => $request->query('campaign_id'),
+            'workflow_ids' => array_values(array_filter(array_map('intval', $workflowIds))),
             'pool' => $request->query('pool', 'callable'),
             'search' => $request->query('search'),
         ];
 
-        if ($this->access->tierFor($user, $routePrefix) === 'agent') {
-            // Agents only see their own assigned queue — no lead-pool switch.
+        $tier = $this->access->tierFor($user, $routePrefix);
+        if (in_array($tier, ['agent', 'team_lead'], true)) {
+            // Dialer queue is personal: leads assigned to another agent never appear here.
             $filters['assigned_user_id'] = (int) $user->id;
             $filters['pool'] = 'assigned';
+            // Agents may filter by their assigned sheets so they can pick which list to dial.
         }
 
         try {
             $payload = $this->importedLeads->paginate($workspace, $filters, $offset, $perPage);
             $payload['campaigns'] = $this->importedLeads->campaignOptions($workspace);
+            $payload['files'] = in_array($tier, ['agent', 'team_lead'], true)
+                ? $this->importedLeads->fileOptions($workspace, (int) $user->id)
+                : $this->importedLeads->fileOptions($workspace);
 
             return response()->json($payload);
         } catch (\Throwable $e) {
@@ -167,6 +208,7 @@ class CommunicationsHubController extends Controller
                 'has_more' => false,
                 'total' => 0,
                 'campaigns' => [],
+                'files' => [],
             ], 500);
         }
     }
@@ -195,6 +237,9 @@ class CommunicationsHubController extends Controller
             'note' => ['nullable', 'string', 'max:5000'],
             'in_call_notes' => ['nullable', 'string', 'max:5000'],
             'duration_sec' => ['nullable', 'integer', 'min:0', 'max:86400'],
+            'connected' => ['nullable', 'boolean'],
+            'call_result' => ['nullable', 'string', 'max:32'],
+            'dial_mode' => ['nullable', 'string', 'in:auto,manual'],
         ]);
 
         $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
@@ -207,128 +252,44 @@ class CommunicationsHubController extends Controller
         $inCallNotes = filled($validated['in_call_notes'] ?? null) ? trim((string) $validated['in_call_notes']) : null;
         $uuid = trim((string) ($validated['call_uuid'] ?? ''));
         $phone = trim((string) ($validated['phone'] ?? ''));
-        $durationSec = (int) ($validated['duration_sec'] ?? 0);
+        $durationSec = array_key_exists('duration_sec', $validated)
+            ? max(0, (int) $validated['duration_sec'])
+            : null;
+        $connected = (bool) ($validated['connected'] ?? false);
+        $callResult = strtolower(trim((string) ($validated['call_result'] ?? '')));
         $leadId = filled($validated['lead_id'] ?? null) ? (int) $validated['lead_id'] : null;
+        $dialMode = trim((string) ($validated['dial_mode'] ?? ''));
+        $userId = (int) $user->id;
+        $workspaceId = (int) $workspace->id;
+        $tier = $this->access->tierFor($user, $routePrefix);
 
-        // Morpheus disposition is best-effort and never blocks the agent UI / next dial.
-        if ($uuid !== '') {
-            $zoomDisposition = $disposition;
-            $zoomNote = $note;
-            dispatch(function () use ($uuid, $zoomDisposition, $zoomNote) {
-                try {
-                    app(\App\Services\Integrations\ZoomApiService::class)->dispositionCall($uuid, [
-                        'disposition' => $zoomDisposition,
-                        'note' => $zoomNote,
-                        'update_lead' => false,
-                    ]);
-                } catch (\Throwable) {
-                    // Local disposition history is still recorded below.
-                }
-            })->afterResponse();
-        }
-
+        // Critical path only: write call log + disposition history, then return.
         $callLog = $this->callHistory->recordDialerDisposition($workspace, [
             'call_uuid' => $uuid !== '' ? $uuid : null,
             'phone' => $phone !== '' ? $phone : null,
             'disposition' => $disposition,
             'note' => $note,
             'in_call_notes' => $inCallNotes,
-            'duration_sec' => $durationSec > 0 ? $durationSec : null,
+            'duration_sec' => $durationSec,
+            'connected' => $connected,
+            'call_result' => $callResult !== '' ? $callResult : null,
             'user' => $user,
             'lead_id' => $leadId,
+            'dial_mode' => $dialMode,
         ]);
 
-        $leadPayload = null;
-        $leadName = '';
-        $leadContact = '';
-        $lead = null;
+        // Optimistic lead payload — queue removal already happens in the browser.
+        $leadPayload = $leadId
+            ? ['id' => $leadId, 'removed' => true, 'marked_ids' => [$leadId]]
+            : null;
 
-        if ($leadId) {
-            $lead = \App\Models\WorkflowLead::query()
-                ->select([
-                    'id',
-                    'workflow_id',
-                    'business_name',
-                    'owner_name',
-                    'notes',
-                    'setter_status',
-                    'contact_attempts',
-                    'last_contacted_at',
-                ])
-                ->whereKey($leadId)
-                ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspace->id))
-                ->first();
-        }
-
-        // Fast path only — skip expensive fuzzy phone scans when lead_id was sent.
-        if (! $lead && $phone !== '' && ! $leadId) {
-            $digits = preg_replace('/\D+/', '', $phone) ?? '';
-            $tail = strlen($digits) >= 10 ? substr($digits, -10) : $digits;
-            $lead = \App\Models\WorkflowLead::query()
-                ->select([
-                    'id',
-                    'workflow_id',
-                    'business_name',
-                    'owner_name',
-                    'notes',
-                    'setter_status',
-                    'contact_attempts',
-                    'last_contacted_at',
-                ])
-                ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspace->id))
-                ->where(function ($q) use ($phone, $tail) {
-                    $q->where('normalized_phone', $phone)
-                        ->orWhere('direct_phone', $phone)
-                        ->orWhere('input_phone', $phone);
-                    if ($tail !== '') {
-                        $q->orWhere('normalized_phone', 'like', '%'.$tail);
-                    }
-                })
-                ->when(
-                    $this->access->tierFor($user, $routePrefix) === 'agent',
-                    fn ($q) => $q->where(function ($assigned) use ($user) {
-                        $assigned->where('assigned_user_id', (int) $user->id)
-                            ->orWhere('assigned_setter_id', (int) $user->id);
-                    })
-                )
-                ->orderByDesc('id')
-                ->limit(1)
-                ->first();
-        }
-
-        if ($lead) {
-            $setterStatus = $this->importedLeads->dispositionToSetterStatus($disposition);
-            $updates = [
-                'last_contacted_at' => now(),
-                'contact_attempts' => max(1, (int) ($lead->contact_attempts ?? 0) + 1),
-            ];
-
-            if ($setterStatus) {
-                $updates['setter_status'] = $setterStatus;
-            }
-
-            if ($note) {
-                $updates['notes'] = trim(((string) ($lead->notes ?? ''))."\n".$note);
-            }
-
-            $lead->update($updates);
-            $leadPayload = [
-                'id' => (int) $lead->id,
-                'removed' => true,
-            ];
-            $leadName = filled($lead->business_name)
-                ? (string) $lead->business_name
-                : (string) ($lead->owner_name ?? '');
-            $leadContact = filled($lead->owner_name) && filled($lead->business_name)
-                ? (string) $lead->owner_name
-                : '';
-        }
-
-        CommunicationsInboxService::bumpDialerLogsCacheVersion();
-
-        // Lightweight response — skip enrichDialerCallLogs* (those were making Save take ~5s).
-        $duration = (int) ($callLog->duration_sec ?? $durationSec);
+        $duration = (int) ($callLog->duration_sec ?? $durationSec ?? 0);
         $phoneDisplay = $phone !== '' ? $phone : (string) ($callLog->to_phone ?? '');
+        $resultLabel = data_get($callLog->meta, 'call_result')
+            ?: ($connected || $duration > 0 || in_array($callResult, ['connected', 'initiated', 'answered'], true)
+                ? ($callResult === 'initiated' ? 'initiated' : 'connected')
+                : 'no-answer');
+
         $formatted = [
             'id' => $callLog->morpheus_call_uuid ?: ('local:'.$callLog->id),
             'direction' => 'outbound',
@@ -337,7 +298,7 @@ class CommunicationsHubController extends Controller
             'to' => $phoneDisplay !== '' ? $phoneDisplay : '—',
             'to_phone' => $phoneDisplay,
             'disposition' => $disposition,
-            'result' => $duration > 0 ? 'connected' : 'no-answer',
+            'result' => $resultLabel,
             'note' => $note,
             'call_note' => $note,
             'in_call_notes' => $inCallNotes,
@@ -345,13 +306,71 @@ class CommunicationsHubController extends Controller
             'duration_sec' => $duration,
             'duration_label' => $duration > 0 ? $duration.'s' : '0s',
             'time_ago' => 'just now',
-            'lead_id' => $lead ? (int) $lead->id : $leadId,
-            'lead_name' => $leadName,
-            'lead_contact' => $leadContact,
+            'lead_id' => $leadId,
+            'lead_name' => '',
+            'lead_contact' => '',
+            'lead_file_name' => null,
             'agent_name' => $user?->name,
             'user_id' => $user?->id,
             'source' => 'local_history',
         ];
+
+        // Heavy work after the browser gets 200 (mark dialed, Morpheus, cache).
+        dispatch(function () use (
+            $workspaceId,
+            $userId,
+            $uuid,
+            $disposition,
+            $note,
+            $phone,
+            $leadId,
+            $tier,
+        ): void {
+            try {
+                if ($uuid !== '') {
+                    app(\App\Services\Integrations\ZoomApiService::class)->dispositionCall($uuid, [
+                        'disposition' => $disposition,
+                        'note' => $note,
+                        'update_lead' => false,
+                    ]);
+                }
+            } catch (\Throwable) {
+                // Local history already saved.
+            }
+
+            try {
+                $workspace = \App\Models\Workspace::query()->find($workspaceId);
+                if (! $workspace) {
+                    return;
+                }
+
+                $lead = null;
+                if ($leadId) {
+                    $leadQuery = \App\Models\WorkflowLead::query()
+                        ->select(['id', 'workflow_id', 'notes', 'contact_attempts', 'assigned_user_id'])
+                        ->whereKey($leadId)
+                        ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspaceId));
+
+                    if (in_array($tier, ['agent', 'team_lead'], true)) {
+                        $leadQuery->where('assigned_user_id', $userId);
+                    }
+
+                    $lead = $leadQuery->first();
+                }
+
+                app(\App\Services\Communications\DialerImportedLeadsService::class)->markDialed(
+                    $workspace,
+                    $lead,
+                    $phone !== '' ? $phone : null,
+                    $disposition,
+                    ($note !== null && $note !== '' && $lead) ? $note : null,
+                );
+
+                \App\Services\Communications\CommunicationsInboxService::bumpDialerLogsCacheVersion();
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        })->afterResponse();
 
         return response()->json([
             'saved' => true,
@@ -360,6 +379,7 @@ class CommunicationsHubController extends Controller
             'lead_removed' => $leadPayload !== null,
             'call_log' => $formatted,
             'next_call_delay_sec' => max(0, (int) config('integrations.communications.next_call_delay_sec', 6)),
+            'async' => true,
         ]);
     }
 
@@ -500,6 +520,8 @@ class CommunicationsHubController extends Controller
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
+        \App\Support\ReleaseSessionLock::now($request);
+
         $validated = $request->validate([
             'call_log_ref' => ['nullable', 'string', 'max:128'],
             'call_uuid' => ['nullable', 'string', 'max:128'],
@@ -519,8 +541,24 @@ class CommunicationsHubController extends Controller
         $recordingService = app(CommunicationsCallRecordingService::class);
 
         if ($log) {
-            $log = $recordingService->resolveAndPersist($log);
+            // Allow Find to retry rows previously marked unavailable once recordings finalize.
+            if ($log->recording_status === CommunicationsCallRecordingService::STATUS_UNAVAILABLE
+                && ! filled($log->recording_file_id)
+            ) {
+                $meta = $log->meta ?? [];
+                $meta['recording_attempt'] = 0;
+                $log->update([
+                    'recording_status' => CommunicationsCallRecordingService::STATUS_PENDING,
+                    'meta' => $meta,
+                ]);
+            }
+
+            $attempt = max(1, (int) data_get($log->fresh()->meta, 'recording_attempt', 0) + 1);
+            $log = $recordingService->resolveAndPersist($log->fresh(), $attempt);
             $recording = $recordingService->recordingFieldsForHubLog($log);
+            if ($log->workspace_id) {
+                \App\Services\Communications\AgentStatusReportService::forgetCachesForWorkspace((int) $log->workspace_id);
+            }
         } else {
             $fileId = $this->zoom->findRecordingFileIdForCall($ref);
             $recording = [
@@ -538,11 +576,22 @@ class CommunicationsHubController extends Controller
         $routePrefix = $this->routePrefix();
         $hasRecording = (bool) ($recording['has_recording_media'] ?? false);
         $callRef = (string) ($recording['call_reference_id'] ?? $ref);
+        $status = (string) ($recording['recording_status'] ?? 'none');
+
+        $message = null;
+        if (! $hasRecording) {
+            $message = match ($status) {
+                CommunicationsCallRecordingService::STATUS_PENDING => 'Recording is still processing. Try Find again in a moment.',
+                CommunicationsCallRecordingService::STATUS_UNAVAILABLE => 'No recording was found for this call.',
+                default => 'Recording not available for this call.',
+            };
+        }
 
         return response()->json([
-            'recording_status' => $recording['recording_status'] ?? 'none',
+            'recording_status' => $status,
             'has_recording' => $hasRecording,
             'recording_id' => $recording['recording_id'] ?? null,
+            'message' => $message,
             'play_url' => $hasRecording
                 ? route($routePrefix.'communications.zoom.recordings.media', [
                     'recordingId' => $recording['recording_id'],
@@ -669,27 +718,26 @@ class CommunicationsHubController extends Controller
 
     {
 
+        $user = $request->user();
+        $routePrefix = $this->routePrefix();
         $source = (string) $request->query('source', 'phone');
-
         $download = $request->query('action', 'play') === 'download';
-
         $callReferenceId = $request->query('call_ref');
+        $callRef = is_string($callReferenceId) && $callReferenceId !== '' ? $callReferenceId : null;
 
-
+        if (! $this->access->canAccessRecording($user, $routePrefix, $recordingId, $callRef)) {
+            abort(403, 'You can only listen to your own call recordings.');
+        }
 
         try {
-
             return $this->zoom->streamRecording(
                 $source,
                 $recordingId,
                 $download,
-                is_string($callReferenceId) && $callReferenceId !== '' ? $callReferenceId : null
+                $callRef
             );
-
         } catch (\Throwable $e) {
-
             return $this->recordingMediaErrorResponse($request, $e);
-
         }
 
     }
@@ -868,7 +916,7 @@ class CommunicationsHubController extends Controller
 
         $stats = [];
 
-        $perPage = (int) config('integrations.communications.list_page_size', 20);
+        $perPage = (int) config('integrations.communications.list_page_size', 30);
 
         $currentOffset = is_numeric($filters['page_token'] ?? null) ? (int) $filters['page_token'] : 0;
 
@@ -882,7 +930,9 @@ class CommunicationsHubController extends Controller
 
                 if (auth()->check()) {
                     $data = app(\App\Services\Communications\CommunicationsDataService::class);
-                    $payload = $data->callLogs(array_merge($filters, ['per_page' => $perPage]), 1, true);
+                    // Recording enrichment hits Zoom pages — only when the recorded filter needs it.
+                    $enrichRecordings = ($filters['filter'] ?? '') === 'recorded';
+                    $payload = $data->callLogs(array_merge($filters, ['per_page' => $perPage]), 1, $enrichRecordings);
                     $callLogs = $this->filterCallLogs($payload['logs'] ?? [], $filters);
                     $nextPageToken = $payload['next_page_token'] ?? null;
                     $prevPageToken = $currentOffset > 0 ? (string) max(0, $currentOffset - $perPage) : null;

@@ -35,7 +35,7 @@
             <div>
                 <h2 id="um-edit-member-title" class="member-confirm-title">Edit account</h2>
                 <p id="um-edit-member-desc" class="um-panel-desc um-add-member-desc">
-                    Update username, role, campaign / team lead assignment, email, and password.
+                    Update profile, role, campaign, team lead, and optional password.
                 </p>
             </div>
             <button type="button" class="app-modal-close" data-um-edit-member-dismiss aria-label="Close">&times;</button>
@@ -58,33 +58,36 @@
                 </div>
                 <div class="um-field">
                     <label class="um-label" for="um-edit-member-role">Role</label>
-                    <select id="um-edit-member-role" name="role" class="um-input um-select" data-edit-member-role>
+                    <select id="um-edit-member-role" name="role" class="um-input um-select js-pretty-select" data-pretty-select data-edit-member-role>
                         @foreach ($assignableRoles as $value => $label)
                             <option value="{{ $value }}">{{ $label }}</option>
                         @endforeach
                     </select>
                 </div>
                 <div class="um-field" data-edit-campaign-field hidden>
-                    <label class="um-label" for="um-edit-member-campaign">Campaign (team lead only)</label>
-                    <select id="um-edit-member-campaign" name="campaign_id" class="um-input um-select"
-                        data-edit-member-campaign>
+                    <label class="um-label" for="um-edit-member-campaign">Campaign</label>
+                    <select id="um-edit-member-campaign" name="campaign_id" class="um-input um-select js-pretty-select"
+                        data-pretty-select data-edit-member-campaign>
                         <option value="">Unassigned</option>
                         @foreach ($campaigns as $campaign)
                             <option value="{{ $campaign->id }}">{{ $campaign->name }}</option>
                         @endforeach
                     </select>
-                    <p class="um-field-hint">Assign B2B Fronter or B2B Closer. Only this lead’s agents inherit it.</p>
+                    <p class="um-field-hint">
+                        Assign a campaign to this account.
+                        <a href="{{ route('admin.campaigns.index') }}" class="um-field-link">Create / manage campaigns</a>
+                    </p>
                 </div>
                 <div class="um-field" data-edit-team-lead-field hidden>
-                    <label class="um-label" for="um-edit-member-team-lead">Team lead (agent only)</label>
-                    <select id="um-edit-member-team-lead" name="team_lead_user_id" class="um-input um-select"
-                        data-edit-member-team-lead>
+                    <label class="um-label" for="um-edit-member-team-lead">Select team lead</label>
+                    <select id="um-edit-member-team-lead" name="team_lead_user_id" class="um-input um-select js-pretty-select"
+                        data-pretty-select data-edit-member-team-lead>
                         <option value="">Unassigned</option>
                     </select>
-                    <p class="um-field-hint">Agent joins that team lead only — not other teams.</p>
+                    <p class="um-field-hint">Agent joins that team lead’s team only.</p>
                 </div>
                 <div class="um-field">
-                    <label class="um-label" for="um-edit-member-password">New password</label>
+                    <label class="um-label" for="um-edit-member-password">New password <span class="um-text-muted">(optional)</span></label>
                     <input id="um-edit-member-password" type="password" name="password" minlength="6"
                         placeholder="Leave blank to keep current" class="um-input" autocomplete="new-password">
                 </div>

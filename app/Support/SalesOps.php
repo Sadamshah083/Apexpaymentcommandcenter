@@ -68,6 +68,11 @@ class SalesOps
         return self::normalizeLegacyRole((string) $role) === 'closers_team_lead';
     }
 
+    public static function isQaRole(?string $role): bool
+    {
+        return self::normalizeLegacyRole((string) $role) === 'closers_qa';
+    }
+
     public static function isTeamAssignableRole(?string $role): bool
     {
         $normalized = self::normalizeLegacyRole((string) $role);
@@ -77,6 +82,7 @@ class SalesOps
             'appointment_setter_team_lead',
             'closer',
             'closers_team_lead',
+            'closers_qa',
         ], true);
     }
 
@@ -109,7 +115,7 @@ class SalesOps
 
         return match ($normalized) {
             'appointment_setter', 'appointment_setter_team_lead' => 'appointment_setter_team_lead',
-            'closer', 'closers_team_lead' => 'closers_team_lead',
+            'closer', 'closers_team_lead', 'closers_qa' => 'closers_team_lead',
             default => null,
         };
     }
@@ -119,9 +125,26 @@ class SalesOps
      */
     public static function assignableMemberRoles(): array
     {
-        return collect(config('sales_ops.roles', []))
+        $roles = collect(config('sales_ops.roles', []))
             ->except(['super_admin'])
             ->all();
+
+        return $roles;
+    }
+
+    /**
+     * Roles a given actor may assign when creating accounts.
+     *
+     * @return array<string, string>
+     */
+    public static function creatableMemberRolesFor(?\App\Models\User $actor = null): array
+    {
+        $roles = self::creatableMemberRoles();
+        if ($actor && ! $actor->isPlatformSuperAdmin()) {
+            unset($roles['admin']);
+        }
+
+        return $roles;
     }
 
     /**

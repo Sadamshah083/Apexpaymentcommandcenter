@@ -37,16 +37,18 @@ class MarketerPortalMiddleware
 
             if ($fallbackWorkspace) {
                 $this->workspaceContext->ensureUserIsMember($user, $fallbackWorkspace);
-                $user->update(['current_workspace_id' => $fallbackWorkspace->id]);
-                $user->refresh();
-                $user->loadMissing(['workspaces']);
+                if ((int) ($user->current_workspace_id ?? 0) !== (int) $fallbackWorkspace->id) {
+                    $user->update(['current_workspace_id' => $fallbackWorkspace->id]);
+                    $user->refresh();
+                    $user->loadMissing(['workspaces']);
+                }
             }
         }
 
         if (! $user->canAccessPortal($user->current_workspace_id)) {
             $fallbackWorkspace = $user->firstPortalWorkspace();
 
-            if ($fallbackWorkspace && $fallbackWorkspace->id !== $user->current_workspace_id) {
+            if ($fallbackWorkspace && (int) $fallbackWorkspace->id !== (int) ($user->current_workspace_id ?? 0)) {
                 $user->update(['current_workspace_id' => $fallbackWorkspace->id]);
                 $user->refresh();
                 $user->loadMissing(['workspaces']);

@@ -21,7 +21,7 @@ class CallNotesController extends Controller
         $user = $request->user();
         $routePrefix = $this->routePrefix();
 
-        if (! $this->access->canDial($user, $routePrefix)) {
+        if (! $this->access->canViewCallNotes($user, $routePrefix)) {
             abort(403, 'Call notes are not available for this account.');
         }
 
@@ -30,16 +30,25 @@ class CallNotesController extends Controller
             abort(404, 'Workspace not found.');
         }
 
-        [$isAdminView, $agents, $selectedAgentId, $selectedAgent] = $this->resolveAgentContext($request, $user, $routePrefix, $workspace);
+        [$isAdminView, $agents, $selectedAgentId, $selectedAgent, $scopeUserIds] = $this->resolveAgentContext(
+            $request,
+            $user,
+            $routePrefix,
+            $workspace,
+        );
 
         $notes = null;
-        if ($selectedAgentId > 0) {
-            $notes = $this->notesHistory->notesForAgent($workspace, $selectedAgentId, 25);
+        if ($scopeUserIds !== []) {
+            $notes = $this->notesHistory->notesForAgents($workspace, $scopeUserIds, 25);
         }
 
         $view = $routePrefix === 'admin.'
             ? 'communications.notes.index'
             : 'communications.notes.portal';
+
+        $downloadQuery = $isAdminView
+            ? ['agent_id' => $selectedAgentId > 0 ? $selectedAgentId : 'all']
+            : [];
 
         return view($view, [
             'routePrefix' => $routePrefix,
@@ -47,9 +56,10 @@ class CallNotesController extends Controller
             'agents' => $agents,
             'selectedAgentId' => $selectedAgentId,
             'selectedAgent' => $selectedAgent,
+            'showAllAgents' => $isAdminView && $selectedAgentId === 0,
             'notes' => $notes,
-            'downloadUrl' => $selectedAgentId > 0
-                ? route($routePrefix.'communications.notes.download', ['agent_id' => $selectedAgentId])
+            'downloadUrl' => $scopeUserIds !== []
+                ? route($routePrefix.'communications.notes.download', $downloadQuery)
                 : null,
             'hubAccess' => $this->access->viewMeta($user, $routePrefix),
         ]);
@@ -60,7 +70,7 @@ class CallNotesController extends Controller
         $user = $request->user();
         $routePrefix = $this->routePrefix();
 
-        if (! $this->access->canDial($user, $routePrefix)) {
+        if (! $this->access->canViewCallNotes($user, $routePrefix)) {
             abort(403, 'Call notes are not available for this account.');
         }
 
@@ -69,25 +79,31 @@ class CallNotesController extends Controller
             abort(404, 'Workspace not found.');
         }
 
-        [$isAdminView, $agents, $selectedAgentId, $selectedAgent] = $this->resolveAgentContext($request, $user, $routePrefix, $workspace);
+        [$isAdminView, $agents, $selectedAgentId, $selectedAgent, $scopeUserIds] = $this->resolveAgentContext(
+            $request,
+            $user,
+            $routePrefix,
+            $workspace,
+        );
 
-        if ($selectedAgentId <= 0 || ! $selectedAgent) {
-            abort(422, 'Select an agent before downloading notes.');
+        if ($scopeUserIds === []) {
+            abort(422, 'No agents available to download notes for.');
         }
 
-        $rows = $this->notesHistory->allNotesForAgent($workspace, $selectedAgentId);
-        $safeName = preg_replace('/[^A-Za-z0-9_-]+/', '-', (string) ($selectedAgent['name'] ?? 'agent')) ?: 'agent';
+        $rows = $this->notesHistory->allNotesForAgents($workspace, $scopeUserIds);
+        $safeName = $selectedAgentId > 0
+            ? (preg_replace('/[^A-Za-z0-9_-]+/', '-', (string) ($selectedAgent['name'] ?? 'agent')) ?: 'agent')
+            : 'all-agents';
         $filename = 'call-notes-'.$safeName.'-'.now()->format('Y-m-d').'.csv';
 
-        return response()->streamDownload(function () use ($rows, $selectedAgent) {
+        return response()->streamDownload(function () use ($rows) {
             $handle = fopen('php://output', 'w');
-            // Excel-friendly UTF-8 BOM
             fwrite($handle, "\xEF\xBB\xBF");
             fputcsv($handle, ['Agent', 'Number', 'Disposition', 'Notes', 'Duration (sec)', 'When']);
 
             foreach ($rows as $row) {
                 fputcsv($handle, [
-                    $selectedAgent['name'] ?? '',
+                    $row['agent'] ?? '',
                     $row['phone'] ?? '',
                     $row['disposition'] ?? '',
                     $row['notes'] ?? '',
@@ -103,26 +119,42 @@ class CallNotesController extends Controller
     }
 
     /**
-     * @return array{0: bool, 1: \Illuminate\Support\Collection, 2: int, 3: ?array}
+     * @return array{0: bool, 1: \Illuminate\Support\Collection, 2: int, 3: ?array, 4: list<int>}
      */
     protected function resolveAgentContext(Request $request, $user, string $routePrefix, $workspace): array
     {
         $tier = $this->access->tierFor($user, $routePrefix);
-        $isAdminView = in_array($tier, ['admin', 'supervisor', 'team_lead'], true);
+        $isAdminView = in_array($tier, ['admin', 'supervisor', 'team_lead', 'qa'], true);
         $agents = $isAdminView
-            ? $this->notesHistory->dialerAgents($workspace, $user, $tier)
+            ? $this->notesHistory->dialerAgents($workspace, $user, $tier === 'qa' ? 'admin' : $tier)
             : collect();
 
         $selectedAgentId = 0;
         $selectedAgent = null;
+        $scopeUserIds = [];
 
         if ($isAdminView) {
-            $selectedAgentId = max(0, (int) $request->query('agent_id', 0));
+            $rawAgent = $request->query('agent_id', 'all');
+            if ($rawAgent === null || $rawAgent === '' || $rawAgent === 'all') {
+                $selectedAgentId = 0;
+            } else {
+                $selectedAgentId = max(0, (int) $rawAgent);
+            }
+
             if ($selectedAgentId > 0 && ! $agents->contains(fn (array $row) => (int) $row['id'] === $selectedAgentId)) {
                 $selectedAgentId = 0;
             }
+
             if ($selectedAgentId > 0) {
                 $selectedAgent = $agents->firstWhere('id', $selectedAgentId);
+                $scopeUserIds = [$selectedAgentId];
+            } else {
+                $selectedAgent = [
+                    'id' => 0,
+                    'name' => 'All agents',
+                    'role' => '',
+                ];
+                $scopeUserIds = $agents->pluck('id')->map(fn ($id) => (int) $id)->values()->all();
             }
         } else {
             $selectedAgentId = (int) $user->id;
@@ -131,9 +163,10 @@ class CallNotesController extends Controller
                 'name' => (string) $user->name,
                 'role' => 'Agent',
             ];
+            $scopeUserIds = [(int) $user->id];
         }
 
-        return [$isAdminView, $agents, $selectedAgentId, $selectedAgent];
+        return [$isAdminView, $agents, $selectedAgentId, $selectedAgent, $scopeUserIds];
     }
 
     protected function routePrefix(): string

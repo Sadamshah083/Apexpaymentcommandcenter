@@ -44,7 +44,7 @@ class WorkspaceSyncController extends Controller
         }
 
         $syncScope = $request->query('sync_scope');
-        if (in_array($syncScope, ['list', 'off'], true)) {
+        if (in_array($syncScope, ['list', 'progress', 'off'], true)) {
             return $syncScope;
         }
 
@@ -75,9 +75,11 @@ class WorkspaceSyncController extends Controller
             $version = $request->query('v');
             $cursor = $request->has('cursor') ? $request->integer('cursor') : null;
             $idleChecks = 0;
-            $maxIdleChecks = 120;
+            $maxIdleChecks = 40; // ~40–120s depending on sleep; prefer HTTP poll
+            $startedAt = time();
+            $maxSeconds = 60;
 
-            while (! connection_aborted() && $idleChecks < $maxIdleChecks) {
+            while (! connection_aborted() && $idleChecks < $maxIdleChecks && (time() - $startedAt) < $maxSeconds) {
                 $payload = $this->syncService->poll(
                     $workspace,
                     $user,

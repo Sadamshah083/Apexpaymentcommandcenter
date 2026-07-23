@@ -96,6 +96,46 @@ class LeadContactDisplayTest extends TestCase
         $this->assertNull($contact['email']);
     }
 
+    public function test_reads_owner_from_decision_maker_column_not_contact_number(): void
+    {
+        $lead = new WorkflowLead([
+            'business_name' => "Danny's Muffler & Brake Inc.",
+            'owner_name' => null,
+            'input_phone' => '(217) 428-4828',
+            'raw_row' => [
+                'Business Name' => "Danny's Muffler & Brake Inc.",
+                'Owner/ Decision Makers/ Operations/ Management' => 'Danny Smith (Owner)',
+                'Contact Number' => '(217) 428-4828',
+                'Address' => '123 Main St',
+                'City' => 'Decatur',
+            ],
+        ]);
+
+        $contact = LeadContactDisplay::for($lead);
+
+        $this->assertSame('Danny Smith (Owner)', $contact['owner']);
+        $this->assertSame('(217) 428-4828', $contact['phone']);
+    }
+
+    public function test_rejects_phone_values_stored_in_owner_name(): void
+    {
+        $lead = new WorkflowLead([
+            'business_name' => 'Decatur Auto & Tire',
+            'owner_name' => '(217) 422-2886',
+            'input_phone' => '(217) 422-2886',
+            'raw_row' => [
+                'Business Name' => 'Decatur Auto & Tire',
+                'Owner/ Decision Makers/ Operations/ Management' => 'Jane Owner (Owner)',
+                'Contact Number' => '(217) 422-2886',
+            ],
+        ]);
+
+        $contact = LeadContactDisplay::for($lead);
+
+        $this->assertSame('Jane Owner (Owner)', $contact['owner']);
+        $this->assertNotSame('(217) 422-2886', $contact['owner']);
+    }
+
     public function test_keeps_business_website_separate_from_social_media(): void
     {
         $lead = new WorkflowLead([

@@ -33,6 +33,20 @@ class MorpheusHubController extends Controller
     // Webphone (embedded SIP/WebRTC)
     // -------------------------------------------------------------------------
 
+    /**
+     * Keep long dialer shifts alive: refresh CSRF + touch the session.
+     */
+    public function sessionPing(Request $request)
+    {
+        $request->session()->put('dialer_last_ping_at', now()->timestamp);
+
+        return response()->json([
+            'ok' => true,
+            'csrf_token' => csrf_token(),
+            'server_time' => now()->toIso8601String(),
+        ]);
+    }
+
     public function webphoneConfig(Request $request)
     {
         $validated = $request->validate([
@@ -63,6 +77,8 @@ class MorpheusHubController extends Controller
 
     public function prepareWebphone(Request $request)
     {
+        ReleaseSessionLock::now($request);
+
         $validated = $request->validate([
             'extension' => ['required', 'string', 'max:32'],
         ]);
@@ -105,6 +121,10 @@ class MorpheusHubController extends Controller
 
     public function originateCall(Request $request)
     {
+        if ($request->wantsJson() || $request->ajax() || $request->expectsJson()) {
+            ReleaseSessionLock::now($request);
+        }
+
         // Browser already placed the call over SIP/WSS — only log history, do not re-originate.
         if ($request->boolean('webphone_direct')) {
             $validated = $request->validate([
@@ -182,7 +202,9 @@ class MorpheusHubController extends Controller
             ? 'Outbound DID is not set on this extension yet — assign a caller ID in Phone Agents before calling customers.'
             : null;
 
-        $endpointOnline = $this->agents->extensionEndpointOnline($fromExtension);
+        $endpointOnline = $transportConnected
+            ? true
+            : $this->agents->extensionEndpointOnline($fromExtension);
 
         if (! $endpointOnline && $dialMethod === 'sip' && ! $apiOnly) {
             $launched = $this->launchOutboundDial($request, $clickToCall, $destination, $fromExtension, 'sip');
@@ -449,23 +471,51 @@ class MorpheusHubController extends Controller
             'related_uuids' => $related,
         ]);
 
-        // Clear wallboard LIVE state immediately — never wait on Morpheus HTTP.
+        // Clear wallboard LIVE state immediately — never wait on Morpheus HTTP or SQLite writes.
         foreach ($ended as $endedUuid) {
             $this->callEvents->markCallEnded($endedUuid, 'NORMAL_CLEARING');
-            $this->touchCallLogEnded($endedUuid);
         }
         $this->callEvents->endLiveCallsForLeg(
             is_string($fromExtension) ? $fromExtension : null,
             is_string($destination) ? $destination : null,
             'NORMAL_CLEARING',
         );
-        $this->markAgentPresenceIdle();
 
         $ext = is_string($fromExtension) ? $fromExtension : null;
         $dest = is_string($destination) ? $destination : null;
+        $userId = Auth::id();
 
-        // Tear down PSTN/SIP legs after the browser gets 200 (background).
-        dispatch(function () use ($primary, $ext, $dest, $related): void {
+        // Tear down PSTN/SIP legs + local DB/presence after the browser gets 200.
+        dispatch(function () use ($primary, $ext, $dest, $related, $ended, $userId): void {
+            foreach ($ended as $endedUuid) {
+                try {
+                    \App\Models\CommunicationCallLog::query()
+                        ->where('morpheus_call_uuid', $endedUuid)
+                        ->whereIn('status', ['initiated', 'ringing', 'bridging', 'active', 'connected', 'talking'])
+                        ->orderByDesc('id')
+                        ->limit(1)
+                        ->update(['status' => 'completed']);
+                } catch (\Throwable) {
+                    // best-effort
+                }
+            }
+
+            try {
+                if ($userId) {
+                    $user = \App\Models\User::find($userId);
+                    if ($user) {
+                        $workspace = app(\App\Services\Workspace\WorkspaceContextService::class)
+                            ->resolveActiveWorkspace($user);
+                        if ($workspace) {
+                            app(\App\Services\Communications\AgentPresenceService::class)
+                                ->markCallEnded($user, $workspace);
+                        }
+                    }
+                }
+            } catch (\Throwable) {
+                // Presence is best-effort.
+            }
+
             try {
                 app(\App\Services\Integrations\ZoomApiService::class)->hangupWithContext(
                     $primary,
@@ -540,29 +590,46 @@ class MorpheusHubController extends Controller
 
     public function releaseExtensionCalls(Request $request)
     {
+        ReleaseSessionLock::now($request);
+
         $validated = $request->validate([
             'from_extension' => ['required', 'string', 'max:32'],
             'destination' => ['nullable', 'string', 'max:64'],
         ]);
 
-        return $this->executeCallAction(
-            $request,
-            function () use ($validated) {
-                $result = $this->morpheus->releaseExtensionCallsWithDestination(
-                    $validated['from_extension'],
-                    $validated['destination'] ?? null,
-                );
+        $ext = (string) $validated['from_extension'];
+        $dest = isset($validated['destination']) ? (string) $validated['destination'] : null;
 
-                $this->callEvents->endLiveCallsForLeg(
-                    $validated['from_extension'],
-                    $validated['destination'] ?? null,
-                    'RELEASED',
-                );
+        // Clear monitoring immediately — Morpheus list/hangup can take many seconds.
+        $this->callEvents->endLiveCallsForLeg($ext, $dest, 'RELEASED');
+        $this->markAgentPresenceIdle();
 
-                return $result;
-            },
-            'Active calls released for extension.'
-        );
+        dispatch(function () use ($ext, $dest): void {
+            try {
+                app(\App\Services\Integrations\ZoomApiService::class)
+                    ->releaseExtensionCallsWithDestination($ext, $dest);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+
+            try {
+                app(\App\Services\Communications\CommunicationsDataService::class)->bustCache();
+                app(\App\Services\Communications\MorpheusHubService::class)->bustCache();
+            } catch (\Throwable) {
+                // best-effort
+            }
+        })->afterResponse();
+
+        if ($request->wantsJson() || $request->ajax() || $request->expectsJson()) {
+            return response()->json([
+                'ok' => true,
+                'message' => 'Active calls released for extension.',
+                'async' => true,
+                'hungup' => [],
+            ]);
+        }
+
+        return $this->redirectBack($request, 'Active calls released for extension.');
     }
 
     public function callStatus(Request $request, string $uuid)
@@ -700,7 +767,10 @@ class MorpheusHubController extends Controller
 
             $lastFingerprint = '';
             $idleTicks = 0;
-            $maxTicks = 1800;
+            // Hard cap — SSE must not occupy php-fpm for the life of a call (WS is primary).
+            $maxTicks = 450;
+            $startedAt = time();
+            $maxSeconds = 45;
             // SSE fallback is webhook-cache only. Rare Morpheus API check (every ~15s)
             // so the CRM worker is not flooded when dialers fall back from WebSocket.
             $apiEveryTicks = 75;
@@ -713,7 +783,7 @@ class MorpheusHubController extends Controller
             }
             flush();
 
-            while (! connection_aborted() && $idleTicks < $maxTicks) {
+            while (! connection_aborted() && $idleTicks < $maxTicks && (time() - $startedAt) < $maxSeconds) {
                 $tick++;
 
                 try {
@@ -909,6 +979,21 @@ class MorpheusHubController extends Controller
         } catch (\Throwable) {
             // Hangup should not fail if call-log update is unavailable.
         }
+    }
+
+    public function recordCall(Request $request, string $uuid)
+    {
+        $validated = $request->validate([
+            'action' => ['nullable', 'string', 'in:start,stop'],
+        ]);
+        $action = $validated['action'] ?? 'start';
+        $message = $action === 'stop' ? 'Recording stopped.' : 'Recording started.';
+
+        return $this->executeCallAction(
+            $request,
+            fn () => $this->morpheus->recordCall($uuid, $action),
+            $message,
+        );
     }
 
     public function holdCall(Request $request, string $uuid)

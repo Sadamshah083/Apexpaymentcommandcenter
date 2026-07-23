@@ -8,7 +8,6 @@ use App\Models\Workspace;
 use App\Models\WorkspaceInvitation;
 use App\Models\WorkspaceSyncEvent;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use App\Support\AdminModules;
@@ -32,15 +31,37 @@ class WorkspaceMemberService
         string $password,
         string $role = 'appointment_setter',
         ?array $modulePermissions = null,
+        ?int $teamLeadUserId = null,
+        ?int $campaignId = null,
+        ?string $email = null,
     ): User {
         $this->workspaceContext->ensureCanManageMembers($createdBy, $workspace);
 
         $username = trim($username);
         $role = $this->normalizeRole($role);
+        $email = strtolower(trim((string) $email));
 
         if ($username === '') {
             throw ValidationException::withMessages([
                 'username' => 'Username is required.',
+            ]);
+        }
+
+        if ($email === '') {
+            throw ValidationException::withMessages([
+                'email' => 'Email is required and must be unique.',
+            ]);
+        }
+
+        if (! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            throw ValidationException::withMessages([
+                'email' => 'Enter a valid email address.',
+            ]);
+        }
+
+        if (User::where('email', $email)->exists()) {
+            throw ValidationException::withMessages([
+                'email' => 'This email is already used. Admin and agent accounts must each have a different email.',
             ]);
         }
 
@@ -56,30 +77,87 @@ class WorkspaceMemberService
             ]);
         }
 
-        $user = User::create([
-            'name' => $username,
-            'email' => $this->syntheticEmail($username, $workspace->name),
-            'password' => Hash::make($password),
-            'current_workspace_id' => $workspace->id,
-        ]);
+        if ($role === 'super_admin') {
+            throw ValidationException::withMessages([
+                'role' => 'There can be only one Super Admin. Create a Workspace Admin instead.',
+            ]);
+        }
 
-        $workspace->users()->attach($user->id, [
-            'role' => $role,
-            'status' => 'active',
-            'joined_at' => now(),
-            'module_permissions' => $this->encodeModulePermissions($role, $modulePermissions),
-        ]);
+        if ($role === 'admin' && ! $createdBy->isPlatformSuperAdmin()) {
+            throw ValidationException::withMessages([
+                'role' => 'Only the Super Admin can create workspace admins.',
+            ]);
+        }
 
-        $this->syncService->record(
+        return DB::transaction(function () use (
             $workspace,
-            'member.joined',
-            'user',
-            $user->id,
-            ['username' => $username, 'role' => $role],
-            $createdBy->id
-        );
+            $createdBy,
+            $username,
+            $password,
+            $role,
+            $modulePermissions,
+            $teamLeadUserId,
+            $campaignId,
+            $email,
+        ) {
+            $user = User::create([
+                'name' => $username,
+                'email' => $email,
+                'password' => $password,
+                'password_hint' => $password,
+                'current_workspace_id' => $workspace->id,
+            ]);
 
-        return $user;
+            $workspace->users()->attach($user->id, [
+                'role' => $role,
+                'status' => 'active',
+                'joined_at' => now(),
+                'module_permissions' => $this->encodeModulePermissions($role, $modulePermissions),
+                'team_lead_user_id' => null,
+                'campaign_id' => null,
+            ]);
+
+            try {
+                app(\App\Services\Communications\CommunicationsAgentService::class)
+                    ->forgetActiveWorkspaceMembersCache((int) $workspace->id);
+            } catch (\Throwable) {
+                // Non-fatal: monitoring roster cache expires in seconds.
+            }
+
+            if (SalesOps::isTeamLeadRole($role) && $campaignId) {
+                $this->updateMemberCampaign($workspace, $createdBy, $user, $campaignId);
+            }
+
+            if (SalesOps::isAgentRole($role)) {
+                if ($teamLeadUserId) {
+                    $this->updateMemberTeamLead($workspace, $createdBy, $user, $teamLeadUserId);
+                } else {
+                    $expectedLeadRole = SalesOps::teamLeadRoleFor($role);
+                    if ($expectedLeadRole) {
+                        $firstLead = $workspace->users()
+                            ->where('users.id', '!=', $user->id)
+                            ->wherePivot('status', 'active')
+                            ->wherePivot('role', $expectedLeadRole)
+                            ->orderBy('users.name')
+                            ->first();
+                        if ($firstLead) {
+                            $this->updateMemberTeamLead($workspace, $createdBy, $user, (int) $firstLead->id);
+                        }
+                    }
+                }
+            }
+
+            $this->syncService->record(
+                $workspace,
+                'member.joined',
+                'user',
+                $user->id,
+                ['username' => $username, 'email' => $email, 'role' => $role],
+                $createdBy->id
+            );
+
+            return $user->fresh();
+        });
     }
 
     protected function syntheticEmail(string $username, string $workspaceName): string
@@ -138,7 +216,7 @@ class WorkspaceMemberService
             $user = User::create([
                 'name' => $username,
                 'email' => $email,
-                'password' => Hash::make(Str::random(32)),
+                'password' => Str::random(32),
             ]);
         }
 
@@ -203,7 +281,7 @@ class WorkspaceMemberService
                 $user->update(['name' => $username]);
             }
 
-            $user->update(['password' => Hash::make($password)]);
+            $user->update(['password' => $password, 'password_hint' => $password]);
 
             $invitation->workspace->users()->updateExistingPivot($user->id, [
                 'status' => 'active',
@@ -261,7 +339,7 @@ class WorkspaceMemberService
 
         if (User::where('email', $email)->where('id', '!=', $member->id)->exists()) {
             throw ValidationException::withMessages([
-                'email' => 'This email is already in use.',
+                'email' => 'This email is already used. Every admin and agent account must have a different email.',
             ]);
         }
 
@@ -271,7 +349,8 @@ class WorkspaceMemberService
         ];
 
         if ($password !== null && $password !== '') {
-            $updates['password'] = Hash::make($password);
+            $updates['password'] = $password;
+            $updates['password_hint'] = $password;
         }
 
         $member->update($updates);
@@ -295,7 +374,13 @@ class WorkspaceMemberService
 
         if ($role === 'super_admin') {
             throw ValidationException::withMessages([
-                'role' => 'Super Admin is assigned to the workspace owner only.',
+                'role' => 'Super Admin is assigned to the platform owner only. There can be only one Super Admin.',
+            ]);
+        }
+
+        if ($role === 'admin' && ! $admin->isPlatformSuperAdmin()) {
+            throw ValidationException::withMessages([
+                'role' => 'Only the Super Admin can assign the Admin role.',
             ]);
         }
 
@@ -305,46 +390,84 @@ class WorkspaceMemberService
             ]);
         }
 
-        if (! $workspace->users()->where('user_id', $member->id)->exists()) {
+        $membership = $workspace->users()->where('user_id', $member->id)->first();
+        if (! $membership) {
             abort(404);
         }
 
-        $currentLeadId = (int) ($workspace->users()->where('user_id', $member->id)->first()?->pivot?->team_lead_user_id ?? 0);
-        $currentCampaignId = (int) ($workspace->users()->where('user_id', $member->id)->first()?->pivot?->campaign_id ?? 0);
+        $currentLeadId = (int) ($membership->pivot->team_lead_user_id ?? 0);
+        $currentCampaignId = (int) ($membership->pivot->campaign_id ?? 0);
         $expectedLeadRole = SalesOps::teamLeadRoleFor($role);
-        $keepLeadId = null;
-        $keepCampaignId = null;
+        $nextLeadId = null;
+        $nextCampaignId = null;
 
-        if ($expectedLeadRole !== null && $currentLeadId > 0 && SalesOps::isAgentRole($role)) {
-            $leadRole = $workspace->users()->where('user_id', $currentLeadId)->first()?->pivot?->role;
-            if ($leadRole === $expectedLeadRole) {
-                $keepLeadId = $currentLeadId;
+        if (SalesOps::isAgentRole($role)) {
+            // Keep current TL only when it matches the new family (fronter vs closer).
+            if ($expectedLeadRole !== null && $currentLeadId > 0) {
+                $leadRole = $workspace->users()->where('user_id', $currentLeadId)->first()?->pivot?->role;
+                if ($leadRole === $expectedLeadRole) {
+                    $nextLeadId = $currentLeadId;
+                }
             }
-        }
 
-        if (SalesOps::isTeamLeadRole($role) && $currentCampaignId > 0) {
-            $campaignExists = LeadCampaign::query()
-                ->where('workspace_id', $workspace->id)
-                ->where('id', $currentCampaignId)
-                ->exists();
-            if ($campaignExists) {
-                $keepCampaignId = $currentCampaignId;
+            // Auto-assign the first matching team lead (e.g. Fronter → Closer picks first closer TL).
+            if ($nextLeadId === null && $expectedLeadRole !== null) {
+                $firstLead = $workspace->users()
+                    ->where('users.id', '!=', $member->id)
+                    ->wherePivot('status', 'active')
+                    ->wherePivot('role', $expectedLeadRole)
+                    ->orderBy('users.name')
+                    ->first();
+
+                if ($firstLead) {
+                    $nextLeadId = (int) $firstLead->id;
+                }
             }
+
+            // Agents inherit campaign from their team lead only — never keep a stale campaign.
+            $nextCampaignId = null;
+        } elseif (SalesOps::isTeamLeadRole($role)) {
+            // Team leads own a campaign; they are not under another team lead.
+            $nextLeadId = null;
+            if ($currentCampaignId > 0) {
+                $campaignExists = LeadCampaign::query()
+                    ->where('workspace_id', $workspace->id)
+                    ->where('id', $currentCampaignId)
+                    ->exists();
+                if ($campaignExists) {
+                    $nextCampaignId = $currentCampaignId;
+                }
+            }
+        } else {
+            // Admin / Manager / QA / other non-agent roles: clear team + campaign assignments.
+            $nextLeadId = null;
+            $nextCampaignId = null;
         }
 
         $workspace->users()->updateExistingPivot($member->id, [
             'role' => $role,
             'module_permissions' => $this->modulePermissionsForRoleChange($role, $member, $workspace),
-            'team_lead_user_id' => $keepLeadId,
-            'campaign_id' => $keepCampaignId,
+            'team_lead_user_id' => $nextLeadId,
+            'campaign_id' => $nextCampaignId,
         ]);
+
+        // If this member was a team lead and is no longer one, detach former agents.
+        if (! SalesOps::isTeamLeadRole($role)) {
+            DB::table('workspace_user')
+                ->where('workspace_id', $workspace->id)
+                ->where('team_lead_user_id', $member->id)
+                ->update([
+                    'team_lead_user_id' => null,
+                    'updated_at' => now(),
+                ]);
+        }
 
         $this->syncService->record(
             $workspace,
             'member.role_updated',
             'user',
             $member->id,
-            array_merge($this->memberPayload($member, $workspace), ['role' => $role]),
+            array_merge($this->memberPayload($member->fresh(), $workspace), ['role' => $role]),
             $admin->id
         );
     }
@@ -443,15 +566,18 @@ class WorkspaceMemberService
         }
 
         $role = (string) ($membership->pivot->role ?? '');
-        if (! SalesOps::isTeamLeadRole($role)) {
+        $canAssignCampaign = SalesOps::isTeamLeadRole($role) || SalesOps::isAgentRole($role);
+        if (! $canAssignCampaign) {
             throw ValidationException::withMessages([
-                'campaign_id' => 'Campaigns can only be assigned to team leads.',
+                'campaign_id' => 'Campaigns can only be assigned to team leads or agents.',
             ]);
         }
 
         if ($campaignId === null || $campaignId === 0) {
             $workspace->users()->updateExistingPivot($member->id, ['campaign_id' => null]);
-            $this->syncTeamMembersCampaign($workspace, (int) $member->id, null);
+            if (SalesOps::isTeamLeadRole($role)) {
+                $this->syncTeamMembersCampaign($workspace, (int) $member->id, null);
+            }
             $this->syncService->record(
                 $workspace,
                 'member.campaign_updated',
@@ -475,13 +601,20 @@ class WorkspaceMemberService
             ]);
         }
 
-        $workspace->users()->updateExistingPivot($member->id, [
+        $pivotUpdate = [
             'campaign_id' => $campaign->id,
-            'team_lead_user_id' => null,
-        ]);
+        ];
+        // Team leads own the campaign for their team; agents keep their team lead link.
+        if (SalesOps::isTeamLeadRole($role)) {
+            $pivotUpdate['team_lead_user_id'] = null;
+        }
 
-        // Keep this lead's agents on the same campaign — never other team leads' members.
-        $this->syncTeamMembersCampaign($workspace, (int) $member->id, (int) $campaign->id);
+        $workspace->users()->updateExistingPivot($member->id, $pivotUpdate);
+
+        if (SalesOps::isTeamLeadRole($role)) {
+            // Keep this lead's agents on the same campaign — never other team leads' members.
+            $this->syncTeamMembersCampaign($workspace, (int) $member->id, (int) $campaign->id);
+        }
 
         $this->syncService->record(
             $workspace,
@@ -568,7 +701,39 @@ class WorkspaceMemberService
         $this->workspaceContext->ensureCanManageMembers($admin, $workspace);
         $this->ensureMemberIsEditable($workspace, $member, 'member');
 
+        $membership = $workspace->users()->where('user_id', $member->id)->first();
+        if (! $membership) {
+            abort(404);
+        }
+
+        $role = (string) ($membership->pivot->role ?? '');
+
+        if ($role === 'super_admin' || (int) $workspace->admin_id === (int) $member->id) {
+            throw ValidationException::withMessages([
+                'member' => 'The Super Admin / workspace owner cannot be deleted.',
+            ]);
+        }
+
+        if ($role === 'admin') {
+            $dependentCount = $workspace->users()
+                ->where('users.id', '!=', $member->id)
+                ->wherePivot('role', '!=', 'super_admin')
+                ->count();
+
+            if ($dependentCount > 0) {
+                throw ValidationException::withMessages([
+                    'member' => 'This workspace admin cannot be deleted while other members still belong to the workspace. Remove or reassign those members first.',
+                ]);
+            }
+        }
+
         $payload = $this->memberPayload($member, $workspace);
+
+        // Clear team-lead links so deleting a lead never cascades to other user rows.
+        DB::table('workspace_user')
+            ->where('workspace_id', $workspace->id)
+            ->where('team_lead_user_id', $member->id)
+            ->update(['team_lead_user_id' => null, 'updated_at' => now()]);
 
         $workspace->users()->detach($member->id);
 
@@ -601,7 +766,10 @@ class WorkspaceMemberService
             abort(404);
         }
 
-        $member->update(['password' => Hash::make($password)]);
+        $member->update([
+            'password' => $password,
+            'password_hint' => $password,
+        ]);
 
         $this->syncService->record(
             $workspace,
@@ -748,13 +916,18 @@ class WorkspaceMemberService
             return;
         }
 
+        // Super Admin email / password may be updated; role, team, and delete stay locked.
+        if (in_array($field, ['account', 'password'], true)) {
+            return;
+        }
+
         $messages = [
             'account' => 'Super Admin accounts cannot be edited.',
-            'role' => 'The Super Admin role cannot be changed.',
+            'role' => 'The Super Admin role cannot be changed. There can be only one Super Admin.',
             'password' => 'Super Admin passwords cannot be changed here.',
             'team' => 'Super Admin accounts cannot be assigned to a team.',
             'campaign' => 'Super Admin accounts cannot be assigned a campaign.',
-            'member' => 'Super Admin accounts cannot be modified.',
+            'member' => 'Super Admin accounts cannot be deleted or suspended.',
         ];
 
         throw ValidationException::withMessages([
@@ -777,6 +950,7 @@ class WorkspaceMemberService
             'team_lead_user_id' => isset($pivot->team_lead_user_id) ? (int) $pivot->team_lead_user_id : null,
             'campaign_id' => isset($pivot->campaign_id) ? (int) $pivot->campaign_id : null,
             'module_permissions' => $member->getModulePermissions($workspace->id),
+            'password_hint' => (string) ($member->password_hint ?? ''),
         ];
     }
 

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\MapsScraperController;
 use App\Http\Controllers\CommunicationsHubController;
 use App\Http\Controllers\ContentAnalyzerController;
 use App\Http\Controllers\CampaignController;
@@ -91,11 +92,14 @@ Route::prefix('admin')->name('admin.')->middleware([
     Route::post('reputation/warmup', [ReputationController::class, 'warmupCalculator'])->name('reputation.warmup');
     Route::post('reputation/compliance', [ReputationController::class, 'complianceCheck'])->name('reputation.compliance');
 
+    Route::get('assigned-leads', [WorkflowController::class, 'assignedLeads'])->name('assigned-leads');
+
     Route::prefix('workflows')->name('workflows.')->group(function () {
         Route::get('/', [WorkflowController::class, 'index'])->name('index');
         Route::get('/create', [WorkflowController::class, 'create'])->name('create');
         Route::post('/', [WorkflowController::class, 'store'])->name('store');
         Route::get('/{workflow}', [WorkflowController::class, 'show'])->name('show');
+        Route::put('/{workflow}', [WorkflowController::class, 'update'])->name('update');
         Route::post('/{workflow}/map', [WorkflowController::class, 'map'])->name('map');
         Route::post('/{workflow}/run', [WorkflowController::class, 'run'])->name('run');
         Route::post('/{workflow}/approve-leads', [WorkflowController::class, 'bulkApproveLeads'])->name('approve-leads');
@@ -106,6 +110,10 @@ Route::prefix('admin')->name('admin.')->middleware([
         Route::post('/{workflow}/enrich', [WorkflowController::class, 'enrich'])->name('enrich');
         Route::post('/{workflow}/distribute', [WorkflowController::class, 'distribute'])->name('distribute');
         Route::post('/{workflow}/assign-leads', [WorkflowController::class, 'assignLeads'])->name('assign-leads');
+        Route::post('/{workflow}/unassign-leads', [WorkflowController::class, 'unassignLeads'])->name('unassign-leads');
+        Route::get('/{workflow}/agent-access', [WorkflowController::class, 'agentAccess'])->name('agent-access');
+        Route::put('/{workflow}/agent-access', [WorkflowController::class, 'syncAgentAccess'])->name('agent-access.sync');
+        Route::get('/{workflow}/dispositions', [WorkflowController::class, 'dispositions'])->name('dispositions');
         Route::delete('/{workflow}', [WorkflowController::class, 'destroy'])->name('destroy');
     });
 
@@ -131,13 +139,14 @@ Route::prefix('admin')->name('admin.')->middleware([
     Route::post('leads/{lead}/setter-status', [PipelineController::class, 'updateSetterStatus'])->name('leads.setter-status');
     Route::post('leads/{lead}/closer-status', [PipelineController::class, 'updateCloserStatus'])->name('leads.closer-status');
 
-    Route::prefix('workspaces')->name('workspaces.')->group(function () {
+    // User Management UI path (legacy /admin/workspaces redirects below).
+    Route::prefix('usermanagement')->name('workspaces.')->group(function () {
         Route::get('/', [WorkflowController::class, 'workspaceIndex'])->name('index');
         Route::post('/', [WorkflowController::class, 'workspaceStore'])->name('store');
         Route::post('/switch/{workspace}', [WorkflowController::class, 'workspaceSwitch'])->name('switch');
     });
 
-    Route::prefix('workspaces')->name('workspaces.')->middleware([\App\Http\Middleware\EnsureSuperAdmin::class])->group(function () {
+    Route::prefix('usermanagement')->name('workspaces.')->middleware([\App\Http\Middleware\EnsureCanManageMembers::class])->group(function () {
         Route::post('/{workspace}/members', [WorkspaceMemberController::class, 'store'])->name('members.store');
         Route::patch('/{workspace}/members/{member}', [WorkspaceMemberController::class, 'update'])->name('members.update');
         Route::patch('/{workspace}/members/{member}/role', [WorkspaceMemberController::class, 'updateRole'])->name('members.role');
@@ -149,9 +158,16 @@ Route::prefix('admin')->name('admin.')->middleware([
         Route::delete('/{workspace}/members/{member}', [WorkspaceMemberController::class, 'destroy'])->name('members.destroy');
     });
 
-    Route::patch('/workspaces/{workspace}/members/{member}/modules', [WorkspaceMemberController::class, 'updateModules'])
+    Route::patch('/usermanagement/{workspace}/members/{member}/modules', [WorkspaceMemberController::class, 'updateModules'])
         ->middleware([\App\Http\Middleware\EnsureCanAssignModulePermissions::class])
         ->name('workspaces.members.modules');
+
+    // Legacy bookmarks → new User Management path
+    Route::get('/workspaces/{path?}', function (?string $path = null) {
+        $suffix = trim((string) $path, '/');
+
+        return redirect('/admin/usermanagement'.($suffix !== '' ? '/'.$suffix : ''), 301);
+    })->where('path', '.*');
 
     Route::get('push/vapid-public-key', [PushNotificationController::class, 'vapidPublicKey'])->name('push.vapid');
     Route::post('push/subscribe', [PushNotificationController::class, 'subscribe'])->name('push.subscribe');
@@ -161,24 +177,40 @@ Route::prefix('admin')->name('admin.')->middleware([
     Route::get('sync', [WorkspaceSyncController::class, 'poll'])->name('sync.poll');
     Route::get('sync/stream', [WorkspaceSyncController::class, 'stream'])->name('sync.stream');
     Route::get('server-monitoring', [ServerMonitoringController::class, 'index'])->name('server.monitoring');
+    // Error Monitoring UI removed from nav — Telescope remains. Routes kept disabled to avoid accidental load.
+    // Route::get('error-monitoring', ...)->name('error-monitoring');
+
+    Route::prefix('maps-scraper')->name('maps-scraper.')->group(function () {
+        Route::get('/', [MapsScraperController::class, 'index'])->name('index');
+        Route::get('/cities', [MapsScraperController::class, 'cities'])->name('cities');
+        Route::post('/', [MapsScraperController::class, 'store'])->name('store');
+        Route::get('/jobs/{mapsScrapeJob}', [MapsScraperController::class, 'show'])->name('show');
+        Route::get('/jobs/{mapsScrapeJob}/status', [MapsScraperController::class, 'status'])->name('status');
+        Route::get('/jobs/{mapsScrapeJob}/download', [MapsScraperController::class, 'download'])->name('download');
+    });
 
     Route::prefix('communications')->name('communications.')->group(function () {
         $registerMorpheusHub = require __DIR__.'/morpheus-communications.php';
 
         Route::get('/', [CommunicationsHubController::class, 'index'])->name('index');
-        Route::get('/monitoring', [\App\Http\Controllers\CallMonitoringController::class, 'index'])->name('monitoring');
-        Route::get('/monitoring/live', [\App\Http\Controllers\CallMonitoringController::class, 'live'])->name('monitoring.live');
-        Route::get('/monitoring/stream', [\App\Http\Controllers\CallMonitoringController::class, 'stream'])->name('monitoring.stream');
-        Route::post('/monitoring/presence', [\App\Http\Controllers\CallMonitoringController::class, 'presenceHeartbeat'])->name('monitoring.presence');
-        Route::get('/monitoring/break/status', [\App\Http\Controllers\CallMonitoringController::class, 'breakStatus'])->name('monitoring.break.status');
-        Route::post('/monitoring/break/start', [\App\Http\Controllers\CallMonitoringController::class, 'breakStart'])->name('monitoring.break.start');
-        Route::post('/monitoring/break/end', [\App\Http\Controllers\CallMonitoringController::class, 'breakEnd'])->name('monitoring.break.end');
+        Route::get('/call-monitoring', [\App\Http\Controllers\CallMonitoringController::class, 'index'])->name('monitoring');
+        Route::get('/call-monitoring/live', [\App\Http\Controllers\CallMonitoringController::class, 'live'])->name('monitoring.live');
+        Route::get('/call-monitoring/stream', [\App\Http\Controllers\CallMonitoringController::class, 'stream'])->name('monitoring.stream');
+        Route::post('/call-monitoring/presence', [\App\Http\Controllers\CallMonitoringController::class, 'presenceHeartbeat'])->name('monitoring.presence');
+        Route::get('/call-monitoring/break/status', [\App\Http\Controllers\CallMonitoringController::class, 'breakStatus'])->name('monitoring.break.status');
+        Route::post('/call-monitoring/break/start', [\App\Http\Controllers\CallMonitoringController::class, 'breakStart'])->name('monitoring.break.start');
+        Route::post('/call-monitoring/break/end', [\App\Http\Controllers\CallMonitoringController::class, 'breakEnd'])->name('monitoring.break.end');
+        Route::permanentRedirect('/monitoring', '/admin/communications/call-monitoring');
+        Route::permanentRedirect('/monitoring/{path}', '/admin/communications/call-monitoring/{path}')->where('path', '.*');
         Route::get('/notes', [\App\Http\Controllers\CallNotesController::class, 'index'])->name('notes');
         Route::get('/notes/download', [\App\Http\Controllers\CallNotesController::class, 'download'])->name('notes.download');
         Route::get('/agent-status', [\App\Http\Controllers\AgentStatusReportController::class, 'index'])->name('agent-status');
         Route::get('/agent-status/export', [\App\Http\Controllers\AgentStatusReportController::class, 'export'])->name('agent-status.export');
         Route::get('/agent-status/export-logs', [\App\Http\Controllers\AgentStatusReportController::class, 'exportLogs'])->name('agent-status.export-logs');
+        Route::get('/agent-status/export-summaries', [\App\Http\Controllers\AgentStatusReportController::class, 'exportSummaries'])->name('agent-status.export-summaries');
+        Route::post('/agent-status/summary', [\App\Http\Controllers\AgentStatusReportController::class, 'summary'])->name('agent-status.summary');
         Route::get('/dialer/call-logs', [CommunicationsHubController::class, 'dialerCallLogs'])->name('dialer.call-logs');
+        Route::get('/dialer/recent-by-phone', [CommunicationsHubController::class, 'dialerRecentByPhone'])->name('dialer.recent-by-phone');
         Route::get('/dialer/notes', [CommunicationsHubController::class, 'dialerPhoneNoteShow'])->name('dialer.notes.show');
         Route::put('/dialer/notes/phone', [CommunicationsHubController::class, 'dialerPhoneNoteSave'])->name('dialer.notes.phone.save');
         Route::put('/dialer/notes/call', [CommunicationsHubController::class, 'dialerCallNoteSave'])->name('dialer.notes.call.save');
@@ -262,19 +294,24 @@ Route::prefix('portal')->name('portal.')->middleware([\App\Http\Middleware\Marke
         $registerMorpheusHub = require __DIR__.'/morpheus-communications.php';
 
         Route::get('/', [CommunicationsHubController::class, 'index'])->name('index');
-        Route::get('/monitoring', [\App\Http\Controllers\CallMonitoringController::class, 'index'])->name('monitoring');
-        Route::get('/monitoring/live', [\App\Http\Controllers\CallMonitoringController::class, 'live'])->name('monitoring.live');
-        Route::get('/monitoring/stream', [\App\Http\Controllers\CallMonitoringController::class, 'stream'])->name('monitoring.stream');
-        Route::post('/monitoring/presence', [\App\Http\Controllers\CallMonitoringController::class, 'presenceHeartbeat'])->name('monitoring.presence');
-        Route::get('/monitoring/break/status', [\App\Http\Controllers\CallMonitoringController::class, 'breakStatus'])->name('monitoring.break.status');
-        Route::post('/monitoring/break/start', [\App\Http\Controllers\CallMonitoringController::class, 'breakStart'])->name('monitoring.break.start');
-        Route::post('/monitoring/break/end', [\App\Http\Controllers\CallMonitoringController::class, 'breakEnd'])->name('monitoring.break.end');
+        Route::get('/call-monitoring', [\App\Http\Controllers\CallMonitoringController::class, 'index'])->name('monitoring');
+        Route::get('/call-monitoring/live', [\App\Http\Controllers\CallMonitoringController::class, 'live'])->name('monitoring.live');
+        Route::get('/call-monitoring/stream', [\App\Http\Controllers\CallMonitoringController::class, 'stream'])->name('monitoring.stream');
+        Route::post('/call-monitoring/presence', [\App\Http\Controllers\CallMonitoringController::class, 'presenceHeartbeat'])->name('monitoring.presence');
+        Route::get('/call-monitoring/break/status', [\App\Http\Controllers\CallMonitoringController::class, 'breakStatus'])->name('monitoring.break.status');
+        Route::post('/call-monitoring/break/start', [\App\Http\Controllers\CallMonitoringController::class, 'breakStart'])->name('monitoring.break.start');
+        Route::post('/call-monitoring/break/end', [\App\Http\Controllers\CallMonitoringController::class, 'breakEnd'])->name('monitoring.break.end');
+        Route::permanentRedirect('/monitoring', '/portal/communications/call-monitoring');
+        Route::permanentRedirect('/monitoring/{path}', '/portal/communications/call-monitoring/{path}')->where('path', '.*');
         Route::get('/notes', [\App\Http\Controllers\CallNotesController::class, 'index'])->name('notes');
         Route::get('/notes/download', [\App\Http\Controllers\CallNotesController::class, 'download'])->name('notes.download');
         Route::get('/agent-status', [\App\Http\Controllers\AgentStatusReportController::class, 'index'])->name('agent-status');
         Route::get('/agent-status/export', [\App\Http\Controllers\AgentStatusReportController::class, 'export'])->name('agent-status.export');
         Route::get('/agent-status/export-logs', [\App\Http\Controllers\AgentStatusReportController::class, 'exportLogs'])->name('agent-status.export-logs');
+        Route::get('/agent-status/export-summaries', [\App\Http\Controllers\AgentStatusReportController::class, 'exportSummaries'])->name('agent-status.export-summaries');
+        Route::post('/agent-status/summary', [\App\Http\Controllers\AgentStatusReportController::class, 'summary'])->name('agent-status.summary');
         Route::get('/dialer/call-logs', [CommunicationsHubController::class, 'dialerCallLogs'])->name('dialer.call-logs');
+        Route::get('/dialer/recent-by-phone', [CommunicationsHubController::class, 'dialerRecentByPhone'])->name('dialer.recent-by-phone');
         Route::get('/dialer/notes', [CommunicationsHubController::class, 'dialerPhoneNoteShow'])->name('dialer.notes.show');
         Route::put('/dialer/notes/phone', [CommunicationsHubController::class, 'dialerPhoneNoteSave'])->name('dialer.notes.phone.save');
         Route::put('/dialer/notes/call', [CommunicationsHubController::class, 'dialerCallNoteSave'])->name('dialer.notes.call.save');

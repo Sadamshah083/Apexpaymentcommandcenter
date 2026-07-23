@@ -24,32 +24,110 @@ class WorkspaceMemberController extends Controller
     public function store(Request $request, Workspace $workspace)
     {
         $creatableRoles = array_keys(SalesOps::creatableAgentRoles());
+        if (! Auth::user()->isPlatformSuperAdmin()) {
+            $creatableRoles = array_values(array_filter(
+                $creatableRoles,
+                static fn (string $role): bool => $role !== 'admin'
+            ));
+        }
 
         $data = $request->validate([
             'username' => 'required|string|max:255',
+            'email' => 'required|email|max:255|unique:users,email',
             'password' => 'required|string|min:6|confirmed',
             'role' => 'required|in:'.implode(',', $creatableRoles),
+            'team_lead_user_id' => ['nullable', 'integer'],
+            'campaign_id' => ['nullable', 'integer'],
+            'extension_num' => ['nullable', 'string', 'max:32'],
+            'caller_id_num' => ['nullable', 'string', 'max:32'],
             'access_mode' => 'sometimes|in:full,restricted',
             'modules' => 'nullable|array',
             'modules.*' => 'string|in:'.implode(',', array_keys(AdminModules::all())),
+        ], [
+            'email.unique' => 'This email is already used. Admin and agent accounts must each have a different email.',
+            'email.required' => 'Email is required and must be unique.',
         ]);
+
+        // Force corporate domain (never apexpayments.com).
+        $local = strtolower((string) strstr($data['email'], '@', true));
+        // Guard pasted full emails / spaces in the local part from the popup.
+        if (str_contains($local, '@')) {
+            $local = (string) strstr($local, '@', true);
+        }
+        $local = preg_replace('/[^a-z0-9._+-]/', '', $local) ?: strtolower(preg_replace('/\s+/', '', $data['username']));
+        $local = preg_replace('/[^a-z0-9._+-]/', '', (string) $local) ?: 'agent';
+        $data['email'] = $local.'@apexonepayments.com';
+
+        if (User::where('email', $data['email'])->exists()) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'email' => 'This email is already used. Admin and agent accounts must each have a different email.',
+            ]);
+        }
 
         $modulePermissions = $this->modulePermissionsFromRequest($request, $data['role']);
 
-        $member = $this->memberService->createAgent(
-            $workspace,
-            Auth::user(),
-            $data['username'],
-            $data['password'],
-            $data['role'],
-            $modulePermissions,
-        );
+        $teamLeadUserId = isset($data['team_lead_user_id']) && (int) $data['team_lead_user_id'] > 0
+            ? (int) $data['team_lead_user_id']
+            : null;
+        $campaignId = isset($data['campaign_id']) && (int) $data['campaign_id'] > 0
+            ? (int) $data['campaign_id']
+            : null;
+
+        try {
+            $member = $this->memberService->createAgent(
+                $workspace,
+                Auth::user(),
+                $data['username'],
+                $data['password'],
+                $data['role'],
+                $modulePermissions,
+                $teamLeadUserId,
+                $campaignId,
+                $data['email'],
+            );
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'username' => 'Could not create account: '.$e->getMessage(),
+            ]);
+        }
+
+        $phoneNote = '';
+        $extensionNum = trim((string) ($data['extension_num'] ?? ''));
+        $callerIdNum = preg_replace('/\D/', '', (string) ($data['caller_id_num'] ?? ''));
+        if ($extensionNum !== '') {
+            try {
+                $agentService = app(\App\Services\Communications\CommunicationsAgentService::class);
+                $result = $agentService->provision($workspace, $member, [
+                    'extension_num' => $extensionNum,
+                    // Login password stays as entered; SIP is padded to Morpheus 8-char minimum.
+                    'sip_password' => $agentService->ensureSipPassword($data['password']),
+                    'caller_id_name' => $data['username'],
+                    'caller_id_num' => $callerIdNum !== '' ? $callerIdNum : null,
+                    'create_morpheus_user' => true,
+                ]);
+                $phoneNote = ($result['ok'] ?? false)
+                    ? ' '.($result['message'] ?? "Phone line {$extensionNum} provisioned.")
+                    : ' Account created, but phone line could not be provisioned: '.($result['error'] ?? 'unknown error');
+            } catch (\Throwable $e) {
+                $phoneNote = ' Account created, but phone line provisioning failed: '.$e->getMessage();
+            }
+        }
 
         return $this->respond(
             $request,
             SalesOps::isAdminPortalRole($data['role'])
-                ? "Account \"{$member->name}\" created as ".SalesOps::roleLabel($data['role']).'. They can sign in at the admin portal.'
-                : "Account \"{$member->name}\" created as ".SalesOps::roleLabel($data['role']).'. They can sign in at the agent portal.',
+                ? "Account \"{$member->name}\" created as ".SalesOps::roleLabel($data['role']).'. They can sign in at the admin portal.'.$phoneNote
+                : "Account \"{$member->name}\" created as ".SalesOps::roleLabel($data['role']).'. They can sign in at the agent portal.'.$phoneNote,
+            [
+                'member' => [
+                    'id' => $member->id,
+                    'name' => $member->name,
+                    'email' => $member->email,
+                    'role' => $data['role'],
+                ],
+            ],
         );
     }
 
@@ -134,6 +212,9 @@ class WorkspaceMemberController extends Controller
             'role' => 'nullable|in:'.implode(',', $assignableRoles),
             'team_lead_user_id' => ['nullable', 'integer'],
             'campaign_id' => ['nullable', 'integer'],
+        ], [
+            'email.unique' => 'This email is already used. Admin and agent accounts must each have a different email.',
+            'username.unique' => 'This username is already taken.',
         ]);
 
         $member = $this->memberService->updateMemberProfile(
@@ -145,24 +226,34 @@ class WorkspaceMemberController extends Controller
             $data['password'] ?? null,
         );
 
-        if (! empty($data['role'])) {
+        $isProtectedSuperAdmin = ($workspace->users()->where('user_id', $member->id)->first()?->pivot?->role ?? null) === 'super_admin';
+
+        if (! $isProtectedSuperAdmin && ! empty($data['role'])) {
             $this->memberService->updateMemberRole($workspace, Auth::user(), $member, $data['role']);
         }
 
         $role = (string) ($workspace->users()->where('user_id', $member->id)->first()?->pivot?->role ?? '');
 
-        if (SalesOps::isTeamLeadRole($role) && $request->exists('campaign_id')) {
-            $campaignId = isset($data['campaign_id']) && (int) $data['campaign_id'] > 0
-                ? (int) $data['campaign_id']
-                : null;
-            $this->memberService->updateMemberCampaign($workspace, Auth::user(), $member, $campaignId);
+        // Always honor campaign / team-lead fields from Edit when they apply to the final role.
+        if (SalesOps::isTeamLeadRole($role)) {
+            $campaignId = $request->filled('campaign_id') ? (int) $request->input('campaign_id') : null;
+            if ($campaignId === 0) {
+                $campaignId = null;
+            }
+            // Only update when the field was present (enabled in the edit form).
+            if ($request->exists('campaign_id') || array_key_exists('campaign_id', $request->all())) {
+                $this->memberService->updateMemberCampaign($workspace, Auth::user(), $member, $campaignId);
+            }
         }
 
-        if (SalesOps::isAgentRole($role) && $request->exists('team_lead_user_id')) {
-            $teamLeadUserId = isset($data['team_lead_user_id']) && (int) $data['team_lead_user_id'] > 0
-                ? (int) $data['team_lead_user_id']
-                : null;
-            $this->memberService->updateMemberTeamLead($workspace, Auth::user(), $member, $teamLeadUserId);
+        if (SalesOps::isAgentRole($role)) {
+            $teamLeadUserId = $request->filled('team_lead_user_id') ? (int) $request->input('team_lead_user_id') : null;
+            if ($teamLeadUserId === 0) {
+                $teamLeadUserId = null;
+            }
+            if ($request->exists('team_lead_user_id') || array_key_exists('team_lead_user_id', $request->all())) {
+                $this->memberService->updateMemberTeamLead($workspace, Auth::user(), $member, $teamLeadUserId);
+            }
         }
 
         return $this->respond($request, "Updated account for {$member->name}.");
@@ -239,13 +330,14 @@ class WorkspaceMemberController extends Controller
         return MemberModuleAccess::sanitizeForRole($role, $request->input('modules', []));
     }
 
-    protected function respond(Request $request, string $message): JsonResponse|RedirectResponse
+    protected function respond(Request $request, string $message, array $extra = []): JsonResponse|RedirectResponse
     {
         if ($request->expectsJson()) {
-            return response()->json([
+            return response()->json(array_merge([
                 'success' => true,
+                'ok' => true,
                 'message' => $message,
-            ]);
+            ], $extra));
         }
 
         return back()->with('success', $message);

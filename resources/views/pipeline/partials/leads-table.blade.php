@@ -7,6 +7,7 @@
     $editableSetterStatus = $editableSetterStatus ?? false;
     $showSetterNotes = $showSetterNotes ?? false;
     $liveSync = $liveSync ?? false;
+    $selectable = $selectable ?? false;
     $setterStatuses = $setterStatuses ?? config('sales_ops.setter_statuses', []);
 @endphp
 
@@ -19,6 +20,11 @@
         <table>
             <thead>
                 <tr>
+                    @if ($selectable)
+                        <th class="w-10">
+                            <input type="checkbox" class="app-checkbox" data-assign-select-all aria-label="Select all leads">
+                        </th>
+                    @endif
                     <th>Business</th>
                     <th>Email</th>
                     <th>Social Media</th>
@@ -46,12 +52,29 @@
                     data-show-setter-notes="{{ $showSetterNotes ? '1' : '0' }}"
                     data-show-editable-setter="{{ $editableSetterStatus ? '1' : '0' }}"
                 @endif
+                @if ($selectable) data-assign-selectable-table @endif
             >
                 @foreach ($leads as $lead)
                     @php
                         $contact = LeadContactDisplay::for($lead);
+                        $canSelect = $selectable && empty($lead->assigned_user_id);
                     @endphp
                     <tr @if ($liveSync) data-lead-id="{{ $lead->id }}" @endif>
+                        @if ($selectable)
+                            <td>
+                                @if ($canSelect)
+                                    <input type="checkbox"
+                                        class="app-checkbox"
+                                        name="lead_ids[]"
+                                        value="{{ $lead->id }}"
+                                        data-assign-lead-id="{{ $lead->id }}"
+                                        form="assign-selected-leads-form"
+                                        aria-label="Select {{ $lead->business_name }}">
+                                @else
+                                    <span class="text-zinc-300">—</span>
+                                @endif
+                            </td>
+                        @endif
                         <td @if ($liveSync) data-col="business" @endif>
                             <a href="{{ route('portal.leads.show', $lead->id) }}" data-turbo="false"
                                 class="font-bold text-zinc-900 hover:underline">{{ $lead->business_name }}</a>

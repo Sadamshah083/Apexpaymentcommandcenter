@@ -43,6 +43,10 @@ class CallNotesHistoryService
             $users = $this->scopeForTeamLeadViewer($users, $viewer, (int) $workspace->id);
         }
 
+        if ($viewerTier === 'agent' && $viewer) {
+            $users = $users->filter(fn (User $user) => (int) $user->id === (int) $viewer->id)->values();
+        }
+
         return $users
             ->sortBy('name', SORT_NATURAL | SORT_FLAG_CASE)
             ->values()
@@ -60,7 +64,19 @@ class CallNotesHistoryService
      */
     public function notesForAgent(Workspace $workspace, int $userId, int $perPage = 25): LengthAwarePaginator
     {
-        $paginator = $this->notesQuery($workspace, $userId)
+        return $this->notesForAgents($workspace, [$userId], $perPage);
+    }
+
+    /**
+     * Notes for one or many agents (admin “All agents” default).
+     *
+     * @param  list<int>  $userIds
+     * @return LengthAwarePaginator<int, array<string, mixed>>
+     */
+    public function notesForAgents(Workspace $workspace, array $userIds, int $perPage = 25): LengthAwarePaginator
+    {
+        $paginator = $this->notesQuery($workspace, $userIds)
+            ->with('user:id,name')
             ->paginate($perPage)
             ->withQueryString();
 
@@ -78,22 +94,34 @@ class CallNotesHistoryService
      */
     public function allNotesForAgent(Workspace $workspace, int $userId): Collection
     {
-        return $this->notesQuery($workspace, $userId)
+        return $this->allNotesForAgents($workspace, [$userId]);
+    }
+
+    /**
+     * @param  list<int>  $userIds
+     * @return Collection<int, array<string, mixed>>
+     */
+    public function allNotesForAgents(Workspace $workspace, array $userIds): Collection
+    {
+        return $this->notesQuery($workspace, $userIds)
+            ->with('user:id,name')
             ->get()
             ->map(fn (CommunicationCallLog $row) => $this->mapNoteRow($row))
             ->values();
     }
 
     /**
+     * @param  int|list<int>  $userIds
      * @return Builder<\App\Models\CommunicationCallLog>
      */
-    protected function notesQuery(Workspace $workspace, int $userId): Builder
+    protected function notesQuery(Workspace $workspace, int|array $userIds): Builder
     {
-        return CommunicationCallLog::query()
+        $ids = array_values(array_filter(array_map('intval', (array) $userIds)));
+
+        $query = CommunicationCallLog::query()
             ->where('workspace_id', $workspace->id)
-            ->where('user_id', $userId)
-            ->where(function ($query) {
-                $query->where(function ($note) {
+            ->where(function ($inner) {
+                $inner->where(function ($note) {
                     $note->whereNotNull('note')->where('note', '!=', '');
                 })->orWhere(function ($disposition) {
                     $disposition->whereNotNull('disposition')->where('disposition', '!=', '');
@@ -103,6 +131,16 @@ class CallNotesHistoryService
                 });
             })
             ->orderByDesc(DB::raw('COALESCE(ended_at, started_at, created_at)'));
+
+        if ($ids === []) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        if (count($ids) === 1) {
+            return $query->where('user_id', $ids[0]);
+        }
+
+        return $query->whereIn('user_id', $ids);
     }
 
     /**
@@ -122,6 +160,8 @@ class CallNotesHistoryService
 
         return [
             'id' => (int) $row->id,
+            'user_id' => (int) ($row->user_id ?? 0),
+            'agent' => (string) ($row->user?->name ?? 'Agent'),
             'phone' => $phone,
             'disposition' => $disposition !== '' ? $disposition : '—',
             'notes' => $notes !== '' ? $notes : '—',

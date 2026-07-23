@@ -96,7 +96,7 @@
                 </div>
                 <a href="{{ route('admin.workflows.index') }}"
                     class="app-btn app-btn-secondary bg-white text-zinc-900 hover:bg-zinc-100 block text-center mt-6">
-                    Open command center
+                    Open dashboard
                 </a>
             </div>
         </div>

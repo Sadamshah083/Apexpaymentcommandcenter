@@ -76,6 +76,7 @@ class WorkflowProviderStatusService
         if ($refresh) {
             Cache::forget(self::GEMINI_HEALTH_CACHE_KEY);
             Cache::forget(self::OPENROUTER_BALANCE_CACHE_KEY);
+            Cache::forget('workflow.openrouter_auth');
         }
 
         $gemini = $this->getGeminiHealth($probeIfMissing);
@@ -176,13 +177,54 @@ class WorkflowProviderStatusService
 
         $balance = $this->getOpenRouterBalance($probeIfMissing);
 
+        // Auth key endpoint often returns null remaining for free-tier keys; treat a successful key lookup as ready.
+        if ($balance !== null) {
+            return [
+                'state' => 'ready',
+                'label' => 'Ready',
+                'balance' => $balance,
+                'message' => 'Remaining credits: '.$balance,
+            ];
+        }
+
+        $auth = Cache::remember('workflow.openrouter_auth', now()->addMinutes(10), function () {
+            try {
+                $request = Http::timeout(3)
+                    ->withHeaders(['Authorization' => 'Bearer '.config('openrouter.api_key')]);
+
+                if (app()->isLocal() && config('app.allow_insecure_http_in_local', false)) {
+                    $request = $request->withoutVerifying();
+                }
+
+                $response = $request->get('https://openrouter.ai/api/v1/auth/key');
+                if ($response->successful()) {
+                    return $response->json('data') ?? ['ok' => true];
+                }
+            } catch (\Throwable $e) {
+                Log::debug('OpenRouter auth check failed', ['error' => $e->getMessage()]);
+            }
+
+            return null;
+        });
+
+        if (is_array($auth)) {
+            $isFree = (bool) ($auth['is_free_tier'] ?? false);
+
+            return [
+                'state' => 'ready',
+                'label' => $isFree ? 'Ready (free tier)' : 'Ready',
+                'balance' => $auth['limit_remaining'] ?? null,
+                'message' => $isFree
+                    ? 'OpenRouter key is active on the free tier. Enrichment can use free models when Gemini is unavailable.'
+                    : 'OpenRouter key is active.',
+            ];
+        }
+
         return [
-            'state' => $balance !== null ? 'ready' : 'unknown',
-            'label' => $balance !== null ? 'Ready' : 'Balance unknown',
-            'balance' => $balance,
-            'message' => $balance !== null
-                ? 'Remaining credits: '.$balance
-                : 'Could not fetch OpenRouter balance.',
+            'state' => 'unknown',
+            'label' => 'Balance unknown',
+            'balance' => null,
+            'message' => 'Could not fetch OpenRouter balance.',
         ];
     }
 
@@ -276,7 +318,10 @@ class WorkflowProviderStatusService
 
         if ($status === 403
             || str_contains($lower, 'api key')
-            || str_contains($lower, 'permission denied')) {
+            || str_contains($lower, 'permission denied')
+            || str_contains($lower, 'denied access')
+            || str_contains($lower, 'invalid api key')
+            || str_contains($lower, 'api_key_invalid')) {
             return 'invalid';
         }
 

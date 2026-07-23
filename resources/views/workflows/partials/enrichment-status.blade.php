@@ -1,4 +1,4 @@
-﻿@props(['status', 'embedded' => false])
+@props(['status', 'embedded' => false])
 
 @php
     $gemini = $status['gemini'] ?? [];
@@ -81,7 +81,25 @@
         </div>
     </div>
 
-    @if(($gemini['last_error'] ?? null) && $geminiState !== 'ready')
+    @php
+        $showGeminiError = ($gemini['last_error'] ?? null)
+            && $geminiState !== 'ready'
+            && ! in_array($geminiState, ['depleted'], true);
+        $fallbackReady = filled(config('openrouter.api_key')) && $orState !== 'not_configured';
+    @endphp
+
+    @if ($geminiState === 'depleted' && $fallbackReady)
+        <div class="app-alert app-alert-info mt-4">
+            <p class="app-alert-title">Gemini billing still empty on this API key</p>
+            <p class="app-alert-desc text-xs leading-relaxed">
+                Google still reports prepayment credits depleted for the configured Gemini project.
+                Enrichment will use <strong>OpenRouter</strong> until Gemini accepts requests again.
+                Confirm payment on
+                <a href="https://aistudio.google.com/app/billing" class="app-link" target="_blank" rel="noopener">AI Studio billing</a>
+                for the same project/API key, then click Refresh status.
+            </p>
+        </div>
+    @elseif ($showGeminiError)
         <div class="app-alert app-alert-warning mt-4">
             <p class="app-alert-title">Last enrichment error</p>
             <p class="app-alert-desc text-xs font-mono break-all">{{ $gemini['last_error'] }}</p>

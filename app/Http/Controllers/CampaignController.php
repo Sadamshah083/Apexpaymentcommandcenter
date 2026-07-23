@@ -4,8 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\LeadCampaign;
 use App\Services\Pipeline\CampaignBatchService;
+use App\Services\Pipeline\CampaignKpiService;
 use App\Services\Pipeline\CampaignService;
-use App\Services\Workflow\WorkflowProviderStatusService;
 use App\Services\Workspace\WorkspaceContextService;
 use App\Support\WorkflowAssignmentRoles;
 use Illuminate\Http\Request;
@@ -17,16 +17,19 @@ class CampaignController extends Controller
         protected WorkspaceContextService $workspaceContext,
         protected CampaignService $campaigns,
         protected CampaignBatchService $batchService,
-        protected WorkflowProviderStatusService $providerStatus,
+        protected CampaignKpiService $campaignKpis,
     ) {}
 
     public function index()
     {
         $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+        $campaigns = $this->campaigns->campaignsWithStats($workspace);
+        $kpis = $this->campaignKpis->forCampaigns($workspace, $campaigns);
 
         return view('campaigns.index', [
             'workspace' => $workspace,
-            'campaigns' => $this->campaigns->campaignsWithStats($workspace),
+            'campaigns' => $campaigns,
+            'campaignKpis' => $kpis,
         ]);
     }
 
@@ -89,6 +92,7 @@ class CampaignController extends Controller
             'campaign' => $campaign,
             'campaigns' => $this->campaigns->listForWorkspace($workspace),
             'counts' => $this->batchService->countByStatus($workspace, $campaign->id, $workflowId),
+            'callKpis' => $this->campaignKpis->forCampaign($workspace, $campaign->id),
             'leads' => $this->batchService->paginateLeads(
                 $workspace,
                 $campaign->id,
@@ -104,11 +108,6 @@ class CampaignController extends Controller
                 ->wherePivot('status', 'active')
                 ->get(),
             'setterTeamLeads' => WorkflowAssignmentRoles::setterTeamLeadsFor($workspace),
-            'enrichmentConfigured' => $this->providerStatus->isEnrichmentConfigured(),
-            'enrichmentConfigMessage' => $this->providerStatus->configurationMessage(),
-            'enrichmentStatus' => $this->providerStatus->getEnrichmentStatus(
-                $request->boolean('refresh_enrichment')
-            ),
         ]);
     }
 

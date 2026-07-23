@@ -1509,39 +1509,13 @@ class ZoomApiService
             || ($method === 'click-to-call' && $webphoneReady);
 
         $lineReset = false;
-
-        if (! $skipLinePrep) {
-            $cleared = $this->clearExtensionForOutboundDial($fromExtension, kickSip: false);
-            // Brief settle only when we actually released stale legs.
-            if (($cleared['released'] ?? []) !== []) {
-                usleep(200_000);
-            }
-
-            if ($this->extensionHasLiveCalls($fromExtension)) {
-                $this->clearExtensionForOutboundDial($fromExtension, kickSip: false);
-                usleep(500_000);
-
-                if ($this->extensionHasLiveCalls($fromExtension)) {
-                    return [
-                        'ok' => false,
-                        'extension_busy' => true,
-                        'error' => "Extension {$fromExtension} is still busy. Wait 10–15 seconds, click Connect line, then try again.",
-                        'attempted' => ['pre-check-busy'],
-                    ];
-                }
-            }
-        }
-
-        $this->ensureManualOutboundCampaign();
         $extra = $this->originatePayloadExtras($options);
-
         $timeout = $this->originateRingTimeout();
         $attempted = [];
         $customerFirst = (bool) ($options['customer_first'] ?? config('integrations.morpheus.originate_customer_first', false));
         $isPstn = strlen($dialDestination) > 6;
 
         $place = function () use ($customerFirst, $isPstn, $method, $fromExtension, $dialDestination, $timeout, $extra, &$attempted): array {
-            // Ring the customer's PSTN line first, then bridge the agent extension (browser).
             if ($customerFirst && $isPstn) {
                 $response = $this->postOriginate('/calls/originate', array_merge([
                     'from' => $dialDestination,
@@ -1574,10 +1548,76 @@ class ZoomApiService
             return $response;
         };
 
+        // Fast path: browser line already Registered — one Morpheus dial only.
+        // Do not GET /calls, sleep, or retry-clear (those added 3–8s and piled up under load).
+        if ($skipLinePrep) {
+            $response = $place();
+
+            if (! ($response['ok'] ?? false)) {
+                return array_merge($response, [
+                    'attempted' => $attempted,
+                    'line_reset' => false,
+                ]);
+            }
+
+            return array_merge($response, [
+                'ok' => true,
+                'outcome' => 'initiated',
+                'customer_first' => $customerFirst && $isPstn,
+                'line_reset' => false,
+                'from' => preg_replace('/\D/', '', $fromExtension) ?: $fromExtension,
+                'to' => ltrim($dialDestination, '+'),
+                'internal_from' => true,
+                'campaign_id' => $extra['campaign_id'] ?? $this->defaultOutboundCampaignId(),
+                'attempted' => $attempted,
+            ]);
+        }
+
+        // Slow path: no live browser registration — clear stale legs first.
+        $cleared = $this->clearExtensionForOutboundDial($fromExtension, kickSip: false);
+        if (($cleared['released'] ?? []) !== []) {
+            $lineReset = true;
+            usleep(250_000);
+        }
+
+        if ($this->extensionHasLiveCalls($fromExtension)) {
+            $this->clearExtensionForOutboundDial($fromExtension, kickSip: false);
+            usleep(500_000);
+
+            if ($this->extensionHasLiveCalls($fromExtension)) {
+                return [
+                    'ok' => false,
+                    'extension_busy' => true,
+                    'error' => "Extension {$fromExtension} is still busy. Wait 10–15 seconds, click Connect line, then try again.",
+                    'attempted' => ['pre-check-busy'],
+                ];
+            }
+        }
+
+        $this->ensureManualOutboundCampaign();
+        $extra = $this->originatePayloadExtras($options);
+
         $response = $place();
 
-        // Click-to-call delivers the agent leg via SIP INVITE to the browser. Polling for
-        // immediate USER_BUSY and hangup/retry disconnects the webphone mid-call.
+        if (! ($response['ok'] ?? false)) {
+            $err = strtolower((string) ($response['error'] ?? ''));
+            $looksBusy = ($response['extension_busy'] ?? false) === true
+                || str_contains($err, 'busy')
+                || str_contains($err, 'in use')
+                || str_contains($err, 'conflict')
+                || str_contains($err, 'reject')
+                || (int) ($response['status'] ?? 0) === 409;
+
+            if ($looksBusy || (int) ($response['status'] ?? 0) >= 500) {
+                $this->releaseCallsForExtension($fromExtension, aggressive: true);
+                $this->clearExtensionForOutboundDial($fromExtension, kickSip: false);
+                $lineReset = true;
+                usleep(450_000);
+                $response = $place();
+                $attempted[] = 'retry-after-line-clear';
+            }
+        }
+
         $skipBusyProbe = $method === 'click-to-call';
 
         if (($response['ok'] ?? false) && filled($response['call_uuid'] ?? null) && ! $skipBusyProbe) {
@@ -1976,7 +2016,7 @@ class ZoomApiService
             'campaign_id' => $result['campaign_id'] ?? ($dialOptions['campaign_id'] ?? $this->defaultOutboundCampaignId()),
             'from' => $from !== '' ? $from : null,
             'caller_id_number' => $this->normalizeOriginateCallerId(
-                $dialOptions['caller_id_number'] ?? config('integrations.communications.default_outbound_did')
+                $dialOptions['caller_id_number'] ?? null
             ),
             'internal_from' => true,
             'outcome' => $result['outcome'] ?? null,
@@ -2563,6 +2603,65 @@ class ZoomApiService
         }
 
         return ['ok' => false, 'error' => $lastError ?: 'Call action failed.'];
+    }
+
+    /**
+     * POST /calls/{uuid}/record — Start or stop call recording.
+     *
+     * @param  'start'|'stop'  $action
+     * @return array{ok: bool, action?: string, recording_action?: string, error?: string}
+     */
+    public function recordCall(string $uuid, string $action = 'start'): array
+    {
+        $uuid = trim($uuid);
+        $action = strtolower(trim($action));
+        if ($uuid === '') {
+            return ['ok' => false, 'error' => 'Missing call uuid.', 'action' => 'record'];
+        }
+        if (! in_array($action, ['start', 'stop'], true)) {
+            return ['ok' => false, 'error' => 'Recording action must be start or stop.', 'action' => 'record'];
+        }
+
+        try {
+            $response = $this->client()
+                ->asJson()
+                ->post($this->url("/calls/{$uuid}/record"), [
+                    'action' => $action,
+                ]);
+
+            if ($response->successful()) {
+                return array_merge([
+                    'ok' => true,
+                    'action' => 'record',
+                    'recording_action' => $action,
+                ], $response->json() ?? []);
+            }
+
+            $status = $response->status();
+            $error = $response->json('error') ?? ('HTTP '.$status);
+            if ($status === 404) {
+                $error = 'Call not found — recording needs a live connected call.';
+            } elseif ($status === 409) {
+                $error = is_string($error) && $error !== ''
+                    ? $error
+                    : 'Recording conflict (already in that state, or agent not ready).';
+            }
+
+            return [
+                'ok' => false,
+                'action' => 'record',
+                'recording_action' => $action,
+                'error' => $error,
+                'http_status' => $status,
+            ];
+        } catch (\Throwable $e) {
+            return [
+                'ok' => false,
+                'action' => 'record',
+                'recording_action' => $action,
+                'error' => $e->getMessage(),
+            ];
+        }
     }
 
     /**
@@ -4072,15 +4171,16 @@ class ZoomApiService
 
     /**
      * Stream recording audio from the Morpheus platform API when available.
+     * Uses chunked passthrough so the browser can start playback before the full file arrives.
      */
     public function streamRecording(string $source, string $recordingId, bool $download = false, ?string $callReferenceId = null): \Symfony\Component\HttpFoundation\Response
     {
-        $response = $this->authenticatedMediaGet($this->url("/recordings/{$recordingId}/download"));
+        $response = $this->authenticatedMediaStreamGet($this->url("/recordings/{$recordingId}/download"));
 
         if (! $response->successful()) {
             $fallbackId = $this->resolveRecordingDownloadId($recordingId, $callReferenceId);
             if ($fallbackId && $fallbackId !== $recordingId) {
-                $response = $this->authenticatedMediaGet($this->url("/recordings/{$fallbackId}/download"));
+                $response = $this->authenticatedMediaStreamGet($this->url("/recordings/{$fallbackId}/download"));
                 $recordingId = $fallbackId;
             }
         }
@@ -4091,37 +4191,186 @@ class ZoomApiService
 
         $contentType = $response->header('Content-Type') ?: 'audio/wav';
         $disposition = $download ? 'attachment' : 'inline';
-
-        return response($response->body(), 200, [
+        $headers = [
             'Content-Type' => $contentType,
             'Content-Disposition' => "{$disposition}; filename=\"recording-{$recordingId}.wav\"",
-        ]);
+            'Cache-Control' => 'private, max-age=300',
+            'X-Accel-Buffering' => 'no',
+            'Accept-Ranges' => 'none',
+        ];
+
+        $length = $response->header('Content-Length');
+        if (is_numeric($length) && (int) $length > 0) {
+            $headers['Content-Length'] = (string) ((int) $length);
+        }
+
+        $psrBody = $response->toPsrResponse()->getBody();
+
+        return response()->stream(function () use ($psrBody) {
+            while (! $psrBody->eof()) {
+                echo $psrBody->read(16384);
+                if (ob_get_level() > 0) {
+                    @ob_flush();
+                }
+                flush();
+            }
+        }, 200, $headers);
     }
 
-    public function findRecordingFileIdForCall(string $callUuid): ?string
+    public function findRecordingFileIdForCall(string $callUuid, ?array $callSnapshot = null, mixed $callLog = null): ?string
     {
         $callUuid = trim($callUuid);
         if ($callUuid === '') {
             return null;
         }
 
-        try {
-            $payload = $this->listRecordings([
-                'call_uuid' => $callUuid,
-                'per_page' => 10,
-            ]);
+        $candidates = [$callUuid];
+        $snap = is_array($callSnapshot) ? $callSnapshot : null;
+        if ($snap === null) {
+            try {
+                $snap = $this->getCall($callUuid);
+            } catch (\Throwable) {
+                $snap = null;
+            }
+        }
 
-            foreach ($payload['recordings'] ?? [] as $recording) {
-                $id = (string) ($recording['id'] ?? '');
-                if ($id !== '') {
-                    return $id;
+        if (is_array($snap)) {
+            foreach (['id', 'call_uuid', 'uuid', 'bridge_uuid', 'bridged_to', 'origination_uuid', 'other_leg_uuid'] as $field) {
+                $value = trim((string) data_get($snap, $field, ''));
+                if ($value !== '' && ! in_array($value, $candidates, true)) {
+                    $candidates[] = $value;
                 }
             }
+            foreach ((array) data_get($snap, 'related_uuids', []) as $related) {
+                $value = trim((string) $related);
+                if ($value !== '' && ! in_array($value, $candidates, true)) {
+                    $candidates[] = $value;
+                }
+            }
+        }
+
+        if (is_object($callLog) && isset($callLog->meta) && is_array($callLog->meta)) {
+            foreach (['bridge_uuid', 'bridged_to', 'origination_uuid', 'other_leg_uuid'] as $field) {
+                $value = trim((string) ($callLog->meta[$field] ?? ''));
+                if ($value !== '' && ! in_array($value, $candidates, true)) {
+                    $candidates[] = $value;
+                }
+            }
+            foreach ((array) ($callLog->meta['related_uuids'] ?? []) as $related) {
+                $value = trim((string) $related);
+                if ($value !== '' && ! in_array($value, $candidates, true)) {
+                    $candidates[] = $value;
+                }
+            }
+        }
+
+        foreach ($candidates as $uuid) {
+            try {
+                $payload = $this->listRecordings([
+                    'call_uuid' => $uuid,
+                    'per_page' => 10,
+                ]);
+
+                foreach ($payload['recordings'] ?? [] as $recording) {
+                    $id = (string) ($recording['id'] ?? '');
+                    if ($id !== '') {
+                        return $id;
+                    }
+                }
+            } catch (\Throwable) {
+                // try next candidate
+            }
+        }
+
+        return $this->findRecordingFileIdByPhoneWindow($callLog, $snap);
+    }
+
+    /**
+     * Fallback: match a recording near the call time by destination / caller number.
+     */
+    protected function findRecordingFileIdByPhoneWindow(mixed $callLog, ?array $snap): ?string
+    {
+        if (! is_object($callLog)) {
+            return null;
+        }
+
+        $createdAt = $callLog->created_at ?? null;
+        if (! $createdAt) {
+            return null;
+        }
+
+        $phones = [];
+        foreach ([(string) ($callLog->to_phone ?? ''), (string) ($callLog->from_phone ?? '')] as $phone) {
+            $digits = preg_replace('/\D+/', '', $phone) ?? '';
+            if (strlen($digits) >= 7) {
+                $phones[] = substr($digits, -10);
+            }
+        }
+        foreach (['destination_number', 'caller_id_number', 'from', 'to'] as $field) {
+            $digits = preg_replace('/\D+/', '', (string) data_get($snap, $field, '')) ?? '';
+            if (strlen($digits) >= 7) {
+                $phones[] = substr($digits, -10);
+            }
+        }
+        $phones = array_values(array_unique(array_filter($phones)));
+        if ($phones === []) {
+            return null;
+        }
+
+        try {
+            $from = $createdAt->copy()->subMinutes(10);
+            $to = $createdAt->copy()->addMinutes(45);
+            $payload = $this->listRecordings([
+                'from' => $from->toIso8601String(),
+                'to' => $to->toIso8601String(),
+                'per_page' => 50,
+            ]);
         } catch (\Throwable) {
             return null;
         }
 
-        return null;
+        $bestId = null;
+        $bestScore = 0;
+        foreach ($payload['recordings'] ?? [] as $recording) {
+            $raw = is_array($recording['raw'] ?? null) ? $recording['raw'] : [];
+            $haystacks = [
+                (string) ($raw['destination_number'] ?? ''),
+                (string) ($raw['caller_id_number'] ?? ''),
+                (string) ($recording['topic'] ?? ''),
+            ];
+            $joined = preg_replace('/\D+/', '', implode(' ', $haystacks)) ?? '';
+            $score = 0;
+            foreach ($phones as $phone) {
+                if ($phone !== '' && str_contains($joined, $phone)) {
+                    $score += 20;
+                } elseif (strlen($phone) >= 7 && str_contains($joined, substr($phone, -7))) {
+                    $score += 10;
+                }
+            }
+            if ($score <= 0) {
+                continue;
+            }
+            $start = (string) ($recording['start_time'] ?? '');
+            if ($start !== '') {
+                try {
+                    $startAt = \Carbon\Carbon::parse($start);
+                    $diff = abs($startAt->diffInSeconds($createdAt));
+                    if ($diff <= 120) {
+                        $score += 15;
+                    } elseif ($diff <= 600) {
+                        $score += 5;
+                    }
+                } catch (\Throwable) {
+                    // ignore parse errors
+                }
+            }
+            if ($score > $bestScore) {
+                $bestScore = $score;
+                $bestId = (string) ($recording['id'] ?? '');
+            }
+        }
+
+        return $bestScore >= 10 && $bestId !== '' ? $bestId : null;
     }
 
     protected function resolveRecordingDownloadId(string $recordingId, ?string $callReferenceId): ?string
@@ -4175,6 +4424,25 @@ class ZoomApiService
             ->get($url);
     }
 
+    /**
+     * Media downloads: longer timeout + stream body so playback can start early.
+     */
+    protected function authenticatedMediaStreamGet(string $url): \Illuminate\Http\Client\Response
+    {
+        app(MorpheusCircuitBreaker::class)->guard();
+
+        $timeout = max(
+            30,
+            (int) config('integrations.communications.media_timeout_seconds', 45),
+        );
+
+        return Http::connectTimeout(3)
+            ->timeout($timeout)
+            ->withOptions(['stream' => true])
+            ->withHeaders($this->morpheusAuthHeaders())
+            ->get($url);
+    }
+
     // =========================================================================
     // Private helpers
     // =========================================================================
@@ -4217,14 +4485,14 @@ class ZoomApiService
         }
 
         $timeout = max(
-            15,
+            8,
             (int) config('integrations.communications.originate_http_timeout_seconds', 0)
                 ?: (int) config('integrations.communications.http_timeout_seconds', 6)
         );
 
         return Http::withHeaders($this->morpheusAuthHeaders())
             ->acceptJson()
-            ->connectTimeout(5)
+            ->connectTimeout(3)
             ->timeout($timeout);
     }
 

@@ -16,7 +16,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
-#[Fillable(['name', 'email', 'password', 'current_workspace_id'])]
+#[Fillable(['name', 'email', 'password', 'password_hint', 'current_workspace_id'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -79,9 +79,21 @@ class User extends Authenticatable
 
     public function adminSwitchableWorkspaces()
     {
-        return $this->switchableWorkspaces()
-            ->filter(fn (Workspace $workspace) => $this->canAccessAdminPortal($workspace->id))
-            ->values();
+        $workspaces = $this->switchableWorkspaces()
+            ->filter(fn (Workspace $workspace) => $this->canAccessAdminPortal($workspace->id));
+
+        // Workspace admins only see their own workspace(s). Only the platform Super Admin
+        // can browse / switch across every workspace.
+        if (! $this->isPlatformSuperAdmin()) {
+            $workspaces = $workspaces->filter(function (Workspace $workspace) {
+                $role = $this->getWorkspaceRole($workspace->id);
+
+                return in_array($role, ['admin', 'manager', 'super_admin'], true)
+                    || $workspace->admin_id === $this->id;
+            });
+        }
+
+        return $workspaces->values();
     }
 
     public function portalSwitchableWorkspaces()
@@ -187,6 +199,40 @@ class User extends Authenticatable
     public function isCloser(?int $workspaceId = null): bool
     {
         return $this->effectivePortalRole($workspaceId) === 'closer';
+    }
+
+    public function isClosersQa(?int $workspaceId = null): bool
+    {
+        return $this->effectivePortalRole($workspaceId) === 'closers_qa';
+    }
+
+    public function isPlatformSuperAdmin(): bool
+    {
+        if ($this->relationLoaded('workspaces')) {
+            return $this->workspaces->contains(
+                fn (Workspace $workspace) => ($workspace->pivot->role ?? null) === 'super_admin'
+                    && ($workspace->pivot->status ?? 'active') === 'active'
+            );
+        }
+
+        return $this->workspaces()
+            ->wherePivot('role', 'super_admin')
+            ->wherePivot('status', 'active')
+            ->exists();
+    }
+
+    /**
+     * The single platform Super Admin (first active super_admin membership).
+     */
+    public static function platformSuperAdmin(): ?self
+    {
+        return static::query()
+            ->whereHas('workspaces', function ($query) {
+                $query->where('workspace_user.role', 'super_admin')
+                    ->where('workspace_user.status', 'active');
+            })
+            ->orderBy('users.id')
+            ->first();
     }
 
     public function isAdminOfAnyWorkspace(): bool
@@ -353,6 +399,11 @@ class User extends Authenticatable
             return true;
         }
 
+        // Managers always keep Campaigns + Call Monitoring related modules.
+        if ($this->isManager($workspaceId) && in_array($module, ['campaigns', 'lead_pipeline', 'communications'], true)) {
+            return true;
+        }
+
         $permissions = $this->getModulePermissions($workspaceId);
         if ($permissions === null) {
             return true;
@@ -374,7 +425,13 @@ class User extends Authenticatable
 
     public function canManageWorkspaceMembers(?int $workspaceId = null): bool
     {
-        return $this->isSuperAdmin($workspaceId ?: $this->current_workspace_id);
+        $workspaceId = $workspaceId ?: $this->current_workspace_id;
+        if (! $workspaceId) {
+            return false;
+        }
+
+        // Super Admin and Admin can add / edit / delete team accounts.
+        return $this->isSuperAdmin($workspaceId) || $this->isAdmin($workspaceId);
     }
 
     protected function workspaceMembershipPivot(int $workspaceId): ?object
@@ -438,6 +495,7 @@ class User extends Authenticatable
             'appointment_setter_team_lead' => 'portal.setter-team.dashboard',
             'closers_team_lead' => 'portal.closer-team.dashboard',
             'closer' => 'portal.closer.dashboard',
+            'closers_qa' => 'portal.communications.notes',
             default => 'portal.login',
         };
     }

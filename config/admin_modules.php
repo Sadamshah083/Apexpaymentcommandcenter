@@ -27,10 +27,23 @@ return [
             'description' => 'Import leads, workflows, and pipeline overview',
             'section' => 'Lead Pipeline',
             'default_route' => 'admin.dashboard',
+            'always_available' => true,
             'routes' => [
                 'admin.workflows.*',
+                'admin.assigned-leads',
                 'admin.leads.*',
                 'admin.dashboard',
+            ],
+        ],
+        'maps_scraper' => [
+            'label' => 'Maps Lead Scraper',
+            'description' => 'Scrape Google Maps small businesses and export Excel by area code',
+            'section' => 'Lead Pipeline',
+            'default_route' => 'admin.maps-scraper.index',
+            'always_available' => true,
+            'routes' => [
+                'admin.maps-scraper',
+                'admin.maps-scraper.*',
             ],
         ],
         'campaigns' => [
@@ -38,6 +51,7 @@ return [
             'description' => 'Manage lead campaigns and batch operations',
             'section' => 'Lead Pipeline',
             'default_route' => 'admin.campaigns.index',
+            'always_available' => true,
             'routes' => [
                 'admin.campaigns.*',
             ],
@@ -101,16 +115,6 @@ return [
             'routes' => [
                 'admin.communications.*',
             ],
-        ],
-        'server_monitoring' => [
-            'label' => 'Server Monitoring',
-            'description' => 'Monitor CPU, RAM, Disk usage and background queues',
-            'section' => 'Workspace Admin',
-            'default_route' => 'admin.server.monitoring',
-            'routes' => [
-                'admin.server.monitoring',
-            ],
-            'grantable_by' => ['super_admin'],
         ],
         'user_management' => [
             'label' => 'User Management',

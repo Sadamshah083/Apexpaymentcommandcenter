@@ -36,13 +36,15 @@ class QueuePoolCommand extends Command
         $tries = (int) $this->option('tries');
         $timeout = (int) $this->option('timeout');
         $sleep = (int) $this->option('sleep');
+        // Ingest/upload jobs must run ahead of slow AI enrichment.
+        $queues = (string) ($this->option('queue') ?: 'ingest,enrichment,default');
 
-        $this->info("Starting {$workers} parallel queue workers on [{$connection}]…");
+        $this->info("Starting {$workers} parallel queue workers on [{$connection}] ({$queues})…");
         $this->line('Each worker processes one lead at a time; more workers = more leads in parallel.');
         $this->newLine();
 
         for ($i = 1; $i <= $workers; $i++) {
-            $this->startWorker($i, $connection, $tries, $timeout, $sleep);
+            $this->startWorker($i, $connection, $tries, $timeout, $sleep, $queues);
         }
 
         $this->trap($this->stopSignals(), function () {
@@ -61,7 +63,8 @@ class QueuePoolCommand extends Command
                         $connection,
                         $tries,
                         $timeout,
-                        $sleep
+                        $sleep,
+                        $queues
                     );
                 }
             }
@@ -88,7 +91,7 @@ class QueuePoolCommand extends Command
         return $signals;
     }
 
-    protected function startWorker(int $number, string $connection, int $tries, int $timeout, int $sleep): void
+    protected function startWorker(int $number, string $connection, int $tries, int $timeout, int $sleep, string $queues): void
     {
         $command = [
             PHP_BINARY,
@@ -96,14 +99,11 @@ class QueuePoolCommand extends Command
             'queue:work',
             $connection,
             "--name=worker-{$number}",
+            "--queue={$queues}",
             "--tries={$tries}",
             "--timeout={$timeout}",
             "--sleep={$sleep}",
         ];
-
-        if ($queue = $this->option('queue')) {
-            $command[] = "--queue={$queue}";
-        }
 
         $process = new Process($command, base_path());
         $process->setTimeout(null);

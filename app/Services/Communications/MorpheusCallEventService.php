@@ -481,6 +481,7 @@ class MorpheusCallEventService
             'ok' => true,
             ...$state,
             'uuid' => $uuid,
+            'monitoring_version' => $this->monitoringVersion(),
         ], JSON_THROW_ON_ERROR);
 
         $secret = trim((string) config('integrations.morpheus.call_events_ws_secret', ''));
@@ -548,10 +549,56 @@ class MorpheusCallEventService
         return (int) Cache::get($this->monitoringVersionKey(), 0);
     }
 
-    public function bumpMonitoringVersion(): void
+    public function bumpMonitoringVersion(?int $workspaceId = null): void
     {
         $key = $this->monitoringVersionKey();
-        Cache::put($key, ((int) Cache::get($key, 0)) + 1, self::CACHE_TTL_SECONDS);
+        $next = ((int) Cache::get($key, 0)) + 1;
+        Cache::put($key, $next, self::CACHE_TTL_SECONDS);
+        $this->publishMonitoringWebSocket($workspaceId, $next);
+    }
+
+    /**
+     * Wake Call Monitoring wallboards over the local WebSocket bridge (no PHP SSE worker needed).
+     */
+    public function publishMonitoringWebSocket(?int $workspaceId = null, ?int $version = null): void
+    {
+        $url = trim((string) config('integrations.morpheus.call_events_ws_monitoring_push_url', ''));
+        if ($url === '') {
+            $push = trim((string) config('integrations.morpheus.call_events_ws_push_url', ''));
+            $url = $push !== '' ? preg_replace('#/push$#', '/push-monitoring', $push) : '';
+        }
+        if ($url === '') {
+            return;
+        }
+
+        $payload = json_encode([
+            'ok' => true,
+            'type' => 'monitoring_refresh',
+            'workspace_id' => $workspaceId,
+            'version' => $version ?? $this->monitoringVersion(),
+            'at' => now()->utc()->toIso8601String(),
+        ], JSON_THROW_ON_ERROR);
+
+        $secret = trim((string) config('integrations.morpheus.call_events_ws_secret', ''));
+        $headers = "Content-Type: application/json\r\nContent-Length: ".strlen($payload)."\r\n";
+        if ($secret !== '') {
+            $headers .= 'X-Call-Events-Secret: '.$secret."\r\n";
+        }
+
+        try {
+            $context = stream_context_create([
+                'http' => [
+                    'method' => 'POST',
+                    'header' => $headers,
+                    'content' => $payload,
+                    'timeout' => 0.25,
+                    'ignore_errors' => true,
+                ],
+            ]);
+            @file_get_contents($url, false, $context);
+        } catch (\Throwable) {
+            // Bridge may be restarting; SSE fallback still works.
+        }
     }
 
     protected function syncLiveIndex(string $uuid, bool $live): void

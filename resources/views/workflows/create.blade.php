@@ -13,14 +13,23 @@
     <div>
         <x-back-link :href="route('admin.workflows.index')" />
         <h1 class="app-page-title mt-2">Import leads</h1>
-        <p class="app-page-subtitle">Upload a spreadsheet under a campaign. Map columns, then enrich and assign from the Command Center.</p>
+        <p class="app-page-subtitle">Upload a spreadsheet under a campaign. Map columns, then enrich and assign from the Dashboard.</p>
     </div>
 
     <div class="app-card app-card-padded">
-        <form method="POST" action="{{ route('admin.workflows.store') }}" enctype="multipart/form-data" class="space-y-5" data-form-loading data-workflow-upload>
+        <form method="POST" action="{{ route('admin.workflows.store') }}" enctype="multipart/form-data"
+            class="space-y-5" data-form-loading data-workflow-upload data-turbo="false">
             @csrf
-            <input type="hidden" name="processing_mode" value="import_only">
 
+            @if ($errors->any())
+                <div class="um-alert um-alert-error" role="alert">
+                    <ul class="um-alert-list">
+                        @foreach ($errors->all() as $error)
+                            <li>{{ $error }}</li>
+                        @endforeach
+                    </ul>
+                </div>
+            @endif
             <div class="app-field">
                 <label id="campaign-label" class="app-label">Campaign</label>
                 <div class="import-campaign-dropdown" data-import-campaign-dropdown>
@@ -73,6 +82,22 @@
             </div>
 
             <div class="app-field">
+                <label for="import_segment" class="app-label">Segment <span class="text-zinc-400 font-normal">(optional)</span></label>
+                <input type="text" name="import_segment" id="import_segment" class="app-input"
+                    placeholder="e.g. Hot leads, Warm follow-up, Cold"
+                    value="{{ old('import_segment') }}" maxlength="120">
+                <p class="app-field-hint">Applied to every lead in this import for filtering and dialer display.</p>
+            </div>
+
+            <div class="app-field">
+                <label for="import_tags" class="app-label">Tags <span class="text-zinc-400 font-normal">(optional)</span></label>
+                <input type="text" name="import_tags" id="import_tags" class="app-input"
+                    placeholder="e.g. salon, texas, b2b"
+                    value="{{ old('import_tags') }}" maxlength="255">
+                <p class="app-field-hint">Comma-separated tags stored on each imported lead.</p>
+            </div>
+
+            <div class="app-field">
                 <label for="name" class="app-label">Import file name</label>
                 <input type="text" name="name" id="name" required placeholder="e.g. Houston salons batch 1" class="app-input" value="{{ old('name') }}">
                 <p class="app-field-hint">Label for this specific upload within the campaign.</p>
@@ -81,12 +106,37 @@
             <div class="app-field">
                 <label class="app-label">File</label>
                 <div class="app-upload-zone import-upload-zone">
-                    <input type="file" name="file" id="file" required accept=".csv,.xlsx,.xls,.txt">
+                    <input type="file" name="file" id="file" required accept=".csv,.xlsx,.xls,.txt,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
                     <div id="upload-placeholder" class="space-y-2">
                         <p class="import-upload-zone__title">Drop CSV or Excel here</p>
-                        <p class="import-upload-zone__hint">Up to 10 MB</p>
+                        <p class="import-upload-zone__hint">CSV, XLSX, XLS — up to 50 MB</p>
+                    </div>
+                    <div id="file-selected" class="space-y-2 hidden">
+                        <p class="import-upload-zone__title" id="file-name"></p>
+                        <button type="button" class="app-btn app-btn-secondary app-btn-sm" data-reset-upload>Choose another file</button>
                     </div>
                 </div>
+            </div>
+
+            <div class="app-field">
+                <span class="app-label">Import mode</span>
+                <div class="space-y-2 mt-2">
+                    <label class="app-checkbox-row">
+                        <input type="radio" name="processing_mode" value="import_only" @checked(old('processing_mode', 'import_only') === 'import_only')>
+                        <span class="app-checkbox-row-text">
+                            <strong>Upload only (fast)</strong>
+                            <span class="block text-xs text-zinc-500 font-normal mt-0.5">Save rows without AI. You can enrich later on the mapping page.</span>
+                        </span>
+                    </label>
+                    <label class="app-checkbox-row">
+                        <input type="radio" name="processing_mode" value="import_and_enrich" @checked(old('processing_mode') === 'import_and_enrich')>
+                        <span class="app-checkbox-row-text">
+                            <strong>Upload + AI enrichment</strong>
+                            <span class="block text-xs text-zinc-500 font-normal mt-0.5">After column mapping, queue AI enrichment for each lead.</span>
+                        </span>
+                    </label>
+                </div>
+                <p class="app-field-hint mt-2">Duplicate US phone numbers in this workspace are skipped when you start the import.</p>
             </div>
 
             <button type="submit" class="app-btn app-btn-success w-full">Continue to column mapping</button>

@@ -13,22 +13,35 @@ class AgentPresenceService
 
     public const MONITOR_ROLES = [
         'appointment_setter',
-        'appointment_setter_team_lead',
         'closers',
         'closer',
-        'closers_team_lead',
+    ];
+
+    /** Appointment-setter agents only (never team leads). */
+    public const SETTER_MONITOR_ROLES = [
+        'appointment_setter',
+    ];
+
+    /** Closer agents only (never team leads). */
+    public const CLOSER_MONITOR_ROLES = [
+        'closer',
+        'closers',
     ];
 
     /** Never show these accounts on Call Monitoring. */
     public const EXCLUDED_ROLES = [
         'super_admin',
         'admin',
+        'manager',
+        'closers_qa',
+        'appointment_setter_team_lead',
+        'closers_team_lead',
     ];
 
     public static function isMonitorableRole(?string $role): bool
     {
         $normalized = \App\Support\SalesOps::normalizeLegacyRole($role) ?: (string) $role;
-        if ($normalized === '' || self::isExcludedRole($normalized)) {
+        if ($normalized === '' || self::isExcludedRole($normalized) || SalesOps::isTeamLeadRole($normalized)) {
             return false;
         }
 
@@ -41,7 +54,54 @@ class AgentPresenceService
         $normalized = \App\Support\SalesOps::normalizeLegacyRole((string) $role) ?: (string) $role;
 
         return in_array($normalized, self::EXCLUDED_ROLES, true)
-            || in_array((string) $role, self::EXCLUDED_ROLES, true);
+            || in_array((string) $role, self::EXCLUDED_ROLES, true)
+            || SalesOps::isTeamLeadRole($normalized);
+    }
+
+    /**
+     * Role keys the wallboard may show for this viewer.
+     * null = all monitorable agent roles (admin/supervisor).
+     *
+     * @return list<string>|null
+     */
+    public static function monitorRolesForViewer(?User $viewer, ?int $workspaceId): ?array
+    {
+        if (! $viewer || ! $workspaceId) {
+            return null;
+        }
+
+        $role = (string) ($viewer->getWorkspaceRole($workspaceId) ?? '');
+        $normalized = SalesOps::normalizeLegacyRole($role) ?: $role;
+
+        if (SalesOps::isSetterTeamLeadRole($normalized)) {
+            return self::SETTER_MONITOR_ROLES;
+        }
+
+        if (SalesOps::isClosersTeamLeadRole($normalized) || SalesOps::isQaRole($normalized)) {
+            return self::CLOSER_MONITOR_ROLES;
+        }
+
+        // Admins / managers see both families (agents only — TLs already excluded).
+        return null;
+    }
+
+    /**
+     * @param  list<string>|null  $allowedRoles
+     */
+    public static function roleAllowedOnBoard(?string $role, ?array $allowedRoles): bool
+    {
+        if (! self::isMonitorableRole($role)) {
+            return false;
+        }
+
+        if ($allowedRoles === null) {
+            return true;
+        }
+
+        $normalized = SalesOps::normalizeLegacyRole((string) $role) ?: (string) $role;
+
+        return in_array($normalized, $allowedRoles, true)
+            || in_array((string) $role, $allowedRoles, true);
     }
 
     /**
@@ -51,18 +111,43 @@ class AgentPresenceService
         ?string $role = null,
         ?string $roleLabel = null,
         ?User $user = null,
-        ?int $workspaceId = null
+        ?int $workspaceId = null,
+        ?string $displayName = null
     ): bool {
-        if ($user && ($user->isSuperAdmin($workspaceId) || $user->isAdmin($workspaceId))) {
-            return true;
+        if ($user) {
+            if ($user->isSuperAdmin($workspaceId)
+                || $user->isAdmin($workspaceId)
+                || $user->isManager($workspaceId)
+                || $user->isPlatformSuperAdmin()
+                || ($workspaceId && $user->canAccessAdminPortal($workspaceId))
+            ) {
+                return true;
+            }
+
+            if (self::looksLikeAdminIdentity((string) $user->name)
+                || self::looksLikeAdminIdentity((string) $user->email)
+            ) {
+                return true;
+            }
         }
 
-        if (self::isExcludedRole($role)) {
+        if (SalesOps::isAdminPortalRole($role) || self::isExcludedRole($role) || SalesOps::isTeamLeadRole($role)) {
             return true;
         }
 
         $label = strtolower(trim((string) $roleLabel));
-        if (in_array($label, ['super admin', 'admin'], true)) {
+        if (in_array($label, ['super admin', 'admin', 'manager'], true)) {
+            return true;
+        }
+
+        // Team lead labels must never appear even if role key is missing/stale.
+        if (str_contains($label, 'team lead')) {
+            return true;
+        }
+
+        if (self::looksLikeAdminIdentity($displayName)
+            || self::looksLikeAdminIdentity((string) $roleLabel)
+        ) {
             return true;
         }
 
@@ -72,6 +157,30 @@ class AgentPresenceService
         }
 
         return false;
+    }
+
+    /**
+     * Login / display names that must never appear on the wallboard (e.g. user "admin").
+     */
+    public static function looksLikeAdminIdentity(?string $value): bool
+    {
+        $raw = strtolower(trim((string) $value));
+        if ($raw === '') {
+            return false;
+        }
+
+        if (str_contains($raw, '@')) {
+            $raw = strstr($raw, '@', true) ?: $raw;
+        }
+
+        $normalized = preg_replace('/[^a-z0-9]+/', '', $raw) ?? '';
+
+        return in_array($normalized, [
+            'admin',
+            'superadmin',
+            'administrator',
+            'root',
+        ], true);
     }
 
     /**
@@ -289,6 +398,17 @@ class AgentPresenceService
             }
 
             $role = (string) ($entry['role'] ?? '');
+            if (self::isExcludedFromMonitoring(
+                $role,
+                (string) ($entry['role_label'] ?? ''),
+                null,
+                null,
+                (string) ($entry['name'] ?? ''),
+            )) {
+                unset($map[$userId]);
+                $changed = true;
+                continue;
+            }
             if ($role !== '' && ! self::isMonitorableRole($role)) {
                 unset($map[$userId]);
                 $changed = true;
@@ -331,9 +451,9 @@ class AgentPresenceService
         $key = $this->versionKey($workspaceId);
         Cache::put($key, ((int) Cache::get($key, 0)) + 1, self::TTL_SECONDS * 10);
 
-        // Wake Call Monitoring SSE / light polls immediately when someone logs in or idles.
+        // Wake Call Monitoring SSE / WebSocket immediately when someone logs in or idles.
         try {
-            app(MorpheusCallEventService::class)->bumpMonitoringVersion();
+            app(MorpheusCallEventService::class)->bumpMonitoringVersion($workspaceId);
         } catch (\Throwable) {
             // Presence still works without the call-event bus.
         }

@@ -56,6 +56,19 @@ class DialerDispositionTest extends TestCase
             'assigned_user_id' => $admin->id,
         ]);
 
+        $duplicate = WorkflowLead::create([
+            'workflow_id' => $workflow->id,
+            'row_number' => 2,
+            'business_name' => 'Auto Masters Repair Dup',
+            'owner_name' => 'Owner',
+            'status' => 'completed',
+            'normalized_phone' => '+17062233188',
+            'direct_phone' => '+17062233188',
+            'contact_attempts' => 0,
+            'last_contacted_at' => null,
+            'assigned_user_id' => $admin->id,
+        ]);
+
         $started = microtime(true);
 
         $response = $this->actingAs($admin)->postJson(route('admin.communications.dialer.disposition'), [
@@ -90,8 +103,17 @@ class DialerDispositionTest extends TestCase
         ]);
 
         $lead->refresh();
+        $duplicate->refresh();
         $this->assertNotNull($lead->last_contacted_at);
         $this->assertGreaterThanOrEqual(1, (int) $lead->contact_attempts);
+        $this->assertNotNull($duplicate->last_contacted_at);
+        $this->assertSame('No Answer', (string) $lead->last_disposition);
+
+        $imported = app(\App\Services\Communications\DialerImportedLeadsService::class)
+            ->paginate($workspace, ['pool' => 'callable'], 0, 50);
+        $ids = collect($imported['leads'])->pluck('id')->all();
+        $this->assertNotContains($lead->id, $ids);
+        $this->assertNotContains($duplicate->id, $ids);
 
         // Call-log display must keep agent disposition "No Answer" (not treat it as CDR status).
         $hubLog = app(CommunicationsCallHistoryService::class)->toHubLogPublic(

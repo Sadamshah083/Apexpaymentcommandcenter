@@ -2,7 +2,9 @@
 
 namespace App\Services\Communications;
 
+use App\Models\CommunicationCallLog;
 use App\Models\User;
+use App\Support\SalesOps;
 use Illuminate\Http\Request;
 
 class CommunicationsAccessService
@@ -59,7 +61,8 @@ class CommunicationsAccessService
    * admin      — super_admin / admin (admin portal): full hub + telephony config
    * supervisor — manager (admin portal): dial + ops channels, no provisioning
    * team_lead  — setter/closer team leads (portal): agents + team visibility
-   * agent      — setters / closers (portal): dial + comms channels only
+   * qa         — B2B Closer Team QA: call notes + live monitoring
+   * agent      — setters / closers (portal): dial + own call recordings only
    */
     public function tierFor(?User $user, string $routePrefix): string
     {
@@ -85,6 +88,10 @@ class CommunicationsAccessService
 
         $role = $user->getWorkspaceRole();
 
+        if (SalesOps::isQaRole($role)) {
+            return 'qa';
+        }
+
         if (in_array($role, ['appointment_setter_team_lead', 'closers_team_lead'], true)) {
             return 'team_lead';
         }
@@ -109,7 +116,7 @@ class CommunicationsAccessService
 
     public function canDial(?User $user, string $routePrefix): bool
     {
-        return $this->tierFor($user, $routePrefix) !== 'guest';
+        return in_array($this->tierFor($user, $routePrefix), ['admin', 'supervisor', 'team_lead', 'agent'], true);
     }
 
     /**
@@ -125,7 +132,15 @@ class CommunicationsAccessService
      */
     public function canViewTeamRecordings(?User $user, string $routePrefix): bool
     {
-        return in_array($this->tierFor($user, $routePrefix), ['admin', 'supervisor', 'team_lead'], true);
+        return in_array($this->tierFor($user, $routePrefix), ['admin', 'supervisor', 'team_lead', 'qa'], true);
+    }
+
+    /**
+     * Call Notes page (agent picker for supervisors / QA / team leads; own notes for agents).
+     */
+    public function canViewCallNotes(?User $user, string $routePrefix): bool
+    {
+        return in_array($this->tierFor($user, $routePrefix), ['admin', 'supervisor', 'team_lead', 'qa', 'agent'], true);
     }
 
     /**
@@ -133,7 +148,84 @@ class CommunicationsAccessService
      */
     public function canViewCallMonitoring(?User $user, string $routePrefix): bool
     {
-        return in_array($this->tierFor($user, $routePrefix), ['admin', 'supervisor', 'team_lead'], true);
+        return in_array($this->tierFor($user, $routePrefix), ['admin', 'supervisor', 'team_lead', 'qa'], true);
+    }
+
+    /**
+     * All call logs — agents see only their own; team leads their team;
+     * QA / managers / admins can review broader sets.
+     */
+    public function canViewAllCallLogs(?User $user, string $routePrefix): bool
+    {
+        return in_array($this->tierFor($user, $routePrefix), ['admin', 'supervisor', 'team_lead', 'qa', 'agent'], true);
+    }
+
+    /**
+     * Play / download a recording. Agents may only open their own call recordings.
+     * Team leads may open recordings for their team members.
+     */
+    public function canAccessRecording(
+        ?User $user,
+        string $routePrefix,
+        string $recordingId,
+        ?string $callReferenceId = null,
+    ): bool {
+        if ($user === null || $recordingId === '') {
+            return false;
+        }
+
+        $tier = $this->tierFor($user, $routePrefix);
+
+        if (in_array($tier, ['admin', 'supervisor', 'qa'], true)) {
+            return true;
+        }
+
+        $workspace = app(\App\Services\Workspace\WorkspaceContextService::class)
+            ->resolveActiveWorkspace($user);
+        if (! $workspace) {
+            return false;
+        }
+
+        $query = CommunicationCallLog::query()
+            ->where('workspace_id', $workspace->id)
+            ->where(function ($inner) use ($recordingId, $callReferenceId) {
+                $inner->where('recording_file_id', $recordingId);
+                if (filled($callReferenceId)) {
+                    $ref = (string) $callReferenceId;
+                    $inner->orWhere('morpheus_call_uuid', $ref);
+                    if (str_starts_with($ref, 'local:')) {
+                        $inner->orWhere('id', (int) substr($ref, 6));
+                    } elseif (ctype_digit($ref)) {
+                        $inner->orWhere('id', (int) $ref);
+                    }
+                }
+            });
+
+        $log = $query->first();
+        if (! $log) {
+            return false;
+        }
+
+        $ownerId = (int) ($log->user_id ?? 0);
+        if ($ownerId <= 0) {
+            return false;
+        }
+
+        if ($tier === 'agent') {
+            return $ownerId === (int) $user->id;
+        }
+
+        if ($tier === 'team_lead') {
+            $allowedIds = app(CallNotesHistoryService::class)
+                ->dialerAgents($workspace, $user, 'team_lead')
+                ->pluck('id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+
+            return in_array($ownerId, $allowedIds, true);
+        }
+
+        return false;
     }
 
     public function canAccessHub(?User $user, string $routePrefix): bool
@@ -156,6 +248,7 @@ class CommunicationsAccessService
             'admin' => array_keys(CommunicationsInboxService::CHANNELS),
             'supervisor' => array_merge(self::AGENT_CHANNELS, self::TEAM_LEAD_CHANNELS, self::SUPERVISOR_CHANNELS),
             'team_lead' => array_merge(self::AGENT_CHANNELS, self::TEAM_LEAD_CHANNELS),
+            'qa' => ['recordings'],
             'agent' => self::AGENT_CHANNELS,
             default => [],
         };
@@ -178,7 +271,7 @@ class CommunicationsAccessService
 
         if (in_array($panel, ['team', 'queues', 'conferences', 'leads', 'campaigns', 'lists'], true)) {
             return $this->tierFor($user, $routePrefix) !== 'guest'
-                && $this->tierFor($user, $routePrefix) !== 'agent';
+                && ! in_array($this->tierFor($user, $routePrefix), ['agent', 'qa'], true);
         }
 
         return $this->canAccessHub($user, $routePrefix);
@@ -197,7 +290,7 @@ class CommunicationsAccessService
         $tier = $this->tierFor($user, $routePrefix);
 
         if (! $this->canAccessChannel($user, $routePrefix, $channel)) {
-            $channel = 'inbox';
+            $channel = $tier === 'qa' ? 'recordings' : 'inbox';
             $panel = 'empty';
         }
 
@@ -244,7 +337,9 @@ class CommunicationsAccessService
             'canDial' => $this->canDial($user, $routePrefix),
             'canAutoDial' => $this->canAutoDial($user, $routePrefix),
             'canViewTeamRecordings' => $this->canViewTeamRecordings($user, $routePrefix),
+            'canViewCallNotes' => $this->canViewCallNotes($user, $routePrefix),
             'canViewCallMonitoring' => $this->canViewCallMonitoring($user, $routePrefix),
+            'canViewAllCallLogs' => $this->canViewAllCallLogs($user, $routePrefix),
             'canUseBreakLunch' => $this->isAgentTier($user, $routePrefix),
             'roleLabel' => $this->roleLabel($tier),
         ];
@@ -256,6 +351,7 @@ class CommunicationsAccessService
             'admin' => 'Administrator',
             'supervisor' => 'Manager',
             'team_lead' => 'Team lead',
+            'qa' => 'QA',
             'agent' => 'Agent',
             default => 'User',
         };

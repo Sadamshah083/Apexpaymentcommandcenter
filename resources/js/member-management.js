@@ -1,4 +1,5 @@
 import { showToast } from './toast.js';
+import { refreshPrettySelect } from './pretty-select.js';
 
 const ACTION_COPY = {
     suspend: {
@@ -15,22 +16,38 @@ const ACTION_COPY = {
         message: (name) => `${name} will be able to sign in to the agent portal again.`,
     },
     remove: {
-        title: 'Delete member?',
+        title: 'Delete account?',
         tone: 'error',
         confirmLabel: 'Delete permanently',
         message: (name) =>
-            `Delete ${name} from this workspace? This cannot be undone. Their campaign and team assignments will be removed.`,
+            `Are you sure you want to permanently delete ${name}? This cannot be undone. Their campaign and team assignments will be removed.`,
     },
     role: {
         title: 'Change role?',
         tone: 'warning',
-        confirmLabel: 'Update role',
+        confirmLabel: 'Switch role',
         message: (name, form) => {
             const select = form?.querySelector('[name="role"], [data-member-role-select]');
+            const nextValue = form?.dataset.pendingRole || select?.value || '';
+            const previousValue = form?.dataset.originalRole || '';
             const label =
                 form?.dataset.pendingRoleLabel ||
                 select?.selectedOptions?.[0]?.textContent?.trim() ||
                 'the new role';
+
+            const fronterRoles = ['appointment_setter', 'appointment_setter_team_lead'];
+            const closerRoles = ['closer', 'closers_team_lead', 'closers_qa'];
+            const crossingFamily =
+                (fronterRoles.includes(previousValue) && closerRoles.includes(nextValue))
+                || (closerRoles.includes(previousValue) && fronterRoles.includes(nextValue));
+
+            if (crossingFamily) {
+                if (fronterRoles.includes(previousValue) && closerRoles.includes(nextValue)) {
+                    return `Switch ${name} to ${label}? A B2B Closer Team Lead must exist first — they will be assigned under the first closer team lead automatically.`;
+                }
+
+                return `Switch ${name} from their current team family to ${label}? Team lead and campaign assignments for the old family will be cleared.`;
+            }
 
             return `Change ${name}'s role to ${label}?`;
         },
@@ -184,7 +201,12 @@ function openConfirmModal(form) {
 
     document.getElementById('member-confirm-title').textContent = copy.title;
     document.getElementById('member-confirm-message').textContent = copy.message(name, form);
-    document.getElementById('member-confirm-submit').textContent = copy.confirmLabel;
+    const submitBtn = document.getElementById('member-confirm-submit');
+    if (submitBtn) {
+        submitBtn.textContent = copy.confirmLabel;
+        submitBtn.classList.toggle('member-confirm-submit--danger', copy.tone === 'error');
+        submitBtn.classList.toggle('member-confirm-submit--warning', copy.tone === 'warning');
+    }
     setModalIcon(copy.tone);
 
     modal.hidden = false;
@@ -234,7 +256,14 @@ async function submitMemberForm(form) {
     const name = form.dataset.memberName || 'Member';
     const row = form.closest('.member-row');
     const methodInput = form.querySelector('[name="_method"]');
-    const formData = new FormData(form);
+
+    let formData;
+    try {
+        formData = prepareMemberFormData(form);
+    } catch (error) {
+        showToast(error?.message || `Could not update ${name}.`, 'error');
+        return;
+    }
 
     // Always POST when method-spoofing so role/password updates hit Laravel reliably.
     const fetchMethod = methodInput ? 'POST' : (form.method || 'POST').toUpperCase();
@@ -259,6 +288,15 @@ async function submitMemberForm(form) {
 
     flashMemberRow(form);
 
+    const submitButtons = form.querySelectorAll('button[type="submit"]');
+    submitButtons.forEach((button) => {
+        button.disabled = true;
+        button.dataset.originalLabel = button.textContent || '';
+        if (form.dataset.memberAction === 'update' || form.dataset.memberAction === 'reset-password') {
+            button.textContent = 'Saving…';
+        }
+    });
+
     try {
         const response = await fetch(form.action, {
             method: fetchMethod === 'GET' ? 'POST' : fetchMethod,
@@ -281,6 +319,12 @@ async function submitMemberForm(form) {
                 `Could not update ${name}.`;
             showToast(message, 'error');
             row?.classList.remove('member-row-busy');
+            submitButtons.forEach((button) => {
+                button.disabled = false;
+                if (button.dataset.originalLabel) {
+                    button.textContent = button.dataset.originalLabel;
+                }
+            });
 
             return;
         }
@@ -360,22 +404,38 @@ async function submitMemberForm(form) {
 
         if (form.dataset.memberAction === 'update') {
             showToast(payload.message || `${name} updated.`, 'success');
-            closeEditMemberModal();
-            window.setTimeout(() => window.location.reload(), 400);
+            closeAllMemberModals();
+            window.setTimeout(() => window.location.reload(), 350);
             row?.classList.remove('member-row-busy');
             return;
         }
 
         if (form.dataset.memberAction === 'reset-password') {
             form.reset();
-            closeResetPasswordModal();
+            showToast(payload.message || `Password updated for ${name}.`, 'success');
+            closeAllMemberModals();
+            window.setTimeout(() => window.location.reload(), 350);
+            row?.classList.remove('member-row-busy');
+            return;
         }
 
         showToast(payload.message || `${name} updated.`, 'success');
         row?.classList.remove('member-row-busy');
+        submitButtons.forEach((button) => {
+            button.disabled = false;
+            if (button.dataset.originalLabel) {
+                button.textContent = button.dataset.originalLabel;
+            }
+        });
     } catch {
         showToast(`Network error while updating ${name}.`, 'error');
         row?.classList.remove('member-row-busy');
+        submitButtons.forEach((button) => {
+            button.disabled = false;
+            if (button.dataset.originalLabel) {
+                button.textContent = button.dataset.originalLabel;
+            }
+        });
     }
 }
 
@@ -924,6 +984,77 @@ function closeEditMemberModal() {
 
     modal.hidden = true;
     modal.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('member-confirm-open');
+}
+
+function closeResetPasswordModal() {
+    const modal = document.getElementById('um-reset-password-modal');
+    if (!modal) {
+        return;
+    }
+
+    modal.hidden = true;
+    modal.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('member-confirm-open');
+}
+
+function closeAllMemberModals() {
+    closeConfirmModal({ revertRole: false });
+    closeEditMemberModal();
+    closeResetPasswordModal();
+    closeModuleAccessModal();
+
+    const addModal = document.getElementById('um-add-member-modal');
+    if (addModal) {
+        addModal.hidden = true;
+        addModal.setAttribute('aria-hidden', 'true');
+    }
+
+    const createWorkspaceModal = document.getElementById('um-create-workspace-modal');
+    if (createWorkspaceModal) {
+        createWorkspaceModal.hidden = true;
+        createWorkspaceModal.setAttribute('aria-hidden', 'true');
+    }
+
+    document.body.classList.remove('member-confirm-open');
+}
+
+function prepareMemberFormData(form) {
+    // Disabled assignment selects are excluded from FormData — re-enable briefly and
+    // copy values so Edit/Add always send campaign + team lead when visible.
+    const previouslyDisabled = [];
+    form.querySelectorAll('select[disabled]').forEach((select) => {
+        const field = select.closest('[data-edit-campaign-field], [data-edit-team-lead-field], [data-create-campaign-field], [data-create-team-lead-field]');
+        if (field && !field.hidden) {
+            previouslyDisabled.push(select);
+            select.disabled = false;
+        }
+    });
+
+    const formData = new FormData(form);
+
+    previouslyDisabled.forEach((select) => {
+        select.disabled = true;
+    });
+
+    const password = String(formData.get('password') || '');
+    const confirmation = String(formData.get('password_confirmation') || '');
+
+    // Optional password on Edit: omit blank values so autofill leftovers do not fail validation.
+    if (form.dataset.memberAction === 'update' && password === '') {
+        formData.delete('password');
+        formData.delete('password_confirmation');
+    }
+
+    if (form.dataset.memberAction === 'update' && password !== '' && password !== confirmation) {
+        throw new Error('Password confirmation does not match.');
+    }
+
+    if (form.dataset.memberAction === 'update' && password !== '' && password.length < 6) {
+        throw new Error('Password must be at least 6 characters.');
+    }
+
+    return formData;
 }
 
 function parseLeadJson(raw) {
@@ -943,19 +1074,38 @@ function fillEditTeamLeadOptions(select, role, selectedId = '') {
     const modal = document.getElementById('um-edit-member-modal');
     const setterLeads = parseLeadJson(modal?.dataset.setterLeads);
     const closerLeads = parseLeadJson(modal?.dataset.closerLeads);
-    const leads = role === 'closer' || role === 'closers_team_lead' ? closerLeads : setterLeads;
+    const leads = role === 'closer' || role === 'closers_team_lead' || role === 'closers_qa'
+        ? closerLeads
+        : setterLeads;
+
+    // Prefer an explicit selection; otherwise default agents to the first matching team lead
+    // so B2B Fronter → B2B Closer lands under the first closer TL instead of Unassigned.
+    let effectiveSelectedId = selectedId;
+    if (!effectiveSelectedId && (role === 'closer' || role === 'appointment_setter') && leads.length > 0) {
+        effectiveSelectedId = String(leads[0].id);
+    }
 
     select.innerHTML = '<option value="">Unassigned</option>';
     leads.forEach((lead) => {
         const option = document.createElement('option');
         option.value = String(lead.id);
+        option.dataset.campaignId = lead.campaign_id ? String(lead.campaign_id) : '';
         option.textContent = lead.campaign_name
             ? `${lead.name} · ${lead.campaign_name}`
             : lead.name;
-        if (String(lead.id) === String(selectedId || '')) {
+        if (String(lead.id) === String(effectiveSelectedId || '')) {
             option.selected = true;
         }
         select.appendChild(option);
+    });
+}
+
+function refreshAssignmentPrettySelects(...selectors) {
+    selectors.forEach((selector) => {
+        const el = typeof selector === 'string' ? document.querySelector(selector) : selector;
+        if (el) {
+            refreshPrettySelect(el);
+        }
     });
 }
 
@@ -966,16 +1116,17 @@ function syncEditAssignmentFields(selectedRole, { teamLeadId = '', campaignId = 
     const teamLeadSelect = document.querySelector('[data-edit-member-team-lead]');
     const isTeamLead = selectedRole === 'appointment_setter_team_lead' || selectedRole === 'closers_team_lead';
     const isAgent = selectedRole === 'appointment_setter' || selectedRole === 'closer';
+    const showCampaign = isTeamLead || isAgent;
 
     if (campaignField) {
-        campaignField.hidden = !isTeamLead;
+        campaignField.hidden = !showCampaign;
     }
     if (teamLeadField) {
         teamLeadField.hidden = !isAgent;
     }
 
     if (campaignSelect) {
-        if (isTeamLead) {
+        if (showCampaign) {
             campaignSelect.disabled = false;
             campaignSelect.removeAttribute('disabled');
             campaignSelect.value = campaignId ? String(campaignId) : '';
@@ -996,6 +1147,8 @@ function syncEditAssignmentFields(selectedRole, { teamLeadId = '', campaignId = 
             teamLeadSelect.disabled = true;
         }
     }
+
+    refreshAssignmentPrettySelects(campaignSelect, teamLeadSelect, '[data-edit-member-role]');
 }
 
 function bindEditMemberModal() {
@@ -1009,14 +1162,21 @@ function bindEditMemberModal() {
         form.action = button.dataset.editUrl || '#';
         form.dataset.memberName = button.dataset.memberName || 'this member';
 
+        const memberRole = button.dataset.memberRole || 'appointment_setter';
+        const isSuperAdmin = memberRole === 'super_admin';
+
         const desc = document.getElementById('um-edit-member-desc');
         if (desc) {
-            desc.textContent = `Update account, role, and team assignment for ${form.dataset.memberName}.`;
+            desc.textContent = isSuperAdmin
+                ? `Update email and password for ${form.dataset.memberName}. The Super Admin role cannot be changed.`
+                : `Update username, email, password, role, campaign, and team assignment for ${form.dataset.memberName}.`;
         }
 
         const usernameInput = document.getElementById('um-edit-member-username');
         const emailInput = document.getElementById('um-edit-member-email');
         const roleSelect = document.querySelector('[data-edit-member-role]');
+        const roleField = roleSelect?.closest('.um-field');
+
         if (usernameInput) {
             usernameInput.value = button.dataset.memberName || '';
         }
@@ -1024,22 +1184,47 @@ function bindEditMemberModal() {
             emailInput.value = button.dataset.memberEmail || '';
         }
         if (roleSelect) {
-            roleSelect.value = button.dataset.memberRole || 'appointment_setter';
+            roleSelect.value = isSuperAdmin ? 'admin' : memberRole;
+            roleSelect.disabled = isSuperAdmin;
+            if (isSuperAdmin) {
+                roleSelect.removeAttribute('name');
+            } else {
+                roleSelect.setAttribute('name', 'role');
+            }
+        }
+        if (roleField) {
+            roleField.hidden = isSuperAdmin;
         }
 
         const passwordInput = form.querySelector('[name="password"]');
         const confirmationInput = form.querySelector('[name="password_confirmation"]');
         if (passwordInput) {
             passwordInput.value = '';
+            passwordInput.removeAttribute('minlength');
+            passwordInput.placeholder = button.dataset.memberPasswordHint
+                ? `Leave blank to keep (${button.dataset.memberPasswordHint})`
+                : 'Leave blank to keep current';
         }
         if (confirmationInput) {
             confirmationInput.value = '';
+            confirmationInput.removeAttribute('minlength');
         }
 
-        syncEditAssignmentFields(roleSelect?.value || '', {
+        syncEditAssignmentFields(isSuperAdmin ? '' : memberRole, {
             teamLeadId: button.dataset.memberTeamLeadId || '',
             campaignId: button.dataset.memberCampaignId || '',
         });
+
+        const campaignField = document.querySelector('[data-edit-campaign-field]');
+        const teamLeadField = document.querySelector('[data-edit-team-lead-field]');
+        if (isSuperAdmin) {
+            if (campaignField) {
+                campaignField.hidden = true;
+            }
+            if (teamLeadField) {
+                teamLeadField.hidden = true;
+            }
+        }
 
         modal.hidden = false;
         modal.setAttribute('aria-hidden', 'false');
@@ -1066,6 +1251,23 @@ function bindEditMemberModal() {
         });
     }
 
+    const teamLeadSelect = document.querySelector('[data-edit-member-team-lead]');
+    if (teamLeadSelect && teamLeadSelect.dataset.campaignSyncBound !== '1') {
+        teamLeadSelect.dataset.campaignSyncBound = '1';
+        teamLeadSelect.addEventListener('change', () => {
+            const campaignSelect = document.querySelector('[data-edit-member-campaign]');
+            if (!campaignSelect || campaignSelect.disabled) {
+                return;
+            }
+            const selected = teamLeadSelect.selectedOptions?.[0];
+            const inherited = selected?.dataset?.campaignId || '';
+            if (inherited) {
+                campaignSelect.value = inherited;
+                refreshPrettySelect(campaignSelect);
+            }
+        });
+    }
+
     if (modal.dataset.bound !== '1') {
         modal.dataset.bound = '1';
 
@@ -1086,45 +1288,45 @@ function bindEditMemberModal() {
         form.addEventListener('submit', (event) => {
             event.preventDefault();
 
-            const password = form.querySelector('[name="password"]')?.value || '';
-            const confirmation = form.querySelector('[name="password_confirmation"]')?.value || '';
+            const passwordInput = form.querySelector('[name="password"]');
+            const confirmationInput = form.querySelector('[name="password_confirmation"]');
+            const password = passwordInput?.value || '';
+            const confirmation = confirmationInput?.value || '';
+
+            // Clear optional blank password fields so HTML5 minlength does not block Save.
+            if (password === '') {
+                if (passwordInput) {
+                    passwordInput.value = '';
+                    passwordInput.removeAttribute('minlength');
+                }
+                if (confirmationInput) {
+                    confirmationInput.value = '';
+                    confirmationInput.removeAttribute('minlength');
+                }
+            } else {
+                passwordInput?.setAttribute('minlength', '6');
+                confirmationInput?.setAttribute('minlength', '6');
+            }
 
             if (password !== '' && password.length < 6) {
                 showToast('Password must be at least 6 characters.', 'error');
-
                 return;
             }
 
             if (password !== '' && password !== confirmation) {
                 showToast('Password confirmation does not match.', 'error');
-
                 return;
             }
 
             if (!form.checkValidity()) {
+                form.reportValidity();
                 return;
             }
 
-            if (form.dataset.confirmed === '1') {
-                form.dataset.confirmed = '0';
-                submitMemberForm(form);
-
-                return;
-            }
-
-            openConfirmModal(form);
+            // Save immediately — no second confirm popup — then close on success.
+            submitMemberForm(form);
         });
     }
-}
-
-function closeResetPasswordModal() {
-    const modal = document.getElementById('um-reset-password-modal');
-    if (!modal) {
-        return;
-    }
-
-    modal.hidden = true;
-    modal.setAttribute('aria-hidden', 'true');
 }
 
 function bindResetPasswordModal() {
@@ -1140,7 +1342,10 @@ function bindResetPasswordModal() {
 
         const desc = document.getElementById('um-reset-password-desc');
         if (desc) {
-            desc.textContent = `Set a new password for ${form.dataset.memberName}.`;
+            const hint = button.dataset.memberPasswordHint || '';
+            desc.textContent = hint
+                ? `Set a new password for ${form.dataset.memberName}. Current password hint: ${hint}.`
+                : `Set a new password for ${form.dataset.memberName}.`;
         }
 
         form.reset();
@@ -1179,17 +1384,11 @@ function bindResetPasswordModal() {
             event.preventDefault();
 
             if (!form.checkValidity()) {
+                form.reportValidity();
                 return;
             }
 
-            if (form.dataset.confirmed === '1') {
-                form.dataset.confirmed = '0';
-                submitMemberForm(form);
-
-                return;
-            }
-
-            openConfirmModal(form);
+            submitMemberForm(form);
         });
     }
 }
@@ -1349,9 +1548,11 @@ function syncRoleDropdownFromSelect(select) {
     const option = select.selectedOptions?.[0];
     if (label && option) {
         label.textContent = option.textContent.trim();
+        label.title = label.textContent;
     }
 
-    wrapper.querySelectorAll('[data-role-option]').forEach((button) => {
+    const menu = wrapper._roleMenuEl || wrapper.querySelector('.um-role-dropdown-menu');
+    menu?.querySelectorAll('[data-role-option]').forEach((button) => {
         const selected = button.dataset.value === select.value;
         button.classList.toggle('is-selected', selected);
         button.setAttribute('aria-selected', selected ? 'true' : 'false');
@@ -1376,23 +1577,30 @@ function clearRoleDropdownMenuPosition(menu) {
 
 function positionRoleDropdownMenu(wrapper) {
     const trigger = wrapper?.querySelector('.um-role-dropdown-trigger');
-    const menu = wrapper?.querySelector('.um-role-dropdown-menu');
+    const menu = wrapper?._roleMenuEl || wrapper?.querySelector('.um-role-dropdown-menu');
     if (!trigger || !menu || menu.hidden) {
         return;
+    }
+
+    wrapper._roleMenuEl = menu;
+
+    if (menu.parentElement !== document.body) {
+        document.body.appendChild(menu);
     }
 
     const gap = 6;
     const edge = 8;
     const triggerRect = trigger.getBoundingClientRect();
-    const preferredWidth = Math.min(Math.max(triggerRect.width, 220), window.innerWidth - edge * 2);
+    const preferredWidth = Math.min(Math.max(triggerRect.width, 240), window.innerWidth - edge * 2);
 
     menu.style.position = 'fixed';
-    menu.style.zIndex = '12150';
+    menu.style.zIndex = '12500';
     menu.style.width = `${preferredWidth}px`;
     menu.style.minWidth = `${Math.min(preferredWidth, 200)}px`;
     menu.style.maxWidth = `calc(100vw - ${edge * 2}px)`;
     menu.style.transform = 'none';
     menu.style.right = 'auto';
+    menu.style.overflowX = 'hidden';
 
     let left = triggerRect.left;
     if (left + preferredWidth > window.innerWidth - edge) {
@@ -1414,6 +1622,7 @@ function positionRoleDropdownMenu(wrapper) {
                 menu.style.top = `${Math.round(upTop)}px`;
             }
         }
+        menu.scrollLeft = 0;
     });
 }
 
@@ -1424,10 +1633,13 @@ function closeRoleDropdown(wrapper) {
 
     wrapper.classList.remove('is-open');
     wrapper.querySelector('.um-role-dropdown-trigger')?.setAttribute('aria-expanded', 'false');
-    const menu = wrapper.querySelector('.um-role-dropdown-menu');
+    const menu = wrapper._roleMenuEl || wrapper.querySelector('.um-role-dropdown-menu');
     if (menu) {
         menu.hidden = true;
         clearRoleDropdownMenuPosition(menu);
+        if (menu.parentElement === document.body) {
+            wrapper.appendChild(menu);
+        }
     }
 }
 
@@ -1471,6 +1683,8 @@ function bindRoleDropdowns() {
             return;
         }
 
+        wrapper._roleMenuEl = menu;
+
         if (!select.dataset.initialRole) {
             select.dataset.initialRole = select.value;
         }
@@ -1486,12 +1700,13 @@ function bindRoleDropdowns() {
 
             wrapper.classList.toggle('is-open', willOpen);
             trigger.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
-            menu.hidden = !willOpen;
+            const activeMenu = wrapper._roleMenuEl || menu;
+            activeMenu.hidden = !willOpen;
 
             if (willOpen) {
                 positionRoleDropdownMenu(wrapper);
             } else {
-                clearRoleDropdownMenuPosition(menu);
+                closeRoleDropdown(wrapper);
             }
         });
 
@@ -1529,7 +1744,7 @@ function bindRoleDropdowns() {
     document.body.dataset.roleDropdownGlobalBound = '1';
 
     document.addEventListener('click', (event) => {
-        if (event.target.closest('[data-role-dropdown]')) {
+        if (event.target.closest('[data-role-dropdown], .um-role-dropdown-menu')) {
             return;
         }
 
@@ -1668,6 +1883,11 @@ export function updateMemberRows(container, members) {
         const emailEl = row.querySelector('.um-member-email');
         if (emailEl && member.email) {
             emailEl.textContent = member.email;
+        }
+
+        const passwordEl = row.querySelector('[data-member-password-hint]');
+        if (passwordEl && Object.prototype.hasOwnProperty.call(member, 'password_hint')) {
+            passwordEl.textContent = member.password_hint || '—';
         }
 
         if (member.name) {

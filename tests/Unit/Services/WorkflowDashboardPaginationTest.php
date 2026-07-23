@@ -53,9 +53,9 @@ class WorkflowDashboardPaginationTest extends TestCase
         $service = new WorkflowDashboardService(new WorkflowProviderStatusService);
         $data = $service->buildIndexData($workspace, $admin);
 
-        $this->assertSame(20, $data['leads']->perPage());
+        $this->assertSame(50, $data['leads']->perPage());
         $this->assertSame(30, $data['leads']->total());
-        $this->assertSame(20, $data['workflows']->perPage());
+        $this->assertSame(50, $data['workflows']->perPage());
         $this->assertSame(11, $data['workflows']->total());
     }
 }

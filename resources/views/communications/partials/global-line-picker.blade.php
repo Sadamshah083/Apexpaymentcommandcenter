@@ -46,7 +46,7 @@
             data-comm-live-badge
             title="{{ $lineLive ? 'You are logged in — line ready' : 'Morpheus telephony is not configured' }}">
             <span class="ghl-comm-live-dot" aria-hidden="true"></span>
-            <span data-comm-live-label>{{ $lineLive ? 'On' : 'Off' }}</span>
+            <span data-comm-live-label>{{ $lineLive ? 'Connected' : 'Off' }}</span>
         </span>
     @endif
 

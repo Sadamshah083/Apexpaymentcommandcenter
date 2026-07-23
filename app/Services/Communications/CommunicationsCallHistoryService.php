@@ -38,16 +38,44 @@ class CommunicationsCallHistoryService
             }
         }
 
-        $limit = (! empty($filters['user_id']) || ! empty($filters['user_ids']) || ! empty($filters['recordings_only']))
-            ? 250
-            : 100;
+        $limit = isset($filters['limit'])
+            ? max(1, min(250, (int) $filters['limit']))
+            : ((! empty($filters['user_id']) || ! empty($filters['user_ids']) || ! empty($filters['recordings_only']))
+                ? 250
+                : 100);
+        $offset = max(0, (int) ($filters['offset'] ?? 0));
 
         return $query
             ->orderByDesc('created_at')
+            ->offset($offset)
             ->limit($limit)
             ->get()
             ->map(fn (CommunicationCallLog $row) => $this->toHubLog($row))
             ->all();
+    }
+
+    /**
+     * Fast dialer page: local DB only (limit+1 to detect has_more).
+     *
+     * @return array{logs: array<int, array<string, mixed>>, has_more: bool}
+     */
+    public function pageForHub(Workspace $workspace, array $filters, int $offset, int $limit): array
+    {
+        $limit = max(1, min(50, $limit));
+        $offset = max(0, $offset);
+        $rows = $this->listForHub($workspace, array_merge($filters, [
+            'offset' => $offset,
+            'limit' => $limit + 1,
+        ]));
+        $hasMore = count($rows) > $limit;
+        if ($hasMore) {
+            $rows = array_slice($rows, 0, $limit);
+        }
+
+        return [
+            'logs' => $rows,
+            'has_more' => $hasMore,
+        ];
     }
 
     public function logOutboundDial(
@@ -107,23 +135,34 @@ class CommunicationsCallHistoryService
         $cause = strtoupper((string) ($snap['hangup_cause'] ?? ''));
         $billsec = (int) ($snap['billsec'] ?? 0);
         $dest = (string) ($snap['destination_number'] ?? '');
+        $destinationConnected = (bool) ($snap['destination_connected'] ?? $snap['destination_answered'] ?? false);
 
         $status = match (true) {
             in_array($cause, ['USER_BUSY', 'CALL_REJECTED'], true) => 'busy',
-            $billsec > 0 => 'completed',
+            $billsec > 0 || $destinationConnected => 'completed',
             in_array($cause, ['NO_USER_RESPONSE', 'NO_ANSWER', 'ORIGINATOR_CANCEL'], true) => 'no_answer',
             default => 'completed',
         };
 
+        $callResult = match (true) {
+            $billsec > 0 || $destinationConnected => 'connected',
+            $status === 'busy' => 'busy',
+            $status === 'no_answer' => 'no-answer',
+            default => 'initiated',
+        };
+
         $log->update([
             'status' => $status,
-            'duration_sec' => $billsec > 0 ? $billsec : null,
+            // Persist 0s connected/initiated calls instead of nulling duration.
+            'duration_sec' => max(0, $billsec),
             'ended_at' => now(),
             'meta' => array_merge($log->meta ?? [], [
                 'cdr_destination' => $dest,
                 'hangup_cause' => $cause,
                 'cdr_synced_at' => now()->toIso8601String(),
                 'cdr_has_recording' => (bool) ($snap['has_recording'] ?? data_get($snap, 'raw.has_recording')),
+                'call_result' => $callResult,
+                'destination_connected' => $destinationConnected,
             ]),
         ]);
 
@@ -322,14 +361,23 @@ class CommunicationsCallHistoryService
     public function recordDialerDisposition(Workspace $workspace, array $payload): CommunicationCallLog
     {
         $disposition = trim((string) ($payload['disposition'] ?? ''));
+        // Column is varchar(120) — never let a long free-text value blow up the save.
+        if (mb_strlen($disposition) > 120) {
+            $disposition = mb_substr($disposition, 0, 120);
+        }
         // Keep comment separate from disposition so Call logs can show both cleanly.
         $historyNote = filled($payload['note'] ?? null) ? trim((string) $payload['note']) : null;
         $uuid = trim((string) ($payload['call_uuid'] ?? ''));
         $phone = trim((string) ($payload['phone'] ?? ''));
-        $durationSec = isset($payload['duration_sec']) ? max(0, (int) $payload['duration_sec']) : null;
+        $durationSec = array_key_exists('duration_sec', $payload) && $payload['duration_sec'] !== null
+            ? max(0, (int) $payload['duration_sec'])
+            : null;
         /** @var User|null $user */
         $user = $payload['user'] ?? null;
         $leadId = isset($payload['lead_id']) ? (int) $payload['lead_id'] : null;
+        $dialMode = trim((string) ($payload['dial_mode'] ?? ''));
+        $connectedFlag = (bool) ($payload['connected'] ?? false);
+        $requestedResult = strtolower(trim((string) ($payload['call_result'] ?? '')));
 
         $log = null;
         if ($uuid !== '') {
@@ -340,6 +388,8 @@ class CommunicationsCallHistoryService
                 ->first();
         }
 
+        // Only attach to an open (empty disposition) outbound row for this phone.
+        // Never overwrite a prior disposition on the same number.
         if (! $log && $phone !== '') {
             $log = CommunicationCallLog::query()
                 ->where('workspace_id', $workspace->id)
@@ -354,12 +404,21 @@ class CommunicationsCallHistoryService
                 ->first();
         }
 
-        $callResult = ($durationSec ?? 0) > 0 ? 'connected' : 'no-answer';
+        // Connected/initiated 0s calls still count in call data (not forced to no-answer).
+        $callResult = match (true) {
+            in_array($requestedResult, ['connected', 'answered', 'initiated'], true) => (
+                $requestedResult === 'answered' ? 'connected' : $requestedResult
+            ),
+            $connectedFlag => 'connected',
+            ($durationSec ?? 0) > 0 => 'connected',
+            default => 'no-answer',
+        };
         $inCallNotes = filled($payload['in_call_notes'] ?? null) ? trim((string) $payload['in_call_notes']) : null;
         $meta = [
             'source' => 'dialer_disposition',
             'lead_id' => $leadId ?: null,
             'call_result' => $callResult,
+            'dial_mode' => $dialMode !== '' ? $dialMode : null,
         ];
         if ($disposition !== '') {
             $meta['disposition'] = $disposition;
@@ -368,8 +427,26 @@ class CommunicationsCallHistoryService
             $meta['in_call_notes'] = $inCallNotes;
         }
 
-        if (! $log) {
-            return CommunicationCallLog::create([
+        $existingDisposition = trim((string) ($log?->disposition ?? ''));
+
+        // Same UUID already dispositioned → append a new call-log row (multi-attempt history).
+        if ($log && $existingDisposition !== '') {
+            $log = CommunicationCallLog::create([
+                'workspace_id' => $workspace->id,
+                'user_id' => $user?->id,
+                'morpheus_call_uuid' => $uuid !== '' ? $uuid : null,
+                'direction' => 'outbound',
+                'to_phone' => $phone !== '' ? $phone : ($log->to_phone ?: null),
+                'disposition' => $disposition !== '' ? $disposition : null,
+                'note' => $historyNote !== '' && $historyNote !== null ? $historyNote : null,
+                'status' => 'completed',
+                'duration_sec' => $durationSec,
+                'started_at' => $durationSec ? now()->subSeconds($durationSec) : now(),
+                'ended_at' => now(),
+                'meta' => array_merge($meta, ['appended_after_prior_disposition' => true]),
+            ]);
+        } elseif (! $log) {
+            $log = CommunicationCallLog::create([
                 'workspace_id' => $workspace->id,
                 'user_id' => $user?->id,
                 'morpheus_call_uuid' => $uuid !== '' ? $uuid : null,
@@ -383,21 +460,70 @@ class CommunicationsCallHistoryService
                 'ended_at' => now(),
                 'meta' => $meta,
             ]);
+        } else {
+            $mergedMeta = array_merge($log->meta ?? [], $meta);
+            $log->update([
+                'disposition' => $disposition !== '' ? $disposition : $log->disposition,
+                'note' => $historyNote !== null && $historyNote !== '' ? $historyNote : $log->note,
+                'status' => 'completed',
+                'ended_at' => now(),
+                'duration_sec' => $durationSec ?? $log->duration_sec ?? ($log->started_at ? (int) $log->started_at->diffInSeconds(now()) : null),
+                'to_phone' => $log->to_phone ?: ($phone !== '' ? $phone : null),
+                'morpheus_call_uuid' => $log->morpheus_call_uuid ?: ($uuid !== '' ? $uuid : null),
+                'user_id' => $log->user_id ?: $user?->id,
+                'meta' => $mergedMeta,
+            ]);
+            $log->disposition = $disposition !== '' ? $disposition : $log->disposition;
+            $log->meta = $mergedMeta;
+            if ($durationSec !== null) {
+                $log->duration_sec = $durationSec;
+            }
         }
 
-        $log->update([
-            'disposition' => $disposition !== '' ? $disposition : $log->disposition,
-            'note' => $historyNote !== null && $historyNote !== '' ? $historyNote : $log->note,
-            'status' => 'completed',
-            'ended_at' => now(),
-            'duration_sec' => $durationSec ?? $log->duration_sec ?? ($log->started_at ? (int) $log->started_at->diffInSeconds(now()) : null),
-            'to_phone' => $log->to_phone ?: ($phone !== '' ? $phone : null),
-            'morpheus_call_uuid' => $log->morpheus_call_uuid ?: ($uuid !== '' ? $uuid : null),
-            'user_id' => $log->user_id ?: $user?->id,
-            'meta' => array_merge($log->meta ?? [], $meta),
+        // Append-only disposition history — same number/lead can store unlimited attempts.
+        $this->appendLeadDisposition($workspace, [
+            'user_id' => $user?->id,
+            'workflow_lead_id' => $leadId ?: null,
+            'communication_call_log_id' => $log->id,
+            'phone' => $phone !== '' ? $phone : ($log->to_phone ?: null),
+            'call_uuid' => $uuid !== '' ? $uuid : ($log->morpheus_call_uuid ?: null),
+            'disposition' => $disposition,
+            'note' => $historyNote,
+            'duration_sec' => $durationSec ?? $log->duration_sec,
+            'dial_mode' => $dialMode !== '' ? $dialMode : null,
+            'meta' => $meta,
         ]);
 
-        return $log->fresh() ?? $log;
+        return $log;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    protected function appendLeadDisposition(Workspace $workspace, array $payload): void
+    {
+        $disposition = trim((string) ($payload['disposition'] ?? ''));
+        if ($disposition === '') {
+            return;
+        }
+
+        try {
+            \App\Models\LeadDisposition::query()->create([
+                'workspace_id' => $workspace->id,
+                'user_id' => $payload['user_id'] ?? null,
+                'workflow_lead_id' => $payload['workflow_lead_id'] ?? null,
+                'communication_call_log_id' => $payload['communication_call_log_id'] ?? null,
+                'phone' => $payload['phone'] ?? null,
+                'call_uuid' => $payload['call_uuid'] ?? null,
+                'disposition' => mb_substr($disposition, 0, 120),
+                'note' => $payload['note'] ?? null,
+                'duration_sec' => isset($payload['duration_sec']) ? max(0, (int) $payload['duration_sec']) : null,
+                'dial_mode' => $payload['dial_mode'] ?? null,
+                'meta' => is_array($payload['meta'] ?? null) ? $payload['meta'] : null,
+            ]);
+        } catch (\Throwable) {
+            // History table may not be migrated yet — call log still saved.
+        }
     }
 
     /**
@@ -425,7 +551,14 @@ class CommunicationsCallHistoryService
 
         $callResult = data_get($row->meta, 'call_result');
         if (! filled($callResult)) {
-            $callResult = ($row->duration_sec ?? 0) > 0 ? 'connected' : ucfirst((string) ($row->status ?: 'completed'));
+            $destinationConnected = (bool) data_get($row->meta, 'destination_connected', false);
+            $callResult = match (true) {
+                ($row->duration_sec ?? 0) > 0 || $destinationConnected => 'connected',
+                in_array(strtolower((string) ($row->status ?: '')), ['connected', 'completed', 'initiated'], true) => (
+                    strtolower((string) $row->status) === 'initiated' ? 'initiated' : 'connected'
+                ),
+                default => ucfirst((string) ($row->status ?: 'completed')),
+            };
         }
 
         return [
@@ -517,6 +650,73 @@ class CommunicationsCallHistoryService
             ->all();
 
         return $merged;
+    }
+
+    /**
+     * Total outbound dials placed by this agent in the workspace.
+     */
+    public function countDialsForUser(Workspace $workspace, User $user): int
+    {
+        return (int) CommunicationCallLog::query()
+            ->where('workspace_id', $workspace->id)
+            ->where('user_id', $user->id)
+            ->where('direction', 'outbound')
+            ->count();
+    }
+
+    /**
+     * Most recent dial attempt for a phone number (outbound to / inbound from).
+     *
+     * @return array<string, mixed>|null
+     */
+    public function recentDialForPhone(Workspace $workspace, string $phone, ?int $userId = null): ?array
+    {
+        $key = app(CommunicationsPhoneNotesService::class)->normalizePhoneKey($phone);
+        if (! $key) {
+            return null;
+        }
+
+        $suffix = strlen($key) >= 10 ? substr($key, -10) : $key;
+        if ($suffix === '') {
+            return null;
+        }
+
+        $query = CommunicationCallLog::query()
+            ->where('workspace_id', $workspace->id)
+            ->with('user:id,name')
+            ->where(function ($phoneMatch) use ($suffix) {
+                $phoneMatch
+                    ->where('to_phone', 'like', '%'.$suffix)
+                    ->orWhere('from_phone', 'like', '%'.$suffix);
+            })
+            ->orderByDesc('created_at');
+
+        if ($userId !== null && $userId > 0) {
+            $query->where('user_id', $userId);
+        }
+
+        $row = $query->first();
+        if (! $row) {
+            return null;
+        }
+
+        $hub = $this->toHubLog($row);
+        $started = $row->started_at ?? $row->created_at;
+
+        return [
+            'id' => $hub['id'] ?? null,
+            'direction' => $hub['direction'] ?? null,
+            'phone' => $hub['to_phone'] ?: ($hub['from_phone'] ?? ''),
+            'disposition' => $hub['disposition'] ?? null,
+            'result' => $hub['result'] ?? null,
+            'note' => trim((string) ($hub['note'] ?? '')),
+            'duration' => (int) ($hub['duration'] ?? 0),
+            'duration_label' => CommunicationsInboxService::formatDialerCallDuration((int) ($hub['duration'] ?? 0)),
+            'agent_name' => $hub['agent_name'] ?? null,
+            'start_time' => $hub['start_time'] ?? null,
+            'time_ago' => $started ? $started->diffForHumans(short: true) : null,
+            'time_label' => $started ? $started->format('M j, Y g:i A') : null,
+        ];
     }
 
     protected function resolveOutboundCallerId(string $fromExtension): ?string

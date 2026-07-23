@@ -27,7 +27,9 @@ class ProcessWorkflowJob implements ShouldQueue
     public function __construct(
         public int $workflowId,
         public string $filePath
-    ) {}
+    ) {
+        $this->onQueue('ingest');
+    }
 
     public function handle(
         \App\Services\Workflow\WorkflowDataFormatter $formatter,
@@ -36,6 +38,7 @@ class ProcessWorkflowJob implements ShouldQueue
         WorkspaceSyncService $syncService,
     ): void {
         set_time_limit(3600);
+        @ini_set('memory_limit', '1024M');
 
         $workflow = Workflow::find($this->workflowId);
         if (! $workflow) {
@@ -170,6 +173,20 @@ class ProcessWorkflowJob implements ShouldQueue
                     }
 
                     $phoneFields = $dedup->formatPhoneForStorage($mappedData['input_phone'] ?? null);
+                    $ownerName = trim((string) ($mappedData['owner_name'] ?? ''));
+                    if ($ownerName !== '' && \App\Support\LeadContactDisplay::looksLikePhoneNumber($ownerName)) {
+                        $ownerName = '';
+                    }
+                    if ($ownerName === '') {
+                        $ownerName = \App\Support\LeadContactDisplay::for(new \App\Models\WorkflowLead([
+                            'raw_row' => $rawRow,
+                        ]))['owner'] ?? '';
+                    }
+
+                    $resolvedState = \App\Support\UsAreaCodeState::resolve(
+                        $mappedData['state'] ?? null,
+                        $phoneFields['input_phone'] ?? ($phoneFields['normalized_phone'] ?? null)
+                    );
 
                     $lead = WorkflowLead::create([
                         'workflow_id' => $workflow->id,
@@ -180,17 +197,24 @@ class ProcessWorkflowJob implements ShouldQueue
                         'stage' => LeadStageSync::forImport(),
                         'status' => 'imported',
                         'row_number' => $spreadsheetRowNumber,
-                        'business_name' => $mappedData['business_name'] ?? '',
-                        'address' => $mappedData['address'] ?? null,
-                        'city' => $mappedData['city'] ?? null,
-                        'state' => $mappedData['state'] ?? null,
-                        'zip_code' => $mappedData['zip_code'] ?? null,
-                        'country' => $mappedData['country'] ?? null,
-                        'website' => $mappedData['website'] ?? null,
+                        'business_name' => $this->truncateField($mappedData['business_name'] ?? '', 255),
+                        'address' => $this->truncateField($mappedData['address'] ?? null, 255),
+                        'city' => $this->truncateField($mappedData['city'] ?? null, 255),
+                        'state' => $this->truncateField($resolvedState, 255),
+                        'zip_code' => $this->truncateField($mappedData['zip_code'] ?? null, 32),
+                        'country' => $this->truncateField($mappedData['country'] ?? null, 255),
+                        'website' => $this->truncateField($mappedData['website'] ?? null, 2000),
                         'input_phone' => $phoneFields['input_phone'],
                         'normalized_phone' => $phoneFields['normalized_phone'],
-                        'input_email' => $mappedData['input_email'] ?? null,
+                        'input_email' => $this->truncateField($mappedData['input_email'] ?? null, 255),
+                        'owner_name' => $ownerName !== '' ? $this->truncateField($ownerName, 255) : null,
                         'raw_row' => $rawRow,
+                        'tags' => is_array($workflow->import_tags) && $workflow->import_tags !== []
+                            ? $workflow->import_tags
+                            : null,
+                        'segment' => filled($workflow->import_segment)
+                            ? $this->truncateField($workflow->import_segment, 120)
+                            : null,
                     ]);
 
                     $insertedLeadIds[] = $lead->id;
@@ -229,9 +253,12 @@ class ProcessWorkflowJob implements ShouldQueue
             }
 
             if ($workflow->isImportOnly()) {
-                $workflow->update(['status' => 'completed']);
+                $workflow->update([
+                    'status' => 'completed',
+                    'processed_leads' => $totalLeads,
+                ]);
                 $syncService->record($workspace, 'workflow.completed', 'workflow', $workflow->id, [
-                    'processed_leads' => 0,
+                    'processed_leads' => $totalLeads,
                     'failed_leads' => 0,
                     'import_only' => true,
                     'discarded_duplicates' => $discardedDuplicates,
@@ -263,5 +290,19 @@ class ProcessWorkflowJob implements ShouldQueue
             ->each(fn (int $leadId) => ProcessLeadJob::dispatch($leadId, $workflow->custom_prompt));
 
         $workflow->update(['status' => 'extracting']);
+    }
+
+    protected function truncateField(mixed $value, int $max): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $text = trim((string) $value);
+        if ($text === '') {
+            return null;
+        }
+
+        return mb_strlen($text) > $max ? mb_substr($text, 0, $max) : $text;
     }
 }

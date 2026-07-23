@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""Deploy Active Leads UI + password_hint fixes."""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+os.environ.setdefault("DEPLOY_PASSWORD", "balitech1")
+
+import deploy._ssh as m
+
+m.HOST = "203.215.161.236"
+m.USER = "ateg"
+m.PASSWORD = "balitech1"
+m.REMOTE_APP = "/var/www/apexone"
+
+from deploy._ssh import connect, sudo_run, upload_files
+
+FILES = [
+    "resources/css/app.css",
+    "resources/css/comm-hub-ui-polish.css",
+    "resources/views/admin/dashboard/partials/imports-panel.blade.php",
+    "resources/views/communications/partials/center-dialer-hub.blade.php",
+    "app/Services/Workspace/WorkspaceMemberService.php",
+    "app/Http/Controllers/WorkflowController.php",
+    "app/Models/User.php",
+    "database/migrations/2026_07_16_234500_add_password_hint_to_users_table.php",
+    "deploy/_backfill_password_hints.php",
+    "deploy/_probe_password_hint.php",
+]
+
+
+def main() -> int:
+    ssh = connect()
+    try:
+        upload_files(ssh, [(ROOT / rel, rel) for rel in FILES if (ROOT / rel).is_file()], app_root="/var/www/apexone")
+        out = sudo_run(
+            ssh,
+            "cd /var/www/apexone && "
+            "php artisan migrate --force --path=database/migrations/2026_07_16_234500_add_password_hint_to_users_table.php && "
+            "php deploy/_backfill_password_hints.php && "
+            "php deploy/_probe_password_hint.php && "
+            "npm run build --silent && "
+            "chown -R www-data:www-data /var/www/apexone/public/build && "
+            "php artisan view:clear && php artisan cache:clear && echo UI_PASS_OK",
+        )
+        print(out.encode("ascii", "replace").decode("ascii"))
+        print("LIVE_OK")
+        return 0
+    finally:
+        ssh.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

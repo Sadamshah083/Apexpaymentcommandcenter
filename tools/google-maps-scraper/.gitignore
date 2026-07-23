@@ -1,0 +1,6 @@
+# Google Maps scraper runtime artifacts
+output/
+data/progress/
+__pycache__/
+*.pyc
+.pytest_cache/

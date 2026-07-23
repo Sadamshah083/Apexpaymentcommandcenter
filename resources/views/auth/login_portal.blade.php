@@ -1,153 +1,225 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="{{ config('app.name') }} agent sign in.">
+    <meta name="robots" content="noindex, nofollow">
     <title>Agent sign in - {{ config('app.name') }}</title>
-    <!-- Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
-        rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        warmgrey: {
-                            50: '#f4f4f5',
-                            100: '#e4e4e7',
-                            200: '#d4d4d8',
-                            500: '#71717a',
-                            900: '#000000',
-                        },
-                        cream: {
-                            50: '#ffffff',
-                            100: '#f4f4f5',
-                            200: '#e4e4e7',
-                            300: '#d4d4d8',
-                        }
-                    }
-                }
-            }
-        }
-    </script>
     <style>
+        :root {
+            --font-sans: 'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system,
+                BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+            --bg: #f0fdf4;
+            --bg-accent: #dcfce7;
+            --surface: rgba(255, 255, 255, 0.92);
+            --ink: #052e16;
+            --muted: #4d7c0f;
+            --line: #bbf7d0;
+            --brand: #22c55e;
+            --brand-hover: #16a34a;
+            --brand-text: #ffffff;
+            --focus: rgba(34, 197, 94, 0.22);
+        }
+
+        * { box-sizing: border-box; }
+
         body {
-            font-family: 'Inter', sans-serif;
-            background: #e4e4e7;
-            /* cream-200 */
+            margin: 0;
             min-height: 100vh;
-            color: #000000;
-            /* warmgrey-900 */
+            font-family: var(--font-sans);
+            color: var(--ink);
+            background:
+                radial-gradient(900px 420px at 15% 0%, rgba(134, 239, 172, 0.42), transparent 55%),
+                radial-gradient(700px 380px at 100% 10%, rgba(187, 247, 208, 0.58), transparent 50%),
+                linear-gradient(rgba(22, 101, 52, 0.035) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(22, 101, 52, 0.035) 1px, transparent 1px),
+                linear-gradient(180deg, var(--bg) 0%, var(--bg-accent) 100%);
+            background-size: auto, auto, 56px 56px, 56px 56px, auto;
+            display: grid;
+            place-items: center;
+            padding: 2rem;
+            -webkit-font-smoothing: antialiased;
         }
 
-        .glass-card {
-            background: #ffffff;
-            /* cream-50 */
-            border: 2px solid #71717a;
-            /* solid grey border */
-            box-shadow: 4px 4px 0px 0px rgba(0, 0, 0, 0.08);
+        .shell {
+            width: min(100%, 28rem);
         }
 
-        .input-glass {
-            background: #ffffff;
-            border: 2px solid #71717a;
-            color: #000000;
-            transition: all 0.3s ease;
+        .brand {
+            text-align: center;
+            margin-bottom: 1.1rem;
         }
 
-        .input-glass:focus {
-            background: #ffffff;
-            border-color: #000000;
-            /* warmgrey-500 */
-            box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.15);
+        .brand h1 {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0;
+            padding: 0.55rem 1.05rem;
+            font-family: var(--font-sans);
+            font-size: 1.08rem;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            line-height: 1.3;
+            color: #064e3b;
+            background: rgba(255, 255, 255, 0.58);
+            border: 1px solid rgba(187, 247, 208, 0.9);
+            border-radius: 999px;
+            box-shadow: 0 12px 30px rgba(20, 83, 45, 0.08);
+        }
+
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 1.25rem;
+            padding: 1.75rem;
+            box-shadow: 0 22px 55px rgba(20, 83, 45, 0.12), 0 1px 2px rgba(20, 83, 45, 0.05);
+        }
+
+        .card h2 {
+            margin: 0;
+            font-size: 1.45rem;
+            line-height: 1.2;
+            font-weight: 800;
+            letter-spacing: -0.035em;
+            color: var(--ink);
+        }
+
+        .card .sub {
+            margin: 0.45rem 0 1.35rem;
+            color: var(--muted);
+            font-size: 0.875rem;
+            line-height: 1.45;
+        }
+
+        .field { margin-top: 1rem; }
+
+        label {
+            display: block;
+            margin-bottom: 0.35rem;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #166534;
+        }
+
+        input {
+            width: 100%;
+            border: 1px solid var(--line);
+            background: #f7fee7;
+            border-radius: 0.85rem;
+            padding: 0.82rem 0.95rem;
+            font: inherit;
+            font-size: 0.9375rem;
+            color: var(--ink);
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        input:focus {
             outline: none;
+            border-color: var(--brand);
+            background: #fff;
+            box-shadow: 0 0 0 3px var(--focus);
         }
 
-        .portal-login-submit {
-            background: #000000 !important;
-            color: #ffffff !important;
-            border: 2px solid #000000;
+        button[type="submit"] {
+            width: 100%;
+            margin-top: 1.35rem;
+            border: 0;
+            border-radius: 0.9rem;
+            padding: 0.9rem 1rem;
+            font: inherit;
+            font-size: 0.9375rem;
+            font-weight: 800;
+            color: var(--brand-text);
+            cursor: pointer;
+            background: linear-gradient(135deg, #22c55e, #16a34a);
+            box-shadow: 0 14px 28px rgba(22, 163, 74, 0.24);
+            transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
         }
 
-        .portal-login-submit:hover:not(:disabled) {
-            background: #27272a !important;
-            border-color: #27272a;
+        button[type="submit"]:hover {
+            background: linear-gradient(135deg, #34d399, var(--brand-hover));
+            box-shadow: 0 18px 34px rgba(22, 163, 74, 0.3);
+            transform: translateY(-1px);
+        }
+
+        .errors {
+            margin-bottom: 0.85rem;
+            padding: 0.75rem 0.9rem;
+            border-radius: 0.5rem;
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            color: #991b1b;
+            font-size: 0.875rem;
+        }
+
+        .copy {
+            margin-top: 1rem;
+            text-align: center;
+            color: #15803d;
+            font-size: 0.75rem;
+        }
+
+        @media (max-width: 480px) {
+            body {
+                padding: 1rem;
+            }
+
+            .card {
+                padding: 1.35rem;
+                border-radius: 1rem;
+            }
+
+            .brand h1 {
+                font-size: 1rem;
+                padding-inline: 0.85rem;
+            }
         }
     </style>
 </head>
-
-<body class="flex items-center justify-center p-4 md:p-8">
-    <div class="w-full max-w-md space-y-6">
-
-        <!-- Header -->
-        <div class="text-center space-y-2">
-            <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-warmgrey-900">{{ config('app.name') }}
-            </h1>
-            <p class="text-warmgrey-500 text-sm">Agent workspace</p>
+<body>
+    <div class="shell">
+        <div class="brand">
+            <h1>{{ config('app.name') }}</h1>
         </div>
 
-        <!-- Error Alerts -->
         @if ($errors->any())
-            <div class="p-4 rounded-xl bg-rose-50 border border-rose-100 text-rose-800 text-xs space-y-1">
+            <div class="errors">
                 @foreach ($errors->all() as $error)
-                    <p class="flex items-center">
-                        <svg class="w-4 h-4 mr-1.5 flex-shrink-0" fill="none" stroke="currentColor"
-                            viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z">
-                            </path>
-                        </svg>
-                        {{ $error }}
-                    </p>
+                    <p style="margin:0">{{ $error }}</p>
                 @endforeach
             </div>
         @endif
 
-        <!-- Card: Login Workspace -->
-        <div class="glass-card rounded-3xl p-8 md:p-10 transition-all duration-300">
-            <div class="space-y-6">
-                <div>
-                    <h2 class="text-2xl font-bold tracking-tight text-warmgrey-900">Agent sign in</h2>
-                    <p class="text-warmgrey-500 text-xs mt-1">Use the username and password your workspace owner created
-                        for you.</p>
+        <div class="card">
+            <h2>Agent Login</h2>
+            <p class="sub">Sign in with the email and password your workspace owner created for you.</p>
+
+            <form method="POST" action="{{ route('portal.login') }}" data-portal-login data-form-loading
+                data-turbo="false"
+                data-login-prefetch="{{ route('portal.communications.index', \App\Support\AdminModules::communicationsDialerParams()) }}"
+                data-loading-title="Signing in" data-loading-message="Verifying your credentials…"
+                data-loading-button-text="Signing in…">
+                @csrf
+                <div class="field" style="margin-top:0">
+                    <label for="portal-email">Email</label>
+                    <input id="portal-email" type="text" name="email" required autocomplete="username"
+                        inputmode="email" placeholder="you@company.com" value="{{ old('email') }}">
                 </div>
-
-                <form method="POST" action="{{ route('portal.login') }}" class="space-y-4" data-portal-login data-form-loading
-                    data-loading-title="Signing in" data-loading-message="Verifying your credentials…"
-                    data-loading-button-text="Signing in…">
-                    @csrf
-                    <div class="space-y-2">
-                        <label
-                            class="block text-xs font-bold uppercase tracking-wider text-warmgrey-500">username</label>
-                        <input type="text" name="username" required placeholder="e.g. john_doe"
-                            value="{{ old('username') }}" class="w-full px-4 py-3 rounded-xl input-glass text-sm">
-                    </div>
-
-                    <div class="space-y-2">
-                        <label
-                            class="block text-xs font-bold uppercase tracking-wider text-warmgrey-500">password</label>
-                        <input type="password" name="password" required placeholder="••••••••"
-                            class="w-full px-4 py-3 rounded-xl input-glass text-sm">
-                    </div>
-
-                    <button type="submit"
-                        class="portal-login-submit w-full mt-6 py-3 font-bold rounded-xl shadow-md transition-all duration-300 transform hover:-translate-y-0.5">
-                        Sign in
-                    </button>
-                </form>
-            </div>
+                <div class="field">
+                    <label for="portal-password">Password</label>
+                    <input id="portal-password" type="password" name="password" required autocomplete="current-password"
+                        placeholder="••••••••">
+                </div>
+                <button type="submit">Sign in</button>
+            </form>
         </div>
 
-        <!-- Footer Info -->
-        <p class="text-center text-xs text-slate-600">© {{ date('Y') }} {{ config('app.name') }}. All rights
-            reserved.</p>
-
+        <p class="copy">© {{ date('Y') }} {{ config('app.name') }}. All rights reserved.</p>
     </div>
     @include('auth.partials.form-loading-assets')
 </body>
-
 </html>

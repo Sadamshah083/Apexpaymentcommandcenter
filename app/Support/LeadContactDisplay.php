@@ -110,11 +110,10 @@ class LeadContactDisplay
         [$website, $socialMedia] = self::splitWebsiteAndSocial($rawWebsite, $rawSocial);
 
         return [
-            'owner' => self::firstAvailable(
+            'owner' => self::resolveOwner(
                 $lead->owner_name,
                 $parsed['owner_name'] ?? null,
-                self::rawValue($rawRow, ['owner_name', 'owner', 'contact_name', 'primary_contact', 'proprietor', 'manager']),
-                self::rawValueFuzzy($rawRow, ['owner', 'contact', 'proprietor', 'manager']),
+                $rawRow,
             ),
             'email' => self::firstAvailable(
                 $lead->direct_email,
@@ -174,6 +173,165 @@ class LeadContactDisplay
     }
 
     /**
+     * Prefer a real person/owner name. Never treat contact-number / phone cells as "owner".
+     *
+     * @param  array<string, mixed>  $rawRow
+     */
+    protected static function resolveOwner(mixed ...$candidatesAndRow): ?string
+    {
+        $rawRow = [];
+        $candidates = [];
+        foreach ($candidatesAndRow as $item) {
+            if (is_array($item)) {
+                $rawRow = $item;
+                continue;
+            }
+            $candidates[] = $item;
+        }
+
+        foreach ($candidates as $candidate) {
+            $normalized = self::normalizeOwnerName($candidate);
+            if ($normalized !== null) {
+                return $normalized;
+            }
+        }
+
+        return self::ownerFromRawRow($rawRow);
+    }
+
+    /**
+     * @param  array<string, mixed>  $rawRow
+     */
+    protected static function ownerFromRawRow(array $rawRow): ?string
+    {
+        if ($rawRow === []) {
+            return null;
+        }
+
+        $exactKeys = [
+            'owner_name',
+            'owner',
+            'contact_name',
+            'primary_contact',
+            'proprietor',
+            'decision_maker',
+            'decision makers',
+        ];
+        foreach ($exactKeys as $key) {
+            if (! array_key_exists($key, $rawRow)) {
+                continue;
+            }
+            $normalized = self::normalizeOwnerName($rawRow[$key]);
+            if ($normalized !== null) {
+                return $normalized;
+            }
+        }
+
+        $bestScore = 0;
+        $bestValue = null;
+        foreach ($rawRow as $header => $value) {
+            $headerNorm = self::normalizeHeader((string) $header);
+            if ($headerNorm === '' || self::headerLooksLikePhoneOrEmail($headerNorm)) {
+                continue;
+            }
+
+            $score = 0;
+            if (str_contains($headerNorm, 'owner')) {
+                $score += 100;
+            }
+            if (str_contains($headerNorm, 'decision maker')) {
+                $score += 90;
+            }
+            if (str_contains($headerNorm, 'proprietor')) {
+                $score += 80;
+            }
+            if (str_contains($headerNorm, 'contact name') || str_contains($headerNorm, 'primary contact')) {
+                $score += 75;
+            }
+            if (str_contains($headerNorm, 'management') || str_contains($headerNorm, 'operations')) {
+                $score += 40;
+            }
+            // Bare "manager" only if it is not a phone/contact header.
+            if (preg_match('/\bmanager\b/', $headerNorm) === 1 && $score === 0) {
+                $score += 35;
+            }
+
+            if ($score <= 0) {
+                continue;
+            }
+
+            $normalized = self::normalizeOwnerName($value);
+            if ($normalized === null) {
+                continue;
+            }
+
+            if ($score > $bestScore) {
+                $bestScore = $score;
+                $bestValue = $normalized;
+            }
+        }
+
+        return $bestValue;
+    }
+
+    protected static function headerLooksLikePhoneOrEmail(string $normalizedHeader): bool
+    {
+        if (str_contains($normalizedHeader, 'email') || str_contains($normalizedHeader, 'e mail')) {
+            return true;
+        }
+
+        // "Contact Number" / "Phone" / "Mobile" must never feed the Owner column.
+        foreach (['contact number', 'phone', 'mobile', 'telephone', 'cell', 'fax', 'whatsapp'] as $needle) {
+            if (str_contains($normalizedHeader, $needle)) {
+                return true;
+            }
+        }
+
+        // Bare "contact" without "name" is usually a phone/contact channel column.
+        if (str_contains($normalizedHeader, 'contact') && ! str_contains($normalizedHeader, 'name')) {
+            return true;
+        }
+
+        return false;
+    }
+
+    protected static function normalizeOwnerName(mixed $value): ?string
+    {
+        $normalized = self::normalizeScalar($value);
+        if ($normalized === null) {
+            return null;
+        }
+
+        if (self::looksLikePhoneNumber($normalized)) {
+            return null;
+        }
+
+        if (self::looksLikeEmail($normalized)) {
+            return null;
+        }
+
+        return $normalized;
+    }
+
+    public static function looksLikePhoneNumber(string $value): bool
+    {
+        $digits = preg_replace('/\D+/', '', $value) ?? '';
+        if (strlen($digits) < 10 || strlen($digits) > 15) {
+            return false;
+        }
+
+        // Mostly digits / phone punctuation → treat as phone, not a person name.
+        $stripped = preg_replace('/[\d\s\-()+.extEXT#]+/', '', $value) ?? '';
+
+        return trim($stripped) === '';
+    }
+
+    protected static function looksLikeEmail(string $value): bool
+    {
+        return filter_var($value, FILTER_VALIDATE_EMAIL) !== false;
+    }
+
+    /**
      * @param  array<string, mixed>  $row
      * @param  list<string>  $keys
      */
@@ -223,7 +381,7 @@ class LeadContactDisplay
     protected static function normalizeHeader(string $header): string
     {
         $header = strtolower(trim($header));
-        $header = str_replace(['_', '-'], ' ', $header);
+        $header = str_replace(['_', '-', '/', '\\', '|'], ' ', $header);
 
         return preg_replace('/\s+/', ' ', $header) ?? $header;
     }

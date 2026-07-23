@@ -10,22 +10,9 @@
         'Not Interested',
         'Requested Appointment',
         'No Answer',
+        'Gatekeeper',
+        'Dead Call',
     ]);
-    $dispositionTones = [
-        'Answer Machine' => 'amber',
-        'Answering Machine' => 'amber',
-        'Call Back' => 'indigo',
-        'Corporate Business' => 'violet',
-        'Owner Not Available' => 'cyan',
-        'Wrong Number/Business' => 'orange',
-        'Owner Hung Up' => 'teal',
-        'Owner Hang up' => 'teal',
-        'Owner Hangup' => 'teal',
-        'Follow Up' => 'sky',
-        'Not Interested' => 'rose',
-        'Requested Appointment' => 'emerald',
-        'No Answer' => 'slate',
-    ];
     $dispositionUrl = url((request()->is('admin*') ? '/admin' : '/portal') . '/communications/dialer/disposition');
     $nextCallDelaySec = (int) config('integrations.communications.next_call_delay_sec', 6);
 @endphp
@@ -65,7 +52,7 @@
                 </div>
                 <div class="ch-call-summary__grid" data-call-summary-dispositions>
                     @foreach ($dispositions as $label)
-                        @php $tone = $dispositionTones[$label] ?? 'slate'; @endphp
+                        @php $tone = \App\Support\DispositionTone::for($label); @endphp
                         <button type="button"
                             class="ch-call-summary__dispo-btn ch-call-summary__dispo-btn--{{ $tone }}"
                             data-disposition-value="{{ $label }}"

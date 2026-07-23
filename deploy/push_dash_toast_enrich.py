@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""Deploy toast dedupe, AI enrichment modal, dashboard charts/cards redesign."""
+from __future__ import annotations
+
+import io
+import os
+import shlex
+import sys
+import tarfile
+from pathlib import Path
+
+import paramiko
+
+ROOT = Path(__file__).resolve().parents[1]
+OLD = {
+    "host": "203.215.160.44",
+    "user": "issac",
+    "password": os.environ.get("OLD_DEPLOY_PASSWORD", "SadamShah123"),
+}
+REMOTE = "/var/www/apexone"
+FILES = [
+    "resources/js/toast.js",
+    "resources/css/app.css",
+    "resources/views/workflows/index.blade.php",
+    "resources/views/admin/dashboard/partials/imports-panel.blade.php",
+    "resources/views/admin/dashboard/index.blade.php",
+    "app/Http/Controllers/AdminDashboardController.php",
+]
+
+
+def main() -> int:
+    build = ROOT / "public" / "build"
+    if not build.exists():
+        raise SystemExit("Run npm run build first")
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.connect(OLD["host"], username=OLD["user"], password=OLD["password"], timeout=35)
+
+    sys.path.insert(0, str(ROOT))
+    import deploy._ssh as ssh_mod
+
+    ssh_mod.HOST = OLD["host"]
+    ssh_mod.USER = OLD["user"]
+    ssh_mod.PASSWORD = OLD["password"]
+    ssh_mod.REMOTE_APP = REMOTE
+    from deploy._ssh import upload_files
+
+    upload_files(ssh, [(ROOT / rel, rel) for rel in FILES], app_root=REMOTE)
+
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        tar.add(build, arcname="public/build")
+    buf.seek(0)
+    remote_tar = "/tmp/apexone-dash-toast.tar.gz"
+    sftp = ssh.open_sftp()
+    sftp.putfo(buf, remote_tar)
+    sftp.close()
+
+    inner = f"""
+set -e
+cd {REMOTE}
+tar -xzf {remote_tar} -C {REMOTE}
+rm -f {remote_tar}
+chown -R www-data:www-data public/build
+sudo -u www-data php artisan view:clear
+sudo -u www-data php artisan config:clear
+python3 - <<'PY'
+from pathlib import Path
+toast = Path('resources/js/toast.js').read_text(errors='replace')
+dash = Path('resources/views/admin/dashboard/index.blade.php').read_text(errors='replace')
+idx = Path('resources/views/workflows/index.blade.php').read_text(errors='replace')
+panel = Path('resources/views/admin/dashboard/partials/imports-panel.blade.php').read_text(errors='replace')
+print('toast_dedupe', 'data-toast-key' in toast or 'toastKey' in toast)
+print('restrict_once', '__importRestrictClickBound' in panel)
+print('ai_enrich_btn', 'data-enrichment-status-open' in idx)
+print('chart_boot', 'waitForChartJs' in dash)
+print('donut', 'pipelineDonutChart' in dash)
+print('no_setters_table', 'setters-table-body' not in dash)
+print('kpi_grid', 'admin-dash-kpi-grid' in dash)
+PY
+echo DONE
+"""
+    cmd = f"echo {shlex.quote(OLD['password'])} | sudo -S -p '' bash -lc {shlex.quote(inner)}"
+    _, o, e = ssh.exec_command(cmd, timeout=180)
+    sys.stdout.write(o.read().decode(errors="replace"))
+    err = e.read().decode(errors="replace")
+    if err.strip():
+        sys.stdout.write("---stderr---\n" + err[-2000:])
+    ssh.close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

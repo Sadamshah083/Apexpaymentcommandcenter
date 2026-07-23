@@ -11,23 +11,23 @@
     @endphp
 
     <div id="workspace-member-management" class="app-page um-page" data-workspace-id="{{ $activeWorkspace->id }}"
-        data-members-base="{{ url('/admin/workspaces/' . $activeWorkspace->id . '/members') }}"
-        data-workspace-switch-base="{{ url('/admin/workspaces/switch') }}" data-csrf-token="{{ csrf_token() }}"
+        data-members-base="{{ url('/admin/usermanagement/' . $activeWorkspace->id . '/members') }}"
+        data-workspace-switch-base="{{ url('/admin/usermanagement/switch') }}" data-csrf-token="{{ csrf_token() }}"
         data-role-labels='@json(SalesOps::assignableMemberRoles())'>
         {{-- Page header --}}
         <div class="um-page-header app-page-header">
             <div>
                 <h1 class="um-page-title app-page-title">User Management</h1>
-                <p class="um-page-subtitle app-page-subtitle">
-                    Manage workspace members, roles, and access for
-                    <span class="um-text-emphasis" id="workspace-active-name">{{ $activeWorkspace->name }}</span>.
-                    Changes sync live across open admin tabs.
-                </p>
             </div>
             <div class="um-page-header-actions">
                 <button type="button" class="um-btn um-btn-ghost um-btn-sm" data-um-portal-info-open>
                     Portal links
                 </button>
+                @if (auth()->user()->canManageWorkspaceMembers($activeWorkspace->id))
+                    <button type="button" class="um-btn um-btn-primary um-btn-sm shrink-0" data-um-add-member-open>
+                        Add account
+                    </button>
+                @endif
                 <div class="um-live-badge" aria-label="Live sync enabled">
                     <span class="um-live-dot"></span>
                     Live sync
@@ -67,9 +67,9 @@
                     </p>
                 </div>
                 <div class="um-toolbar-actions">
-                    @if (auth()->user()->isSuperAdmin($activeWorkspace->id))
+                    @if (auth()->user()->isPlatformSuperAdmin())
                         <button type="button" class="um-btn um-btn-primary um-btn-sm shrink-0" data-um-create-workspace-open>
-                            Create workspace
+                            Add workspace
                         </button>
                     @endif
                 </div>
@@ -103,23 +103,19 @@
         {{-- Team members table --}}
         <section class="um-panel um-panel-flush um-section">
             <div class="um-panel-toolbar">
-                <div>
-                    <h3 class="um-panel-heading">Team members</h3>
-                    <p class="um-panel-desc">Suspend, change roles, assign campaigns to team leads, put agents on the same team lead, reset passwords, or limit admin module access.</p>
-                </div>
-                <div class="um-toolbar-actions">
+                <div class="um-toolbar-actions um-toolbar-actions--end">
                     <input type="search" id="um-member-search" class="um-input um-search-input"
                         placeholder="Search by name, email, or role…" autocomplete="off"
                         aria-label="Search team members">
                     @if (auth()->user()->canManageWorkspaceMembers($activeWorkspace->id))
                         <button type="button" class="um-btn um-btn-primary um-btn-sm shrink-0" data-um-add-member-open>
-                            Add account
+                            + Add account
                         </button>
                     @endif
                 </div>
             </div>
 
-            <x-data-table :paginator="$members" min-width="1380px" class="um-members-table-wrap">
+            <x-data-table :paginator="$members" min-width="1480px" class="um-members-table-wrap">
                 <table class="um-members-table">
                     <thead>
                         <tr>
@@ -130,7 +126,10 @@
                             <th class="col-status">Status</th>
                             <th class="col-portal">Portal</th>
                             <th class="col-access">Access</th>
-                            <th class="col-manage text-right">Manage</th>
+                            @if (auth()->user()->canManageWorkspaceMembers($activeWorkspace->id) || auth()->user()->isAdminOfAnyWorkspace())
+                                <th class="col-password">Password</th>
+                            @endif
+                            <th class="col-manage">Manage</th>
                         </tr>
                     </thead>
                     <tbody id="workspace-sync-team" class="member-team-list" data-admin-team="1">
@@ -144,10 +143,12 @@
                                 'campaigns' => $campaigns ?? collect(),
                                 'campaignNames' => $campaignNames ?? collect(),
                                 'teamLeadCampaignIds' => $teamLeadCampaignIds ?? collect(),
+                                'teamMemberCounts' => $teamMemberCounts ?? collect(),
+                                'showPasswordHint' => auth()->user()->canManageWorkspaceMembers($activeWorkspace->id) || auth()->user()->isAdminOfAnyWorkspace(),
                             ])
                         @empty
                             <tr data-um-empty-members>
-                                <td colspan="8">
+                                <td colspan="{{ (auth()->user()->canManageWorkspaceMembers($activeWorkspace->id) || auth()->user()->isAdminOfAnyWorkspace()) ? 9 : 8 }}">
                                     <div class="um-empty-state">
                                         <p class="um-empty-title">No team members yet</p>
                                         <p class="um-empty-desc">Create an agent account to get started.</p>
@@ -162,10 +163,18 @@
     </div>
 
     @if (auth()->user()->canManageWorkspaceMembers($activeWorkspace->id))
-        @include('workflows.partials.add-member-modal', ['activeWorkspace' => $activeWorkspace])
+        @include('workflows.partials.add-member-modal', [
+            'activeWorkspace' => $activeWorkspace,
+            'campaigns' => $campaigns ?? collect(),
+            'campaignNames' => $campaignNames ?? collect(),
+            'setterTeamLeads' => $setterTeamLeads ?? collect(),
+            'closerTeamLeads' => $closerTeamLeads ?? collect(),
+            'teamLeadCampaignIds' => $teamLeadCampaignIds ?? collect(),
+            'availablePhoneLines' => $availablePhoneLines ?? collect(),
+        ])
     @endif
 
-    @if (auth()->user()->isSuperAdmin($activeWorkspace->id))
+    @if (auth()->user()->isPlatformSuperAdmin())
         @include('workflows.partials.create-workspace-modal')
     @endif
 
@@ -182,6 +191,7 @@
         'closerTeamLeads' => $closerTeamLeads ?? collect(),
         'teamLeadCampaignIds' => $teamLeadCampaignIds ?? collect(),
     ])
+    @include('workflows.partials.reset-password-modal')
     @include('workflows.partials.module-access-modal')
 @endsection
 

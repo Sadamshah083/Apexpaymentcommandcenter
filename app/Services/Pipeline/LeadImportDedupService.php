@@ -15,6 +15,10 @@ class LeadImportDedupService
         ?string $rawPhone,
         array &$batchPhonesInMemory,
     ): bool {
+        if (config('workflow.skip_phone_dedup', false)) {
+            return false;
+        }
+
         $normalized = UsPhoneNormalizer::normalize($rawPhone);
 
         if (! $normalized) {
@@ -25,13 +29,15 @@ class LeadImportDedupService
             return true;
         }
 
-        $exists = WorkflowLead::query()
-            ->where('normalized_phone', $normalized)
-            ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspaceId))
-            ->exists();
+        if (! config('workflow.skip_cross_import_phone_dedup', false)) {
+            $exists = WorkflowLead::query()
+                ->where('normalized_phone', $normalized)
+                ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspaceId))
+                ->exists();
 
-        if ($exists) {
-            return true;
+            if ($exists) {
+                return true;
+            }
         }
 
         $batchPhonesInMemory[$normalized] = true;

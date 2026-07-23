@@ -33,6 +33,7 @@ return [
         'webhook_path' => env('MORPHEUS_WEBHOOK_PATH', '/webhooks/morpheus/calls'),
         // Local Node WebSocket bridge — webhook pushes here, dialer listens (no polling).
         'call_events_ws_push_url' => env('CALL_EVENTS_WS_PUSH_URL', 'http://127.0.0.1:8787/push'),
+        'call_events_ws_monitoring_push_url' => env('CALL_EVENTS_WS_MONITORING_PUSH_URL', 'http://127.0.0.1:8787/push-monitoring'),
         'call_events_ws_secret' => env('CALL_EVENTS_WS_SECRET', ''),
         'call_events_ws_public_path' => env('CALL_EVENTS_WS_PUBLIC_PATH', '/communications-ws/ws'),
     ],
@@ -40,7 +41,7 @@ return [
     'communications' => [
         'cache_ttl_minutes' => (int) env('COMMUNICATIONS_CACHE_TTL', 10),
         'default_days' => (int) env('COMMUNICATIONS_DEFAULT_DAYS', 14),
-        'list_page_size' => (int) env('COMMUNICATIONS_LIST_PAGE_SIZE', 20),
+        'list_page_size' => (int) env('COMMUNICATIONS_LIST_PAGE_SIZE', 30),
         'list_max_pages' => 1,
         'detail_max_pages' => 1,
         'user_fallback' => (bool) env('COMMUNICATIONS_USER_FALLBACK', true),
@@ -67,6 +68,8 @@ return [
             'Not Interested',
             'Requested Appointment',
             'No Answer',
+            'Gatekeeper',
+            'Dead Call',
         ],
     ],
 

@@ -36,7 +36,37 @@
             </div>
         @endif
 
-        @if (!empty($detail['activities']))
+        @if (!empty($detail['call_logs']))
+            <div class="dash-detail-table-wrap">
+                <table class="dash-detail-table">
+                    <thead>
+                        <tr>
+                            <th>Team member</th>
+                            <th>Phone</th>
+                            <th>Disposition</th>
+                            <th>When</th>
+                        </tr>
+                    </thead>
+                    <tbody id="detail-activities-body">
+                        @forelse ($detail['call_logs'] as $log)
+                            <tr>
+                                <td>{{ $log->user?->name ?? '—' }}</td>
+                                <td>{{ $log->to_phone ?: ($log->from_phone ?: '—') }}</td>
+                                <td><span class="dash-detail-badge">{{ $log->disposition ?: 'Dial' }}</span></td>
+                                <td class="dash-detail-muted">{{ ($log->started_at ?? $log->created_at)?->diffForHumans() }}</td>
+                            </tr>
+                        @empty
+                            <tr>
+                                <td colspan="4" class="dash-detail-empty">No activity logged yet today.</td>
+                            </tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
+            @if ($detail['call_logs']->hasPages())
+                <div class="dash-detail-pagination">{{ $detail['call_logs']->links() }}</div>
+            @endif
+        @elseif (!empty($detail['activities']))
             <div class="dash-detail-table-wrap">
                 <table class="dash-detail-table">
                     <thead>

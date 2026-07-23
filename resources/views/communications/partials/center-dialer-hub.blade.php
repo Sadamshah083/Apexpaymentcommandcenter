@@ -5,8 +5,9 @@
     $canViewTeamRecordings = (bool) ($hubAccess['canViewTeamRecordings'] ?? false);
     $hubTier = (string) ($hubAccess['tier'] ?? '');
     $isAgentDialer = $hubTier === 'agent';
+    $showAgentDialStats = in_array($hubTier, ['agent', 'team_lead'], true);
     $showBreakControls = in_array($hubTier, ['agent', 'team_lead'], true);
-    $callLogsPerPage = (int) config('integrations.communications.list_page_size', 20);
+    $callLogsPerPage = (int) config('integrations.communications.list_page_size', 30);
     $allCallLogs = collect($callLogs ?? []);
     $recentLogs = $allCallLogs->take($callLogsPerPage);
     $liveCalls = collect($activeCalls ?? [])->take(5);
@@ -16,17 +17,21 @@
     $importedLeads = collect($dialerImportedLeads ?? []);
     $leadsPageSize = (int) config('integrations.communications.dialer_leads_page_size', 25);
     $hasMoreImportedLeads = (bool) ($dialerImportedLeadsHasMore ?? $importedLeads->count() > $leadsPageSize);
+    $importedLeadsTotal = (int) ($dialerImportedLeadsTotal ?? ($hasMoreImportedLeads ? max($importedLeads->count(), 1) : $importedLeads->count()));
     $importedLeadsApiUrl = $autoDialer ? route($routePrefix . 'communications.dialer.imported-leads') : '';
     $presenceUrl = route($routePrefix . 'communications.monitoring.presence');
     $breakStatusUrl = $showBreakControls ? route($routePrefix . 'communications.monitoring.break.status') : '';
     $breakStartUrl = $showBreakControls ? route($routePrefix . 'communications.monitoring.break.start') : '';
     $breakEndUrl = $showBreakControls ? route($routePrefix . 'communications.monitoring.break.end') : '';
     $campaignOptions = collect($dialerCampaignOptions ?? []);
+    $fileOptions = collect($dialerFileOptions ?? []);
     $recordingLogs = $allCallLogs
         ->filter(fn ($log) => ! empty($log['has_recording_media']) && ! empty($log['recording_id']))
         ->values();
     $recentRecordings = $recordingLogs->take($callLogsPerPage);
     $hasMoreRecordings = $recordingLogs->count() > $callLogsPerPage;
+    $agentTotalDials = (int) ($agentTotalDials ?? 0);
+    $recentByPhoneUrl = route($routePrefix . 'communications.dialer.recent-by-phone');
 @endphp
 
 <div class="ch-dial-workspace ch-dial-workspace--compact ghl-dialer-center {{ $compact ? 'ghl-dialer-center--compact' : '' }} {{ $autoDialer ? 'ch-dial-workspace--admin' : '' }}"
@@ -36,6 +41,8 @@
     data-phone-view="{{ $autoDialer ? 'logs' : 'dialer' }}"
     data-recording-role=""
     data-recording-sync-url="{{ $recordingSyncUrl }}"
+    data-recent-by-phone-url="{{ $recentByPhoneUrl }}"
+    data-agent-total-dials="{{ $agentTotalDials }}"
     @if ($autoDialer) data-auto-dial-hub data-imported-leads-url="{{ $importedLeadsApiUrl }}" data-next-call-delay-sec="{{ (int) config('integrations.communications.next_call_delay_sec', 6) }}" @endif
     @if ($isAgentDialer) data-agent-dialer="1" @endif
     @if ($showBreakControls)
@@ -45,76 +52,81 @@
     @endif>
     <div class="ch-dial-workspace__toolbar">
         <div class="ch-dial-workspace__nav" data-phone-workspace-nav>
-            @if ($autoDialer)
-                <div class="ghl-comm-dial-mode" data-dial-mode-switch role="tablist" aria-label="Dial mode">
-                    <button type="button" class="ghl-comm-dial-mode__btn is-active" data-dial-mode="manual" role="tab" aria-selected="true">
-                        Manual dial
-                    </button>
-                    <button type="button" class="ghl-comm-dial-mode__btn" data-dial-mode="auto" role="tab" aria-selected="false">
-                        Auto dial
-                    </button>
-                </div>
-            @endif
-            <div class="ghl-phone-panel-switch" data-phone-panel-switch role="tablist" aria-label="Phone workspace">
+            <div class="ghl-phone-panel-switch ghl-phone-panel-switch--primary" data-phone-panel-switch role="tablist" aria-label="Phone workspace">
                 @if ($autoDialer)
                     <button type="button" class="ghl-phone-panel-switch__btn is-active" data-phone-panel-view="logs"
                         role="tab" aria-selected="true" aria-controls="ghl-phone-logs-pane-center">Call logs</button>
                     <button type="button" class="ghl-phone-panel-switch__btn" data-phone-panel-view="leads"
                         role="tab" aria-selected="false" aria-controls="ghl-phone-leads-pane-center">Imported leads</button>
-                    <button type="button" class="ghl-phone-panel-switch__btn" data-phone-panel-view="recordings" data-recording-role=""
-                        role="tab" aria-selected="false" aria-controls="ghl-phone-recordings-pane-center">Call Recording</button>
-                    @if ($canViewTeamRecordings)
-                        <button type="button" class="ghl-phone-panel-switch__btn" data-phone-panel-view="recordings" data-recording-role="agent"
-                            role="tab" aria-selected="false" aria-controls="ghl-phone-recordings-pane-center">Agent recordings</button>
-                        <button type="button" class="ghl-phone-panel-switch__btn" data-phone-panel-view="recordings" data-recording-role="team_lead"
-                            role="tab" aria-selected="false" aria-controls="ghl-phone-recordings-pane-center">Team lead recordings</button>
-                    @endif
                 @else
                     <button type="button" class="ghl-phone-panel-switch__btn is-active" data-phone-panel-view="logs"
                         role="tab" aria-selected="true" aria-controls="ghl-phone-logs-pane-center">Call logs</button>
-                    <button type="button" class="ghl-phone-panel-switch__btn" data-phone-panel-view="recordings" data-recording-role=""
-                        role="tab" aria-selected="false" aria-controls="ghl-phone-recordings-pane-center">Call Recording</button>
-                    @if ($canViewTeamRecordings)
-                        <button type="button" class="ghl-phone-panel-switch__btn" data-phone-panel-view="recordings" data-recording-role="agent"
-                            role="tab" aria-selected="false" aria-controls="ghl-phone-recordings-pane-center">Agent recordings</button>
-                        <button type="button" class="ghl-phone-panel-switch__btn" data-phone-panel-view="recordings" data-recording-role="team_lead"
-                            role="tab" aria-selected="false" aria-controls="ghl-phone-recordings-pane-center">Team lead recordings</button>
-                    @endif
                     <button type="button" class="ghl-phone-panel-switch__btn" data-phone-panel-view="dialer"
                         role="tab" aria-selected="false" aria-controls="ghl-phone-dial-pane-center">Dial pad</button>
                 @endif
             </div>
-            @if ($showBreakControls)
-                <div class="ch-break-controls" data-break-controls>
-                    <button type="button" class="ch-btn ch-btn--secondary ch-break-controls__btn" data-break-start="break">
-                        Break In
-                    </button>
-                    <button type="button" class="ch-btn ch-btn--secondary ch-break-controls__btn" data-break-start="lunch">
-                        Lunch
-                    </button>
-                    <button type="button" class="ch-btn ch-btn--primary ch-break-controls__btn hidden" data-break-end>
-                        Break Out
-                    </button>
-                    <p class="ch-break-controls__status hidden" data-break-status aria-live="polite">
-                        <span data-break-status-label></span>
-                        <span data-break-countdown></span>
-                    </p>
+            @if ($showAgentDialStats || $showBreakControls)
+                <div class="ch-dial-workspace__agent-meta">
+                    @if ($showAgentDialStats)
+                        <p class="ch-agent-total-dials" data-agent-total-dials-label aria-live="polite">
+                            Total dials: <strong data-agent-total-dials-value>{{ number_format($agentTotalDials) }}</strong>
+                        </p>
+                    @endif
+                    @if ($showBreakControls)
+                        <div class="ch-break-controls" data-break-controls>
+                            <button type="button" class="ch-btn ch-btn--secondary ch-break-controls__btn" data-break-start="break">
+                                Break In
+                            </button>
+                            <button type="button" class="ch-btn ch-btn--secondary ch-break-controls__btn" data-break-start="lunch">
+                                Lunch
+                            </button>
+                            <button type="button" class="ch-btn ch-btn--primary ch-break-controls__btn hidden" data-break-end>
+                                Break Out
+                            </button>
+                            <p class="ch-break-controls__status hidden" data-break-status aria-live="polite">
+                                <span data-break-status-label></span>
+                                <span data-break-countdown></span>
+                            </p>
+                        </div>
+                    @endif
                 </div>
             @endif
         </div>
-        @if ($autoDialer)
-            <p class="ch-auto-dial-countdown hidden" data-auto-dial-countdown aria-live="polite">
-                <span data-auto-dial-countdown-text></span>
-            </p>
-        @endif
+        <div class="ch-dial-workspace__toolbar-end">
+            <div class="ghl-phone-panel-switch ghl-phone-panel-switch--recordings" data-phone-panel-switch-recordings role="tablist" aria-label="Call recordings">
+                <button type="button" class="ghl-phone-panel-switch__btn" data-phone-panel-view="recordings" data-recording-role=""
+                    role="tab" aria-selected="false" aria-controls="ghl-phone-recordings-pane-center">Call Recording</button>
+                @if ($canViewTeamRecordings)
+                    <button type="button" class="ghl-phone-panel-switch__btn" data-phone-panel-view="recordings" data-recording-role="agent"
+                        role="tab" aria-selected="false" aria-controls="ghl-phone-recordings-pane-center">Agent recordings</button>
+                    <button type="button" class="ghl-phone-panel-switch__btn" data-phone-panel-view="recordings" data-recording-role="team_lead"
+                        role="tab" aria-selected="false" aria-controls="ghl-phone-recordings-pane-center">Team lead recordings</button>
+                @endif
+            </div>
+            @if ($autoDialer)
+                <p class="ch-auto-dial-countdown hidden" data-auto-dial-countdown aria-live="polite">
+                    <span data-auto-dial-countdown-text></span>
+                </p>
+            @endif
+        </div>
     </div>
     <div class="ch-dial-workspace__grid ch-dial-workspace__grid--phone-split {{ $autoDialer ? 'ch-dial-workspace__grid--admin-split' : '' }}">
         <div class="ch-dial-workspace__left-pane {{ $autoDialer ? 'ch-dial-workspace__left-pane--admin' : '' }}"
             @if ($autoDialer) data-phone-left-pane @endif>
         <aside class="ch-panel ghl-dialer-center-logs ghl-dialer-center-logs--full is-visible" id="ghl-phone-logs-pane-center"
             data-phone-logs-pane role="tabpanel" aria-label="Call logs">
-            <div class="ghl-dialer-center-logs__header ch-panel__header ch-panel__header--slim">
+            <div class="ghl-dialer-center-logs__header ch-panel__header ch-panel__header--slim ghl-dialer-logs-header">
                 <h3 class="ch-panel__title">Call logs</h3>
+                @if ($autoDialer)
+                    <div class="ghl-comm-dial-mode ghl-comm-dial-mode--logs-header" data-dial-mode-switch role="tablist" aria-label="Dial mode">
+                        <button type="button" class="ghl-comm-dial-mode__btn is-active" data-dial-mode="manual" role="tab" aria-selected="true">
+                            Manual dial
+                        </button>
+                        <button type="button" class="ghl-comm-dial-mode__btn" data-dial-mode="auto" role="tab" aria-selected="false">
+                            Auto dial
+                        </button>
+                    </div>
+                @endif
             </div>
             <div class="ghl-dialer-center-logs__scroll ch-panel__body ch-panel__body--slim ghl-dialer-recent-list ghl-dialer-recent-list--full"
                 data-call-logs-list
@@ -148,13 +160,13 @@
                 @endif
 
                 <div data-call-logs-items>
-                    @forelse ($recentLogs as $log)
+                @forelse ($recentLogs as $log)
                         @include('communications.partials.call-log-row', [
                             'log' => $log,
                             'routePrefix' => $routePrefix,
                         ])
                     @empty
-                        <p class="ghl-dialer-recent-empty" data-call-logs-empty>Loading recent calls…</p>
+                        <p class="ghl-dialer-recent-empty" data-call-logs-empty>No recent calls yet.</p>
                     @endforelse
                 </div>
 
@@ -166,12 +178,46 @@
         @if ($autoDialer)
             <aside class="ch-panel ghl-dialer-center-leads ghl-dialer-center-logs ghl-dialer-center-logs--full hidden" id="ghl-phone-leads-pane-center"
                 data-phone-leads-pane role="tabpanel" aria-label="Imported leads">
-                <div class="ghl-dialer-center-logs__header ch-panel__header ch-panel__header--slim">
-                    <h3 class="ch-panel__title">Imported leads</h3>
+                <div class="ghl-dialer-center-logs__header ch-panel__header ch-panel__header--slim ghl-dialer-leads-header">
+                    <div class="ghl-dialer-leads-header__title-row">
+                        <h3 class="ch-panel__title">Imported leads</h3>
+                        <span class="ghl-dialer-leads-count" data-imported-leads-count>{{ number_format(max($importedLeadsTotal, $importedLeads->count())) }}{{ $hasMoreImportedLeads ? '+' : '' }}</span>
+                    </div>
+                    <div class="ghl-dialer-leads-header-actions">
+                        <div class="ghl-comm-dial-mode ghl-comm-dial-mode--panel" data-dial-mode-switch role="tablist" aria-label="Dial mode">
+                            <button type="button" class="ghl-comm-dial-mode__btn is-active" data-dial-mode="manual" role="tab" aria-selected="true">
+                                Manual
+                            </button>
+                            <button type="button" class="ghl-comm-dial-mode__btn" data-dial-mode="auto" role="tab" aria-selected="false">
+                                Auto
+                            </button>
+                        </div>
+                        <button type="button" class="ghl-dialer-files-size-toggle"
+                            data-dialer-leads-list-size-toggle aria-expanded="false" title="Expand leads list">
+                            <span data-dialer-leads-list-size-label>Expand list</span>
+                        </button>
+                    </div>
                     <p class="ghl-dialer-leads-status hidden" data-auto-dial-status aria-live="polite"></p>
                 </div>
+                <div class="ghl-dialer-leads-actions ghl-dialer-leads-actions--sticky" data-auto-dial-controls>
+                    <button type="button" class="ch-btn ch-btn--primary ghl-auto-dial-btn ghl-auto-dial-btn--start" data-auto-dial-start>
+                        Start Auto Dial
+                    </button>
+                    <button type="button" class="ch-btn ghl-auto-dial-btn ghl-auto-dial-btn--stop hidden" data-auto-dial-stop>
+                        Stop Auto Dial
+                    </button>
+                </div>
                 <div class="ghl-dialer-leads-toolbar">
-                    <div class="ghl-dialer-leads-filters">
+                    <div class="ghl-dialer-leads-toolbar__head">
+                        <span class="ghl-dialer-leads-label">{{ $isAgentDialer ? 'My leads filters' : 'Lead filters' }}</span>
+                        <button type="button" class="ghl-dialer-files-size-toggle"
+                            data-dialer-filters-size-toggle
+                            aria-expanded="true"
+                            title="Shrink filters">
+                            <span data-dialer-filters-size-label>Shrink</span>
+                        </button>
+                    </div>
+                    <div class="ghl-dialer-leads-filters is-expanded" data-dialer-leads-filters>
                         @unless ($isAgentDialer)
                             <div class="ghl-dialer-leads-field">
                                 <span class="ghl-dialer-leads-label" id="dialer-leads-pool-label">Lead pool</span>
@@ -201,8 +247,8 @@
                             <input type="hidden" id="dialer-leads-pool" name="dialer_leads_pool"
                                 data-dialer-leads-pool value="assigned">
                         @endunless
-                        @if ($campaignOptions->isNotEmpty())
-                            <div class="ghl-dialer-leads-field">
+                        @if ($autoDialer)
+                            <div class="ghl-dialer-leads-field {{ $campaignOptions->isEmpty() ? 'hidden' : '' }}" data-dialer-campaign-field>
                                 <span class="ghl-dialer-leads-label" id="dialer-leads-campaign-label">Campaign</span>
                                 <div class="ghl-leads-select" data-leads-select>
                                     <select id="dialer-leads-campaign" name="dialer_leads_campaign"
@@ -226,28 +272,65 @@
                                 </div>
                             </div>
                         @endif
-                    </div>
-                    <div class="ghl-dialer-leads-actions">
-                        <button type="button" class="ch-btn ch-btn--primary ghl-auto-dial-btn" data-auto-dial-start>
-                            Start auto dial
-                        </button>
-                        <button type="button" class="ch-btn ch-btn--secondary ghl-auto-dial-btn hidden" data-auto-dial-stop>
-                            Stop auto dial
-                        </button>
+                        @if ($autoDialer)
+                            <div class="ghl-dialer-leads-field ghl-dialer-leads-field--files {{ $fileOptions->isEmpty() ? 'is-files-shrunk hidden' : 'is-files-expanded' }}" data-dialer-files-field>
+                                <div class="ghl-dialer-files-head">
+                                    <span class="ghl-dialer-leads-label" id="dialer-leads-files-label">{{ $isAgentDialer ? 'My lead sheets' : 'Uploaded files' }}</span>
+                                    <button type="button" class="ghl-dialer-files-size-toggle"
+                                        data-dialer-files-size-toggle aria-expanded="{{ $fileOptions->isEmpty() ? 'false' : 'true' }}" title="{{ $fileOptions->isEmpty() ? 'Expand file list' : 'Shrink file list' }}">
+                                        <span data-dialer-files-size-label>{{ $fileOptions->isEmpty() ? 'Expand' : 'Shrink' }}</span>
+                                        <svg data-dialer-files-size-icon-expand class="{{ $fileOptions->isEmpty() ? '' : 'hidden' }}" viewBox="0 0 24 24" fill="none"
+                                            stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                            <path stroke-linecap="round" stroke-linejoin="round"
+                                                d="M8 3H3v5m13-5h5v5M8 21H3v-5m18 0v5h-5" />
+                                        </svg>
+                                        <svg data-dialer-files-size-icon-shrink class="{{ $fileOptions->isEmpty() ? 'hidden' : '' }}" viewBox="0 0 24 24"
+                                            fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                            <path stroke-linecap="round" stroke-linejoin="round"
+                                                d="M9 9H4V4m11 5h5V4M9 15H4v5m11-5h5v5" />
+                                        </svg>
+                                    </button>
+                                </div>
+                                <div class="ghl-dialer-file-checks {{ $fileOptions->isEmpty() ? '' : 'is-expanded' }}" role="group" aria-labelledby="dialer-leads-files-label" data-dialer-leads-files>
+                                    <label class="ghl-dialer-file-check">
+                                        <span>{{ $isAgentDialer ? 'All my sheets' : 'All uploaded files' }}</span>
+                                        <input type="checkbox" data-dialer-file-all checked>
+                                    </label>
+                                    @foreach ($fileOptions as $file)
+                                        @php
+                                            $fileLabel = (string) ($file['name'] ?? 'Import');
+                                            if (($file['total_leads'] ?? 0) > 0) {
+                                                $fileLabel .= ' ('.number_format((int) $file['total_leads']).')';
+                                            }
+                                        @endphp
+                                        <label class="ghl-dialer-file-check">
+                                            <span title="{{ $fileLabel }}">{{ $fileLabel }}</span>
+                                            <input type="checkbox" value="{{ $file['id'] }}" data-dialer-file-id>
+                                        </label>
+                                    @endforeach
+                                </div>
+                            </div>
+                        @endif
                     </div>
                 </div>
                 <div class="ghl-dialer-center-logs__scroll ch-panel__body ch-panel__body--slim ghl-dialer-recent-list ghl-dialer-recent-list--full"
                     data-imported-leads-list
                     data-imported-leads-url="{{ $importedLeadsApiUrl }}"
                     data-imported-leads-offset="{{ $importedLeads->count() }}"
-                    data-imported-leads-has-more="{{ $hasMoreImportedLeads ? '1' : '0' }}">
+                    data-imported-leads-has-more="{{ $hasMoreImportedLeads ? '1' : '0' }}"
+                    data-imported-leads-total="{{ (int) ($dialerImportedLeadsTotal ?? $importedLeads->count()) }}">
                     <div data-imported-leads-items>
                         @forelse ($importedLeads as $lead)
                             @include('communications.partials.dialer-lead-row', ['lead' => $lead])
                         @empty
-                            <p class="ghl-dialer-recent-empty" data-imported-leads-empty>
-                                {{ $isAgentDialer ? 'No leads assigned to you with phone numbers yet.' : 'No imported leads with phone numbers yet.' }}
-                            </p>
+                            <div class="ghl-dialer-leads-empty" data-imported-leads-empty>
+                                <p class="ghl-dialer-leads-empty__title">No leads to dial yet</p>
+                                <p class="ghl-dialer-leads-empty__hint">
+                                    {{ $isAgentDialer
+                                        ? 'Ask your team lead to assign leads, or widen filters above.'
+                                        : 'Pick a campaign or uploaded file above, or import leads from Command Center → Imports.' }}
+                                </p>
+                            </div>
                         @endforelse
                     </div>
                     <p class="ghl-dialer-recent-loading hidden" data-imported-leads-loading aria-live="polite">Loading more leads…</p>
@@ -273,9 +356,9 @@
                                 'log' => $log,
                                 'routePrefix' => $routePrefix,
                             ])
-                        @empty
+                @empty
                             <p class="ghl-dialer-recent-empty" data-call-recordings-empty>No call recordings yet.</p>
-                        @endforelse
+                @endforelse
                     </div>
                     <p class="ghl-dialer-recent-loading hidden" data-call-recordings-loading aria-live="polite">Loading more recordings…</p>
                     <div class="ghl-dialer-recent-sentinel" data-call-recordings-sentinel aria-hidden="true"></div>

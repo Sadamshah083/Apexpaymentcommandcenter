@@ -69,10 +69,14 @@
         ?? ''
     ));
     // CDR technical statuses only — never treat agent disposition "No Answer" as a status.
-    $resultAsDispositionSkip = ['—', '-', 'completed', 'initiated', 'connected', 'answered', 'no-answer', 'busy', 'failed', 'missed', 'unknown'];
+    $resultAsDispositionSkip = [
+        '—', '-', 'completed', 'initiated', 'connected', 'answered', 'no-answer', 'busy', 'failed',
+        'missed', 'unknown', 'hangup', 'canceled', 'cancelled', 'ringing', 'bridging', 'active', 'talking', 'ended',
+    ];
     if ($dispositionLabel !== '' && in_array(strtolower($dispositionLabel), $resultAsDispositionSkip, true)) {
         $dispositionLabel = '';
     }
+    // Never promote CDR result (connected/initiated) into disposition.
     if ($dispositionLabel === '' && $resultLabel !== '' && ! in_array(strtolower($resultLabel), $resultAsDispositionSkip, true)) {
         $dispositionLabel = $resultLabel;
     }
@@ -111,7 +115,7 @@
     data-log-phone="{{ $callbackPhone ?? '' }}"
     data-log-extension="{{ $logExtension ?? '' }}"
     data-log-agent="{{ e($agentName) }}"
-    data-log-result="{{ $log['result'] ?? '—' }}"
+    data-log-result="{{ $dispositionLabel !== '' ? $dispositionLabel : '' }}"
     data-log-time="{{ $timeLabel }}"
     data-log-call-ref="{{ $callLogRef }}"
     data-log-lead-name="{{ e($leadName) }}"
@@ -154,9 +158,9 @@
                 <span class="ghl-dialer-recent-meta__time">{{ $timeAgo }}</span>
                 <span class="ghl-dialer-recent-meta__sep" aria-hidden="true">·</span>
                 <span class="ghl-dialer-recent-duration">{{ $durationLabel }}</span>
-                @if ($resultLabel !== '' && $resultLabel !== '—')
+                @if ($showDispositionPreview)
                     <span class="ghl-dialer-recent-meta__sep" aria-hidden="true">·</span>
-                    <span class="ghl-dialer-recent-result">{{ $resultLabel }}</span>
+                    <span class="ghl-dialer-recent-result ghl-dialer-recent-result--disposition">{{ $dispositionLabel }}</span>
                 @endif
             </span>
         </div>

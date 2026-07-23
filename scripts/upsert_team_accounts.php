@@ -32,7 +32,7 @@ $accounts = [
     ['name' => 'damonpeterson', 'email' => 'damonpeterson@apexonepayments.com', 'role' => 'appointment_setter_team_lead'],
     ['name' => 'Jacob Khan', 'email' => 'jacob@apexonepayments.com', 'role' => 'appointment_setter'],
     ['name' => 'Nina Jones', 'email' => 'nina@apexonepayments.com', 'role' => 'appointment_setter'],
-    ['name' => 'Hannah', 'email' => 'hannah@apexonepayments.com', 'role' => 'manager'], // QA → Manager (closest role)
+    ['name' => 'Hannah', 'email' => 'hannah@apexonepayments.com', 'role' => 'closers_qa'],
     ['name' => 'SophiaHeather', 'email' => 'sophia@apexonepayments.com', 'role' => 'appointment_setter', 'password' => 'Amisa123'],
 ];
 

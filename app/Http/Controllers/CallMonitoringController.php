@@ -36,6 +36,9 @@ class CallMonitoringController extends Controller
         $snapshot = $this->monitoring->snapshot($workspace, light: true);
         $pollUrl = route($routePrefix.'communications.monitoring.live');
         $streamUrl = route($routePrefix.'communications.monitoring.stream');
+        $wsPath = trim((string) config('integrations.morpheus.call_events_ws_public_path', '/communications-ws/ws'));
+        $wsScheme = $request->secure() ? 'wss' : 'ws';
+        $wsUrl = $wsScheme.'://'.$request->getHost().$wsPath;
 
         $view = $routePrefix === 'admin.'
             ? 'communications.monitoring.index'
@@ -46,6 +49,8 @@ class CallMonitoringController extends Controller
             'snapshot' => $snapshot,
             'pollUrl' => $pollUrl,
             'streamUrl' => $streamUrl,
+            'wsUrl' => $wsUrl,
+            'workspaceId' => (int) ($workspace?->id ?? 0),
             'hubAccess' => $this->access->viewMeta($user, $routePrefix),
         ]);
     }
@@ -99,7 +104,10 @@ class CallMonitoringController extends Controller
             return response()->json(['ok' => false, 'message' => 'No workspace'], 422);
         }
 
-        $membership = $workspace->users()->where('users.id', $user->id)->first();
+        $membership = $workspace->users()
+            ->where('users.id', $user->id)
+            ->select(['users.id'])
+            ->first();
         $role = (string) ($membership?->pivot?->role ?? '');
         $extension = preg_replace('/\D/', '', (string) ($validated['extension'] ?? $membership?->pivot?->morpheus_extension_num ?? '')) ?: null;
 
@@ -285,13 +293,15 @@ class CallMonitoringController extends Controller
             $lastPresenceVersion = -1;
             $lastFingerprint = '';
             $idleTicks = 0;
-            // Keep stream open longer so login/idle flips push in real time.
-            $maxIdle = 600;
+            // Absolute lifetime — never hold a php-fpm worker forever (was starving the pool → site-wide 504s).
+            $maxIdle = 180;
+            $startedAt = time();
+            $maxSeconds = 45;
             $ticksSinceFull = 0;
             $presence = app(AgentPresenceService::class);
             $workspaceId = (int) ($workspace?->id ?? 0);
 
-            while (! connection_aborted() && $idleTicks < $maxIdle) {
+            while (! connection_aborted() && $idleTicks < $maxIdle && (time() - $startedAt) < $maxSeconds) {
                 try {
                     $version = $this->callEvents->monitoringVersion();
                     $presenceVersion = $workspaceId > 0 ? $presence->presenceVersion($workspaceId) : 0;
@@ -315,25 +325,34 @@ class CallMonitoringController extends Controller
                         $fingerprint = md5(json_encode([
                             $snapshot['version'] ?? 0,
                             $snapshot['presence_version'] ?? 0,
+                            // Counts only — never include ticking timers (client ticks locally).
                             $snapshot['summary'] ?? [],
                             collect($snapshot['rows'] ?? [])->map(fn ($row) => [
                                 $row['id'] ?? null,
                                 $row['status_group'] ?? null,
                                 $row['bucket'] ?? null,
                                 $row['connected_at'] ?? null,
+                                $row['user_id'] ?? null,
+                                $row['station'] ?? null,
                             ])->all(),
                             collect($snapshot['tables']['not_in_call'] ?? [])->map(fn ($row) => [
                                 $row['id'] ?? null,
                                 $row['dial_mode'] ?? null,
+                                $row['idle_since'] ?? null,
                             ])->all(),
-                            collect($snapshot['tables']['disposition'] ?? [])->map(fn ($row) => $row['id'] ?? null)->all(),
+                            collect($snapshot['tables']['disposition'] ?? [])->map(fn ($row) => [
+                                $row['id'] ?? null,
+                                $row['idle_since'] ?? null,
+                            ])->all(),
                             collect($snapshot['tables']['break'] ?? [])->map(fn ($row) => [
                                 $row['id'] ?? null,
-                                $row['timer_sec'] ?? null,
+                                $row['break_ends_at'] ?? null,
+                                $row['idle_since'] ?? null,
                             ])->all(),
                             collect($snapshot['tables']['lunch'] ?? [])->map(fn ($row) => [
                                 $row['id'] ?? null,
-                                $row['timer_sec'] ?? null,
+                                $row['break_ends_at'] ?? null,
+                                $row['idle_since'] ?? null,
                             ])->all(),
                             collect($snapshot['tables']['not_logged_in'] ?? [])->map(fn ($row) => $row['id'] ?? null)->all(),
                         ]));

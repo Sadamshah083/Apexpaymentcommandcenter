@@ -13,6 +13,40 @@ const WORKFLOW_STATUS_LABELS = {
     failed: 'Failed',
 };
 
+const WORKFLOW_UPLOAD_STATUS_LABELS = {
+    mapping: 'Setup',
+    pending: 'Queued',
+    extracting: 'Uploading',
+    paused: 'Paused',
+    completed: 'Uploaded',
+    failed: 'Failed',
+};
+
+function isUploadOnlyWorkflow(workflow) {
+    if (workflow?.is_import_only === true) {
+        return true;
+    }
+
+    return ['import_only', 'store_only'].includes(String(workflow?.processing_mode || ''));
+}
+
+function workflowStatusLabel(workflowOrStatus, processingMode = null) {
+    if (workflowOrStatus && typeof workflowOrStatus === 'object') {
+        const status = workflowOrStatus.status;
+        const labels = isUploadOnlyWorkflow(workflowOrStatus)
+            ? WORKFLOW_UPLOAD_STATUS_LABELS
+            : WORKFLOW_STATUS_LABELS;
+
+        return labels[status] || status;
+    }
+
+    const labels = ['import_only', 'store_only'].includes(String(processingMode || ''))
+        ? WORKFLOW_UPLOAD_STATUS_LABELS
+        : WORKFLOW_STATUS_LABELS;
+
+    return labels[workflowOrStatus] || workflowOrStatus;
+}
+
 /** Only these event types may surface an in-app toast. */
 const NOTIFY_EVENT_TYPES = new Set([
     'workflow.completed',
@@ -44,15 +78,7 @@ const IMPORT_ACTION_ICONS = {
 };
 
 function getWorkflowAssignRemaining(workflow) {
-    const ready = Number(workflow.ready_to_assign ?? 0);
-    if (ready > 0) {
-        return ready;
-    }
-
-    const enriched = Number(workflow.enriched_leads ?? 0);
-    const assigned = Number(workflow.assigned_leads ?? 0);
-
-    return Math.max(0, enriched - assigned);
+    return Math.max(0, Number(workflow.ready_to_assign ?? 0));
 }
 
 function workflowCanAssign(workflow) {
@@ -102,20 +128,29 @@ function renderWorkflowProgressCell(workflow) {
     const failed = Number(workflow.failed_leads ?? 0);
     const attempted = Number(workflow.attempted_leads ?? enriched + failed);
     const active = ['pending', 'extracting', 'paused'].includes(workflow.status);
-    const pct = total > 0 ? Math.min(100, Math.round((attempted / total) * 100)) : 0;
+    const uploadOnly = isUploadOnlyWorkflow(workflow);
+    const uploadDone = workflow.ingestion_complete === true || workflow.status === 'completed';
+    const pct = uploadOnly
+        ? (uploadDone && total > 0 ? 100 : 0)
+        : (total > 0 ? Math.min(100, Math.round((attempted / total) * 100)) : 0);
 
     if (total === 0 && workflow.status === 'mapping') {
         return '<td data-label="Progress" class="col-progress min-w-[148px]"><span class="text-xs text-zinc-400">Awaiting setup</span></td>';
     }
 
-    const fillClass = active ? '' : ' bg-emerald-500';
+    const fillClass = ' bg-emerald-500';
+    const progressText = uploadOnly
+        ? (active && workflow.status !== 'paused'
+            ? `${total.toLocaleString()} uploaded…`
+            : `${total.toLocaleString()} / ${total.toLocaleString()} uploaded`)
+        : `${attempted.toLocaleString()} / ${total.toLocaleString()} enriched`;
 
     return `<td data-label="Progress" class="col-progress min-w-[148px]">
         <div class="space-y-1">
             <div class="app-progress-track h-1.5">
                 <div class="app-progress-fill${fillClass}" style="width: ${pct}%"></div>
             </div>
-            <p class="text-[10px] text-zinc-500 import-workflow-progress-text">${attempted.toLocaleString()} / ${total.toLocaleString()} enriched</p>
+            <p class="text-[10px] text-zinc-500 import-workflow-progress-text">${progressText}</p>
         </div>
     </td>`;
 }
@@ -123,12 +158,21 @@ function renderWorkflowProgressCell(workflow) {
 function renderWorkflowAssignCell(workflow) {
     const remaining = getWorkflowAssignRemaining(workflow);
     const canAssign = workflowCanAssign(workflow);
+    const assigned = Number(workflow.assigned_leads ?? 0);
+    const actions = [];
 
-    if (!canAssign) {
+    if (canAssign) {
+        actions.push(renderWorkflowAssignButton(workflow, remaining));
+    }
+    if (assigned > 0) {
+        actions.push(renderWorkflowUnassignButton(workflow, remaining));
+    }
+
+    if (actions.length === 0) {
         return '<td data-label="Assign" class="col-assign"><span class="import-assign-empty">&mdash;</span></td>';
     }
 
-    return `<td data-label="Assign" class="col-assign">${renderWorkflowAssignButton(workflow, remaining)}</td>`;
+    return `<td data-label="Assign" class="col-assign"><div class="import-assign-actions">${actions.join('')}</div></td>`;
 }
 
 function renderWorkflowAssignButton(workflow, remaining = null) {
@@ -147,6 +191,24 @@ function renderWorkflowAssignButton(workflow, remaining = null) {
         >Assign</button>`;
 }
 
+function renderWorkflowUnassignButton(workflow, remaining = null) {
+    const ready = remaining ?? getWorkflowAssignRemaining(workflow);
+    const agents = Array.isArray(workflow.assigned_agents) ? workflow.assigned_agents : [];
+
+    return `<button
+            type="button"
+            class="app-btn app-btn-secondary app-btn-sm import-unassign-btn"
+            data-import-unassign-open
+            data-workflow-id="${workflow.id}"
+            data-workflow-name="${escapeHtml(workflow.name)}"
+            data-workflow-total="${workflow.total_leads ?? 0}"
+            data-workflow-assigned="${workflow.assigned_leads ?? 0}"
+            data-workflow-remaining="${ready}"
+            data-assigned-agents="${escapeHtml(JSON.stringify(agents))}"
+            title="Return assigned leads to the pool"
+        >Unassign</button>`;
+}
+
 function patchWorkflowAssignCell(cell, workflow) {
     if (!cell) {
         return;
@@ -154,25 +216,39 @@ function patchWorkflowAssignCell(cell, workflow) {
 
     const remaining = getWorkflowAssignRemaining(workflow);
     const canAssign = workflowCanAssign(workflow);
-    const existingBtn = cell.querySelector('[data-import-assign-open]');
+    const assigned = Number(workflow.assigned_leads ?? 0);
+    const existingAssign = cell.querySelector('[data-import-assign-open]');
+    const existingUnassign = cell.querySelector('[data-import-unassign-open]');
+    const needsAssign = canAssign;
+    const needsUnassign = assigned > 0;
 
-    if (canAssign) {
-        if (existingBtn) {
-            existingBtn.dataset.workflowId = String(workflow.id);
-            existingBtn.dataset.workflowName = workflow.name ?? '';
-            existingBtn.dataset.workflowTotal = String(workflow.total_leads ?? 0);
-            existingBtn.dataset.workflowEnriched = String(workflow.enriched_leads ?? 0);
-            existingBtn.dataset.workflowAssigned = String(workflow.assigned_leads ?? 0);
-            existingBtn.dataset.workflowRemaining = String(remaining);
-            return;
+    if (needsAssign === Boolean(existingAssign) && needsUnassign === Boolean(existingUnassign)) {
+        if (existingAssign) {
+            existingAssign.dataset.workflowId = String(workflow.id);
+            existingAssign.dataset.workflowName = workflow.name ?? '';
+            existingAssign.dataset.workflowTotal = String(workflow.total_leads ?? 0);
+            existingAssign.dataset.workflowEnriched = String(workflow.enriched_leads ?? 0);
+            existingAssign.dataset.workflowAssigned = String(assigned);
+            existingAssign.dataset.workflowRemaining = String(remaining);
         }
-
-        cell.innerHTML = renderWorkflowAssignButton(workflow, remaining);
+        if (existingUnassign) {
+            existingUnassign.dataset.workflowId = String(workflow.id);
+            existingUnassign.dataset.workflowName = workflow.name ?? '';
+            existingUnassign.dataset.workflowTotal = String(workflow.total_leads ?? 0);
+            existingUnassign.dataset.workflowAssigned = String(assigned);
+            existingUnassign.dataset.workflowRemaining = String(remaining);
+            existingUnassign.setAttribute('data-assigned-agents', JSON.stringify(Array.isArray(workflow.assigned_agents) ? workflow.assigned_agents : []));
+        }
         return;
     }
 
-    if (!existingBtn && !cell.querySelector('.import-assign-empty')) {
-        cell.innerHTML = '<span class="import-assign-empty">&mdash;</span>';
+    cell.className = 'col-assign';
+    const wrap = document.createElement('tbody');
+    wrap.innerHTML = `<tr>${renderWorkflowAssignCell(workflow)}</tr>`;
+    const next = wrap.querySelector('td');
+    if (next) {
+        cell.className = next.className;
+        cell.innerHTML = next.innerHTML;
     }
 }
 
@@ -201,8 +277,114 @@ function patchWorkflowActionsCell(cell, workflow, showBase) {
     cell.innerHTML = workflowActionForms(workflow, showBase);
 }
 
+function renderWorkflowAgentsCell(workflow, showBase) {
+    const restricted = Boolean(workflow.agent_restricted);
+    const btnClass = restricted ? 'app-btn-danger' : 'app-btn-secondary';
+    const label = restricted ? 'Restricted' : 'Visible';
+    const title = restricted
+        ? 'Allow agents to see this file'
+        : 'Hide this file from agent dialer';
+
+    return `<td data-label="Agents" class="col-agents">
+        <div class="import-agent-visibility">
+            <button type="button"
+                class="app-btn app-btn-sm ${btnClass} import-restrict-btn"
+                data-import-restrict-toggle
+                data-workflow-id="${workflow.id}"
+                data-restricted="${restricted ? '1' : '0'}"
+                data-toggle-url="${showBase}/${workflow.id}"
+                title="${escapeHtml(title)}">${label}</button>
+            <button type="button"
+                class="app-btn app-btn-sm app-btn-secondary import-share-btn"
+                data-import-share-open
+                data-workflow-id="${workflow.id}"
+                data-workflow-name="${escapeHtml(workflow.name || '')}"
+                data-access-url="/admin/workflows/${workflow.id}/agent-access"
+                data-access-sync-url="/admin/workflows/${workflow.id}/agent-access"
+                title="Choose which agents can see this file">Share</button>
+        </div>
+    </td>`;
+}
+
+function patchWorkflowAgentsCell(cell, workflow, showBase) {
+    if (!cell) {
+        return;
+    }
+
+    // Never invent "Visible" when sync omitted the flag — that was unrestricting files on its own.
+    if (!Object.prototype.hasOwnProperty.call(workflow, 'agent_restricted')) {
+        const existing = cell.querySelector('[data-import-restrict-toggle]');
+        if (existing) {
+            existing.dataset.workflowId = String(workflow.id);
+            existing.dataset.toggleUrl = `${showBase}/${workflow.id}`;
+            return;
+        }
+    }
+
+    const restricted = Boolean(workflow.agent_restricted);
+    const btn = cell.querySelector('[data-import-restrict-toggle]');
+    if (btn) {
+        const next = restricted ? '1' : '0';
+        if (btn.dataset.restricted !== next) {
+            btn.dataset.restricted = next;
+            btn.textContent = restricted ? 'Restricted' : 'Visible';
+            btn.classList.toggle('app-btn-danger', restricted);
+            btn.classList.toggle('app-btn-secondary', !restricted);
+            btn.title = restricted
+                ? 'Allow agents to see this file'
+                : 'Hide this file from agent dialer';
+        }
+        btn.dataset.workflowId = String(workflow.id);
+        btn.dataset.toggleUrl = `${showBase}/${workflow.id}`;
+        return;
+    }
+
+    const nextCell = cellFromRender(renderWorkflowAgentsCell(workflow, showBase));
+    if (nextCell) {
+        cell.innerHTML = nextCell.innerHTML;
+        cell.className = nextCell.className;
+    }
+}
+
+function renderAssignedAgentsCellHtml(workflow) {
+    const total = Number(workflow.assigned_leads ?? 0);
+    const agents = Array.isArray(workflow.assigned_agents) ? workflow.assigned_agents : [];
+    const rows = agents.slice(0, 4).map((agent) => {
+        const name = escapeHtml(agent?.name || `Agent #${agent?.user_id || ''}`);
+        const count = Number(agent?.count ?? 0).toLocaleString();
+        return `<li><span class="import-assigned-agents__name">${name}</span><span class="import-assigned-agents__count">${count}</span></li>`;
+    }).join('');
+    const more = agents.length > 4
+        ? `<li><button type="button" class="import-assigned-agents__more" data-assigned-agents-more data-workflow-name="${escapeHtml(workflow.name || 'Import')}" data-assigned-total="${total}" data-assigned-agents="${escapeHtml(JSON.stringify(agents))}">+${agents.length - 4} more</button></li>`
+        : '';
+    const list = agents.length > 0
+        ? `<ul class="import-assigned-agents" title="Agents this file is assigned to">${rows}${more}</ul>`
+        : (total === 0 ? '<span class="import-assigned-empty">No agents yet</span>' : '');
+
+    return `<div class="import-assigned-cell"><strong class="import-assigned-total">${total.toLocaleString()}</strong>${list}</div>`;
+}
+
+function patchAssignedAgentsCell(el, workflow) {
+    if (!el) {
+        return;
+    }
+
+    const next = renderAssignedAgentsCellHtml(workflow);
+    if (el.innerHTML.trim() === next.trim()) {
+        return;
+    }
+    el.innerHTML = next;
+    el.className = 'import-workflow-stat import-workflow-stat-success';
+    el.setAttribute('data-import-assigned', '1');
+}
+
 function patchImportStatCell(el, value) {
     if (!el) {
+        return;
+    }
+
+    // Never wipe rich Assigned/Agents cells with a bare number.
+    if (el.hasAttribute('data-import-assigned') || el.querySelector('.import-assigned-cell')) {
         return;
     }
 
@@ -253,7 +435,7 @@ function escapeHtml(value) {
 
 function renderLeadCampaignMeta(lead) {
     const campaignHtml = lead.campaign_name
-        ? `<span class="campaign-chip campaign-chip--sm">${escapeHtml(lead.campaign_name)}</span>`
+        ? `<span class="campaign-chip campaign-chip--${campaignChipTone(lead.campaign_id, lead.campaign_name)} campaign-chip--sm">${escapeHtml(lead.campaign_name)}</span>`
         : '';
     const listHtml = lead.lead_list_name
         ? `<div class="text-[10px] text-zinc-400 mt-0.5">List: <span class="font-medium text-zinc-600">${escapeHtml(lead.lead_list_name)}</span></div>`
@@ -262,18 +444,38 @@ function renderLeadCampaignMeta(lead) {
     return `${campaignHtml}${listHtml ? `<div class="mt-0.5">${listHtml}</div>` : ''}`;
 }
 
+function campaignChipTone(campaignId, campaignName = '') {
+    const tones = ['emerald', 'sky', 'violet', 'amber', 'rose', 'cyan', 'indigo', 'teal', 'orange', 'lime', 'fuchsia', 'blue'];
+    const id = Number(campaignId || 0);
+    if (id > 0) {
+        return tones[id % tones.length];
+    }
+    const raw = String(campaignName || '').trim().toLowerCase();
+    if (!raw) {
+        return 'slate';
+    }
+    let hash = 0;
+    for (let i = 0; i < raw.length; i += 1) {
+        hash = ((hash << 5) - hash) + raw.charCodeAt(i);
+        hash |= 0;
+    }
+    return tones[Math.abs(hash) % tones.length];
+}
+
 function campaignChipHtml(campaignId, campaignName, campaignBase) {
     if (!campaignName) {
         return '';
     }
 
+    const tone = campaignChipTone(campaignId, campaignName);
+    const classes = `campaign-chip campaign-chip--${tone} campaign-chip--sm mt-1`;
     const href = campaignId && campaignBase
         ? `${campaignBase}/${campaignId}`
         : null;
 
     return href
-        ? `<a href="${escapeHtml(href)}" class="campaign-chip campaign-chip--sm mt-1">${escapeHtml(campaignName)}</a>`
-        : `<span class="campaign-chip campaign-chip--sm mt-1">${escapeHtml(campaignName)}</span>`;
+        ? `<a href="${escapeHtml(href)}" class="${classes}">${escapeHtml(campaignName)}</a>`
+        : `<span class="${classes}">${escapeHtml(campaignName)}</span>`;
 }
 
 function workflowImportCellHtml(workflow, campaignBase) {
@@ -478,9 +680,20 @@ const WORKFLOW_PILL_CLASS = {
     failed: 'app-status-pill-failed',
 };
 
-function renderWorkflowStatusPill(status) {
-    const label = WORKFLOW_STATUS_LABELS[status] || status;
-    const pillClass = WORKFLOW_PILL_CLASS[status] || 'app-status-pill-queued';
+const WORKFLOW_UPLOAD_PILL_CLASS = {
+    ...WORKFLOW_PILL_CLASS,
+    extracting: 'app-status-pill-uploading',
+};
+
+function renderWorkflowStatusPill(workflowOrStatus, processingMode = null) {
+    const workflow = workflowOrStatus && typeof workflowOrStatus === 'object'
+        ? workflowOrStatus
+        : { status: workflowOrStatus, processing_mode: processingMode };
+    const status = workflow.status;
+    const uploadOnly = isUploadOnlyWorkflow(workflow);
+    const label = workflowStatusLabel(workflow);
+    const pillClass = (uploadOnly ? WORKFLOW_UPLOAD_PILL_CLASS : WORKFLOW_PILL_CLASS)[status]
+        || 'app-status-pill-queued';
 
     return `<span class="app-status-pill ${pillClass}">${escapeHtml(label)}</span>`;
 }
@@ -535,22 +748,56 @@ function renderPipelineLeadRow(lead, leadShowBase, csrf) {
     `;
 }
 
+function renderDispositionCellHtml(workflow) {
+    const total = Number(workflow.disposition_total ?? 0);
+    const breakdown = Array.isArray(workflow.disposition_breakdown) ? workflow.disposition_breakdown : [];
+    if (total < 1) {
+        return `<td data-label="Dispositions" class="col-dispositions" data-import-dispositions><span class="import-disposition-empty">0</span></td>`;
+    }
+    const top = breakdown[0]?.label ? `<span class="import-disposition-btn__top">${escapeHtml(breakdown[0].label)}</span>` : '';
+    return `<td data-label="Dispositions" class="col-dispositions" data-import-dispositions>
+        <button type="button" class="import-disposition-btn" data-import-dispositions-open
+            data-workflow-id="${workflow.id}"
+            data-workflow-name="${escapeHtml(workflow.name || 'Import')}"
+            data-dispositions-url="/admin/workflows/${workflow.id}/dispositions"
+            title="View all dispositions submitted by agents">
+            <strong class="import-disposition-btn__total">${total.toLocaleString()}</strong>
+            <span class="import-disposition-btn__label">total</span>
+            ${top}
+        </button>
+    </td>`;
+}
+
+function patchDispositionCell(cell, workflow) {
+    if (!cell) return;
+    const wrap = document.createElement('tbody');
+    wrap.innerHTML = `<tr>${renderDispositionCellHtml(workflow)}</tr>`;
+    const next = wrap.querySelector('td');
+    if (!next) return;
+    if (cell.innerHTML.trim() === next.innerHTML.trim()) return;
+    cell.className = next.className;
+    cell.innerHTML = next.innerHTML;
+    cell.setAttribute('data-import-dispositions', '1');
+}
+
 function renderWorkflowRow(workflow, showBase, campaignBase = '') {
     const remaining = getWorkflowAssignRemaining(workflow);
 
     return `
-        <tr data-workflow-id="${workflow.id}">
+        <tr data-workflow-id="${workflow.id}" data-agent-restricted="${workflow.agent_restricted ? '1' : '0'}">
             <td data-label="Import name" class="col-import-name">
                 ${workflowImportCellHtml(workflow, campaignBase)}
             </td>
             <td data-label="File" class="col-file import-workflow-file" title="${escapeHtml(workflow.original_filename || '')}">${escapeHtml(workflow.original_filename || '')}</td>
-            <td data-label="Status" class="col-status">${renderWorkflowStatusPill(workflow.status)}</td>
+            <td data-label="Status" class="col-status">${renderWorkflowStatusPill(workflow)}</td>
             ${renderWorkflowProgressCell(workflow)}
             <td data-label="Total" class="col-total import-workflow-stat">${Number(workflow.total_leads ?? 0).toLocaleString()}</td>
             <td data-label="Enriched" class="col-enriched import-workflow-stat">${Number(workflow.enriched_leads ?? 0).toLocaleString()}</td>
-            <td data-label="Assigned" class="col-assigned import-workflow-stat import-workflow-stat-success">${Number(workflow.assigned_leads ?? 0).toLocaleString()}</td>
+            <td data-label="Assigned" class="col-assigned import-workflow-stat import-workflow-stat-success" data-import-assigned>${renderAssignedAgentsCellHtml(workflow)}</td>
+            ${renderDispositionCellHtml(workflow)}
             <td data-label="Remaining" class="col-remaining import-workflow-stat import-workflow-stat-warning">${remaining.toLocaleString()}</td>
             ${renderWorkflowAssignCell(workflow)}
+            ${renderWorkflowAgentsCell(workflow, showBase)}
             <td data-label="Actions" class="col-actions text-right">${workflowActionForms(workflow, showBase)}</td>
         </tr>
     `;
@@ -664,7 +911,7 @@ function patchWorkflowRowCells(row, workflow, showBase, campaignBase = '') {
         cells[0].innerHTML = nameHtml;
     }
 
-    const statusHtml = renderWorkflowStatusPill(workflow.status);
+    const statusHtml = renderWorkflowStatusPill(workflow);
     if (cells[2].innerHTML.trim() !== statusHtml.trim()) {
         cells[2].innerHTML = statusHtml;
     }
@@ -677,12 +924,25 @@ function patchWorkflowRowCells(row, workflow, showBase, campaignBase = '') {
 
     patchImportStatCell(cells[4], Number(workflow.total_leads ?? 0).toLocaleString());
     patchImportStatCell(cells[5], Number(workflow.enriched_leads ?? 0).toLocaleString());
-    patchImportStatCell(cells[6], Number(workflow.assigned_leads ?? 0).toLocaleString());
-    patchImportStatCell(cells[7], getWorkflowAssignRemaining(workflow).toLocaleString());
+    patchAssignedAgentsCell(cells[6], workflow);
 
-    patchWorkflowAssignCell(cells[8], workflow);
-
-    patchWorkflowActionsCell(cells[9], workflow, showBase);
+    // 12-col admin imports: Assigned(6) Dispositions(7) Ready(8) Assign(9) Agents(10) Actions(11)
+    if (expectedCols >= 12) {
+        patchDispositionCell(cells[7], workflow);
+        patchImportStatCell(cells[8], getWorkflowAssignRemaining(workflow).toLocaleString());
+        patchWorkflowAssignCell(cells[9], workflow);
+        patchWorkflowAgentsCell(cells[10], workflow, showBase);
+        patchWorkflowActionsCell(cells[11], workflow, showBase);
+    } else if (expectedCols >= 11) {
+        patchImportStatCell(cells[7], getWorkflowAssignRemaining(workflow).toLocaleString());
+        patchWorkflowAssignCell(cells[8], workflow);
+        patchWorkflowAgentsCell(cells[9], workflow, showBase);
+        patchWorkflowActionsCell(cells[10], workflow, showBase);
+    } else {
+        patchImportStatCell(cells[7], getWorkflowAssignRemaining(workflow).toLocaleString());
+        patchWorkflowAssignCell(cells[8], workflow);
+        patchWorkflowActionsCell(cells[9], workflow, showBase);
+    }
 }
 
 function workflowsVisibleOnPage(tbody, workflows) {
@@ -786,12 +1046,20 @@ function reapplyPipelineLeadFilter() {
 }
 
 function formatWorkflowProgressLabel(wf) {
+    if (isUploadOnlyWorkflow(wf)) {
+        const total = Number(wf.total_leads ?? 0);
+        const done = wf.ingestion_complete === true || wf.status === 'completed';
+        return done
+            ? `100% · ${total} / ${total} uploaded`
+            : `${total} uploaded…`;
+    }
+
     const done = (wf.attempted_leads ?? ((wf.enriched_leads ?? 0) + (wf.failed_leads ?? 0)));
-    return `${wf.completion_pct ?? 0}% ┬╖ ${done} / ${wf.total_leads ?? 0}`;
+    return `${wf.completion_pct ?? 0}% · ${done} / ${wf.total_leads ?? 0}`;
 }
 
 const SYNC_ACTIVE_MS = 2000;
-const SYNC_LITE_MS = 15000;
+const SYNC_LITE_MS = 45000;
 const SYNC_HIDDEN_MS = 10000;
 const SYNC_ERROR_MS = 4000;
 
@@ -1012,9 +1280,9 @@ let syncRequestHandler = null;
 let syncPollTimer = null;
 let syncPollAborted = false;
 let syncGeneration = 0;
-const SYNC_LIST_POLL_MS = 8000;
-const SYNC_FULL_POLL_MS = 5000;
-const SYNC_HIDDEN_POLL_MS = 30000;
+const SYNC_LIST_POLL_MS = 30000;
+const SYNC_FULL_POLL_MS = 30000;
+const SYNC_HIDDEN_POLL_MS = 90000;
 
 const SYNC_TARGET_IDS = [
     'workspace-sync-leads-body',
@@ -1097,18 +1365,29 @@ export function initWorkspaceSync() {
     const root = document.body;
     const streamUrl = root.dataset.workspaceSyncStreamUrl;
     const pollUrl = root.dataset.workspaceSyncUrl;
-    const usePoll = root.dataset.workspaceSyncUsePoll === '1';
     const syncLite = root.dataset.workspaceSyncScope === 'lite';
 
     if (!pageNeedsWorkspaceSync()) {
         return;
     }
 
-    if ((syncLite || usePoll) && !pollUrl) {
+    const pageContext = document.getElementById('workspace-sync-page');
+    const workflowId = pageContext?.dataset.workflowId || root.dataset.workspaceWorkflowId || null;
+    const leadId = pageContext?.dataset.leadId || root.dataset.workspaceLeadId || null;
+    const syncScope = syncLite ? 'lite' : (pageContext?.dataset.syncScope || null);
+    const pageUsePoll = pageContext?.dataset.usePoll === '1' || pageContext?.dataset.usePoll === 'true';
+    // Imports/list pages: prefer poll — EventSource streams often hit proxy 504 / HTTP2 errors.
+    let preferPoll = root.dataset.workspaceSyncUsePoll === '1'
+        || root.dataset.workspaceSyncUsePoll === 'true'
+        || pageUsePoll
+        || syncScope === 'list';
+    let streamFailCount = 0;
+
+    if ((syncLite || preferPoll) && !pollUrl) {
         return;
     }
 
-    if (!syncLite && !usePoll && (!streamUrl || typeof EventSource === 'undefined')) {
+    if (!syncLite && !preferPoll && (!streamUrl || typeof EventSource === 'undefined')) {
         return;
     }
 
@@ -1117,10 +1396,6 @@ export function initWorkspaceSync() {
     let cursor = loadStoredCursor(workspaceId);
     let hasSyncedOnce = sessionStorage.getItem(readyStorageKey(workspaceId)) === '1';
     const seenEventIds = loadSeenEventIds(workspaceId);
-    const pageContext = document.getElementById('workspace-sync-page');
-    const workflowId = pageContext?.dataset.workflowId || root.dataset.workspaceWorkflowId || null;
-    const leadId = pageContext?.dataset.leadId || root.dataset.workspaceLeadId || null;
-    const syncScope = syncLite ? 'lite' : (pageContext?.dataset.syncScope || null);
     const leadShowBase = root.dataset.leadShowBase || '/portal/leads';
     const workflowShowBase = root.dataset.workflowShowBase || '/admin/workflows';
 
@@ -1234,7 +1509,7 @@ export function initWorkspaceSync() {
 
             if (workflowId && Array.isArray(data.workflows) && data.workflows.length > 0) {
                 const wf = data.workflows[0];
-                smoothHtmlUpdate(workflowStatus, renderWorkflowStatusPill(wf.status));
+                smoothHtmlUpdate(workflowStatus, renderWorkflowStatusPill(wf));
             smoothTextUpdate(workflowProgress, String(wf.attempted_leads ?? wf.enriched_leads ?? 0));
                 smoothTextUpdate(workflowAssigned, String(wf.assigned_leads ?? 0));
                 smoothTextUpdate(workflowPendingReview, String(wf.pending_verification ?? 0));
@@ -1274,12 +1549,16 @@ export function initWorkspaceSync() {
         syncPollTimer = window.setTimeout(pollTick, delayMs);
     }
 
+    let syncFetchInFlight = false;
     async function pollTick() {
         if (syncPollAborted || generation !== syncGeneration || !pollUrl) {
             return;
         }
 
-        const pollInterval = syncLite ? SYNC_LITE_MS : (syncScope === 'list' ? SYNC_LIST_POLL_MS : SYNC_FULL_POLL_MS);
+        const customPollMs = Number(root.dataset.syncPollMs || 0);
+        const pollInterval = customPollMs > 0
+            ? customPollMs
+            : (syncLite ? SYNC_LITE_MS : (syncScope === 'list' ? SYNC_LIST_POLL_MS : SYNC_FULL_POLL_MS));
         const hiddenInterval = SYNC_HIDDEN_POLL_MS;
 
         if (document.hidden) {
@@ -1287,6 +1566,14 @@ export function initWorkspaceSync() {
             return;
         }
 
+        // Collapse overlapping sync fetches (double boot / turbo race).
+        if (syncFetchInFlight || window.__apexWorkspaceSyncInFlight) {
+            schedulePoll(Math.min(pollInterval, 1500));
+            return;
+        }
+
+        syncFetchInFlight = true;
+        window.__apexWorkspaceSyncInFlight = true;
         try {
             const response = await fetch(buildSyncUrl(pollUrl), {
                 headers: {
@@ -1310,6 +1597,9 @@ export function initWorkspaceSync() {
             if (!syncPollAborted && generation === syncGeneration) {
                 updateSyncIndicator('paused');
             }
+        } finally {
+            syncFetchInFlight = false;
+            window.__apexWorkspaceSyncInFlight = false;
         }
 
         schedulePoll(document.hidden ? hiddenInterval : pollInterval);
@@ -1347,6 +1637,7 @@ export function initWorkspaceSync() {
                 source.close();
                 return;
             }
+            streamFailCount = 0;
             updateSyncIndicator('live');
         };
 
@@ -1378,6 +1669,13 @@ export function initWorkspaceSync() {
                 return;
             }
             updateSyncIndicator('paused');
+            streamFailCount += 1;
+            // After repeated stream failures (504 / HTTP2), fall back to polling so the page stays usable.
+            if (streamFailCount >= 2 && pollUrl) {
+                preferPoll = true;
+                connectPoll();
+                return;
+            }
             scheduleReconnect(2000);
         };
     }
@@ -1386,7 +1684,7 @@ export function initWorkspaceSync() {
         if (syncPollAborted || generation !== syncGeneration) {
             return;
         }
-        if (syncLite || usePoll) {
+        if (syncLite || preferPoll) {
             connectPoll();
             return;
         }
@@ -1400,7 +1698,7 @@ export function initWorkspaceSync() {
         if (document.hidden || syncPollAborted || generation !== syncGeneration) {
             return;
         }
-        if (syncLite || usePoll) {
+        if (syncLite || preferPoll) {
             if (!syncPollTimer && !syncPollAborted) {
                 schedulePoll(0);
             }
@@ -1412,7 +1710,7 @@ export function initWorkspaceSync() {
     };
     document.addEventListener('visibilitychange', syncVisibilityHandler);
 
-    if (syncLite || usePoll) {
+    if (syncLite || preferPoll) {
         if (syncLite && 'requestIdleCallback' in window) {
             requestIdleCallback(connectPoll, { timeout: 2500 });
         } else {

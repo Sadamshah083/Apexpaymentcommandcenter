@@ -1,6 +1,6 @@
 @extends('layouts.portal')
 
-@section('title', 'Agent Status')
+@section('title', 'All call logs')
 
 @section('content')
     @include('communications.agent-status.partials.panel')

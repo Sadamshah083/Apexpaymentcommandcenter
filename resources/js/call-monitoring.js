@@ -309,6 +309,35 @@ function mergeStickyRows(root, liveRows, nowMs = Date.now()) {
     return merged;
 }
 
+function rowStructuralKey(row) {
+    return [
+        String(row?.id || ''),
+        String(row?.user_id || ''),
+        String(row?.station || row?.extension || ''),
+        String(row?.user || ''),
+        String(row?.role_label || ''),
+        String(row?.status_group || ''),
+        bucketFor(row),
+        String(row?.connected_at || ''),
+        String(row?.idle_since || ''),
+        String(row?.break_ends_at || row?.ends_at || ''),
+        String(row?.dial_mode || ''),
+        String(row?.destination || ''),
+        String(row?.campaign || ''),
+    ].join('|');
+}
+
+function isAdminLikeRow(row) {
+    const name = String(row?.user || '').trim().toLowerCase();
+    const role = String(row?.role_label || '').trim().toLowerCase();
+    const local = name.includes('@') ? name.split('@')[0] : name;
+    const normalized = local.replace(/[^a-z0-9]+/g, '');
+    if (['admin', 'superadmin', 'administrator', 'root'].includes(normalized)) {
+        return true;
+    }
+    return ['admin', 'super admin', 'manager'].includes(role);
+}
+
 function fillTable(root, bucket, rows, nowMs = Date.now()) {
     const tbody = root.querySelector(`[data-call-monitoring-rows="${bucket}"]`);
     const board = root.querySelector(`[data-call-monitoring-board="${bucket}"]`);
@@ -316,7 +345,7 @@ function fillTable(root, bucket, rows, nowMs = Date.now()) {
         return;
     }
 
-    const list = Array.isArray(rows) ? rows : [];
+    const list = (Array.isArray(rows) ? rows : []).filter((row) => !isAdminLikeRow(row));
     // Remember role labels per row so light/full poll flicker cannot blank "Appointment Setter".
     if (!root._roleLabelMemory) {
         root._roleLabelMemory = Object.create(null);
@@ -343,8 +372,38 @@ function fillTable(root, bucket, rows, nowMs = Date.now()) {
         }
     });
 
+    const structureKey = list.map((row) => rowStructuralKey(row)).join('||');
+    if (tbody.dataset.structureKey === structureKey) {
+        if (list.length > 0) {
+            // Same roster identity — only patch timers / status cells in place.
+            const byId = new Map();
+            tbody.querySelectorAll('.call-monitoring-row').forEach((el) => {
+                const id = String(el.dataset.rowId || '');
+                if (id) {
+                    byId.set(id, el);
+                }
+            });
+            list.forEach((row) => {
+                const el = byId.get(String(row.id || ''));
+                if (el) {
+                    patchRow(el, row, nowMs);
+                }
+            });
+        }
+        return;
+    }
+    tbody.dataset.structureKey = structureKey;
+
     if (list.length === 0) {
-        tbody.innerHTML = emptyRow(emptyMessageFor(bucket));
+        if (!tbody.querySelector('[data-call-monitoring-empty]')) {
+            tbody.replaceChildren();
+            const wrap = document.createElement('tbody');
+            wrap.innerHTML = emptyRow(emptyMessageFor(bucket));
+            const empty = wrap.firstElementChild;
+            if (empty) {
+                tbody.appendChild(empty);
+            }
+        }
     } else {
         // Keyed reconciliation: patch / reorder existing <tr>s instead of wiping innerHTML.
         tbody.querySelector('[data-call-monitoring-empty]')?.remove();
@@ -359,6 +418,7 @@ function fillTable(root, bucket, rows, nowMs = Date.now()) {
         });
 
         const keep = new Set();
+        const nextNodes = [];
         list.forEach((row) => {
             const id = String(row.id || '');
             if (!id) {
@@ -377,7 +437,7 @@ function fillTable(root, bucket, rows, nowMs = Date.now()) {
             } else {
                 patchRow(el, row, nowMs);
             }
-            tbody.appendChild(el);
+            nextNodes.push(el);
         });
 
         existingById.forEach((el, id) => {
@@ -385,6 +445,18 @@ function fillTable(root, bucket, rows, nowMs = Date.now()) {
                 el.remove();
             }
         });
+
+        // Only touch DOM order when it actually changed (avoids layout thrash / flicker).
+        let orderChanged = nextNodes.length !== tbody.querySelectorAll('.call-monitoring-row').length;
+        if (!orderChanged) {
+            const current = [...tbody.querySelectorAll('.call-monitoring-row')];
+            orderChanged = nextNodes.some((el, idx) => current[idx] !== el);
+        }
+        if (orderChanged) {
+            const frag = document.createDocumentFragment();
+            nextNodes.forEach((el) => frag.appendChild(el));
+            tbody.appendChild(frag);
+        }
     }
 
     const countEl = board?.querySelector('[data-board-count]');
@@ -612,7 +684,7 @@ function applySnapshot(root, payload) {
     }
 
     const tables = payload.tables || {};
-    const allRows = Array.isArray(payload.rows) ? payload.rows : [];
+    const allRows = (Array.isArray(payload.rows) ? payload.rows : []).filter((row) => !isAdminLikeRow(row));
     const enriched = allRows.map((row) => {
         if (row.status_group !== 'incall' && row.bucket !== 'incall_short' && row.bucket !== 'incall_long') {
             return row;
@@ -625,12 +697,14 @@ function applySnapshot(root, payload) {
         };
     });
 
-    const ringing = tables.ringing
-        || enriched.filter((row) => bucketFor(row) === 'ringing');
+    const ringing = (tables.ringing
+        || enriched.filter((row) => bucketFor(row) === 'ringing')).filter((row) => !isAdminLikeRow(row));
     const shortRows = (tables.incall_short || enriched.filter((row) => bucketFor(row) === 'incall_short'))
+        .filter((row) => !isAdminLikeRow(row))
         .map((row) => ({ ...row, timer_sec: timerSecForRow(row, nowMs) }))
         .filter((row) => timerSecForRow(row, nowMs) <= 120);
     const longRows = (tables.incall_long || enriched.filter((row) => bucketFor(row) === 'incall_long'))
+        .filter((row) => !isAdminLikeRow(row))
         .map((row) => ({ ...row, timer_sec: timerSecForRow(row, nowMs) }))
         .filter((row) => timerSecForRow(row, nowMs) > 120);
 
@@ -638,23 +712,23 @@ function applySnapshot(root, payload) {
     const shortFinal = allConnected.filter((row) => timerSecForRow(row, nowMs) <= 120);
     const longFinal = allConnected.filter((row) => timerSecForRow(row, nowMs) > 120);
 
-    const notInCallRaw = Array.isArray(tables.not_in_call) ? tables.not_in_call : [];
-    const notLoggedInRaw = Array.isArray(tables.not_logged_in) ? tables.not_logged_in : [];
-    const deadRows = Array.isArray(tables.dead)
+    const notInCallRaw = (Array.isArray(tables.not_in_call) ? tables.not_in_call : []).filter((row) => !isAdminLikeRow(row));
+    const notLoggedInRaw = (Array.isArray(tables.not_logged_in) ? tables.not_logged_in : []).filter((row) => !isAdminLikeRow(row));
+    const deadRows = (Array.isArray(tables.dead)
         ? tables.dead
-        : enriched.filter((row) => bucketFor(row) === 'dead');
-    const dispositionRaw = Array.isArray(tables.disposition)
+        : enriched.filter((row) => bucketFor(row) === 'dead')).filter((row) => !isAdminLikeRow(row));
+    const dispositionRaw = (Array.isArray(tables.disposition)
         ? tables.disposition
-        : enriched.filter((row) => bucketFor(row) === 'disposition');
-    const breakRaw = Array.isArray(tables.break)
+        : enriched.filter((row) => bucketFor(row) === 'disposition')).filter((row) => !isAdminLikeRow(row));
+    const breakRaw = (Array.isArray(tables.break)
         ? tables.break
-        : enriched.filter((row) => bucketFor(row) === 'break');
-    const lunchRaw = Array.isArray(tables.lunch)
+        : enriched.filter((row) => bucketFor(row) === 'break')).filter((row) => !isAdminLikeRow(row));
+    const lunchRaw = (Array.isArray(tables.lunch)
         ? tables.lunch
-        : enriched.filter((row) => bucketFor(row) === 'lunch');
-    const queueRows = Array.isArray(tables.queue)
+        : enriched.filter((row) => bucketFor(row) === 'lunch')).filter((row) => !isAdminLikeRow(row));
+    const queueRows = (Array.isArray(tables.queue)
         ? tables.queue
-        : enriched.filter((row) => bucketFor(row) === 'queue');
+        : enriched.filter((row) => bucketFor(row) === 'queue')).filter((row) => !isAdminLikeRow(row));
 
     // Pin live / idle / break rows briefly so light polls cannot flash them to NOT LOGGED IN.
     rememberStickyRows(root, [...shortFinal, ...longFinal, ...ringing, ...queueRows, ...dispositionRaw, ...breakRaw, ...lunchRaw, ...notInCallRaw], nowMs);
@@ -971,14 +1045,16 @@ function syncSidebarFromBoard(root) {
 let monitoringRuntime = null;
 
 /**
+ * Call Monitoring wallboard — WebSocket-first realtime + SSE fallback.
  * Timers tick locally every 1s from connected_at (matches dialer).
- * When the board has live rows, poll fast so hangup disappears in real time.
  */
-const BOARD_POLL_ACTIVE_MS = 8000;
-const BOARD_POLL_IDLE_MS = 20000;
-const BOARD_POLL_SSE_MS = 30000;
-const BOARD_FULL_EVERY = 10;
-const NAV_POLL_MS = 30000;
+const BOARD_POLL_ACTIVE_MS = 15000;
+const BOARD_POLL_IDLE_MS = 60000;
+const BOARD_POLL_SSE_MS = 120000;
+const BOARD_FULL_EVERY = 20;
+const NAV_POLL_MS = 120000;
+const WS_REFRESH_DEBOUNCE_MS = 120;
+const WS_REFRESH_MIN_GAP_MS = 250;
 
 function digitsOnly(value) {
     return String(value ?? '').replace(/\D/g, '');
@@ -1076,12 +1152,18 @@ function stopMonitoringRuntime() {
     }
     window.clearInterval(monitoringRuntime.pollTimer);
     window.clearInterval(monitoringRuntime.tickTimer);
+    window.clearTimeout(monitoringRuntime.wsRefreshTimer);
     monitoringRuntime.abortController?.abort();
     if (typeof monitoringRuntime.streamGeneration === 'number') {
         monitoringRuntime.streamGeneration += 1;
     }
     try {
         monitoringRuntime.eventSource?.close();
+    } catch {
+        // ignore
+    }
+    try {
+        monitoringRuntime.webSocket?.close();
     } catch {
         // ignore
     }
@@ -1112,12 +1194,29 @@ export function initCallMonitoring(root = document) {
         return;
     }
 
+    // Communications dialer: zero /live polling — sidebar chips stay idle here.
+    const onDialerPage = Boolean(document.querySelector('[data-phone-workspace], [data-auto-dial-hub]'));
+    if (onDialerPage && !board) {
+        stopMonitoringRuntime();
+        document.documentElement.dataset.callMonitoringInit = '0';
+
+        return;
+    }
+
     const pollUrl = board?.dataset.callMonitoringPollUrl
         || navLinks[0]?.dataset.callMonitoringPollUrl
         || '';
     const streamUrl = board?.dataset.callMonitoringStreamUrl
         || navLinks[0]?.dataset.callMonitoringStreamUrl
         || '';
+    const wsUrlBase = board?.dataset.callMonitoringWsUrl
+        || navLinks[0]?.dataset.callMonitoringWsUrl
+        || '';
+    const workspaceId = String(
+        board?.dataset.callMonitoringWorkspaceId
+        || navLinks[0]?.dataset.callMonitoringWorkspaceId
+        || '',
+    ).trim();
 
     const navOnly = !board && navLinks.length > 0;
 
@@ -1143,9 +1242,14 @@ export function initCallMonitoring(root = document) {
     let pollCount = 0;
     let abortController = null;
     let eventSource = null;
+    let webSocket = null;
+    let wsRefreshTimer = null;
+    let lastWsRefreshAt = 0;
     let streamGeneration = 0;
     let lastAppliedPresenceVersion = -1;
     let lastAppliedVersion = -1;
+
+    const wsConnected = () => Boolean(webSocket && webSocket.readyState === WebSocket.OPEN);
 
     const handlePayload = (payload) => {
         if (!payload || payload.ok === false) {
@@ -1211,21 +1315,44 @@ export function initCallMonitoring(root = document) {
         }
     };
 
+    const requestWsRefresh = ({ full = false, force = false } = {}) => {
+        const now = Date.now();
+        if (!force && now - lastWsRefreshAt < WS_REFRESH_MIN_GAP_MS) {
+            window.clearTimeout(wsRefreshTimer);
+            wsRefreshTimer = window.setTimeout(() => {
+                requestWsRefresh({ full, force: true });
+            }, WS_REFRESH_DEBOUNCE_MS);
+            if (monitoringRuntime) {
+                monitoringRuntime.wsRefreshTimer = wsRefreshTimer;
+            }
+            return;
+        }
+        lastWsRefreshAt = now;
+        void poll({ full });
+    };
+
     const reschedulePoll = () => {
         if (pollTimer) {
             window.clearInterval(pollTimer);
+            pollTimer = null;
         }
         if (navOnly) {
-            pollTimer = window.setInterval(() => {
-                void poll({ full: false });
-            }, NAV_POLL_MS);
-        } else {
-            const sseLive = Boolean(eventSource && eventSource.readyState === 1);
-            const delay = sseLive
-                ? BOARD_POLL_SSE_MS
-                : (boardHasLiveRows(board) ? BOARD_POLL_ACTIVE_MS : BOARD_POLL_IDLE_MS);
-            pollTimer = window.setInterval(scheduleBoardPoll, delay);
+            if (monitoringRuntime) {
+                monitoringRuntime.pollTimer = null;
+            }
+
+            return;
         }
+        // WebSocket or SSE live → no HTTP poll loop.
+        if (wsConnected() || (eventSource && eventSource.readyState === 1)) {
+            if (monitoringRuntime) {
+                monitoringRuntime.pollTimer = null;
+            }
+
+            return;
+        }
+        const delay = boardHasLiveRows(board) ? BOARD_POLL_ACTIVE_MS : BOARD_POLL_IDLE_MS;
+        pollTimer = window.setInterval(scheduleBoardPoll, delay);
         if (monitoringRuntime) {
             monitoringRuntime.pollTimer = pollTimer;
         }
@@ -1252,8 +1379,8 @@ export function initCallMonitoring(root = document) {
         }
         lastVisibilityPollAt = now;
         scheduleBoardPoll();
-        if (!eventSource || eventSource.readyState === 2) {
-            connectStream();
+        if (!wsConnected() && (!eventSource || eventSource.readyState === 2)) {
+            connectRealtime();
         }
     };
 
@@ -1262,18 +1389,138 @@ export function initCallMonitoring(root = document) {
         if (detail?.type && detail.type !== 'call-ended') {
             return;
         }
+        // Instant local clear only — NEVER re-fetch /live on hangup (was doubling Network rows).
         if (board) {
             removeEndedCallsFromBoard(board, detail);
         }
-        void poll({ full: false });
-        reschedulePoll();
+        // WebSocket will push monitoring_refresh; soft refresh shortly if WS quiet.
+        if (wsConnected()) {
+            requestWsRefresh({ full: false });
+        }
+    };
+
+    const connectWebSocket = () => {
+        if (navOnly || !wsUrlBase || typeof WebSocket === 'undefined') {
+            return false;
+        }
+        const generation = streamGeneration;
+        let url = wsUrlBase;
+        try {
+            const parsed = new URL(wsUrlBase, window.location.origin);
+            parsed.searchParams.set('channel', 'monitoring');
+            if (workspaceId) {
+                parsed.searchParams.set('workspace_id', workspaceId);
+            }
+            url = parsed.toString();
+        } catch {
+            const join = wsUrlBase.includes('?') ? '&' : '?';
+            url = `${wsUrlBase}${join}channel=monitoring${workspaceId ? `&workspace_id=${encodeURIComponent(workspaceId)}` : ''}`;
+        }
+
+        try {
+            webSocket?.close();
+        } catch {
+            // ignore
+        }
+
+        try {
+            webSocket = new WebSocket(url);
+        } catch (error) {
+            console.warn('[call-monitoring] websocket open failed', error);
+            webSocket = null;
+            return false;
+        }
+
+        webSocket.onopen = () => {
+            if (generation !== streamGeneration) {
+                return;
+            }
+            if (monitoringRuntime) {
+                monitoringRuntime.webSocket = webSocket;
+            }
+            // Immediate board sync once the socket is up.
+            requestWsRefresh({ full: false, force: true });
+            reschedulePoll();
+        };
+
+        webSocket.onmessage = (event) => {
+            if (generation !== streamGeneration) {
+                return;
+            }
+            try {
+                const payload = JSON.parse(event.data || '{}');
+                const type = String(payload.type || '');
+                if (type === 'monitoring_hello' || type === 'monitoring_refresh' || payload.reason) {
+                    requestWsRefresh({ full: Boolean(payload.live === false) });
+                    return;
+                }
+                // Full snapshot pushed (future-proof).
+                if (payload.summary || payload.rows || payload.tables) {
+                    handlePayload(payload);
+                    reschedulePoll();
+                }
+            } catch (error) {
+                console.warn('[call-monitoring] websocket parse failed', error);
+            }
+        };
+
+        webSocket.onerror = () => {
+            // onclose handles reconnect / SSE fallback
+        };
+
+        webSocket.onclose = () => {
+            if (generation !== streamGeneration) {
+                return;
+            }
+            webSocket = null;
+            if (monitoringRuntime) {
+                monitoringRuntime.webSocket = null;
+            }
+            // Prefer HTTP poll over PHP SSE — SSE was pinning all php-fpm workers → site-wide 504s.
+            reschedulePoll();
+            const attempt = Number(monitoringRuntime?.wsReconnectAttempts || 0) + 1;
+            if (monitoringRuntime) {
+                monitoringRuntime.wsReconnectAttempts = attempt;
+            }
+            const delay = Math.min(15000, 1500 * attempt);
+            window.setTimeout(() => {
+                if (document.documentElement.dataset.callMonitoringInit !== '1'
+                    || generation !== streamGeneration
+                    || document.hidden
+                    || wsConnected()) {
+                    return;
+                }
+                if (connectWebSocket()) {
+                    if (monitoringRuntime) {
+                        monitoringRuntime.wsReconnectAttempts = 0;
+                    }
+                    reschedulePoll();
+
+                    return;
+                }
+                // SSE only after repeated WS failures (last resort).
+                if (attempt >= 3) {
+                    connectStream();
+                }
+                reschedulePoll();
+            }, delay);
+        };
+
+        if (monitoringRuntime) {
+            monitoringRuntime.webSocket = webSocket;
+        }
+        return true;
     };
 
     const connectStream = () => {
         if (navOnly || !streamUrl || typeof EventSource === 'undefined') {
             return;
         }
-        const generation = ++streamGeneration;
+        // Prefer WebSocket — skip SSE while WS is healthy.
+        if (wsConnected()) {
+            return;
+        }
+        const generation = streamGeneration;
         try {
             eventSource?.close();
         } catch {
@@ -1308,7 +1555,8 @@ export function initCallMonitoring(root = document) {
             window.setTimeout(() => {
                 if (document.documentElement.dataset.callMonitoringInit === '1'
                     && generation === streamGeneration
-                    && !document.hidden) {
+                    && !document.hidden
+                    && !wsConnected()) {
                     connectStream();
                 }
             }, 3000);
@@ -1319,44 +1567,75 @@ export function initCallMonitoring(root = document) {
         }
     };
 
+    const connectRealtime = () => {
+        streamGeneration += 1;
+        if (monitoringRuntime) {
+            monitoringRuntime.streamGeneration = streamGeneration;
+            monitoringRuntime.wsReconnectAttempts = 0;
+        }
+        // Prefer WebSocket. If unavailable, use short HTTP polls — avoid opening PHP SSE by default.
+        if (!connectWebSocket()) {
+            reschedulePoll();
+        }
+    };
+
     if (navOnly) {
+        // Sidebar badges: ONE /live snapshot — no interval polling.
         void poll({ full: false });
-        reschedulePoll();
-    } else {
-        scheduleBoardPoll();
-        connectStream();
-        reschedulePoll();
-        document.addEventListener('visibilitychange', onVisibility);
-        window.addEventListener('comm:monitoring-hangup', onHangup);
-        window.addEventListener('comm:call-ended', onHangup);
+        monitoringRuntime = {
+            pollTimer: null,
+            tickTimer: null,
+            abortController,
+            eventSource: null,
+            webSocket: null,
+            wsRefreshTimer: null,
+            onVisibility: null,
+            onHangup: null,
+            broadcast: null,
+            pollUrl,
+            navOnly,
+            streamGeneration,
+        };
+        document.addEventListener('turbo:before-cache', stopMonitoringRuntime, { once: true });
 
-        tickTimer = window.setInterval(() => {
-            if (board) {
-                tickTimers(board);
-            }
-        }, 1000);
+        return;
     }
 
-    let broadcast = null;
-    try {
-        broadcast = new BroadcastChannel('apex-call-monitoring');
-        broadcast.onmessage = (event) => onHangup(event);
-    } catch {
-        broadcast = null;
-    }
-
+    // Wallboard: ONE /live boot + WebSocket (SSE fallback).
     monitoringRuntime = {
-        pollTimer,
-        tickTimer,
+        pollTimer: null,
+        tickTimer: null,
         abortController,
-        eventSource,
-        onVisibility: navOnly ? null : onVisibility,
-        onHangup: navOnly ? null : onHangup,
-        broadcast,
+        eventSource: null,
+        webSocket: null,
+        wsRefreshTimer: null,
+        onVisibility,
+        onHangup,
+        broadcast: null,
         pollUrl,
         navOnly,
         streamGeneration,
     };
+    scheduleBoardPoll();
+    connectRealtime();
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('comm:monitoring-hangup', onHangup);
+    window.addEventListener('comm:call-ended', onHangup);
+
+    tickTimer = window.setInterval(() => {
+        if (board) {
+            tickTimers(board);
+        }
+    }, 1000);
+    monitoringRuntime.tickTimer = tickTimer;
+
+    try {
+        const broadcast = new BroadcastChannel('apex-call-monitoring');
+        broadcast.onmessage = (event) => onHangup(event);
+        monitoringRuntime.broadcast = broadcast;
+    } catch {
+        // ignore
+    }
 
     document.addEventListener('turbo:before-cache', stopMonitoringRuntime, { once: true });
 }

@@ -119,5 +119,29 @@ return [
                 'portal.communications.*',
             ],
         ],
+        'call_notes' => [
+            'label' => 'Call Notes',
+            'description' => 'Review agent call notes and dispositions',
+            'section' => 'QA',
+            'roles' => ['closers_qa'],
+            'always_available' => true,
+            'default_route' => 'portal.communications.notes',
+            'routes' => [
+                'portal.communications.notes',
+                'portal.communications.notes.download',
+            ],
+        ],
+        'call_monitoring' => [
+            'label' => 'Call Monitoring',
+            'description' => 'Live wallboard for in-call, ringing, and idle agents',
+            'section' => 'QA',
+            'roles' => ['closers_qa'],
+            'always_available' => true,
+            'default_route' => 'portal.communications.monitoring',
+            'routes' => [
+                'portal.communications.monitoring',
+                'portal.communications.monitoring.*',
+            ],
+        ],
     ],
 ];

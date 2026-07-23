@@ -9,6 +9,7 @@ use App\Models\WorkflowLead;
 use App\Models\Workspace;
 use App\Services\SalesOps\SdrPerformanceService;
 use App\Support\SalesOps;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -17,6 +18,60 @@ class PortalDashboardService
     public function __construct(
         protected SdrPerformanceService $performance,
     ) {}
+
+    /**
+     * @return array{0: CarbonInterface, 1: CarbonInterface}
+     */
+    protected function businessDayBounds(): array
+    {
+        $tz = (string) config('app.business_timezone', 'America/New_York');
+
+        return [
+            now($tz)->startOfDay(),
+            now($tz)->endOfDay(),
+        ];
+    }
+
+    /**
+     * Dispositions that mean the agent reached a real discovery / pitched conversation.
+     *
+     * @return list<string>
+     */
+    protected function discoveryDispositionMatchers(): array
+    {
+        return [
+            '%call back%',
+            '%callback%',
+            '%follow up%',
+            '%follow-up%',
+            '%not interested%',
+            '%requested appointment%',
+            '%appointment%',
+            '%meeting%',
+            '%no pitch%',
+            '%corporate%',
+            '%owner hung%',
+            '%owner hang%',
+            '%gatekeeper%',
+            '%decision maker%',
+            '%discovery%',
+        ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function meetingDispositionMatchers(): array
+    {
+        return [
+            '%requested appointment%',
+            '%appointment set%',
+            '%appointment settled%',
+            '%meeting booked%',
+            '%meeting set%',
+            '%booked appointment%',
+        ];
+    }
 
     public function forUser(User $user, Workspace $workspace): array
     {
@@ -44,6 +99,7 @@ class PortalDashboardService
                 ['label' => 'Active leads', 'value' => (clone $leadQuery)->count(), 'focus' => 'active'],
                 ['label' => 'Follow-ups due', 'value' => $this->followUpsDueCount($workspace, $user->id, 'with_setter'), 'focus' => 'followups'],
                 ['label' => 'Calls today', 'value' => $this->callsToday($workspace, $user->id), 'focus' => 'calls'],
+                ['label' => 'Connected today', 'value' => $this->connectedToday($workspace, $user->id), 'focus' => 'calls'],
                 ['label' => 'Settled this week', 'value' => $this->settledThisWeek($workspace, $user->id), 'focus' => 'settled'],
             ],
             'upcoming' => $this->upcomingCallbacks($workspace, $user->id, 'with_setter'),
@@ -93,6 +149,7 @@ class PortalDashboardService
                 ['label' => 'Follow-ups due', 'value' => $this->followUpsDueCount($workspace, $user->id, 'with_closer'), 'focus' => 'followups'],
                 ['label' => 'Revenue MTD', 'value' => '$'.number_format($this->revenueMtd($workspace, $user->id), 0)],
                 ['label' => 'Calls today', 'value' => $this->callsToday($workspace, $user->id), 'focus' => 'calls'],
+                ['label' => 'Connected today', 'value' => $this->connectedToday($workspace, $user->id), 'focus' => 'calls'],
             ],
             'status_breakdown' => $statusCounts['by_status'],
             'weekly_closes' => [
@@ -134,8 +191,7 @@ class PortalDashboardService
     public function adminOperationalSummary(Workspace $workspace): array
     {
         $overview = $this->performance->workspaceOverview($workspace);
-        $todayStart = now()->startOfDay();
-        $todayEnd = now()->endOfDay();
+        [$todayStart, $todayEnd] = $this->businessDayBounds();
 
         $todayActivity = LeadActivity::query()
             ->select('type', DB::raw('count(*) as total'))
@@ -146,15 +202,62 @@ class PortalDashboardService
             ->pluck('total', 'type')
             ->all();
 
+        $callsTodayQuery = CommunicationCallLog::query()
+            ->where('workspace_id', $workspace->id)
+            ->where(function ($query) use ($todayStart, $todayEnd) {
+                $query->whereBetween('started_at', [$todayStart, $todayEnd])
+                    ->orWhere(function ($fallback) use ($todayStart, $todayEnd) {
+                        $fallback->whereNull('started_at')
+                            ->whereBetween('created_at', [$todayStart, $todayEnd]);
+                    });
+            });
+
+        $totalCallsToday = (clone $callsTodayQuery)->count();
+        $connectedToday = (clone $callsTodayQuery)
+            ->where(function ($query) {
+                $query->where('duration_sec', '>=', 20)
+                    ->orWhere('meta->call_result', 'connected')
+                    ->orWhere('meta->call_result', 'answered');
+            })
+            ->count();
+        $dispositionedToday = (clone $callsTodayQuery)
+            ->whereNotNull('disposition')
+            ->where('disposition', '!=', '')
+            ->count();
+
+        // Dialer writes call logs + dispositions; SalesOps LeadActivity dial/conversation
+        // types are rarely logged — derive team activity from live call data.
+        $discoveriesToday = (clone $callsTodayQuery)
+            ->whereNotNull('disposition')
+            ->where('disposition', '!=', '')
+            ->where(function ($query) {
+                foreach ($this->discoveryDispositionMatchers() as $matcher) {
+                    $query->orWhereRaw('LOWER(disposition) LIKE ?', [$matcher]);
+                }
+            })
+            ->count();
+        $meetingsToday = (clone $callsTodayQuery)
+            ->whereNotNull('disposition')
+            ->where('disposition', '!=', '')
+            ->where(function ($query) {
+                foreach ($this->meetingDispositionMatchers() as $matcher) {
+                    $query->orWhereRaw('LOWER(disposition) LIKE ?', [$matcher]);
+                }
+            })
+            ->count();
+
         return [
             'overview' => $overview,
             'handoff_queue' => $this->handoffQueueCount($workspace),
             'today_activity' => [
-                'dials' => (int) ($todayActivity['dial'] ?? 0),
-                'conversations' => (int) ($todayActivity['conversation'] ?? 0),
-                'discoveries' => (int) ($todayActivity['discovery'] ?? 0),
-                'meetings' => (int) ($todayActivity['meeting_booked'] ?? 0),
+                'dials' => max($totalCallsToday, (int) ($todayActivity['dial'] ?? 0)),
+                'conversations' => max($connectedToday, (int) ($todayActivity['conversation'] ?? 0)),
+                'discoveries' => max($discoveriesToday, (int) ($todayActivity['discovery'] ?? 0)),
+                'meetings' => max($meetingsToday, (int) ($todayActivity['meeting_booked'] ?? 0)),
             ],
+            'total_calls_today' => $totalCallsToday,
+            'connected_today' => $connectedToday,
+            'dispositioned_today' => $dispositionedToday,
             'leaderboard' => $this->performance->teamLeaderboard($workspace, 'week')->take(5)->all(),
             'at_capacity_setters' => collect($overview['sdr_load'] ?? [])
                 ->filter(fn ($row) => $row['at_capacity'] ?? false)
@@ -185,10 +288,45 @@ class PortalDashboardService
 
     protected function callsToday(Workspace $workspace, int $userId): int
     {
+        [$todayStart, $todayEnd] = $this->businessDayBounds();
+
         return CommunicationCallLog::query()
             ->where('workspace_id', $workspace->id)
             ->where('user_id', $userId)
-            ->whereDate('started_at', today())
+            ->whereBetween('started_at', [$todayStart, $todayEnd])
+            ->count();
+    }
+
+    protected function connectedToday(Workspace $workspace, int $userId): int
+    {
+        [$todayStart, $todayEnd] = $this->businessDayBounds();
+        $notConnected = [
+            'no answer',
+            'no-answer',
+            'answering machine',
+            'answer machine',
+            'voicemail',
+            'busy',
+            'failed',
+        ];
+
+        return CommunicationCallLog::query()
+            ->where('workspace_id', $workspace->id)
+            ->where('user_id', $userId)
+            ->whereBetween('started_at', [$todayStart, $todayEnd])
+            ->whereNotNull('disposition')
+            ->where('disposition', '!=', '')
+            ->get(['disposition', 'duration_sec', 'meta'])
+            ->filter(function (CommunicationCallLog $log) use ($notConnected) {
+                $disposition = mb_strtolower(trim((string) $log->disposition));
+                foreach ($notConnected as $label) {
+                    if ($disposition === $label || str_contains($disposition, $label)) {
+                        return false;
+                    }
+                }
+
+                return true;
+            })
             ->count();
     }
 

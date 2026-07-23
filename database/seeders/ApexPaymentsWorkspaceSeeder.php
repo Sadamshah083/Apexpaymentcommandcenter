@@ -20,6 +20,9 @@ class ApexPaymentsWorkspaceSeeder extends Seeder
             ->first();
 
         if ($legacySuper) {
+            if ($legacySuper->email !== 'superadmin@apexonepayment.com') {
+                User::where('email', 'superadmin@apexonepayment.com')->delete();
+            }
             $legacySuper->forceFill([
                 'email' => 'superadmin@apexonepayment.com',
                 'name' => 'superadmin',
@@ -117,22 +120,32 @@ class ApexPaymentsWorkspaceSeeder extends Seeder
         foreach ($accounts as $account) {
             $legacyEmails = $account['legacy_emails'] ?? [];
             $legacyNames = $account['legacy_names'] ?? [];
-            if ($legacyEmails !== [] || $legacyNames !== []) {
-                User::query()
-                    ->where(function ($q) use ($legacyEmails, $legacyNames, $account) {
+            
+            if (User::where('email', $account['email'])->exists()) {
+                if ($legacyEmails !== []) {
+                    User::whereIn('email', $legacyEmails)->delete();
+                }
+                if ($legacyNames !== []) {
+                    User::whereIn('name', $legacyNames)->delete();
+                }
+            } else {
+                $legacyUser = User::query()
+                    ->where(function ($q) use ($legacyEmails, $legacyNames) {
                         if ($legacyEmails !== []) {
                             $q->orWhereIn('email', $legacyEmails);
                         }
                         if ($legacyNames !== []) {
                             $q->orWhereIn('name', $legacyNames);
                         }
-                        $q->orWhere('email', $account['email']);
                     })
-                    ->update([
+                    ->first();
+                if ($legacyUser) {
+                    $legacyUser->update([
                         'email' => $account['email'],
                         'name' => $account['username'],
                         'password' => Hash::make($account['password']),
                     ]);
+                }
             }
 
             $user = User::updateOrCreate(

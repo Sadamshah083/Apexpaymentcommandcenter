@@ -8,3 +8,8 @@
     }
 @endphp
 @vite($viteEntries)
+<link rel="dns-prefetch" href="//apexone.morpheus.cx">
+@if (request()->routeIs('admin.communications.*', 'portal.communications.*')
+    && ! request()->routeIs('admin.communications.monitoring*', 'portal.communications.monitoring*'))
+    <link rel="preconnect" href="https://apexone.morpheus.cx" crossorigin>
+@endif

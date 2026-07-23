@@ -30,4 +30,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*'),
         );
+
+        // Error Monitoring UI removed — Telescope remains the exception debugger.
+        // Do not write to application_errors on every exception (cuts DB write load).
     })->create();

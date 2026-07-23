@@ -1,10 +1,18 @@
-<x-sidebar.section title="Pipeline">
-    @php
-        $user = auth()->user();
-        $role = $user?->getWorkspaceRole();
-        $workspaceId = $user?->current_workspace_id;
-    @endphp
+@php
+    $user = auth()->user();
+    $role = $user?->getWorkspaceRole();
+    $workspaceId = $user?->current_workspace_id;
+    $access = app(\App\Services\Communications\CommunicationsAccessService::class);
+    $showCommunications = (bool) $user?->canAccessPortalModule('communications', $workspaceId);
+    $showCallNotes = $showCommunications
+        || (bool) $user?->canAccessPortalModule('call_notes', $workspaceId)
+        || $access->canViewCallNotes($user, 'portal.');
+    $showCallMonitoring = $access->canViewCallMonitoring($user, 'portal.');
+    $showAllCallLogs = $access->canViewAllCallLogs($user, 'portal.');
+    $showCommsSection = $showCommunications || $showCallNotes || $showCallMonitoring || $showAllCallLogs;
+@endphp
 
+<x-sidebar.section title="Pipeline">
     @if ($role === 'appointment_setter')
         @if ($user->canAccessPortalModule('setter_leads', $workspaceId))
             <x-sidebar.link :href="route('portal.setter.dashboard')" label="My Leads" icon-name="leads"
@@ -54,21 +62,25 @@
     @endif
 </x-sidebar.section>
 
-@if ($user?->canAccessPortalModule('communications', $user?->current_workspace_id))
+@if ($showCommsSection)
     <x-sidebar.section title="Communications">
-        <x-sidebar.link :href="route('portal.communications.index')" label="Communications" icon-name="phone"
-            :exclude-prefixes="['/portal/communications/monitoring', '/portal/communications/notes', '/portal/communications/agent-status']"
-            :active="request()->routeIs('portal.communications.*') && ! request()->routeIs('portal.communications.monitoring*', 'portal.communications.notes', 'portal.communications.agent-status*')">
-            <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'phone'])</x-slot:icon>
-        </x-sidebar.link>
-        <x-sidebar.link :href="route('portal.communications.notes')" label="Call Notes" icon-name="notes"
-            :active="request()->routeIs('portal.communications.notes')">
-            <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'notes'])</x-slot:icon>
-        </x-sidebar.link>
-        @if (app(\App\Services\Communications\CommunicationsAccessService::class)->canViewCallMonitoring($user, 'portal.'))
+        @if ($showCommunications)
+            <x-sidebar.link :href="route('portal.communications.index')" label="Communications" icon-name="phone"
+                :exclude-prefixes="['/portal/communications/call-monitoring', '/portal/communications/monitoring', '/portal/communications/notes', '/portal/communications/agent-status']"
+                :active="request()->routeIs('portal.communications.*') && ! request()->routeIs('portal.communications.monitoring*', 'portal.communications.notes', 'portal.communications.agent-status*')">
+                <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'phone'])</x-slot:icon>
+            </x-sidebar.link>
+        @endif
+        @if ($showCallNotes)
+            <x-sidebar.link :href="route('portal.communications.notes')" label="Call Notes" icon-name="notes"
+                :active="request()->routeIs('portal.communications.notes')">
+                <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'notes'])</x-slot:icon>
+            </x-sidebar.link>
+        @endif
+        @if ($showCallMonitoring)
             <x-sidebar.link
                 :href="route('portal.communications.monitoring')"
-                label="Team Lead Status"
+                label="Call Monitoring"
                 icon-name="phone"
                 :active="request()->routeIs('portal.communications.monitoring*')"
                 data-call-monitoring-nav
@@ -80,9 +92,11 @@
                     <span class="sidebar-live-chip sidebar-live-chip--blue is-empty" title="Ringing" data-call-monitoring-nav-waiting hidden>0</span>
                 </x-slot:badge>
             </x-sidebar.link>
+        @endif
+        @if ($showAllCallLogs)
             <x-sidebar.link
                 :href="route('portal.communications.agent-status')"
-                label="Agent Status"
+                label="All call logs"
                 icon-name="notes"
                 :active="request()->routeIs('portal.communications.agent-status*')">
                 <x-slot:icon>@include('layouts.partials.sidebar-icon', ['name' => 'notes'])</x-slot:icon>

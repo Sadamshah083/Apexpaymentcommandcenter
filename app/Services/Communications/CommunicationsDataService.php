@@ -124,7 +124,10 @@ class CommunicationsDataService
         $index = $this->phoneRecordingFileIndex($filters);
 
         return array_map(function (array $log) use ($index) {
-            if (! empty($log['has_recording_media']) && ! empty($log['recording_id']) && ($log['source'] ?? '') === 'local_history') {
+            if (! empty($log['has_recording_media']) && ! empty($log['recording_id'])) {
+                // Always use null-coalesce — PHP 8+ throws on bare $log['recording_status'] when missing.
+                $log['recording_status'] = (string) (($log['recording_status'] ?? '') ?: 'ready');
+
                 return $log;
             }
 

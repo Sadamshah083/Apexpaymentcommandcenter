@@ -21,6 +21,7 @@ use App\Support\SalesOps;
 use App\Support\WorkflowAssignmentRoles;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class WorkflowController extends Controller
 {
@@ -38,20 +39,38 @@ class WorkflowController extends Controller
         protected CampaignService $campaignService,
     ) {}
 
+    public function assignedLeads(Request $request)
+    {
+        $request->merge(['view' => 'assigned']);
+
+        return $this->index($request);
+    }
+
     public function index(Request $request)
     {
         if ($request->is('admin*') || $request->routeIs('admin.*')) {
+            if ($request->routeIs('admin.workflows.index') && $request->input('view') === 'assigned') {
+                return redirect()->route('admin.assigned-leads', $request->except('view'));
+            }
+
             $user = Auth::user();
             $workspace = $this->workspaceContext->resolveActiveWorkspace($user);
+            $assignedLeadsView = $request->routeIs('admin.assigned-leads')
+                || $request->input('view') === 'assigned';
             $data = $this->dashboardService->buildIndexData($workspace, $user, [
                 'search' => $request->input('search'),
                 'phase' => $request->input('phase'),
+                'workflow_id' => $request->input('workflow_id'),
+                'workflow_ids' => $request->input('workflow_ids', []),
                 'assigned_user_id' => $request->input('assigned_user_id'),
+                'assigned_only' => $assignedLeadsView,
+                'per_page' => $request->input('per_page'),
                 'refresh_enrichment' => $request->boolean('refresh_enrichment'),
             ]);
 
             $data['importsWorkflows'] = $data['workflows'];
             $data['campaigns'] = $this->campaignService->campaignsWithStats($workspace);
+            $data['assignedLeadsView'] = $assignedLeadsView;
 
             // Use denormalized workflow counters — never GROUP BY all leads on every page click
             // (that was hanging /admin/workflows?page=N with 3k+ leads).
@@ -135,12 +154,27 @@ class WorkflowController extends Controller
 
     public function store(Request $request)
     {
+        @ini_set('memory_limit', '512M');
+        @set_time_limit(180);
+
         $request->validate([
             'name' => 'required|string|max:255',
-            'file' => 'required|file|mimes:csv,txt,xlsx,xls|max:10240',
+            // Extension-based check — browser MIME for Excel is often wrong / octet-stream.
+            'file' => ['required', 'file', 'max:51200', function (string $attribute, $value, \Closure $fail) {
+                $ext = strtolower((string) $value->getClientOriginalExtension());
+                if (! in_array($ext, ['csv', 'txt', 'xlsx', 'xls'], true)) {
+                    $fail('Upload a CSV or Excel file (.csv, .xlsx, .xls).');
+                }
+            }],
             'processing_mode' => 'required|in:store_only,full_pipeline,import_only,import_and_enrich',
             'campaign_id' => 'nullable|integer',
             'campaign_name' => 'nullable|string|max:100',
+            'import_segment' => 'nullable|string|max:120',
+            'import_tags' => 'nullable|string|max:255',
+        ], [
+            'file.required' => 'Choose a spreadsheet file to upload.',
+            'file.max' => 'The file may not be larger than 50 MB.',
+            'name.required' => 'Enter an import file name.',
         ]);
 
         $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
@@ -151,13 +185,32 @@ class WorkflowController extends Controller
             $request->input('campaign_name'),
         );
 
-        $workflow = $this->workflowService->createFromUpload(
-            $workspace,
-            $request->input('name'),
-            $request->file('file'),
-            $request->input('processing_mode'),
-            $campaign->id,
-        );
+        $importTags = collect(preg_split('/[,;]+/', (string) $request->input('import_tags', '')))
+            ->map(fn ($tag) => trim((string) $tag))
+            ->filter()
+            ->unique()
+            ->take(12)
+            ->values()
+            ->all();
+
+        try {
+            $workflow = $this->workflowService->createFromUpload(
+                $workspace,
+                $request->input('name'),
+                $request->file('file'),
+                $request->input('processing_mode'),
+                $campaign->id,
+                $importTags,
+                filled($request->input('import_segment')) ? trim((string) $request->input('import_segment')) : null,
+            );
+        } catch (\Throwable $e) {
+            report($e);
+
+            return redirect()
+                ->back()
+                ->withInput()
+                ->withErrors(['file' => 'Could not store the upload: '.$e->getMessage()]);
+        }
 
         $workflow = $this->workflowService->applyAutoMappingIfNeeded($workflow);
 
@@ -171,8 +224,78 @@ class WorkflowController extends Controller
             ->with('success', $message);
     }
 
+    public function update(Request $request, Workflow $workflow)
+    {
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+        $this->workspaceContext->ensureWorkflowBelongsToWorkspace($workflow, $workspace);
+
+        $data = $request->validate([
+            'name' => 'sometimes|required|string|max:255',
+            'original_filename' => 'nullable|string|max:255',
+            'agent_restricted' => 'sometimes|boolean',
+        ]);
+
+        if ($request->exists('agent_restricted') && ! $request->filled('name') && ! $request->exists('original_filename')) {
+            $workflow->agent_restricted = $request->boolean('agent_restricted');
+            $workflow->save();
+
+            if ($request->expectsJson() || $request->ajax()) {
+                return response()->json([
+                    'ok' => true,
+                    'id' => $workflow->id,
+                    'agent_restricted' => (bool) $workflow->agent_restricted,
+                    'message' => $workflow->agent_restricted
+                        ? 'File restricted from agent dialer.'
+                        : 'File visible to agents again.',
+                ]);
+            }
+
+            return redirect()
+                ->back()
+                ->with('success', $workflow->agent_restricted
+                    ? 'File restricted from agent dialer.'
+                    : 'File visible to agents again.');
+        }
+
+        $name = trim((string) ($data['name'] ?? $workflow->name));
+        $filename = array_key_exists('original_filename', $data)
+            ? trim((string) ($data['original_filename'] ?? ''))
+            : null;
+
+        $workflow->name = $name;
+        if ($filename !== null && $filename !== '') {
+            // Keep a spreadsheet-looking name when editing display file label.
+            if (! preg_match('/\.(csv|txt|xlsx|xls)$/i', $filename)) {
+                $ext = pathinfo((string) $workflow->original_filename, PATHINFO_EXTENSION) ?: 'xlsx';
+                $filename .= '.'.$ext;
+            }
+            $workflow->original_filename = $filename;
+        }
+        if ($request->exists('agent_restricted')) {
+            $workflow->agent_restricted = $request->boolean('agent_restricted');
+        }
+        $workflow->save();
+
+        if ($request->expectsJson() || $request->ajax()) {
+            return response()->json([
+                'ok' => true,
+                'id' => $workflow->id,
+                'name' => $workflow->name,
+                'original_filename' => $workflow->original_filename,
+                'agent_restricted' => (bool) $workflow->agent_restricted,
+                'message' => 'Import updated.',
+            ]);
+        }
+
+        return redirect()
+            ->back()
+            ->with('success', "Import renamed to \"{$workflow->name}\".");
+    }
+
     public function show(Workflow $workflow)
     {
+        @ini_set('memory_limit', '512M');
+
         $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
         $this->workspaceContext->ensureWorkflowBelongsToWorkspace($workflow, $workspace);
 
@@ -205,17 +328,23 @@ class WorkflowController extends Controller
             'mapping_confirmed' => 'accepted',
         ]);
 
+        $runEnrichment = $request->boolean('run_enrichment_on_import');
+
         $this->workflowService->queueForProcessing($workflow, [
             'mapping' => $request->input('mapping', []),
             'custom_prompt' => $request->input('custom_prompt'),
             'verification_toggles' => $request->input('verification_toggles'),
             'distribution_users' => $request->input('distribution_users'),
             'mapping_confirmed' => $request->boolean('mapping_confirmed'),
-            'run_enrichment_on_import' => $request->boolean('run_enrichment_on_import'),
+            'run_enrichment_on_import' => $runEnrichment,
             'auto_assign_setters' => $request->boolean('auto_assign_setters'),
         ]);
 
-        return redirect()->route('admin.workflows.show', $workflow->id)->with('success', 'Import started. Leads will appear as rows are processed.');
+        $message = $runEnrichment
+            ? 'Import started with AI enrichment. Leads will appear as rows are processed.'
+            : 'Upload started (no AI). Leads will appear as the file is imported.';
+
+        return redirect()->route('admin.workflows.show', $workflow->id)->with('success', $message);
     }
 
     public function enrich(Workflow $workflow)
@@ -274,19 +403,17 @@ class WorkflowController extends Controller
             ]);
         }
 
-        if ($teamLead->getWorkspaceRole($workspace->id) !== WorkflowAssignmentRoles::setterTeamLeadRole()) {
-            return $this->assignLeadsResponse($request, false, 'Enriched import leads must be assigned to an Appointment Setter Team Lead.', [
-                'team_lead_id' => 'Enriched import leads must be assigned to an Appointment Setter Team Lead. Closers Team Lead handles settled appointments.',
-            ]);
-        }
+        $teamLeadRole = $teamLead->getWorkspaceRole($workspace->id);
+        $teamMembers = WorkflowAssignmentRoles::agentsForTeamLead($workspace, $teamLead);
+        $agentCount = $teamMembers->count();
 
-        $teamMembers = WorkflowAssignmentRoles::settersForTeamLead($workspace, (int) $teamLead->id);
-        $allSetters = WorkflowAssignmentRoles::activeSettersFor($workspace);
-        $setterCount = $teamMembers->isNotEmpty() ? $teamMembers->count() : $allSetters->count();
+        if ($agentCount === 0) {
+            $agentLabel = $teamLeadRole === WorkflowAssignmentRoles::closerTeamLeadRole()
+                ? 'closers'
+                : 'appointment setters';
 
-        if ($setterCount === 0) {
-            return $this->assignLeadsResponse($request, false, 'No active appointment setters are available in this workspace.', [
-                'lead_count' => 'Add at least one active appointment setter before assigning leads.',
+            return $this->assignLeadsResponse($request, false, "No active {$agentLabel} are available for this team lead.", [
+                'lead_count' => "Add at least one active {$agentLabel} under this team lead before assigning leads.",
             ]);
         }
 
@@ -316,12 +443,12 @@ class WorkflowController extends Controller
 
         if ($assigned === 0) {
             return $this->assignLeadsResponse($request, false, 'No leads could be assigned.', [
-                'lead_count' => 'No leads could be assigned. Ensure active appointment setters exist on this team.',
+                'lead_count' => 'No leads could be assigned. Ensure active team members exist on this team.',
             ]);
         }
 
         $memberLabel = $memberIds === []
-            ? "{$teamLead->name}'s setter team"
+            ? "{$teamLead->name}'s team"
             : (count($memberIds) === 1 ? 'the selected team member' : count($memberIds).' selected team members');
 
         return $this->assignLeadsResponse(
@@ -332,6 +459,202 @@ class WorkflowController extends Controller
             $assigned,
             $available - $assigned,
         );
+    }
+
+    public function unassignLeads(Request $request, Workflow $workflow)
+    {
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+        $this->workspaceContext->ensureWorkflowBelongsToWorkspace($workflow, $workspace);
+
+        try {
+            $data = $request->validate([
+                'lead_count' => 'required|integer|min:1|max:5000',
+                'agent_ids' => 'nullable|array',
+                'agent_ids.*' => 'integer|exists:users,id',
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            return $this->assignLeadsResponse($request, false, $exception->getMessage(), $exception->errors());
+        }
+
+        try {
+            $agentIds = collect($data['agent_ids'] ?? [])
+                ->map(fn ($id) => (int) $id)
+                ->filter(fn ($id) => $id > 0)
+                ->unique()
+                ->values()
+                ->all();
+
+            $available = $this->setterDistribution->assignedWorkflowLeadCount($workflow, $agentIds);
+            if ($available === 0) {
+                return $this->assignLeadsResponse($request, false, 'No assigned leads are available to unassign for this import.', [
+                    'lead_count' => 'No assigned leads are available to unassign for this import.',
+                ]);
+            }
+
+            $requested = min((int) $data['lead_count'], $available);
+            $unassigned = $this->setterDistribution->unassignWorkflowLeadsToPool(
+                $workspace,
+                $workflow,
+                $requested,
+                Auth::user(),
+                $agentIds,
+            );
+
+            if ($unassigned === 0) {
+                return $this->assignLeadsResponse($request, false, 'No leads could be unassigned.', [
+                    'lead_count' => 'No leads could be unassigned.',
+                ]);
+            }
+
+            $scopeLabel = $agentIds === []
+                ? 'all agents'
+                : (count($agentIds) === 1 ? 'the selected agent' : count($agentIds).' selected agents');
+
+            return $this->unassignLeadsResponse(
+                $request,
+                true,
+                "Unassigned {$unassigned} lead(s) from {$scopeLabel}. They are back in the assign pool.",
+                [],
+                $unassigned,
+                $this->setterDistribution->unassignedWorkflowLeadCount($workflow),
+                $this->setterDistribution->assignedWorkflowLeadCount($workflow),
+            );
+        } catch (\Throwable $e) {
+            report($e);
+
+            return $this->assignLeadsResponse($request, false, 'Unassign failed: '.$e->getMessage(), [
+                'lead_count' => 'Unassign failed. Please try again.',
+            ]);
+        }
+    }
+
+    public function agentAccess(Workflow $workflow)
+    {
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+        $this->workspaceContext->ensureWorkflowBelongsToWorkspace($workflow, $workspace);
+
+        $selectedIds = $workflow->agentAccess()->pluck('user_id')->map(fn ($id) => (int) $id)->all();
+        $agents = $workspace->users()
+            ->wherePivot('status', 'active')
+            ->wherePivotIn('role', [
+                'appointment_setter',
+                'closer',
+                'appointment_setter_team_lead',
+                'closers_team_lead',
+            ])
+            ->orderBy('users.name')
+            ->get(['users.id', 'users.name'])
+            ->map(fn ($user) => [
+                'id' => (int) $user->id,
+                'name' => (string) $user->name,
+                'selected' => in_array((int) $user->id, $selectedIds, true),
+            ])
+            ->values()
+            ->all();
+
+        return response()->json([
+            'workflow_id' => (int) $workflow->id,
+            'workflow_name' => (string) $workflow->name,
+            'agent_restricted' => (bool) $workflow->agent_restricted,
+            'agents' => $agents,
+            'selected_ids' => $selectedIds,
+            'mode' => $selectedIds === [] ? 'all_visible_agents' : 'allowlist',
+        ]);
+    }
+
+    public function syncAgentAccess(Request $request, Workflow $workflow)
+    {
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+        $this->workspaceContext->ensureWorkflowBelongsToWorkspace($workflow, $workspace);
+
+        $data = $request->validate([
+            'user_ids' => 'nullable|array',
+            'user_ids.*' => 'integer|exists:users,id',
+            'agent_restricted' => 'sometimes|boolean',
+        ]);
+
+        $allowedWorkspaceUserIds = $workspace->users()
+            ->wherePivot('status', 'active')
+            ->pluck('users.id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        $userIds = collect($data['user_ids'] ?? [])
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0 && in_array($id, $allowedWorkspaceUserIds, true))
+            ->unique()
+            ->values()
+            ->all();
+
+        $workflow->visibleAgents()->sync($userIds);
+
+        if ($request->exists('agent_restricted')) {
+            $workflow->agent_restricted = $request->boolean('agent_restricted');
+            $workflow->save();
+        } elseif ($userIds !== [] && $workflow->agent_restricted) {
+            // Sharing with specific agents implies the file should be visible.
+            $workflow->agent_restricted = false;
+            $workflow->save();
+        }
+
+        return response()->json([
+            'ok' => true,
+            'workflow_id' => (int) $workflow->id,
+            'selected_ids' => $userIds,
+            'agent_restricted' => (bool) $workflow->agent_restricted,
+            'message' => $userIds === []
+                ? 'All agents with assigned leads can see this file (when Visible).'
+                : 'File visibility limited to '.count($userIds).' selected agent(s).',
+        ]);
+    }
+
+    public function dispositions(Workflow $workflow)
+    {
+        $workspace = $this->workspaceContext->resolveActiveWorkspace(Auth::user());
+        $this->workspaceContext->ensureWorkflowBelongsToWorkspace($workflow, $workspace);
+
+        $payload = $this->dashboardService->dispositionHistoryForWorkflow((int) $workflow->id);
+
+        return response()->json([
+            'workflow_id' => (int) $workflow->id,
+            'workflow_name' => (string) $workflow->name,
+            ...$payload,
+        ]);
+    }
+
+    /**
+     * @param  array<string, string|list<string>>  $errors
+     */
+    protected function unassignLeadsResponse(
+        Request $request,
+        bool $success,
+        string $message,
+        array $errors = [],
+        int $unassigned = 0,
+        ?int $remaining = null,
+        ?int $stillAssigned = null,
+    ) {
+        if ($request->expectsJson()) {
+            if ($success) {
+                return response()->json([
+                    'message' => $message,
+                    'unassigned' => $unassigned,
+                    'remaining' => $remaining,
+                    'assigned' => $stillAssigned,
+                ]);
+            }
+
+            return response()->json([
+                'message' => $message,
+                'errors' => $errors,
+            ], 422);
+        }
+
+        if ($success) {
+            return redirect()->back()->with('success', $message);
+        }
+
+        return redirect()->back()->withErrors($errors);
     }
 
     /**
@@ -579,35 +902,55 @@ class WorkflowController extends Controller
         $activeMemberCount = $activeWorkspace->users()->wherePivot('status', 'active')->count();
         $suspendedMemberCount = $activeWorkspace->users()->wherePivot('status', 'suspended')->count();
         $members = $activeWorkspace->users()
+            ->select([
+                'users.id',
+                'users.name',
+                'users.email',
+                'users.password_hint',
+                'users.current_workspace_id',
+                'users.created_at',
+                'users.updated_at',
+            ])
             ->orderBy('users.name')
             ->paginate(config('pagination.members_per_page'))
             ->withQueryString();
-        $setterTeamLeads = $activeWorkspace->users()
+
+        // One query for team-lead options + campaign map instead of three full membership scans.
+        $teamLeadRows = $activeWorkspace->users()
             ->wherePivot('status', 'active')
-            ->wherePivot('role', 'appointment_setter_team_lead')
-            ->orderBy('users.name')
-            ->get(['users.id', 'users.name']);
-        $closerTeamLeads = $activeWorkspace->users()
-            ->wherePivot('status', 'active')
-            ->wherePivot('role', 'closers_team_lead')
-            ->orderBy('users.name')
-            ->get(['users.id', 'users.name']);
-        $teamLeadNames = $activeWorkspace->users()
             ->wherePivotIn('role', ['appointment_setter_team_lead', 'closers_team_lead'])
-            ->get(['users.id', 'users.name'])
-            ->pluck('name', 'id');
+            ->orderBy('users.name')
+            ->get(['users.id', 'users.name']);
+        $setterTeamLeads = $teamLeadRows->filter(fn ($u) => ($u->pivot->role ?? '') === 'appointment_setter_team_lead')->values();
+        $closerTeamLeads = $teamLeadRows->filter(fn ($u) => ($u->pivot->role ?? '') === 'closers_team_lead')->values();
+        $teamLeadNames = $teamLeadRows->pluck('name', 'id');
+        $teamLeadCampaignIds = $teamLeadRows->mapWithKeys(
+            fn ($lead) => [(int) $lead->id => (int) ($lead->pivot->campaign_id ?? 0)]
+        );
         $campaigns = $activeWorkspace->campaigns()
             ->orderBy('name')
             ->get(['id', 'name']);
         $campaignNames = $campaigns->pluck('name', 'id');
-        $teamLeadCampaignIds = $activeWorkspace->users()
-            ->wherePivotIn('role', ['appointment_setter_team_lead', 'closers_team_lead'])
-            ->get()
-            ->mapWithKeys(fn ($lead) => [(int) $lead->id => (int) ($lead->pivot->campaign_id ?? 0)]);
+        $teamMemberCounts = DB::table('workspace_user')
+            ->where('workspace_id', $activeWorkspace->id)
+            ->whereNotNull('team_lead_user_id')
+            ->selectRaw('team_lead_user_id, COUNT(*) as member_count')
+            ->groupBy('team_lead_user_id')
+            ->pluck('member_count', 'team_lead_user_id');
         $workspaces->each(function (Workspace $workspace) {
             $workspace->loadMissing('admin:id,name');
             $workspace->loadCount(['workflows', 'users']);
         });
+
+        $availablePhoneLines = [];
+        $suggestedExtension = '1021';
+        try {
+            $agentService = app(\App\Services\Communications\CommunicationsAgentService::class);
+            $availablePhoneLines = $agentService->availablePhoneLines($activeWorkspace);
+            $suggestedExtension = $agentService->suggestNextExtension($activeWorkspace);
+        } catch (\Throwable) {
+            $availablePhoneLines = [];
+        }
 
         return view('workflows.workspaces', compact(
             'workspaces',
@@ -621,16 +964,24 @@ class WorkflowController extends Controller
             'campaigns',
             'campaignNames',
             'teamLeadCampaignIds',
+            'teamMemberCounts',
+            'availablePhoneLines',
+            'suggestedExtension',
         ));
     }
 
     public function workspaceStore(Request $request)
     {
+        $user = Auth::user();
+        if (! $user->isPlatformSuperAdmin()) {
+            abort(403, 'Only the Super Admin can add workspaces.');
+        }
+
         $request->validate([
             'name' => 'required|string|max:255',
         ]);
 
-        $workspace = $this->workspaceManager->createWorkspace(Auth::user(), $request->input('name'));
+        $workspace = $this->workspaceManager->createWorkspace($user, $request->input('name'));
 
         if ($request->wantsJson()) {
             return response()->json([
@@ -682,7 +1033,10 @@ class WorkflowController extends Controller
 
         $redirect = request()->is('portal*') || request()->routeIs('portal.*')
             ? route('portal.dashboard')
-            : (request()->headers->get('referer') && str_contains(request()->headers->get('referer'), '/admin/workspaces')
+            : (request()->headers->get('referer') && (
+                str_contains(request()->headers->get('referer'), '/admin/usermanagement')
+                || str_contains(request()->headers->get('referer'), '/admin/workspaces')
+            )
                 ? route('admin.workspaces.index')
                 : route('admin.workflows.index'));
 

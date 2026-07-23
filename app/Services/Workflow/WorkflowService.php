@@ -36,14 +36,16 @@ class WorkflowService
         UploadedFile $file,
         string $processingMode = 'import_only',
         ?int $campaignId = null,
+        array $importTags = [],
+        ?string $importSegment = null,
     ): Workflow {
         $storedPath = $file->store('workflows');
+        // Fast upload: never parse sheet contents here. Sheet names are cheap metadata only.
         $sheets = [];
         $extension = strtolower((string) $file->getClientOriginalExtension());
-
-        // CSV/TXT are single-sheet — skip PhpSpreadsheet sheet discovery for faster uploads.
-        if (! in_array($extension, ['csv', 'txt'], true)) {
+        if (in_array($extension, ['xlsx', 'xls'], true)) {
             try {
+                @ini_set('memory_limit', '512M');
                 $sheets = $this->aiMapper->getFileSheets(Storage::disk('local')->path($storedPath));
             } catch (\Throwable $e) {
                 Log::debug('Workflow upload has no spreadsheet sheets', [
@@ -57,6 +59,8 @@ class WorkflowService
         return Workflow::create([
             'workspace_id' => $workspace->id,
             'campaign_id' => $campaignId,
+            'import_tags' => $importTags !== [] ? array_values($importTags) : null,
+            'import_segment' => filled($importSegment) ? mb_substr(trim($importSegment), 0, 120) : null,
             'name' => $name,
             'processing_mode' => $this->normalizeProcessingMode($processingMode),
             'original_filename' => $file->getClientOriginalName(),
@@ -83,7 +87,8 @@ class WorkflowService
         }
 
         try {
-            // Fast heuristic map on upload — no Gemini round-trip (keeps import snappy).
+            @ini_set('memory_limit', '512M');
+            // Fast heuristic map on upload — header rows only (read filter), no Gemini.
             $autoMap = $this->aiMapper->fastMap(
                 Storage::disk('local')->path($workflow->file_path),
                 $workflow->selected_sheet
@@ -102,12 +107,19 @@ class WorkflowService
                 'error' => $e->getMessage(),
             ]);
 
-            $headers = $this->resolveHeaderRow($workflow);
-            if (! empty($headers)) {
-                $fallback = $this->aiMapper->heuristicMap($headers);
-                if (! empty($fallback['business_name'])) {
-                    $workflow->update(['column_mapping' => $fallback]);
+            try {
+                $headers = $this->resolveHeaderRow($workflow);
+                if (! empty($headers)) {
+                    $fallback = $this->aiMapper->heuristicMap($headers);
+                    if (! empty($fallback['business_name'])) {
+                        $workflow->update(['column_mapping' => $fallback]);
+                    }
                 }
+            } catch (\Throwable $fallbackError) {
+                Log::warning('Workflow header fallback mapping failed', [
+                    'workflow_id' => $workflow->id,
+                    'error' => $fallbackError->getMessage(),
+                ]);
             }
         }
 
@@ -130,7 +142,7 @@ class WorkflowService
             'leads as assigned_leads_count' => fn ($query) => $query->whereNotNull('assigned_user_id'),
             'leads as pending_verification_count' => fn ($query) => $query->where('status', 'pending_verification'),
             'leads as imported_leads_count' => fn ($query) => $query->where('status', 'imported'),
-            'leads as enriched_leads_count' => fn ($query) => $query->where('status', 'enriched'),
+            'leads as enriched_leads_count' => fn ($query) => $query->enrichmentSucceeded(),
             'leads as ready_to_distribute_count' => fn ($query) => $query->readyToAssign(),
             'leads as ready_to_assign_count' => fn ($query) => $query->readyToAssign(),
         ]);
@@ -240,7 +252,7 @@ class WorkflowService
             ]);
         }
 
-        $runEnrichment = ! empty($runConfig['run_enrichment_on_import']);
+        $runEnrichment = filter_var($runConfig['run_enrichment_on_import'] ?? false, FILTER_VALIDATE_BOOLEAN);
         if ($runEnrichment && ! $this->providerStatus->isEnrichmentConfigured()) {
             throw ValidationException::withMessages([
                 'enrichment' => $this->providerStatus->configurationMessage(),
@@ -429,7 +441,15 @@ class WorkflowService
         if ($ingestionIncomplete && $workflow->file_path) {
             ProcessWorkflowJob::dispatch($workflow->id, $workflow->file_path);
         } elseif ($importedCount > 0) {
-            $this->startEnrichment($workflow);
+            if ($workflow->isImportOnly()) {
+                $workflow->update([
+                    'status' => 'completed',
+                    'ingestion_complete' => true,
+                    'processed_leads' => max((int) $workflow->processed_leads, (int) $workflow->total_leads),
+                ]);
+            } else {
+                $this->startEnrichment($workflow);
+            }
         } elseif ($failedCount > 0) {
             $this->retryFailedLeads($workflow);
         } elseif (! $workflow->leads()->exists() && $workflow->file_path) {

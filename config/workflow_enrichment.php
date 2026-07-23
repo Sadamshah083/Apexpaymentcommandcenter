@@ -35,5 +35,14 @@ return [
 
     'openrouter_web_search_enabled' => filter_var(env('WORKFLOW_OPENROUTER_WEB_SEARCH', true), FILTER_VALIDATE_BOOLEAN),
 
+    // Keep under OpenRouter free RPM / daily caps while Gemini is depleted.
+    'openrouter_fallback_rpm' => (int) env('WORKFLOW_OPENROUTER_FALLBACK_RPM', 8),
+
+    // Seconds to wait before retrying a throttled enrichment job.
+    'openrouter_retry_delay_seconds' => (int) env('WORKFLOW_OPENROUTER_RETRY_DELAY', 12),
+
+    // When Gemini/OpenRouter quota is exhausted, promote imported spreadsheet fields so assign can proceed.
+    'sheet_fallback_enabled' => filter_var(env('WORKFLOW_SHEET_FALLBACK', true), FILTER_VALIDATE_BOOLEAN),
+
     'health_check_cache_minutes' => (int) env('WORKFLOW_ENRICHMENT_HEALTH_CACHE_MINUTES', 10),
 ];

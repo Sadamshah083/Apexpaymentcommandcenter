@@ -42,12 +42,13 @@ return [
   | (only dedupe repeated phones within the same file import batch)
   |--------------------------------------------------------------------------
   */
-  'skip_cross_import_phone_dedup' => filter_var(env('WORKFLOW_SKIP_CROSS_IMPORT_PHONE_DEDUP', true), FILTER_VALIDATE_BOOL),
+  'skip_cross_import_phone_dedup' => filter_var(env('WORKFLOW_SKIP_CROSS_IMPORT_PHONE_DEDUP', false), FILTER_VALIDATE_BOOL),
 
   /*
   |--------------------------------------------------------------------------
   | Skip all phone-based duplicate discards during import (import every row)
+  | Default false: duplicate US phones in the workspace are skipped on import.
   |--------------------------------------------------------------------------
   */
-  'skip_phone_dedup' => filter_var(env('WORKFLOW_SKIP_PHONE_DEDUP', true), FILTER_VALIDATE_BOOL),
+  'skip_phone_dedup' => filter_var(env('WORKFLOW_SKIP_PHONE_DEDUP', false), FILTER_VALIDATE_BOOL),
 ];

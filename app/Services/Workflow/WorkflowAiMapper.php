@@ -3,6 +3,7 @@
 namespace App\Services\Workflow;
 
 use App\Services\BusinessResearch\GeminiClient;
+use App\Support\SpreadsheetChunkReadFilter;
 use App\Support\SpreadsheetHeaderDetector;
 use App\Support\SpreadsheetText;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -45,6 +46,11 @@ class WorkflowAiMapper
             $reader->setReadDataOnly(true);
             $this->configureCsvReader($reader, $filePath);
 
+            // Only load the first rows — full XLSX load OOMs large imports (HTTP 500).
+            if (method_exists($reader, 'setReadFilter')) {
+                $reader->setReadFilter(new SpreadsheetChunkReadFilter(1, 25));
+            }
+
             if ($sheetName && method_exists($reader, 'setLoadSheetsOnly')) {
                 $reader->setLoadSheetsOnly([$sheetName]);
             }
@@ -62,6 +68,9 @@ class WorkflowAiMapper
                 }
                 $rows[] = $rowData;
             }
+
+            $spreadsheet->disconnectWorksheets();
+            unset($spreadsheet);
 
             return SpreadsheetHeaderDetector::detect($rows);
         } catch (\Throwable $e) {
@@ -169,18 +178,26 @@ class WorkflowAiMapper
                 'phone_number' => 100,
                 'contact phone' => 95,
                 'telephone' => 90,
-                'mobile' => 90,
-                'cell' => 85,
+                'mobile phone' => 90,
+                'mobile number' => 90,
+                'cell phone' => 85,
+                'cell number' => 85,
                 'phone' => 100,
                 'tel' => 70,
             ],
             'input_email' => ['email' => 100, 'e-mail' => 100, 'mail' => 70],
             'owner_name' => [
                 'owner name' => 100,
+                'owner/ decision makers/ operations/ management' => 100,
+                'owner decision makers' => 98,
+                'decision makers' => 96,
+                'decision maker' => 96,
                 'owner' => 95,
                 'contact name' => 95,
                 'primary contact' => 90,
                 'proprietor' => 85,
+                'operations management' => 80,
+                'management' => 72,
                 'manager' => 70,
             ],
         ];
@@ -191,6 +208,15 @@ class WorkflowAiMapper
 
             foreach ($candidates as $candidate) {
                 if ($field === 'business_name' && $this->isExcludedBusinessNameHeader($candidate['normalized'])) {
+                    continue;
+                }
+
+                // Never map phone/contact-number columns onto owner_name.
+                if ($field === 'owner_name' && $this->isExcludedOwnerNameHeader($candidate['normalized'], $candidate['original'])) {
+                    continue;
+                }
+
+                if ($field === 'input_phone' && $this->isExcludedPhoneHeader($candidate['normalized'])) {
                     continue;
                 }
 
@@ -296,11 +322,12 @@ class WorkflowAiMapper
                 "- website (Website, domain, url)\n".
                 "- input_phone (Phone number, mobile, contact phone, contact number)\n".
                 "- input_email (Email address, contact email)\n".
-                "- owner_name (Owner name, owner, contact name)\n\n".
+                "- owner_name (Owner name, owner, decision makers, operations/management, contact name — NEVER contact number/phone)\n\n".
                 "STRICT RULES:\n".
                 "1. You MUST find a match for business_name. If no explicit 'business_name' is present, use the column containing the name of the store, company, name of client, or row name.\n".
-                "2. Respond with a raw JSON object where keys are the target system keys listed above and values are the exact matching headers from the uploaded file (or null if not found).\n".
-                "3. Do not include any explanation or markdown block wrappers. Output ONLY the raw JSON.";
+                "2. Map owner_name to owner / decision maker / management name columns. Do NOT map phone or 'Contact Number' to owner_name.\n".
+                "3. Respond with a raw JSON object where keys are the target system keys listed above and values are the exact matching headers from the uploaded file (or null if not found).\n".
+                "4. Do not include any explanation or markdown block wrappers. Output ONLY the raw JSON.";
 
             $userPrompt = 'Uploaded Headers: '.json_encode(array_values($headers))."\n".
                 "Sample Rows:\n".json_encode($dataRows);
@@ -389,9 +416,48 @@ class WorkflowAiMapper
     protected function normalizeHeaderValue(string $value): string
     {
         $value = strtolower(trim($value));
+        $value = str_replace(['/', '\\', '|'], ' ', $value);
         $value = preg_replace('/[\s_\-]+/', ' ', $value) ?? $value;
 
         return trim($value);
+    }
+
+    protected function isExcludedOwnerNameHeader(string $normalizedHeader, ?string $originalHeader = null): bool
+    {
+        foreach (['contact number', 'phone', 'mobile', 'telephone', 'cell', 'fax', 'email', 'e mail', 'website', 'url'] as $needle) {
+            if (str_contains($normalizedHeader, $needle)) {
+                return true;
+            }
+        }
+
+        // Bare "contact" without "name" is a phone/channel column, not owner.
+        if (str_contains($normalizedHeader, 'contact') && ! str_contains($normalizedHeader, 'name')) {
+            return true;
+        }
+
+        // Data cell mistaken for a header (e.g. "Mr. Rick Baker (Owner)").
+        $probe = $originalHeader ?? $normalizedHeader;
+        if (preg_match('/\b(mr|mrs|ms|miss)\.?\s+/i', $probe) === 1) {
+            return true;
+        }
+
+        return false;
+    }
+
+    protected function isExcludedPhoneHeader(string $normalizedHeader): bool
+    {
+        // Phone-type labels / values are not dialable phone columns.
+        return in_array($normalizedHeader, [
+            'mobile',
+            'fixed line',
+            'fixedline',
+            'landline',
+            'voip',
+            'cell',
+            'cellular',
+            'phone type',
+            'line type',
+        ], true);
     }
 
     protected function isExcludedBusinessNameHeader(string $normalizedHeader): bool
@@ -400,6 +466,10 @@ class WorkflowAiMapper
             if (str_contains($normalizedHeader, $needle)) {
                 return true;
             }
+        }
+
+        if (preg_match('/\b(mr|mrs|ms|miss)\.?\s+/i', $normalizedHeader) === 1) {
+            return true;
         }
 
         return false;

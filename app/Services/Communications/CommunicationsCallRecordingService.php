@@ -40,17 +40,22 @@ class CommunicationsCallRecordingService
         $cdrHasRecording = (bool) data_get($snap, 'has_recording')
             || (bool) data_get($snap, 'raw.has_recording');
         $billsec = (int) (data_get($snap, 'billsec') ?? data_get($snap, 'duration') ?? $log->duration_sec ?? 0);
-        $shouldLookup = $cdrHasRecording || $billsec > 0;
+        // Morpheus CDR often omits has_recording even when a file exists — still look up by UUID.
+        $shouldLookup = $cdrHasRecording || $billsec > 0 || (int) ($log->duration_sec ?? 0) > 0;
 
         if (! $shouldLookup) {
             $log->update([
                 'recording_status' => self::STATUS_UNAVAILABLE,
+                'meta' => array_merge($log->meta ?? [], [
+                    'recording_skip_reason' => 'no_billable_seconds',
+                    'recording_attempt' => max($attempt, (int) data_get($log->meta, 'recording_attempt', 0)),
+                ]),
             ]);
 
             return $log->fresh();
         }
 
-        $fileId = $this->zoom->findRecordingFileIdForCall($uuid);
+        $fileId = $this->zoom->findRecordingFileIdForCall($uuid, $snap ?: null, $log);
 
         if ($fileId) {
             $log->update([
@@ -64,16 +69,37 @@ class CommunicationsCallRecordingService
             ]);
 
             CommunicationsInboxService::bumpDialerLogsCacheVersion($log->user_id);
+            if ($log->workspace_id) {
+                AgentStatusReportService::forgetCachesForWorkspace((int) $log->workspace_id);
+            }
 
             return $log->fresh();
         }
 
-        $status = $attempt >= 6 ? self::STATUS_UNAVAILABLE : self::STATUS_PENDING;
+        // No-answer / ring-only legs usually never produce a recording.
+        if ($billsec <= 0 && ! $cdrHasRecording) {
+            $log->update([
+                'recording_status' => self::STATUS_UNAVAILABLE,
+                'meta' => array_merge($log->meta ?? [], [
+                    'recording_last_attempt_at' => now()->toIso8601String(),
+                    'recording_attempt' => max($attempt, (int) data_get($log->meta, 'recording_attempt', 0) + 1),
+                    'cdr_has_recording' => false,
+                    'recording_skip_reason' => 'zero_billsec',
+                ]),
+            ]);
+
+            return $log->fresh();
+        }
+
+        // Keep Find clickable — recordings often finalize a few minutes after hangup.
+        $priorAttempts = (int) data_get($log->meta, 'recording_attempt', 0);
+        $nextAttempt = max($attempt, $priorAttempts + 1);
+        $status = $nextAttempt >= 8 ? self::STATUS_UNAVAILABLE : self::STATUS_PENDING;
         $log->update([
             'recording_status' => $status,
             'meta' => array_merge($log->meta ?? [], [
                 'recording_last_attempt_at' => now()->toIso8601String(),
-                'recording_attempt' => $attempt,
+                'recording_attempt' => $nextAttempt,
                 'cdr_has_recording' => $cdrHasRecording,
             ]),
         ]);
@@ -82,7 +108,7 @@ class CommunicationsCallRecordingService
             Log::info('communications.recording.unavailable', [
                 'call_log_id' => $log->id,
                 'morpheus_call_uuid' => $uuid,
-                'attempt' => $attempt,
+                'attempt' => $nextAttempt,
             ]);
         }
 

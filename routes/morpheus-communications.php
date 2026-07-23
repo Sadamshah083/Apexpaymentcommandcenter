@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 
 return function (): void {
     Route::prefix('morpheus')->name('morpheus.')->group(function () {
+        Route::get('/session/ping', [MorpheusHubController::class, 'sessionPing'])->name('session.ping');
         Route::get('/webphone/config', [MorpheusHubController::class, 'webphoneConfig'])->name('webphone.config');
         Route::post('/webphone/prepare', [MorpheusHubController::class, 'prepareWebphone'])->name('webphone.prepare');
 
@@ -19,6 +20,7 @@ return function (): void {
             Route::post('/{uuid}/ended', [MorpheusHubController::class, 'markCallEnded'])->name('ended');
             Route::post('/{uuid}/transfer', [MorpheusHubController::class, 'transferCall'])->name('transfer');
             Route::post('/{uuid}/hangup', [MorpheusHubController::class, 'hangupCall'])->name('hangup');
+            Route::post('/{uuid}/record', [MorpheusHubController::class, 'recordCall'])->name('record');
             Route::post('/{uuid}/hold', [MorpheusHubController::class, 'holdCall'])->name('hold');
             Route::post('/{uuid}/unhold', [MorpheusHubController::class, 'unholdCall'])->name('unhold');
             Route::post('/{uuid}/park', [MorpheusHubController::class, 'parkCall'])->name('park');

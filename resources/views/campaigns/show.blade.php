@@ -5,16 +5,13 @@
 @section('content')
     @php use App\Support\LeadRoute; @endphp
 
-    <div class="app-page space-y-6">
-        <div>
-            <x-back-link :href="route('admin.campaigns.index')" label="All campaigns" />
-            <h1 class="app-page-title mt-2">{{ $campaign->name }}</h1>
-            <p class="app-page-subtitle">Manage leads across all imports in this campaign.</p>
+    <div class="app-page campaigns-show-page space-y-5">
+        <div class="app-page-header flex flex-row items-start justify-between gap-3">
+            <div class="min-w-0">
+                <x-back-link :href="route('admin.campaigns.index')" label="All campaigns" />
+                <h1 class="app-page-title mt-2">{{ $campaign->name }}</h1>
+            </div>
         </div>
-
-        @if (isset($enrichmentStatus))
-            @include('workflows.partials.enrichment-status', ['status' => $enrichmentStatus])
-        @endif
 
         <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
             @foreach ([
@@ -25,31 +22,52 @@
                 'failed' => 'Failed',
             ] as $key => $label)
                 <div class="app-card app-card-padded text-center">
-                    <p class="text-xs text-zinc-400 font-semibold">{{ $label }}</p>
-                    <p class="text-2xl font-bold text-zinc-900">{{ number_format($counts[$key] ?? 0) }}</p>
+                    <p class="text-xs text-zinc-400 font-semibold uppercase tracking-wide">{{ $label }}</p>
+                    <p class="text-2xl font-bold text-zinc-900 mt-1">{{ number_format($counts[$key] ?? 0) }}</p>
                 </div>
             @endforeach
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            @if (($counts['imported'] ?? 0) > 0 || ($counts['failed'] ?? 0) > 0)
-                <div class="app-card app-card-padded space-y-3">
-                    <h3 class="app-section-title">Batch enrich</h3>
-                    @if ($enrichmentConfigured ?? false)
-                        <form method="POST" action="{{ route('admin.campaigns.enrich', $campaign) }}">
-                            @csrf
-                            @if ($workflowId)<input type="hidden" name="workflow_id" value="{{ $workflowId }}">@endif
-                            <button type="submit" class="app-btn app-btn-primary app-btn-sm">Enrich campaign leads</button>
-                        </form>
-                    @else
-                        <p class="text-xs text-rose-600">{{ $enrichmentConfigMessage }}</p>
-                    @endif
+        @php $callKpis = $callKpis ?? ['dials' => 0, 'connected' => 0, 'connect_rate' => 0, 'dispositions' => []]; @endphp
+        <div class="app-card app-card-padded space-y-4">
+            <h3 class="app-section-title">Call KPIs</h3>
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div class="text-center">
+                    <p class="text-xs text-zinc-400 font-semibold uppercase tracking-wide">Calls</p>
+                    <p class="text-2xl font-bold text-zinc-900 mt-1">{{ number_format($callKpis['dials'] ?? 0) }}</p>
+                </div>
+                <div class="text-center">
+                    <p class="text-xs text-zinc-400 font-semibold uppercase tracking-wide">Connected</p>
+                    <p class="text-2xl font-bold text-emerald-700 mt-1">{{ number_format($callKpis['connected'] ?? 0) }}</p>
+                </div>
+                <div class="text-center">
+                    <p class="text-xs text-zinc-400 font-semibold uppercase tracking-wide">Connect rate</p>
+                    <p class="text-2xl font-bold text-zinc-900 mt-1">{{ number_format($callKpis['connect_rate'] ?? 0, 1) }}%</p>
+                </div>
+                <div class="text-center">
+                    <p class="text-xs text-zinc-400 font-semibold uppercase tracking-wide">Dispositioned</p>
+                    <p class="text-2xl font-bold text-zinc-900 mt-1">{{ number_format($callKpis['dispositioned'] ?? 0) }}</p>
+                </div>
+            </div>
+            @if (! empty($callKpis['dispositions']))
+                <div>
+                    <p class="text-xs font-semibold text-zinc-500 mb-2 uppercase tracking-wide">By disposition</p>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                        @foreach (array_slice($callKpis['dispositions'], 0, 12) as $row)
+                            <div class="flex items-center justify-between rounded-lg border border-zinc-100 bg-zinc-50 px-3 py-2 text-sm">
+                                <span class="text-zinc-700 truncate pr-2">{{ $row['label'] }}</span>
+                                <span class="font-semibold text-zinc-900">{{ number_format($row['count']) }}</span>
+                            </div>
+                        @endforeach
+                    </div>
                 </div>
             @endif
-            @if (($counts['ready_to_distribute'] ?? 0) > 0)
+        </div>
+
+        @if (($counts['ready_to_distribute'] ?? 0) > 0)
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <div class="app-card app-card-padded space-y-3">
                     <h3 class="app-section-title">Assign to team lead</h3>
-                    <p class="text-xs text-zinc-500">Distribute enriched leads to an Appointment Setter Team Lead. Leads are split across their active setters.</p>
                     <form method="POST" action="{{ route('admin.campaigns.assign-team-lead', $campaign) }}" class="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
                         @csrf
                         @if ($workflowId)<input type="hidden" name="workflow_id" value="{{ $workflowId }}">@endif
@@ -73,7 +91,7 @@
                     @endif
                 </div>
                 <div class="app-card app-card-padded space-y-3">
-                    <h3 class="app-section-title">Batch assign setters (direct)</h3>
+                    <h3 class="app-section-title">Batch assign setters</h3>
                     <form method="POST" action="{{ route('admin.campaigns.distribute', $campaign) }}" class="space-y-3">
                         @csrf
                         @if ($workflowId)<input type="hidden" name="workflow_id" value="{{ $workflowId }}">@endif
@@ -88,8 +106,8 @@
                         <button type="submit" class="app-btn app-btn-primary app-btn-sm">Distribute</button>
                     </form>
                 </div>
-            @endif
-        </div>
+            </div>
+        @endif
 
         <form method="GET" class="app-card app-card-padded flex flex-wrap gap-3 items-end">
             <div class="app-field">

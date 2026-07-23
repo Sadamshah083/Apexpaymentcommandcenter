@@ -6,10 +6,20 @@
 @php
     use App\Support\LeadContactDisplay;
 
-    $attempted = ($workflow->enriched_leads ?? 0) + ($workflow->failed_leads ?? 0);
-    $pct = $workflow->total_leads > 0
-        ? (int) round(($attempted / $workflow->total_leads) * 100)
-        : 0;
+    $uploadOnly = $workflow->isImportOnly();
+    $attempted = $uploadOnly
+        ? (int) ($workflow->total_leads ?? 0)
+        : (($workflow->enriched_leads ?? 0) + ($workflow->failed_leads ?? 0));
+    $pct = $uploadOnly
+        ? (($workflow->ingestion_complete || $workflow->status === 'completed') && ($workflow->total_leads ?? 0) > 0 ? 100 : 0)
+        : ($workflow->total_leads > 0
+            ? (int) round(($attempted / $workflow->total_leads) * 100)
+            : 0);
+    $progressLabel = $uploadOnly
+        ? ($pct === 100
+            ? "100% · {$attempted} / {$workflow->total_leads} uploaded"
+            : number_format($attempted).' uploaded…')
+        : "{$pct}% · {$attempted} / {$workflow->total_leads}";
     $importedCount = $workflow->imported_leads_count ?? 0;
     $enrichedCount = $workflow->enriched_leads_count ?? 0;
     $readyToDistribute = (int) ($workflow->ready_to_assign_count ?? $workflow->ready_to_distribute_count ?? 0);
@@ -37,7 +47,7 @@
                         <button type="submit" class="app-btn app-btn-primary app-btn-sm">Resume</button>
                     </form>
                 @endif
-                <x-workflow-status-pill :status="$workflow->status" id="workspace-sync-workflow-status" />
+                <x-workflow-status-pill :status="$workflow->status" :processing-mode="$workflow->processing_mode" id="workspace-sync-workflow-status" />
             </div>
         @endif
     </div>
@@ -159,21 +169,34 @@
                     </div>
                 </div>
 
-                <label class="app-checkbox-row">
-                    <input type="checkbox" name="run_enrichment_on_import" value="1" @checked($enrichmentConfigured ?? false) @disabled(!($enrichmentConfigured ?? false))>
-                    <span class="app-checkbox-row-text">
-                        <strong>Run AI enrichment now</strong>
-                        @if(!($enrichmentConfigured ?? false))
-                            <span class="block text-xs text-zinc-500 font-normal mt-0.5">Requires GEMINI_API_KEY or OPENROUTER_API_KEY on the server.</span>
-                        @else
-                            <span class="block text-xs text-zinc-500 font-normal mt-0.5">Uncheck to import only — enrich from this page when ready.</span>
-                        @endif
-                    </span>
-                </label>
+                <fieldset class="space-y-3">
+                    <legend class="app-label mb-1">Import mode (AI check)</legend>
+                    @php
+                        $preferEnrich = old('run_enrichment_on_import', $workflow->runsEnrichmentOnImport() ? '1' : '0') === '1';
+                    @endphp
+                    <label class="app-checkbox-row">
+                        <input type="radio" name="run_enrichment_on_import" value="0" @checked(! $preferEnrich)>
+                        <span class="app-checkbox-row-text">
+                            <strong>Upload only (fast)</strong>
+                            <span class="block text-xs text-zinc-500 font-normal mt-0.5">Import spreadsheet rows now. No AI enrichment queue. Assign or enrich later.</span>
+                        </span>
+                    </label>
+                    <label class="app-checkbox-row {{ ($enrichmentConfigured ?? false) ? '' : 'opacity-60' }}">
+                        <input type="radio" name="run_enrichment_on_import" value="1" @checked($preferEnrich) @disabled(!($enrichmentConfigured ?? false))>
+                        <span class="app-checkbox-row-text">
+                            <strong>Upload + AI enrichment</strong>
+                            @if(!($enrichmentConfigured ?? false))
+                                <span class="block text-xs text-zinc-500 font-normal mt-0.5">Requires GEMINI_API_KEY or OPENROUTER_API_KEY on the server.</span>
+                            @else
+                                <span class="block text-xs text-zinc-500 font-normal mt-0.5">Import rows, then queue AI enrichment for each lead.</span>
+                            @endif
+                        </span>
+                    </label>
+                </fieldset>
 
                 <label class="app-checkbox-row">
                     <input type="checkbox" name="mapping_confirmed" value="1" required>
-                    <span class="app-checkbox-row-text">I've reviewed the column mapping. Duplicate US phone numbers in this workspace will be skipped.</span>
+                    <span class="app-checkbox-row-text"><strong>Duplicate check:</strong> I've reviewed the column mapping. Duplicate US phone numbers in this workspace will be skipped.</span>
                 </label>
                 @error('mapping_confirmed')
                     <p class="text-xs text-rose-600 font-semibold">{{ $message }}</p>
@@ -194,10 +217,27 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
 
                 <div class="flex justify-end gap-3 pt-2">
                     <a href="{{ route('admin.workflows.index') }}" class="app-btn app-btn-secondary">Cancel</a>
-                    <button type="submit" class="app-btn app-btn-primary">Start import</button>
+                    <button type="submit" class="app-btn app-btn-primary" id="workflow-start-import-btn">Start upload</button>
                 </div>
             </div>
         </form>
+        @push('scripts')
+        <script>
+        (() => {
+            const form = document.querySelector('form[action*="run"]');
+            const btn = document.getElementById('workflow-start-import-btn');
+            if (!form || !btn) return;
+            const syncLabel = () => {
+                const enrich = form.querySelector('input[name="run_enrichment_on_import"][value="1"]');
+                btn.textContent = (enrich && enrich.checked) ? 'Start upload + enrichment' : 'Start upload';
+            };
+            form.querySelectorAll('input[name="run_enrichment_on_import"]').forEach((el) => {
+                el.addEventListener('change', syncLabel);
+            });
+            syncLabel();
+        })();
+        </script>
+        @endpush
     @else
         @if(isset($enrichmentStatus))
             @include('workflows.partials.enrichment-status', ['status' => $enrichmentStatus])
@@ -210,7 +250,7 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
                 <div class="space-y-2">
                     <div class="flex justify-between text-xs font-semibold text-zinc-500">
                         <span>Overall progress</span>
-                        <span id="workspace-sync-workflow-progress-label">{{ $pct }}% &middot; {{ $attempted }} / {{ $workflow->total_leads }}</span>
+                        <span id="workspace-sync-workflow-progress-label">{{ $progressLabel }}</span>
                     </div>
                     <div class="app-progress-track">
                         <div id="workspace-sync-workflow-progress-bar" class="app-progress-fill" style="width: {{ $pct }}%"></div>
@@ -429,7 +469,7 @@ Extract business identity, owner contact, payment processor, and booking/POS sof
 @endsection
 
 @push('scripts')
-<div id="workspace-sync-page" class="hidden" data-workflow-id="{{ $workflow->id }}" aria-hidden="true"></div>
+<div id="workspace-sync-page" class="hidden" data-workflow-id="{{ $workflow->id }}" data-sync-scope="progress" aria-hidden="true"></div>
 <script>
     document.body.dataset.workspaceWorkflowId = '{{ $workflow->id }}';
 

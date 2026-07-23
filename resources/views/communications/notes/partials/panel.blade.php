@@ -1,26 +1,20 @@
 @php
     $formAction = route($routePrefix.'communications.notes');
+    $showAllAgents = (bool) ($showAllAgents ?? false);
 @endphp
 
 <div class="app-page space-y-5 call-notes-page">
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
             <h1 class="app-page-title">Call Notes</h1>
-            <p class="app-page-subtitle">
-                @if ($isAdminView)
-                    Select an agent to review their call notes, phone numbers, and dispositions.
-                @else
-                    Your saved call notes with phone number and disposition.
-                @endif
-            </p>
         </div>
         <div class="call-notes-toolbar">
             @if ($isAdminView)
                 <form method="GET" action="{{ $formAction }}" class="call-notes-agent-form">
                     <label class="call-notes-agent-label" for="call-notes-agent">Agent</label>
                     <select id="call-notes-agent" name="agent_id" class="app-input call-notes-agent-select"
-                        onchange="this.form.submit()">
-                        <option value="">Select agent…</option>
+                        data-pretty-select data-pretty-select-width="trigger" onchange="this.form.submit()">
+                        <option value="all" @selected($showAllAgents || (int) $selectedAgentId === 0)>All agents</option>
                         @foreach ($agents as $agent)
                             <option value="{{ $agent['id'] }}" @selected((int) $selectedAgentId === (int) $agent['id'])>
                                 {{ $agent['name'] }}@if (!empty($agent['role'])) — {{ $agent['role'] }}@endif
@@ -42,62 +36,61 @@
     </div>
 
     <div class="app-card app-card-padded call-notes-card">
-        @if ($isAdminView && (int) $selectedAgentId <= 0)
-            <div class="call-notes-empty">
-                <p class="call-notes-empty__title">Choose an agent</p>
-                <p class="call-notes-empty__text">Pick an agent name above to load their notes, numbers, and dispositions. Then use Download notes for a full CSV export.</p>
-            </div>
-        @else
-            <div class="call-notes-card__head">
-                <h2 class="call-notes-card__title">
-                    {{ $selectedAgent['name'] ?? 'Agent' }}
-                    @if (!empty($selectedAgent['role']))
-                        <span class="call-notes-card__role">· {{ $selectedAgent['role'] }}</span>
-                    @endif
-                </h2>
-                @if ($notes)
-                    <span class="call-notes-card__count">{{ number_format($notes->total()) }} note{{ $notes->total() === 1 ? '' : 's' }}</span>
+        <div class="call-notes-card__head">
+            <h2 class="call-notes-card__title">
+                {{ $selectedAgent['name'] ?? 'Agent' }}
+                @if (!empty($selectedAgent['role']))
+                    <span class="call-notes-card__role">· {{ $selectedAgent['role'] }}</span>
                 @endif
-            </div>
-
-            <div class="call-notes-table-wrap">
-                <table class="call-notes-table">
-                    <thead>
-                        <tr>
-                            <th>Number</th>
-                            <th>Disposition</th>
-                            <th>Notes</th>
-                            <th>When</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @forelse (($notes ?? collect()) as $row)
-                            <tr>
-                                <td class="call-notes-phone">{{ $row['phone'] }}</td>
-                                <td>
-                                    @if (($row['disposition'] ?? '—') !== '—')
-                                        <span class="call-notes-dispo">{{ $row['disposition'] }}</span>
-                                    @else
-                                        <span class="call-notes-muted">—</span>
-                                    @endif
-                                </td>
-                                <td class="call-notes-body">{!! nl2br(e($row['notes'])) !!}</td>
-                                <td class="call-notes-muted" title="{{ $row['when_exact'] ?? '' }}">{{ $row['when_display'] ?? $row['when'] }}</td>
-                            </tr>
-                        @empty
-                            <tr>
-                                <td colspan="4" class="call-notes-empty-row">
-                                    No notes or dispositions logged yet for this agent.
-                                </td>
-                            </tr>
-                        @endforelse
-                    </tbody>
-                </table>
-            </div>
-
-            @if ($notes && $notes->total() > 0)
-                <x-pagination :paginator="$notes" class="call-notes-pagination" />
+            </h2>
+            @if ($notes)
+                <span class="call-notes-card__count">{{ number_format($notes->total()) }} note{{ $notes->total() === 1 ? '' : 's' }}</span>
             @endif
+        </div>
+
+        <div class="call-notes-table-wrap">
+            <table class="call-notes-table">
+                <thead>
+                    <tr>
+                        @if ($showAllAgents)
+                            <th>Agent</th>
+                        @endif
+                        <th>Number</th>
+                        <th>Disposition</th>
+                        <th>Notes</th>
+                        <th>When</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @forelse (($notes ?? collect()) as $row)
+                        <tr>
+                            @if ($showAllAgents)
+                                <td>{{ $row['agent'] ?? '—' }}</td>
+                            @endif
+                            <td class="call-notes-phone">{{ $row['phone'] }}</td>
+                            <td>
+                                @if (($row['disposition'] ?? '—') !== '—')
+                                    <span class="call-notes-dispo">{{ $row['disposition'] }}</span>
+                                @else
+                                    <span class="call-notes-muted">—</span>
+                                @endif
+                            </td>
+                            <td class="call-notes-body">{!! nl2br(e($row['notes'])) !!}</td>
+                            <td class="call-notes-muted" title="{{ $row['when_exact'] ?? '' }}">{{ $row['when_display'] ?? $row['when'] }}</td>
+                        </tr>
+                    @empty
+                        <tr>
+                            <td colspan="{{ $showAllAgents ? 5 : 4 }}" class="call-notes-empty-row">
+                                No notes or dispositions logged yet{{ $showAllAgents ? ' for these agents' : ' for this agent' }}.
+                            </td>
+                        </tr>
+                    @endforelse
+                </tbody>
+            </table>
+        </div>
+
+        @if ($notes && $notes->total() > 0)
+            <x-pagination :paginator="$notes" class="call-notes-pagination" />
         @endif
     </div>
 </div>

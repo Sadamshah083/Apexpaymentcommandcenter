@@ -10,7 +10,8 @@ export default defineConfig({
             refresh: true,
             fonts: [
                 bunny('Instrument Sans', {
-                    weights: [400, 500, 600],
+                    // Two weights only — fewer font downloads on first paint.
+                    weights: [400, 600],
                 }),
             ],
         }),
@@ -42,9 +43,15 @@ export default defineConfig({
                     if (
                         id.includes('/resources/js/communications-webphone.js')
                         || id.includes('/resources/js/communications-dialer.js')
+                        || id.includes('/resources/js/communications-auto-dial.js')
                         || id.includes('node_modules/jssip')
+                        || id.includes('node_modules/sip.js')
                     ) {
                         return 'communications';
+                    }
+
+                    if (id.includes('/resources/js/agent-presence.js')) {
+                        return 'agent-presence';
                     }
                 },
             },

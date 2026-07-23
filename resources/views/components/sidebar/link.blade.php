@@ -26,6 +26,7 @@
     data-nav-path="{{ $navPath }}"
     data-nav-query="{{ $navQuery }}"
     data-nav-query-mode="{{ $resolvedQueryMode }}"
+    data-turbo-prefetch="true"
     @if ($navMatchPrefixes !== []) data-nav-match-prefixes='@json($navMatchPrefixes)' @endif
     @if ($navExcludePrefixes !== []) data-nav-exclude-prefixes='@json($navExcludePrefixes)' @endif
     @if ($active) aria-current="page" @endif

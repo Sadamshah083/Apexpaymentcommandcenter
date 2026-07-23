@@ -2,6 +2,7 @@
 
 namespace App\Services\Dashboard;
 
+use App\Models\CommunicationCallLog;
 use App\Models\LeadActivity;
 use App\Models\User;
 use App\Models\WorkflowLead;
@@ -312,23 +313,85 @@ class DashboardDetailService
             'meetings' => 'Meetings booked today',
         ];
 
+        $tz = (string) config('app.business_timezone', 'America/New_York');
+        $todayStart = now($tz)->startOfDay();
+        $todayEnd = now($tz)->endOfDay();
+
         $activities = LeadActivity::query()
             ->with(['user', 'lead'])
             ->where('type', $activityType)
-            ->whereBetween('created_at', [now()->startOfDay(), now()->endOfDay()])
+            ->whereBetween('created_at', [$todayStart, $todayEnd])
             ->whereHas('lead.workflow', fn ($q) => $q->where('workspace_id', $workspace->id))
             ->orderByDesc('created_at')
             ->paginate(15)
             ->withQueryString();
 
+        // Dialer activity lives in call logs — use those when SalesOps activity rows are empty.
+        $callLogs = null;
+        if ($activities->total() === 0) {
+            $callLogs = $this->todayActivityCallLogs($workspace, $type, $todayStart, $todayEnd);
+        }
+
         return [
             'key' => 'activity',
             'title' => $labels[$type] ?? 'Team activity',
-            'description' => 'Live activity log for today — refreshes automatically.',
+            'description' => 'Live activity for today — sourced from dialer call logs and team activity.',
             'activities' => $activities,
-            'total' => $activities->total(),
+            'call_logs' => $callLogs,
+            'total' => $callLogs?->total() ?? $activities->total(),
             'activity_type' => $type,
         ];
+    }
+
+    /**
+     * @return LengthAwarePaginator<int, CommunicationCallLog>
+     */
+    protected function todayActivityCallLogs(Workspace $workspace, string $type, $todayStart, $todayEnd): LengthAwarePaginator
+    {
+        $query = CommunicationCallLog::query()
+            ->with('user')
+            ->where('workspace_id', $workspace->id)
+            ->where(function ($q) use ($todayStart, $todayEnd) {
+                $q->whereBetween('started_at', [$todayStart, $todayEnd])
+                    ->orWhere(function ($fallback) use ($todayStart, $todayEnd) {
+                        $fallback->whereNull('started_at')
+                            ->whereBetween('created_at', [$todayStart, $todayEnd]);
+                    });
+            });
+
+        if ($type === 'conversations') {
+            $query->where(function ($q) {
+                $q->where('duration_sec', '>=', 20)
+                    ->orWhere('meta->call_result', 'connected')
+                    ->orWhere('meta->call_result', 'answered');
+            });
+        } elseif ($type === 'discoveries') {
+            $query->whereNotNull('disposition')
+                ->where('disposition', '!=', '')
+                ->where(function ($q) {
+                    foreach ([
+                        '%call back%', '%callback%', '%follow up%', '%follow-up%',
+                        '%not interested%', '%requested appointment%', '%appointment%',
+                        '%meeting%', '%no pitch%', '%corporate%', '%owner hung%',
+                        '%owner hang%', '%gatekeeper%', '%decision maker%', '%discovery%',
+                    ] as $matcher) {
+                        $q->orWhereRaw('LOWER(disposition) LIKE ?', [$matcher]);
+                    }
+                });
+        } elseif ($type === 'meetings') {
+            $query->whereNotNull('disposition')
+                ->where('disposition', '!=', '')
+                ->where(function ($q) {
+                    foreach ([
+                        '%requested appointment%', '%appointment set%', '%appointment settled%',
+                        '%meeting booked%', '%meeting set%', '%booked appointment%',
+                    ] as $matcher) {
+                        $q->orWhereRaw('LOWER(disposition) LIKE ?', [$matcher]);
+                    }
+                });
+        }
+
+        return $query->orderByDesc('started_at')->orderByDesc('id')->paginate(15)->withQueryString();
     }
 
     /**

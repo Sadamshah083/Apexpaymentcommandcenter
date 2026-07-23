@@ -1,11 +1,13 @@
 @php
     $agents = $communicationAgents ?? [];
     $suggestedExt = $suggestedExtensionNum ?? config('integrations.communications.default_caller_id', '1020');
+    $availablePhoneLines = collect($availablePhoneLines ?? []);
     $sipHost = config('integrations.morpheus.sip_host') ?: config('integrations.morpheus.host');
     $registerHost = app(\App\Services\Communications\ZoomClickToCallService::class)->publicSipHost();
     $sipDomain = app(\App\Services\Communications\ZoomClickToCallService::class)->webrtcSipDomain();
     $wssUrl = config('integrations.morpheus.sip_wss_url') ?: ('wss://' . config('integrations.morpheus.host', 'apexone.morpheus.cx') . ':7443/');
     $provisioned = session('provisioned_agent');
+    $defaultLine = $availablePhoneLines->first();
 @endphp
 
 @if ($provisioned)
@@ -84,9 +86,9 @@
 @if ($hubAccess['canConfigure'] ?? false)
 <div class="ghl-card mb-6">
     <h3 class="ghl-card-title">Provision phone agent</h3>
-    <p class="text-sm text-slate-500 mb-3">Creates a Morpheus SIP extension linked to a workspace user. Set the
-        <strong>Caller ID number</strong> to the DID Morpheus assigns — outbound calls will not show your business
-        number until this is filled in.</p>
+    <p class="text-sm text-slate-500 mb-3">Creates a Morpheus SIP extension linked to a workspace user.
+        <strong>{{ $availablePhoneLines->count() }} remaining</strong> extension/DID pair{{ $availablePhoneLines->count() === 1 ? '' : 's' }} available from the billing pool.
+    </p>
     <form method="POST"
         action="{{ route($routePrefix . 'communications.morpheus.agents.provision', ['user' => '__USER__']) }}"
         id="provision-agent-form" class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
@@ -105,14 +107,27 @@
             </select>
         </div>
         <div>
-            <label class="comm-hub-label">Extension number *</label>
-            <input type="text" name="extension_num" value="{{ $suggestedExt }}" required
-                class="comm-hub-input w-full" pattern="[0-9]{3,6}">
+            <label class="comm-hub-label">Extension (remaining) *</label>
+            @if ($availablePhoneLines->isNotEmpty())
+                <select name="extension_num" id="provision-extension-select" class="comm-hub-input w-full" required
+                    data-provision-extension>
+                    @foreach ($availablePhoneLines as $line)
+                        <option value="{{ $line['extension'] }}" data-did="{{ $line['did'] }}"
+                            @selected(($defaultLine['extension'] ?? '') === $line['extension'])>
+                            {{ $line['label'] }}
+                        </option>
+                    @endforeach
+                </select>
+            @else
+                <input type="text" name="extension_num" value="{{ $suggestedExt }}" required
+                    class="comm-hub-input w-full" pattern="[0-9]{3,6}">
+                <p class="text-xs text-amber-700 mt-1">No unused billing DIDs left — enter an extension manually.</p>
+            @endif
         </div>
         <div>
             <label class="comm-hub-label">SIP password *</label>
             <input type="text" name="sip_password" required minlength="8" class="comm-hub-input w-full"
-                autocomplete="new-password" placeholder="Min 8 characters">
+                autocomplete="new-password" placeholder="Min 8 characters" value="12345678">
         </div>
         <div>
             <label class="comm-hub-label">Caller ID name</label>
@@ -120,15 +135,28 @@
                 placeholder="Agent name">
         </div>
         <div>
-            <label class="comm-hub-label">Caller ID number (outbound DID)</label>
-            <input type="text" name="caller_id_num" class="comm-hub-input w-full" placeholder="+1 555 123 4567"
-                title="Required for correct outbound caller ID once Morpheus delivers your DIDs">
+            <label class="comm-hub-label">Caller ID number (remaining DID)</label>
+            <input type="text" name="caller_id_num" id="provision-caller-did" class="comm-hub-input w-full"
+                value="{{ $defaultLine['did'] ?? '' }}"
+                placeholder="Select extension to auto-fill DID" @readonly($availablePhoneLines->isNotEmpty())>
         </div>
         <div class="md:col-span-2 flex items-center gap-2">
             <input type="hidden" name="create_morpheus_user" value="1">
             <button type="submit" class="comm-hub-btn">Create phone line</button>
         </div>
     </form>
+    @if ($availablePhoneLines->isNotEmpty())
+        <script>
+            (() => {
+                const select = document.getElementById('provision-extension-select');
+                const did = document.getElementById('provision-caller-did');
+                if (!select || !did) return;
+                select.addEventListener('change', () => {
+                    did.value = select.selectedOptions?.[0]?.dataset?.did || '';
+                });
+            })();
+        </script>
+    @endif
 </div>
 @endif
 

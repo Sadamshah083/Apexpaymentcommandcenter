@@ -203,12 +203,13 @@ function bindWorkflowUploadForm(form) {
         resetUpload();
     });
 
-    form.addEventListener('turbo:submit-end', (event) => {
-        if (event.detail?.success) {
-            resetUpload();
-            if (nameInput) {
-                nameInput.value = '';
-            }
+    form.addEventListener('submit', () => {
+        // Native submit (Turbo disabled on this form) — keep selected file name visible.
+        const submitBtn = form.querySelector('button[type="submit"]');
+        if (submitBtn && !submitBtn.dataset.originalText) {
+            submitBtn.dataset.originalText = submitBtn.textContent || '';
+            submitBtn.textContent = 'Uploading…';
+            submitBtn.disabled = true;
         }
     });
 }

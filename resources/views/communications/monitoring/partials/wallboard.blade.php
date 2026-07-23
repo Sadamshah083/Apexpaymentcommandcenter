@@ -78,11 +78,13 @@
     data-call-monitoring
     data-call-monitoring-unified="1"
     data-call-monitoring-poll-url="{{ $pollUrl }}"
-    data-call-monitoring-stream-url="{{ $streamUrl ?? '' }}">
+    data-call-monitoring-stream-url="{{ $streamUrl ?? '' }}"
+    data-call-monitoring-ws-url="{{ $wsUrl ?? '' }}"
+    data-call-monitoring-workspace-id="{{ (int) ($workspaceId ?? 0) }}">
     <div class="call-monitoring-toolbar app-card">
         <div class="call-monitoring-toolbar__intro">
-            <p class="call-monitoring-toolbar__eyebrow">Team Lead</p>
-            <p class="call-monitoring-toolbar__title">Agent status</p>
+            <p class="call-monitoring-toolbar__eyebrow">Live board</p>
+            <p class="call-monitoring-toolbar__title">Call Monitoring</p>
         </div>
         <div class="call-monitoring-toolbar__stats">
             <div class="call-monitoring-toolbar__stat">
@@ -109,9 +111,6 @@
     <div class="app-page-header flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
             <h1 class="app-page-title">Call Monitoring</h1>
-            <p class="app-page-subtitle">
-                Live board for idle, break, lunch, ringing, connected, disposition, and offline agents.
-            </p>
         </div>
         <div class="call-monitoring-live-badge" aria-live="polite">
             <span class="call-monitoring-live-dot" aria-hidden="true"></span>

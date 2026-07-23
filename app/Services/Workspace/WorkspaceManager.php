@@ -4,6 +4,7 @@ namespace App\Services\Workspace;
 
 use App\Models\User;
 use App\Models\Workspace;
+use Illuminate\Validation\ValidationException;
 
 class WorkspaceManager
 {
@@ -14,11 +15,18 @@ class WorkspaceManager
 
     public function createWorkspace(User $user, string $name): Workspace
     {
+        if (! $user->isPlatformSuperAdmin()) {
+            throw ValidationException::withMessages([
+                'name' => 'Only the Super Admin can add workspaces.',
+            ]);
+        }
+
         $workspace = Workspace::create([
             'name' => $name,
             'admin_id' => $user->id,
         ]);
 
+        // Keep a single platform Super Admin across workspaces — do not create extra SA users.
         $workspace->users()->attach($user->id, [
             'role' => 'super_admin',
             'status' => 'active',

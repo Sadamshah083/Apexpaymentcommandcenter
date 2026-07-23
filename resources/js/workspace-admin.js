@@ -1,4 +1,5 @@
 import { bindModuleAccessFormFields, syncModuleAccessForRole } from './member-management.js';
+import { refreshPrettySelect } from './pretty-select.js';
 
 function escapeHtml(value) {
     return String(value ?? '')
@@ -264,17 +265,83 @@ function bindCreateMemberForm() {
     }
 
     createForm.dataset.bound = '1';
+
+    const modal = document.getElementById('um-add-member-modal');
+    const emailDomain = String(modal?.dataset.emailDomain || 'apexonepayments.com').toLowerCase();
+    const usernameInput = createForm.querySelector('[data-create-member-username], #create-username');
+    const emailLocalInput = createForm.querySelector('[data-create-member-email-local]');
+    const emailHidden = createForm.querySelector('[data-create-member-email], #create-email');
+    const extensionSelect = createForm.querySelector('[data-create-member-extension], #create-extension');
+    const didSelect = createForm.querySelector('[data-create-member-did], #create-did');
+
+    const syncEmail = () => {
+        let localRaw = String(emailLocalInput?.value || usernameInput?.value || '').trim().toLowerCase();
+        // If the user pasted a full email into the local box, keep only the local part.
+        if (localRaw.includes('@')) {
+            localRaw = localRaw.split('@')[0] || '';
+        }
+        const local = localRaw.replace(/[^a-z0-9._+-]/g, '') || 'agent';
+        if (emailLocalInput && emailLocalInput.value !== local && document.activeElement !== emailLocalInput) {
+            emailLocalInput.value = local;
+        }
+        if (emailHidden) {
+            emailHidden.value = `${local}@${emailDomain}`;
+        }
+        return emailHidden?.value || `${local}@${emailDomain}`;
+    };
+
+    const syncExtensionFromDid = () => {
+        if (!didSelect || !extensionSelect) return;
+        const option = didSelect.selectedOptions?.[0];
+        const suggested = option?.dataset?.extension || '';
+        if (suggested && (!extensionSelect.value || extensionSelect.dataset.autofilled === '1')) {
+            extensionSelect.value = suggested;
+            extensionSelect.dataset.autofilled = '1';
+        }
+    };
+
+    usernameInput?.addEventListener('input', () => {
+        if (emailLocalInput && !emailLocalInput.dataset.touched) {
+            emailLocalInput.value = String(usernameInput.value || '')
+                .trim()
+                .toLowerCase()
+                .replace(/[^a-z0-9._+-]/g, '');
+        }
+        syncEmail();
+    });
+    emailLocalInput?.addEventListener('input', () => {
+        emailLocalInput.dataset.touched = '1';
+        syncEmail();
+    });
+    extensionSelect?.addEventListener('input', () => {
+        extensionSelect.dataset.autofilled = '0';
+    });
+    didSelect?.addEventListener('change', syncExtensionFromDid);
+    syncEmail();
+    syncExtensionFromDid();
+
     createForm.addEventListener('submit', async (event) => {
         if (createForm.dataset.submitting === '1') {
             event.preventDefault();
             return;
         }
 
+        syncEmail();
+        syncExtensionFromDid();
+
         if (!createForm.checkValidity()) {
             return;
         }
 
         event.preventDefault();
+
+        const email = String(emailHidden?.value || '').trim().toLowerCase();
+        if (!email.endsWith(`@${emailDomain}`)) {
+            window.showToast?.(`Email must use @${emailDomain}.`, 'error');
+            emailLocalInput?.focus();
+            return;
+        }
+
         createForm.dataset.submitting = '1';
 
         const submitButton = createForm.querySelector('button[type="submit"]');
@@ -285,9 +352,19 @@ function bindCreateMemberForm() {
         }
 
         try {
+            const formData = new FormData(createForm);
+            const finalEmail = syncEmail();
+            formData.set('email', finalEmail);
+
+            // Disabled selects are omitted from FormData — re-enable team lead for submit.
+            const teamLeadSelect = createForm.querySelector('[data-create-member-team-lead]');
+            if (teamLeadSelect && teamLeadSelect.disabled && teamLeadSelect.value) {
+                formData.set('team_lead_user_id', teamLeadSelect.value);
+            }
+
             const response = await fetch(createForm.action, {
                 method: 'POST',
-                body: new FormData(createForm),
+                body: formData,
                 headers: {
                     Accept: 'application/json',
                     'X-Requested-With': 'XMLHttpRequest',
@@ -309,9 +386,18 @@ function bindCreateMemberForm() {
             }
 
             createForm.reset();
+            if (emailLocalInput) delete emailLocalInput.dataset.touched;
             closeUmModal(document.getElementById('um-add-member-modal'));
             window.showToast?.(payload.message || 'Agent account created.', 'success');
-            window.setTimeout(() => window.location.reload(), 600);
+            // Hard reload so the new row always appears in User Management.
+            window.setTimeout(() => {
+                const url = new URL(window.location.href);
+                url.searchParams.delete('page');
+                if (payload.member?.id) {
+                    url.searchParams.set('highlight', String(payload.member.id));
+                }
+                window.location.assign(url.toString());
+            }, 400);
         } catch {
             window.showToast?.('Network error while creating account.', 'error');
         } finally {
@@ -327,7 +413,7 @@ function bindCreateMemberForm() {
 function bindCreateMemberRoleToggle() {
     const roleSelect = document.querySelector('[data-create-member-role]');
     const modulesPanel = document.querySelector('[data-create-member-modules]');
-    if (!roleSelect || !modulesPanel || roleSelect.dataset.bound === '1') {
+    if (!roleSelect || roleSelect.dataset.bound === '1') {
         return;
     }
 
@@ -340,18 +426,104 @@ function bindCreateMemberRoleToggle() {
         'closers_team_lead',
         'appointment_setter',
         'closer',
+        'closers_qa',
     ]);
+
+    const parseLeadJson = (raw) => {
+        try {
+            const parsed = JSON.parse(raw || '[]');
+            return Array.isArray(parsed) ? parsed : [];
+        } catch {
+            return [];
+        }
+    };
+
+    const fillCreateTeamLeadOptions = (select, role) => {
+        if (!select) {
+            return;
+        }
+
+        const modal = document.getElementById('um-add-member-modal');
+        const setterLeads = parseLeadJson(modal?.dataset.setterLeads);
+        const closerLeads = parseLeadJson(modal?.dataset.closerLeads);
+        const leads =
+            role === 'closer' || role === 'closers_qa' ? closerLeads : setterLeads;
+
+        select.innerHTML = '<option value="">Unassigned</option>';
+        leads.forEach((lead) => {
+            const option = document.createElement('option');
+            option.value = String(lead.id);
+            option.textContent = lead.campaign_name
+                ? `${lead.name} · ${lead.campaign_name}`
+                : lead.name;
+            select.appendChild(option);
+        });
+
+        if (leads.length > 0 && (role === 'closer' || role === 'appointment_setter')) {
+            select.value = String(leads[0].id);
+        }
+    };
+
+    const syncCreateAssignmentFields = () => {
+        const role = roleSelect.value;
+        const campaignField = document.querySelector('[data-create-campaign-field]');
+        const teamLeadField = document.querySelector('[data-create-team-lead-field]');
+        const campaignSelect = document.querySelector('[data-create-member-campaign]');
+        const teamLeadSelect = document.querySelector('[data-create-member-team-lead]');
+        const isTeamLead = role === 'appointment_setter_team_lead' || role === 'closers_team_lead';
+        const isAgent = role === 'appointment_setter' || role === 'closer';
+
+        if (campaignField) {
+            campaignField.hidden = !isTeamLead;
+        }
+        if (teamLeadField) {
+            teamLeadField.hidden = !isAgent;
+        }
+
+        if (campaignSelect) {
+            if (isTeamLead) {
+                campaignSelect.disabled = false;
+                campaignSelect.removeAttribute('disabled');
+            } else {
+                campaignSelect.value = '';
+                campaignSelect.disabled = true;
+            }
+        }
+
+        if (teamLeadSelect) {
+            if (isAgent) {
+                teamLeadSelect.disabled = false;
+                teamLeadSelect.removeAttribute('disabled');
+                fillCreateTeamLeadOptions(teamLeadSelect, role);
+            } else {
+                teamLeadSelect.innerHTML = '<option value="">Unassigned</option>';
+                teamLeadSelect.value = '';
+                teamLeadSelect.disabled = true;
+            }
+        }
+
+        [campaignSelect, teamLeadSelect, roleSelect].forEach((select) => {
+            if (select) {
+                refreshPrettySelect(select);
+            }
+        });
+    };
 
     const syncVisibility = () => {
         const role = roleSelect.value;
-        modulesPanel.classList.toggle('hidden', !configurableRoles.has(role));
-        syncModuleAccessForRole(modulesPanel, role);
+        if (modulesPanel) {
+            modulesPanel.classList.toggle('hidden', !configurableRoles.has(role));
+            syncModuleAccessForRole(modulesPanel, role);
+        }
+        syncCreateAssignmentFields();
     };
 
     roleSelect.addEventListener('change', syncVisibility);
     syncVisibility();
 
-    bindModuleAccessFormFields(modulesPanel);
+    if (modulesPanel) {
+        bindModuleAccessFormFields(modulesPanel);
+    }
 }
 
 export function initWorkspaceAdmin() {

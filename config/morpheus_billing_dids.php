@@ -1,7 +1,8 @@
 <?php
 
 /**
- * Billing department DID pool — one unique inbound/outbound caller ID per extension (1001–1020).
+ * Billing department DID pool — one unique inbound/outbound caller ID per extension.
+ * Extra DIDs can be assigned manually via the Add Account DID dropdown.
  */
 return [
     'department' => 'Billing',
@@ -26,5 +27,16 @@ return [
         '1018' => '12016485597',
         '1019' => '12016485954',
         '1020' => '12016485968',
+        // New DIDs (Jul 2026)
+        '1021' => '12107595101',
+        '1022' => '12107595102',
+        '1023' => '12394231022',
+        '1024' => '12394231023',
+        '1025' => '12566894487',
+        '1026' => '12566894488',
+        '1027' => '12296420144',
+        '1028' => '12296420145',
+        '1029' => '12352025377',
+        '1030' => '12352025378',
     ],
 ];

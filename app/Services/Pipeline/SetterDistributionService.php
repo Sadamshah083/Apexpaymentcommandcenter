@@ -124,6 +124,46 @@ class SetterDistributionService
         return $assigned;
     }
 
+    /**
+     * Assign specific unassigned leads to a setter (checkbox / selection flow).
+     *
+     * @param  array<int, int>  $leadIds
+     */
+    public function assignSelectedLeadsToSetter(Workspace $workspace, User $setter, array $leadIds, User $actor): int
+    {
+        if (! $setter->isAppointmentSetter($workspace->id)) {
+            return 0;
+        }
+
+        $ids = array_values(array_unique(array_filter(array_map('intval', $leadIds))));
+        if ($ids === []) {
+            return 0;
+        }
+
+        $cap = (int) config('sales_ops.leads_per_setter', 500);
+        $availableSlots = max(0, $cap - $this->setterActiveLoad($workspace, $setter->id));
+        if ($availableSlots < 1) {
+            return 0;
+        }
+
+        $leads = WorkflowLead::query()
+            ->whereHas('workflow', fn ($q) => $q->where('workspace_id', $workspace->id))
+            ->whereIn('id', $ids)
+            ->readyToAssign()
+            ->orderBy('row_number')
+            ->limit($availableSlots)
+            ->get();
+
+        $assigned = 0;
+        foreach ($leads as $lead) {
+            if ($this->assignToSetter($workspace, $lead, $setter, $actor)) {
+                $assigned++;
+            }
+        }
+
+        return $assigned;
+    }
+
     public function assignWorkflowLeadsToSetter(
         Workspace $workspace,
         Workflow $workflow,
@@ -173,20 +213,18 @@ class SetterDistributionService
         User $actor,
         array $memberIds = [],
     ): int {
-        if ($count < 1 || $teamLead->getWorkspaceRole($workspace->id) !== WorkflowAssignmentRoles::setterTeamLeadRole()) {
+        $teamLeadRole = $teamLead->getWorkspaceRole($workspace->id);
+        if ($count < 1 || ! WorkflowAssignmentRoles::isAssignableTeamLeadRole($teamLeadRole)) {
             return 0;
         }
 
         WorkflowLead::normalizeUnassignedForWorkflow($workflow->id);
 
-        $teamSetters = WorkflowAssignmentRoles::settersForTeamLead($workspace, (int) $teamLead->id);
-        $allSetters = WorkflowAssignmentRoles::activeSettersFor($workspace);
-
-        $setters = $teamSetters->isNotEmpty() ? $teamSetters : $allSetters;
+        $agents = WorkflowAssignmentRoles::agentsForTeamLead($workspace, $teamLead);
 
         $memberIds = array_values(array_unique(array_filter(array_map('intval', $memberIds))));
         if ($memberIds !== []) {
-            $allowed = $setters->keyBy(fn ($user) => (int) $user->id);
+            $allowed = $agents->keyBy(fn ($user) => (int) $user->id);
             $selected = collect($memberIds)
                 ->map(fn (int $id) => $allowed->get($id))
                 ->filter()
@@ -196,10 +234,10 @@ class SetterDistributionService
             if ($selected->isEmpty()) {
                 return 0;
             }
-            $setters = $selected;
+            $agents = $selected;
         }
 
-        if ($setters->isEmpty()) {
+        if ($agents->isEmpty()) {
             return 0;
         }
 
@@ -216,11 +254,15 @@ class SetterDistributionService
             ->limit($toAssign)
             ->get();
 
+        $assignToCloser = $teamLeadRole === WorkflowAssignmentRoles::closerTeamLeadRole();
         $assigned = 0;
-        $setterCount = $setters->count();
+        $agentCount = $agents->count();
         foreach ($leads as $index => $lead) {
-            $setter = $setters[$index % $setterCount];
-            if ($this->assignToSetter($workspace, $lead, $setter, $actor, $teamLead)) {
+            $agent = $agents[$index % $agentCount];
+            $ok = $assignToCloser
+                ? $this->assignToCloser($workspace, $lead, $agent, $actor, $teamLead)
+                : $this->assignToSetter($workspace, $lead, $agent, $actor, $teamLead);
+            if ($ok) {
                 $assigned++;
             }
         }
@@ -305,6 +347,132 @@ class SetterDistributionService
             ->count();
     }
 
+    /**
+     * Return assigned import leads to the unassigned pool so admins can assign them again.
+     * Removes them from agent dialer/portal queues (clears assigned_user_id).
+     *
+     * @param  list<int>  $agentIds  Optional filter: only leads owned by these users.
+     */
+    public function unassignWorkflowLeadsToPool(
+        Workspace $workspace,
+        Workflow $workflow,
+        int $count,
+        User $actor,
+        array $agentIds = [],
+    ): int {
+        if ($count < 1 || (int) $workflow->workspace_id !== (int) $workspace->id) {
+            return 0;
+        }
+
+        $agentIds = collect($agentIds)
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        $query = WorkflowLead::query()
+            ->where('workflow_id', $workflow->id)
+            ->whereNotNull('assigned_user_id')
+            ->whereIn('pipeline_phase', ['with_setter', 'with_closer'])
+            ->orderByDesc('updated_at')
+            ->limit($count);
+
+        if ($agentIds !== []) {
+            $query->whereIn('assigned_user_id', $agentIds);
+        }
+
+        $leads = $query->get();
+        $unassigned = 0;
+
+        foreach ($leads as $lead) {
+            if ($this->unassignLeadToPool($lead, $actor)) {
+                $unassigned++;
+            }
+        }
+
+        return $unassigned;
+    }
+
+    public function assignedWorkflowLeadCount(Workflow $workflow, array $agentIds = []): int
+    {
+        $query = WorkflowLead::query()
+            ->where('workflow_id', $workflow->id)
+            ->whereNotNull('assigned_user_id')
+            ->whereIn('pipeline_phase', ['with_setter', 'with_closer']);
+
+        $agentIds = collect($agentIds)
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($agentIds !== []) {
+            $query->whereIn('assigned_user_id', $agentIds);
+        }
+
+        return $query->count();
+    }
+
+    protected function unassignLeadToPool(WorkflowLead $lead, User $actor): bool
+    {
+        return (bool) SqliteConcurrency::retry(function () use ($lead, $actor) {
+            return DB::transaction(function () use ($lead, $actor) {
+                $locked = WorkflowLead::lockForUpdate()->find($lead->id);
+                if (
+                    ! $locked
+                    || ! $locked->assigned_user_id
+                    || ! in_array($locked->pipeline_phase, ['with_setter', 'with_closer'], true)
+                ) {
+                    return false;
+                }
+
+                $from = User::find($locked->assigned_user_id);
+                $wasEnriched = filled($locked->researched_at);
+                $isStoredImport = ($locked->import_mode === 'stored');
+
+                // pipeline_phase is NOT NULL in DB — never write null.
+                $poolStatus = $wasEnriched ? 'enriched' : ($isStoredImport ? 'imported' : 'enriched');
+                $poolPhase = $wasEnriched ? 'enriched' : ($isStoredImport ? 'imported' : 'enriched');
+
+                $locked->update(LeadStageSync::mergeStage($locked, [
+                    'assigned_user_id' => null,
+                    'assigned_setter_id' => null,
+                    'assigned_closer_id' => null,
+                    'setter_status' => null,
+                    'closer_status' => null,
+                    'pipeline_phase' => $poolPhase,
+                    'status' => $poolStatus,
+                ]));
+
+                $this->recordAssignment($locked, $from, null, $poolPhase, $actor);
+
+                try {
+                    $this->activities->log(
+                        $locked->fresh(),
+                        $actor,
+                        'note',
+                        'unassigned',
+                        $from
+                            ? "Lead unassigned from {$from->name} and returned to the assign pool"
+                            : 'Lead returned to the assign pool'
+                    );
+                } catch (\Throwable $e) {
+                    // Activity log must not block returning leads to the pool.
+                    report($e);
+                }
+
+                $workflow = Workflow::lockForUpdate()->find($locked->workflow_id);
+                if ($workflow && (int) $workflow->processed_leads > 0) {
+                    $workflow->decrement('processed_leads');
+                }
+
+                return true;
+            });
+        });
+    }
+
     protected function assignToSetter(Workspace $workspace, WorkflowLead $lead, User $setter, User $actor, ?User $teamLead = null): bool
     {
         return (bool) SqliteConcurrency::retry(function () use ($workspace, $lead, $setter, $actor, $teamLead) {
@@ -318,8 +486,9 @@ class SetterDistributionService
                 }
 
                 $phoneUpdates = LeadDialablePhone::syncAttributes($locked);
+                $campaignId = $this->resolveAssignmentCampaignId($locked, $setter, $teamLead);
 
-                $locked->update(LeadStageSync::mergeStage($locked, array_merge($phoneUpdates, [
+                $locked->update(LeadStageSync::mergeStage($locked, array_merge($phoneUpdates, array_filter([
                     'assigned_user_id' => $setter->id,
                     'assigned_setter_id' => $setter->id,
                     'pipeline_phase' => 'with_setter',
@@ -328,7 +497,8 @@ class SetterDistributionService
                     'verification_status' => 'approved',
                     'verified_at' => now(),
                     'verified_by' => $actor->id,
-                ])));
+                    'campaign_id' => $campaignId,
+                ], fn ($value) => $value !== null))));
 
                 $this->recordAssignment($locked, null, $setter, 'with_setter', $actor);
                 $note = $teamLead
@@ -352,6 +522,76 @@ class SetterDistributionService
                 return true;
             });
         });
+    }
+
+    /**
+     * Assign an enriched import lead directly to a closer under a Closers Team Lead.
+     */
+    protected function assignToCloser(Workspace $workspace, WorkflowLead $lead, User $closer, User $actor, ?User $teamLead = null): bool
+    {
+        return (bool) SqliteConcurrency::retry(function () use ($workspace, $lead, $closer, $actor, $teamLead) {
+            return DB::transaction(function () use ($workspace, $lead, $closer, $actor, $teamLead) {
+                $locked = WorkflowLead::lockForUpdate()->find($lead->id);
+                if (
+                    ! $locked
+                    || ! WorkflowLead::query()->whereKey($locked->id)->readyToAssign()->exists()
+                ) {
+                    return false;
+                }
+
+                $phoneUpdates = LeadDialablePhone::syncAttributes($locked);
+                $campaignId = $this->resolveAssignmentCampaignId($locked, $closer, $teamLead);
+
+                $locked->update(LeadStageSync::mergeStage($locked, array_merge($phoneUpdates, array_filter([
+                    'assigned_user_id' => $closer->id,
+                    'assigned_closer_id' => $closer->id,
+                    'pipeline_phase' => 'with_closer',
+                    'closer_status' => 'new',
+                    'status' => 'completed',
+                    'verification_status' => 'approved',
+                    'verified_at' => now(),
+                    'verified_by' => $actor->id,
+                    'campaign_id' => $campaignId,
+                ], fn ($value) => $value !== null))));
+
+                $this->recordAssignment($locked, null, $closer, 'with_closer', $actor);
+                $note = $teamLead
+                    ? "Lead assigned to closer {$closer->name} under team lead {$teamLead->name}"
+                    : "Lead assigned to closer {$closer->name}";
+                $this->activities->logStatusChange(
+                    $locked->fresh(),
+                    $actor,
+                    'closer',
+                    null,
+                    'new',
+                    $note
+                );
+
+                $workflow = Workflow::lockForUpdate()->find($locked->workflow_id);
+                if ($workflow) {
+                    $workflow->increment('processed_leads');
+                    $this->maybeCompleteWorkflowDistribution($workflow->fresh());
+                }
+
+                return true;
+            });
+        });
+    }
+
+    protected function resolveAssignmentCampaignId(WorkflowLead $lead, User $agent, ?User $teamLead): ?int
+    {
+        if ((int) ($lead->campaign_id ?? 0) > 0) {
+            return (int) $lead->campaign_id;
+        }
+
+        $fromLead = (int) ($teamLead?->pivot?->campaign_id ?? 0);
+        if ($fromLead > 0) {
+            return $fromLead;
+        }
+
+        $fromAgent = (int) ($agent->pivot->campaign_id ?? 0);
+
+        return $fromAgent > 0 ? $fromAgent : null;
     }
 
     public function rebalanceWorkspace(Workspace $workspace, User $actor, ?array $distributionUserIds = null): int

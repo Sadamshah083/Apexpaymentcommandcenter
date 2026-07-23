@@ -6,6 +6,7 @@ use App\Models\CommunicationCallLog;
 use App\Models\Workspace;
 use App\Services\Workspace\WorkspaceContextService;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 
 class CallMonitoringService
 {
@@ -14,6 +15,9 @@ class CallMonitoringService
 
     /** @var array<int, bool> */
     protected array $monitoringExcludedUserIds = [];
+
+    /** @var list<string>|null null = all agent families */
+    protected ?array $monitoringRoleFilter = null;
 
     public function __construct(
         protected MorpheusHubService $hub,
@@ -103,19 +107,57 @@ class CallMonitoringService
         $monitorRoster = [];
         $excludedExtensions = [];
         $excludedUserIds = [];
+        $viewer = $user instanceof \App\Models\User ? $user : null;
+        $this->monitoringRoleFilter = $workspace
+            ? AgentPresenceService::monitorRolesForViewer($viewer, (int) $workspace->id)
+            : null;
         if ($workspace) {
             try {
+                // One active-member load powers light directory, monitor roster, and exclusions.
+                $activeMembers = $this->agents->loadActiveWorkspaceMembers($workspace);
+
                 // Light polls must still resolve role badges (DB only). Full polls can enrich via Morpheus.
                 $agents = $light
-                    ? $this->agents->listLocalExtensionDirectory($workspace)
+                    ? $this->agents->mapLocalExtensionDirectory($activeMembers)
                     : $this->agents->listForWorkspace($workspace);
 
                 // Always load the full monitorable roster (extension optional) so Admin / Team Lead
                 // still see NOT LOGGED IN agents with real usernames when nobody is on a call.
                 try {
-                    $monitorRoster = $this->agents->listMonitorableDirectory($workspace);
+                    $monitorRoster = $this->agents->mapMonitorableDirectory($activeMembers, $workspace);
                 } catch (\Throwable) {
                     $monitorRoster = [];
+                }
+
+                // Ban EVERY excluded member (including admins/TLs with no extension) plus the
+                // other agent family when the viewer is a setter/closer team lead.
+                try {
+                    foreach ($activeMembers as $member) {
+                        $pivot = $member->pivot;
+                        $role = (string) ($pivot->role ?? '');
+                        $label = \App\Support\SalesOps::roleLabel($role);
+                        $ban = AgentPresenceService::isExcludedFromMonitoring(
+                            $role,
+                            $label,
+                            $member,
+                            (int) $workspace->id,
+                            (string) $member->name,
+                        ) || ! AgentPresenceService::roleAllowedOnBoard($role, $this->monitoringRoleFilter);
+
+                        if (! $ban) {
+                            continue;
+                        }
+                        $uid = (int) $member->id;
+                        if ($uid > 0) {
+                            $excludedUserIds[$uid] = true;
+                        }
+                        $ext = preg_replace('/\D/', '', (string) ($pivot->morpheus_extension_num ?? '')) ?? '';
+                        if ($ext !== '') {
+                            $excludedExtensions[$ext] = true;
+                        }
+                    }
+                } catch (\Throwable) {
+                    // Fall through to agent-list heuristic below.
                 }
 
                 foreach (array_merge($agents, $monitorRoster) as $agent) {
@@ -124,7 +166,10 @@ class CallMonitoringService
                     }
                     $role = (string) ($agent['role'] ?? '');
                     $label = (string) ($agent['role_label'] ?? '');
-                    if (AgentPresenceService::isExcludedFromMonitoring($role, $label)) {
+                    $name = (string) ($agent['name'] ?? $agent['morpheus_username'] ?? '');
+                    if (AgentPresenceService::isExcludedFromMonitoring($role, $label, null, null, $name)
+                        || ! AgentPresenceService::roleAllowedOnBoard($role, $this->monitoringRoleFilter)
+                    ) {
                         $ext = preg_replace('/\D/', '', (string) ($agent['morpheus_extension_num'] ?? '')) ?? '';
                         if ($ext !== '') {
                             $excludedExtensions[$ext] = true;
@@ -144,8 +189,14 @@ class CallMonitoringService
                     ->filter(fn (array $a) => ! AgentPresenceService::isExcludedFromMonitoring(
                         (string) ($a['role'] ?? ''),
                         (string) ($a['role_label'] ?? ''),
+                        null,
+                        null,
+                        (string) ($a['name'] ?? ''),
                     ))
-                    ->filter(fn (array $a) => AgentPresenceService::isMonitorableRole((string) ($a['role'] ?? '')))
+                    ->filter(fn (array $a) => AgentPresenceService::roleAllowedOnBoard(
+                        (string) ($a['role'] ?? ''),
+                        $this->monitoringRoleFilter,
+                    ))
                     ->keyBy(fn (array $a) => preg_replace('/\D/', '', (string) $a['morpheus_extension_num']));
 
                 // Prefer richer Morpheus-backed agent rows when available; fill gaps from roster.
@@ -167,18 +218,38 @@ class CallMonitoringService
                         if ($ext === '' || $agentsByExt->has($ext)) {
                             continue;
                         }
-                        if (! AgentPresenceService::isMonitorableRole((string) ($agentRow['role'] ?? ''))) {
+                        if (! AgentPresenceService::roleAllowedOnBoard(
+                            (string) ($agentRow['role'] ?? ''),
+                            $this->monitoringRoleFilter,
+                        )) {
                             continue;
                         }
                         if (AgentPresenceService::isExcludedFromMonitoring(
                             (string) ($agentRow['role'] ?? ''),
                             (string) ($agentRow['role_label'] ?? ''),
+                            null,
+                            null,
+                            (string) ($agentRow['name'] ?? ''),
                         )) {
                             continue;
                         }
                         $agentsByExt->put($ext, $agentRow);
                     }
                 }
+
+                $monitorRoster = array_values(array_filter(
+                    $monitorRoster,
+                    fn ($agent) => is_array($agent) && AgentPresenceService::roleAllowedOnBoard(
+                        (string) ($agent['role'] ?? ''),
+                        $this->monitoringRoleFilter,
+                    ) && ! AgentPresenceService::isExcludedFromMonitoring(
+                        (string) ($agent['role'] ?? ''),
+                        (string) ($agent['role_label'] ?? ''),
+                        null,
+                        null,
+                        (string) ($agent['name'] ?? ''),
+                    )
+                ));
             } catch (\Throwable $e) {
                 $warnings[] = 'Could not load workspace agents.';
             }
@@ -756,10 +827,6 @@ class CallMonitoringService
         }
 
         $userId = (int) ($local['user_id'] ?? $agent['user_id'] ?? 0);
-        if ($this->isExcludedMonitoringTarget($extension, $userId, $agent)) {
-            return null;
-        }
-
         $userName = $this->resolveAgentDisplayName(
             is_array($agent) ? $agent : null,
             [
@@ -768,6 +835,10 @@ class CallMonitoringService
             ],
             $extension
         );
+
+        if ($this->isExcludedMonitoringTarget($extension, $userId, $agent, $userName)) {
+            return null;
+        }
 
         return [
             'id' => $uuid !== '' ? $uuid : ('live:'.md5(json_encode($input))),
@@ -832,8 +903,12 @@ class CallMonitoringService
     /**
      * @param  array<string, mixed>|null  $agent
      */
-    protected function isExcludedMonitoringTarget(string $extension, int $userId, ?array $agent = null): bool
-    {
+    protected function isExcludedMonitoringTarget(
+        string $extension,
+        int $userId,
+        ?array $agent = null,
+        ?string $displayName = null
+    ): bool {
         if ($extension !== '' && isset($this->monitoringExcludedExtensions[$extension])) {
             return true;
         }
@@ -842,10 +917,20 @@ class CallMonitoringService
             return true;
         }
 
+        $name = $displayName
+            ?? (string) ($agent['name'] ?? $agent['morpheus_username'] ?? '');
+
         if (is_array($agent) && AgentPresenceService::isExcludedFromMonitoring(
             (string) ($agent['role'] ?? ''),
             (string) ($agent['role_label'] ?? ''),
+            null,
+            null,
+            $name,
         )) {
+            return true;
+        }
+
+        if (AgentPresenceService::looksLikeAdminIdentity($name)) {
             return true;
         }
 
@@ -863,13 +948,17 @@ class CallMonitoringService
         return array_values(array_filter($rows, function (array $row) {
             $ext = preg_replace('/\D/', '', (string) ($row['station'] ?? $row['extension'] ?? '')) ?? '';
             $uid = (int) ($row['user_id'] ?? 0);
-            if ($this->isExcludedMonitoringTarget($ext, $uid)) {
+            $name = (string) ($row['user'] ?? '');
+            if ($this->isExcludedMonitoringTarget($ext, $uid, null, $name)) {
                 return false;
             }
 
             return ! AgentPresenceService::isExcludedFromMonitoring(
                 null,
                 (string) ($row['role_label'] ?? ''),
+                null,
+                null,
+                $name,
             );
         }));
     }
@@ -1200,8 +1289,18 @@ class CallMonitoringService
             $agent = $agentsByUser->get($userId) ?: [];
             $role = (string) ($entry['role'] ?? $agent['role'] ?? '');
             $normalized = \App\Support\SalesOps::normalizeLegacyRole($role) ?: $role;
+            $displayName = (string) ($entry['name'] ?? $agent['name'] ?? '');
 
-            // Super Admin and other non-agent roles never belong on this board.
+            // Super Admin / Admin / non-agent roles never belong on this board.
+            if (AgentPresenceService::isExcludedFromMonitoring(
+                $role,
+                (string) ($entry['role_label'] ?? $agent['role_label'] ?? ''),
+                null,
+                null,
+                $displayName,
+            )) {
+                continue;
+            }
             if ($role !== '' && ! AgentPresenceService::isMonitorableRole($role)) {
                 continue;
             }
@@ -1328,7 +1427,7 @@ class CallMonitoringService
 
             $role = (string) ($agent['role'] ?? '');
             $label = (string) ($agent['role_label'] ?? '');
-            if (AgentPresenceService::isExcludedFromMonitoring($role, $label)) {
+            if (AgentPresenceService::isExcludedFromMonitoring($role, $label, null, null, (string) ($agent['name'] ?? ''))) {
                 continue;
             }
             if (! AgentPresenceService::isMonitorableRole($role)) {
@@ -1673,28 +1772,30 @@ class CallMonitoringService
      */
     protected function lastCallEndedAtByUser(Workspace $workspace): array
     {
-        $logs = CommunicationCallLog::query()
-            ->where('workspace_id', $workspace->id)
-            ->whereNotNull('user_id')
-            ->where('created_at', '>=', now()->subDay())
-            ->whereIn('status', ['completed', 'ended', 'no-answer', 'busy', 'failed', 'canceled', 'cancelled'])
-            ->orderByDesc('id')
-            ->limit(300)
-            ->get(['user_id', 'updated_at', 'ended_at']);
+        return Cache::remember('cm:last_ended:w'.$workspace->id, 8, function () use ($workspace) {
+            $logs = CommunicationCallLog::query()
+                ->where('workspace_id', $workspace->id)
+                ->whereNotNull('user_id')
+                ->where('created_at', '>=', now()->subDay())
+                ->whereIn('status', ['completed', 'ended', 'no-answer', 'busy', 'failed', 'canceled', 'cancelled'])
+                ->orderByDesc('id')
+                ->limit(300)
+                ->get(['user_id', 'updated_at', 'ended_at']);
 
-        $out = [];
-        foreach ($logs as $log) {
-            $uid = (int) $log->user_id;
-            if ($uid <= 0 || isset($out[$uid])) {
-                continue;
+            $out = [];
+            foreach ($logs as $log) {
+                $uid = (int) $log->user_id;
+                if ($uid <= 0 || isset($out[$uid])) {
+                    continue;
+                }
+                $stamp = $log->ended_at ?? $log->updated_at;
+                if ($stamp) {
+                    $out[$uid] = \Carbon\Carbon::parse($stamp)->utc()->toIso8601String();
+                }
             }
-            $stamp = $log->ended_at ?? $log->updated_at;
-            if ($stamp) {
-                $out[$uid] = \Carbon\Carbon::parse($stamp)->utc()->toIso8601String();
-            }
-        }
 
-        return $out;
+            return $out;
+        });
     }
 
     /**
@@ -1706,25 +1807,27 @@ class CallMonitoringService
             return [];
         }
 
-        return CommunicationCallLog::query()
-            ->where('workspace_id', $workspace->id)
-            ->where('created_at', '>=', now()->subHours(6))
-            ->whereNotNull('morpheus_call_uuid')
-            ->with('user:id,name')
-            ->orderByDesc('id')
-            ->limit(200)
-            ->get()
-            ->mapWithKeys(function (CommunicationCallLog $log) {
-                return [
-                    (string) $log->morpheus_call_uuid => [
-                        'user_id' => $log->user_id,
-                        'agent_name' => $log->user?->name,
-                        'direction' => $log->direction,
-                        'from_extension' => $log->from_extension,
-                    ],
-                ];
-            })
-            ->all();
+        return Cache::remember('cm:local_uuid:w'.$workspace->id, 8, function () use ($workspace) {
+            return CommunicationCallLog::query()
+                ->where('workspace_id', $workspace->id)
+                ->where('created_at', '>=', now()->subHours(6))
+                ->whereNotNull('morpheus_call_uuid')
+                ->with('user:id,name')
+                ->orderByDesc('id')
+                ->limit(200)
+                ->get()
+                ->mapWithKeys(function (CommunicationCallLog $log) {
+                    return [
+                        (string) $log->morpheus_call_uuid => [
+                            'user_id' => $log->user_id,
+                            'agent_name' => $log->user?->name,
+                            'direction' => $log->direction,
+                            'from_extension' => $log->from_extension,
+                        ],
+                    ];
+                })
+                ->all();
+        });
     }
 
     protected function formatTimer(int $seconds): string

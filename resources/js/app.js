@@ -1,14 +1,15 @@
 import * as Turbo from '@hotwired/turbo';
 import { initTurboAuthGuard } from './turbo-auth.js';
 import { initToasts } from './toast.js';
-import './system-notifications.js';
 import { initTopnav } from './topnav.js';
 import { initSidebar } from './sidebar.js';
 import { initFormLoading } from './form-loading.js';
 import { initFastImportNav } from './fast-import-nav.js';
+import { initFastNav } from './fast-nav.js';
 import { initPaginationPreserve } from './pagination-preserve.js';
 import { startProgressPoll } from './realtime-poll.js';
 import { updateAdminDetailPanel } from './admin-dashboard-detail.js';
+import { initThemeToggle, applyTheme, getStoredTheme } from './theme.js';
 
 window.startProgressPoll = startProgressPoll;
 window.updateAdminDetailPanel = updateAdminDetailPanel;
@@ -16,9 +17,9 @@ window.updateAdminDetailPanel = updateAdminDetailPanel;
 // Delay the top loader slightly so fast sidebar clicks do not flash it.
 // Still shows on slow/blocked visits; hide is handled by Turbo when the visit ends.
 if (Turbo.config?.drive) {
-    Turbo.config.drive.progressBarDelay = 200;
+    Turbo.config.drive.progressBarDelay = 120;
 } else if (typeof Turbo.session?.drive?.progressBar?.setDelay === 'function') {
-    Turbo.session.drive.progressBar.setDelay(200);
+    Turbo.session.drive.progressBar.setDelay(120);
 }
 
 let workspaceSyncModule = null;
@@ -139,9 +140,11 @@ async function bootDeferredFeatures() {
         tasks.push(Promise.all([
             import('./member-management.js'),
             import('./workspace-admin.js'),
-        ]).then(([memberModule, adminModule]) => {
+            import('./pretty-select.js'),
+        ]).then(([memberModule, adminModule, prettyModule]) => {
             memberModule.initMemberManagement();
             adminModule.initWorkspaceAdmin();
+            prettyModule.initPrettySelects();
         }));
     }
 
@@ -156,19 +159,30 @@ async function bootDeferredFeatures() {
         // Safe to call again — module-level guards prevent double disposition listeners.
         tasks.push(import('./communications-auto-dial.js').then((module) => module.initAutoDialHub()));
     } else if (document.querySelector('[data-presence-url]')) {
-        // Agent logged into portal — announce presence so Call Monitoring flips to Not in call.
-        tasks.push(import('./communications-auto-dial.js').then((module) => {
-            module.initAgentPresence();
-            module.initAgentBreakControls?.();
-        }));
+        // Non-dialer portal pages: tiny presence module only (never pull sip.js / dialer).
+        tasks.push(import('./agent-presence.js').then((module) => module.initAgentPresenceLite()));
     }
+
+    // OS notifications helpers — defer; not needed for first paint.
+    tasks.push(import('./system-notifications.js').catch(() => null));
 
     if (document.querySelector('[data-workflow-upload]')) {
         tasks.push(import('./workflow-upload.js').then((module) => module.initWorkflowUpload()));
     }
 
-    if (document.querySelector('.js-pretty-select, select[data-pretty-select]')) {
-        tasks.push(import('./pretty-select.js').then((module) => module.initPrettySelects()));
+    if (document.querySelector('.js-pretty-select, select[data-pretty-select], select.app-input, select.um-select, select.um-input')) {
+        tasks.push(import('./pretty-select.js').then((module) => {
+            module.initPrettySelects();
+            window.initPrettySelects = module.initPrettySelects;
+            window.refreshPrettySelect = module.refreshPrettySelect;
+        }));
+    }
+
+    if (document.querySelector('input[type="date"].js-pretty-date, input[type="date"][data-pretty-date]')) {
+        tasks.push(import('./pretty-date.js').then((module) => {
+            module.initPrettyDates();
+            window.initPrettyDates = module.initPrettyDates;
+        }));
     }
 
     const syncScope = document.body?.dataset?.workspaceSyncScope || '';
@@ -182,7 +196,11 @@ async function bootDeferredFeatures() {
 
     tasks.push(bootCommunicationsFeatures());
 
-    if (document.querySelector('[data-call-monitoring], [data-call-monitoring-nav]')) {
+    // Dialer pages: no /live polling — SIP WebSocket + call-events own realtime.
+    // Call Monitoring wallboard still boots when the board is present.
+    const onDialerPage = Boolean(document.querySelector('[data-phone-workspace], [data-auto-dial-hub]'));
+    const hasMonitoringBoard = Boolean(document.querySelector('[data-call-monitoring]'));
+    if (hasMonitoringBoard || (!onDialerPage && document.querySelector('[data-call-monitoring-nav]'))) {
         tasks.push(import('./call-monitoring.js').then((module) => {
             callMonitoringModuleRef = module;
             module.initCallMonitoring();
@@ -205,24 +223,35 @@ function scheduleDeferredBoot() {
         void bootDeferredFeatures();
     };
 
-    // Prefer a longer idle window so first paint stays responsive.
+    const onDialer = Boolean(document.querySelector('[data-phone-workspace], [data-auto-dial-hub], .ghl-dialer-originate-form'));
+    // Dialer: boot ASAP after paint. Other pages keep a longer idle window.
     if (typeof window.requestIdleCallback === 'function') {
-        window.requestIdleCallback(run, { timeout: 2500 });
+        window.requestIdleCallback(run, { timeout: onDialer ? 800 : 2500 });
         return;
     }
 
-    window.setTimeout(run, 300);
+    window.setTimeout(run, onDialer ? 120 : 300);
+}
+
+function tearDownBlockingRuntimes() {
+    // Stop sync/SSE/monitoring immediately so the next Turbo visit is never blocked.
+    document.dispatchEvent(new CustomEvent('workspace:teardown-request'));
+    workspaceSyncModule?.teardownWorkspaceSync?.();
+    callMonitoringModuleRef?.teardownCallMonitoring?.();
 }
 
 function bootCore() {
     initTurboAuthGuard();
     initPageTransitions();
+    applyTheme(getStoredTheme());
+    initThemeToggle();
     initToasts();
     initTopnav();
     initSidebar();
     initFormLoading();
     initHorizontalWheelScroll();
     initFastImportNav();
+    initFastNav();
     initPaginationPreserve();
     scheduleDeferredBoot();
 }
@@ -234,12 +263,15 @@ if (document.readyState === 'loading') {
 }
 
 document.addEventListener('turbo:load', () => {
+    applyTheme(getStoredTheme());
+    initThemeToggle();
     initToasts();
     initTopnav();
     initSidebar();
     initFormLoading();
     initHorizontalWheelScroll();
     initFastImportNav();
+    initFastNav();
     scheduleDeferredBoot();
 });
 
@@ -249,9 +281,7 @@ document.addEventListener('workspace:teardown-request', () => {
 });
 
 document.addEventListener('turbo:before-visit', () => {
-    // Close long-lived SSE/polls before the next Turbo fetch so navigation is not stalled.
-    workspaceSyncModule?.teardownWorkspaceSync?.();
-    callMonitoringModuleRef?.teardownCallMonitoring?.();
+    tearDownBlockingRuntimes();
 });
 
 document.addEventListener('turbo:submit-start', (event) => {

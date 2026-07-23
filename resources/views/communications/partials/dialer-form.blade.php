@@ -263,6 +263,20 @@
                     <span class="ghl-dialer-line-meta__sep" aria-hidden="true">·</span>
                     <span class="ghl-dialer-line-meta__did" data-dialer-from-did>{{ $resolvedDid }}</span>
                 </p>
+                <div class="ghl-dialer-recent-preview hidden" data-dialer-recent-preview aria-live="polite">
+                    <p class="ghl-dialer-recent-preview__title">Recent dial</p>
+                    <p class="ghl-dialer-recent-preview__row">
+                        <span data-dialer-recent-when>—</span>
+                        <span class="ghl-dialer-recent-preview__sep" aria-hidden="true">·</span>
+                        <span data-dialer-recent-disposition>—</span>
+                    </p>
+                    <p class="ghl-dialer-recent-preview__meta">
+                        <span data-dialer-recent-duration></span>
+                        <span data-dialer-recent-result></span>
+                    </p>
+                    <p class="ghl-dialer-recent-preview__note hidden" data-dialer-recent-note></p>
+                    <p class="ghl-dialer-recent-preview__empty hidden" data-dialer-recent-empty>No previous dial for this number.</p>
+                </div>
                 <div class="ghl-dialer-call-actions hidden" data-dialer-call-actions>
                     <button type="button" class="ghl-webphone-btn-answer hidden" data-dialer-call-answer
                         title="Answer the incoming call on your browser line">Answer</button>

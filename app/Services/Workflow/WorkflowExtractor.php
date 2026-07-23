@@ -11,7 +11,9 @@ use App\Services\BusinessResearch\OpenRouterClient;
 use App\Services\BusinessResearch\ResearchInput;
 use App\Services\BusinessResearch\ResearchResultSanitizer;
 use App\Services\BusinessResearch\WebSearchService;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\RateLimiter;
 
 class WorkflowExtractor
 {
@@ -29,6 +31,12 @@ class WorkflowExtractor
      */
     public function extract(WorkflowLead $lead, ?string $customPrompt = null): array
     {
+        if ($this->shouldUseSheetFallbackImmediately()) {
+            Log::info("Using imported sheet enrichment for lead {$lead->id} (AI providers exhausted)");
+
+            return $this->enrichFromImportedSheet($lead, 'AI providers exhausted; using imported sheet data.');
+        }
+
         $input = ResearchInput::fromWorkflowLead($lead);
         $location = $this->resolveLocation($lead);
 
@@ -95,6 +103,23 @@ class WorkflowExtractor
             ]);
         } catch (\Exception $e) {
             $this->providerStatus->recordGeminiError($e->getMessage());
+
+            if ($this->isProviderQuotaExhausted($e->getMessage())
+                && (bool) config('workflow_enrichment.sheet_fallback_enabled', true)
+            ) {
+                $this->markOpenRouterDailyExhausted($e->getMessage());
+                Log::warning("AI enrichment unavailable for lead {$lead->id}; promoting imported sheet data", [
+                    'error' => $e->getMessage(),
+                ]);
+
+                return $this->enrichFromImportedSheet($lead, $e->getMessage());
+            }
+
+            // Transient throttle — let the job retry instead of failing the lead.
+            if ($this->isTransientProviderFailure($e->getMessage())) {
+                throw $e;
+            }
+
             Log::error("WorkflowExtractor failed for lead {$lead->id}: ".$e->getMessage());
 
             return [
@@ -103,6 +128,167 @@ class WorkflowExtractor
                 'researched_at' => now(),
             ];
         }
+    }
+
+    /**
+     * Promote spreadsheet/import fields to an enriched lead when AI research is unavailable.
+     *
+     * @return array<string, mixed>
+     */
+    public function enrichFromImportedSheet(WorkflowLead $lead, ?string $reason = null): array
+    {
+        $raw = is_array($lead->raw_row) ? $lead->raw_row : [];
+        $owner = $this->firstFilled([
+            $lead->owner_name,
+            $raw['Owner Name'] ?? null,
+            $raw['owner_name'] ?? null,
+            $raw['Owner'] ?? null,
+            $raw['Contact Name'] ?? null,
+            $raw['Contact'] ?? null,
+        ]);
+        $email = $this->firstFilled([
+            $lead->direct_email,
+            $lead->input_email,
+            $raw['Email'] ?? null,
+            $raw['email'] ?? null,
+            $raw['Direct Email'] ?? null,
+        ]);
+        $phone = $this->firstFilled([
+            $lead->direct_phone,
+            $lead->input_phone,
+            $lead->normalized_phone,
+            $raw['Contact No.'] ?? null,
+            $raw['Contact No'] ?? null,
+            $raw['Phone'] ?? null,
+            $raw['phone'] ?? null,
+        ]);
+
+        $note = $reason
+            ? "Imported sheet enrichment (AI unavailable: {$reason})"
+            : 'Imported sheet enrichment';
+
+        $report = implode("\n", array_filter([
+            '### Business Overview',
+            '**Business Name:** '.($lead->business_name ?: 'Not Publicly Available'),
+            '**Physical Address:** '.($lead->address ?: 'Not Publicly Available'),
+            '**Website:** '.($lead->website ?: 'Not Publicly Available'),
+            '',
+            '### Direct Owner Contact',
+            '**Owner Name:** '.($owner ?: 'Not Publicly Available'),
+            '**Direct Phone:** '.($phone ?: 'Not Publicly Available'),
+            '**Direct Email:** '.($email ?: 'Not Publicly Available'),
+            '',
+            '### Notes',
+            $note,
+        ]));
+
+        $attributes = $this->mapParsedToLeadAttributes([
+            'owner_name' => $owner,
+            'direct_phone' => $phone,
+            'direct_email' => $email,
+            'physical_address' => $lead->address,
+            'payment_processor' => null,
+            'system_integration' => null,
+            'primary_service' => null,
+            'operating_hours' => null,
+        ], [
+            'content' => $report,
+            'model' => 'sheet-import',
+            'tokens' => 0,
+        ], $lead);
+
+        return array_merge($attributes, [
+            'status' => 'completed',
+            'error_message' => null,
+        ]);
+    }
+
+    protected function shouldUseSheetFallbackImmediately(): bool
+    {
+        if (! (bool) config('workflow_enrichment.sheet_fallback_enabled', true)) {
+            return false;
+        }
+
+        if (Cache::get('workflow-enrichment:openrouter-daily-exhausted')) {
+            return true;
+        }
+
+        $geminiHealth = $this->providerStatus->getGeminiHealth();
+        $geminiDepleted = ($geminiHealth['state'] ?? '') === 'depleted';
+
+        return $geminiDepleted && Cache::get('workflow-enrichment:openrouter-daily-exhausted');
+    }
+
+    protected function markOpenRouterDailyExhausted(string $message): void
+    {
+        if (! $this->isProviderQuotaExhausted($message)) {
+            return;
+        }
+
+        Cache::put('workflow-enrichment:openrouter-daily-exhausted', true, now()->addHours(6));
+    }
+
+    protected function isProviderQuotaExhausted(string $message): bool
+    {
+        $message = strtolower($message);
+
+        foreach ([
+            'credits depleted',
+            'prepayment credits',
+            'free-models-per-day',
+            'insufficient credits',
+            'add 10 credits',
+            'quota exceeded',
+            'billing',
+        ] as $needle) {
+            if (str_contains($message, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function isTransientProviderFailure(string $message): bool
+    {
+        $message = strtolower($message);
+
+        foreach ([
+            'rate limit',
+            'temporarily throttled',
+            'too many requests',
+            'provider returned error',
+            'timeout',
+            'timed out',
+            'http 429',
+            'http 502',
+            'http 503',
+            'http 504',
+        ] as $needle) {
+            if (str_contains($message, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  list<mixed>  $values
+     */
+    protected function firstFilled(array $values): ?string
+    {
+        foreach ($values as $value) {
+            if (! is_scalar($value)) {
+                continue;
+            }
+            $text = trim((string) $value);
+            if ($text !== '' && $text !== '-' && strcasecmp($text, 'n/a') !== 0) {
+                return $text;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -126,12 +312,18 @@ class WorkflowExtractor
         ];
 
         $geminiHealth = $this->providerStatus->getGeminiHealth();
-        $skipGemini = ($geminiHealth['state'] ?? '') === 'depleted'
+        $geminiState = (string) ($geminiHealth['state'] ?? '');
+        $skipGemini = in_array($geminiState, ['depleted', 'invalid', 'error'], true)
             && filled(config('openrouter.api_key'));
 
         try {
             if ($skipGemini) {
-                throw new \RuntimeException('Gemini credits depleted — using OpenRouter fallback.');
+                $reason = match ($geminiState) {
+                    'depleted' => 'Gemini credits depleted',
+                    'invalid' => 'Gemini API key invalid or project access denied',
+                    default => 'Gemini unavailable',
+                };
+                throw new \RuntimeException($reason.' — using OpenRouter fallback.');
             }
 
             $lastGeminiContent = '';
@@ -169,19 +361,48 @@ class WorkflowExtractor
             $this->providerStatus->recordGeminiError($e->getMessage());
             Log::warning('Gemini failed in WorkflowExtractor. Falling back to OpenRouter: '.$e->getMessage());
 
-            // DDG context is already in the prompt — plain chat avoids OpenRouter tool-call
-            // responses that never return the markdown schema.
-            $result = $this->openRouter->chat($systemPrompt, $userPrompt);
-
-            if (! $this->isAcceptableResult($result['content'])) {
-                throw new \RuntimeException('OpenRouter fallback returned an incomplete enrichment report.');
+            // One OpenRouter call at a time + RPM cap. Free models thrash hard under parallel workers.
+            $lock = Cache::lock('workflow-enrichment:openrouter-active', 120);
+            if (! $lock->get()) {
+                throw new \RuntimeException(
+                    'OpenRouter fallback temporarily throttled; enrichment will retry.'
+                );
             }
 
-            return [
-                'content' => $result['content'],
-                'model' => $result['model'],
-                'tokens' => $result['tokens'],
-            ];
+            try {
+                if (! RateLimiter::attempt(
+                    'workflow-enrichment:openrouter-fallback',
+                    (int) config('workflow_enrichment.openrouter_fallback_rpm', 4),
+                    fn () => true,
+                    60,
+                )) {
+                    throw new \RuntimeException(
+                        'OpenRouter fallback temporarily throttled; enrichment will retry.'
+                    );
+                }
+
+                // Prefer the lean pipeline path (lower tokens, no tool-call loop).
+                $result = method_exists($this->openRouter, 'chatForPipeline')
+                    ? $this->openRouter->chatForPipeline($systemPrompt, $userPrompt)
+                    : $this->openRouter->chat($systemPrompt, $userPrompt);
+
+                if (! $this->isAcceptableResult($result['content'])) {
+                    throw new \RuntimeException('OpenRouter fallback returned an incomplete enrichment report.');
+                }
+
+                Cache::forget('workflow-enrichment:openrouter-daily-exhausted');
+
+                return [
+                    'content' => $result['content'],
+                    'model' => $result['model'],
+                    'tokens' => $result['tokens'],
+                ];
+            } catch (\Exception $openRouterError) {
+                $this->markOpenRouterDailyExhausted($openRouterError->getMessage());
+                throw $openRouterError;
+            } finally {
+                optional($lock)->release();
+            }
         }
     }
 

@@ -68,9 +68,12 @@ class WorkspaceSyncService
 
         $lite = $scope === 'lite';
         $list = $scope === 'list';
-        $fingerprint = $lite
-            ? $this->fingerprintLite($workspace, $user)
-            : $this->fingerprint($workspace, $user, $workflowId, $leadId, $list ? 'list' : null);
+        $progress = $scope === 'progress' && $workflowId !== null;
+        $fingerprint = match (true) {
+            $lite => $this->fingerprintLite($workspace, $user),
+            $progress => $this->fingerprintProgress($workspace, $workflowId),
+            default => $this->fingerprint($workspace, $user, $workflowId, $leadId, $list ? 'list' : null),
+        };
         $latestCursor = (int) (WorkspaceSyncEvent::where('workspace_id', $workspace->id)->max('id') ?? 0);
 
         $events = [];
@@ -173,6 +176,7 @@ class WorkspaceSyncService
         $isAdmin = $user->isWorkspaceAdmin($workspace->id);
         $workflowIds = $this->workflowIds($workspace);
         $isListScope = $scope === 'list';
+        $isProgressScope = $scope === 'progress' && $workflowId !== null;
 
         if ($events === null) {
             $events = WorkspaceSyncEvent::where('workspace_id', $workspace->id)
@@ -192,8 +196,11 @@ class WorkspaceSyncService
                 ->all();
         }
 
-        $workflows = $this->loadWorkflows($workspace, $workflowId, $isListScope);
-        $leads = $isListScope
+        $workflows = $this->withAssignedAgentSummaries(
+            $this->loadWorkflows($workspace, $workflowId, $isListScope)
+        );
+        app(\App\Services\Workflow\WorkflowDashboardService::class)->attachDispositionSummaries($workflows);
+        $leads = ($isListScope || $isProgressScope)
             ? collect()
             : $this->loadLeads($workspace, $workflowIds, $user, $isAdmin, $workflowId);
 
@@ -205,7 +212,7 @@ class WorkspaceSyncService
             'leads' => $leads->map(fn (WorkflowLead $lead) => $this->serializeLead($lead))->values()->all(),
         ];
 
-        if ($isListScope || ($workflowId && ! $leadId)) {
+        if ($isListScope || $isProgressScope || ($workflowId && ! $leadId)) {
             return $state;
         }
 
@@ -290,6 +297,28 @@ class WorkspaceSyncService
         ]));
     }
 
+    protected function fingerprintProgress(Workspace $workspace, int $workflowId): string
+    {
+        $workflow = Workflow::query()
+            ->where('workspace_id', $workspace->id)
+            ->whereKey($workflowId)
+            ->first(['id', 'updated_at']);
+        $eventStamp = WorkspaceSyncEvent::where('workspace_id', $workspace->id)
+            ->where(function ($query) use ($workflowId) {
+                $query->where('entity_type', 'workflow')
+                    ->where('entity_id', $workflowId);
+            })
+            ->max('id') ?? 0;
+
+        return md5(implode('|', [
+            'progress',
+            $workspace->id,
+            $workflowId,
+            $workflow?->updated_at ?? '',
+            $eventStamp,
+        ]));
+    }
+
     /**
      * @return Collection<int, int>
      */
@@ -317,17 +346,21 @@ class WorkspaceSyncService
                     'name',
                     'original_filename',
                     'status',
+                    'processing_mode',
+                    'ingestion_complete',
                     'total_leads',
                     'processed_leads',
                     'enriched_leads',
                     'failed_leads',
                     'campaign_id',
                     'lead_list_id',
+                    // Required so imports "Agents" restrict toggle is not wiped to Visible on every poll.
+                    'agent_restricted',
                     'updated_at',
                 ])
                 ->withCount([
                     'leads as assigned_leads_count' => fn ($query) => $query->whereNotNull('assigned_user_id'),
-                    'leads as enriched_leads_count' => fn ($query) => $query->where('status', 'enriched'),
+                    'leads as enriched_leads_count' => fn ($query) => $query->enrichmentSucceeded(),
                     'leads as ready_to_assign_count' => fn ($query) => $query->readyToAssign(),
                 ])
                 ->limit((int) config('pagination.workflows_per_page', 8))
@@ -337,7 +370,7 @@ class WorkspaceSyncService
         return $query
             ->withCount([
                 'leads as assigned_leads_count' => fn ($query) => $query->whereNotNull('assigned_user_id'),
-                'leads as enriched_leads_count' => fn ($query) => $query->where('status', 'enriched'),
+                'leads as enriched_leads_count' => fn ($query) => $query->enrichmentSucceeded(),
                 'leads as ready_to_assign_count' => fn ($query) => $query->readyToAssign(),
                 'leads as pending_verification_count' => fn ($query) => $query->where('status', 'pending_verification'),
                 'leads as imported_leads_count' => fn ($query) => $query->where('status', 'imported'),
@@ -345,6 +378,49 @@ class WorkspaceSyncService
             ])
             ->limit($workflowId ? 1 : 12)
             ->get();
+    }
+
+    /**
+     * @param  Collection<int, Workflow>  $workflows
+     * @return Collection<int, Workflow>
+     */
+    protected function withAssignedAgentSummaries(Collection $workflows): Collection
+    {
+        $ids = $workflows->pluck('id')->filter()->values()->all();
+        if ($ids === []) {
+            return $workflows;
+        }
+
+        $rows = WorkflowLead::query()
+            ->selectRaw('workflow_id, assigned_user_id, COUNT(*) as lead_count')
+            ->whereIn('workflow_id', $ids)
+            ->whereNotNull('assigned_user_id')
+            ->groupBy('workflow_id', 'assigned_user_id')
+            ->get();
+
+        $names = User::query()
+            ->whereIn('id', $rows->pluck('assigned_user_id')->unique()->filter()->all())
+            ->pluck('name', 'id');
+
+        $byWorkflow = [];
+        foreach ($rows as $row) {
+            $workflowId = (int) $row->workflow_id;
+            $userId = (int) $row->assigned_user_id;
+            $byWorkflow[$workflowId][] = [
+                'user_id' => $userId,
+                'name' => (string) ($names[$userId] ?? ('Agent #'.$userId)),
+                'count' => (int) $row->lead_count,
+            ];
+        }
+
+        foreach ($byWorkflow as $workflowId => $agents) {
+            usort($agents, static fn (array $a, array $b) => $b['count'] <=> $a['count'] ?: strcmp($a['name'], $b['name']));
+            $byWorkflow[$workflowId] = array_values($agents);
+        }
+
+        return $workflows->each(function (Workflow $workflow) use ($byWorkflow) {
+            $workflow->setAttribute('assigned_agents', $byWorkflow[(int) $workflow->id] ?? []);
+        });
     }
 
     /**
@@ -583,7 +659,7 @@ class WorkspaceSyncService
 
         $isSuperAdminMember = ($member->pivot->role ?? null) === 'super_admin';
 
-        return [
+        $payload = [
             'id' => $member->id,
             'name' => $member->name,
             'email' => $member->email,
@@ -596,6 +672,13 @@ class WorkspaceSyncService
             'can_assign_modules' => $viewer->canAssignModulePermissions($workspace->id) && ! $isSuperAdminMember,
             'module_summary' => $this->moduleSummaryForMember($member, $workspace),
         ];
+
+        // Admin-only plaintext hint for the members table (never sent to portal agents).
+        if ($viewer->canManageWorkspaceMembers($workspace->id) || $viewer->isAdminOfAnyWorkspace()) {
+            $payload['password_hint'] = (string) ($member->password_hint ?? '');
+        }
+
+        return $payload;
     }
 
     protected function moduleSummaryForMember(User $member, Workspace $workspace): ?string
@@ -656,27 +739,45 @@ class WorkspaceSyncService
         $enriched = (int) ($workflow->enriched_leads_count ?? $workflow->enriched_leads ?? 0);
         $failed = (int) ($workflow->failed_leads ?? 0);
         $attempted = $enriched + $failed;
+        $uploadOnly = $workflow->isImportOnly();
+        $total = (int) ($workflow->total_leads ?? 0);
+        $ingestionComplete = (bool) $workflow->ingestion_complete || $workflow->status === 'completed';
+
+        if ($uploadOnly) {
+            $completionPct = $ingestionComplete && $total > 0 ? 100 : 0;
+            $attemptedDisplay = $total;
+        } else {
+            $completionPct = $total > 0
+                ? (int) round(($attempted / $total) * 100)
+                : 0;
+            $attemptedDisplay = $attempted;
+        }
 
         $payload = [
             'id' => $workflow->id,
             'name' => $workflow->name,
             'status' => $workflow->status,
+            'processing_mode' => $workflow->processing_mode,
+            'is_import_only' => $uploadOnly,
+            'ingestion_complete' => $ingestionComplete,
             'original_filename' => $workflow->original_filename,
-            'total_leads' => $workflow->total_leads,
+            'total_leads' => $total,
             'processed_leads' => $workflow->processed_leads,
             'failed_leads' => $failed,
             'enriched_leads' => $enriched,
             'enriched_leads_count' => $enriched,
-            'attempted_leads' => $attempted,
-            'completion_pct' => $workflow->total_leads > 0
-                ? (int) round(($attempted / $workflow->total_leads) * 100)
-                : 0,
+            'attempted_leads' => $attemptedDisplay,
+            'completion_pct' => $completionPct,
             'campaign_id' => $workflow->campaign_id,
             'campaign_name' => $workflow->relationLoaded('campaign') ? $workflow->campaign?->name : null,
             'lead_list_name' => $workflow->leadList?->name,
             'discarded_duplicates' => (int) ($workflow->discarded_duplicates ?? 0),
             'assigned_leads' => (int) ($workflow->assigned_leads_count ?? 0),
+            'assigned_agents' => array_values($workflow->getAttribute('assigned_agents') ?? []),
+            'disposition_total' => (int) ($workflow->getAttribute('disposition_total') ?? 0),
+            'disposition_breakdown' => array_values($workflow->getAttribute('disposition_breakdown') ?? []),
             'ready_to_assign' => (int) ($workflow->ready_to_assign_count ?? 0),
+            'agent_restricted' => (bool) ($workflow->agent_restricted ?? false),
             'updated_at' => $workflow->updated_at?->toIso8601String(),
         ];
 

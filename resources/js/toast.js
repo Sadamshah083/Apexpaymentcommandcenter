@@ -21,14 +21,6 @@ const TOAST_ICONS = {
     info: '<svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clip-rule="evenodd"/></svg>',
 };
 
-function escapeHtml(value) {
-    return String(value ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-}
-
 function getContainer() {
     let container = document.getElementById('toast-container');
     if (!container) {
@@ -37,9 +29,13 @@ function getContainer() {
         container.className = 'app-toast-container';
         container.setAttribute('aria-live', 'polite');
         container.setAttribute('aria-atomic', 'true');
-        document.body.appendChild(container);
     }
+    document.body.appendChild(container);
     return container;
+}
+
+function toastKey(type, message, title) {
+    return `${type}::${title || ''}::${String(message ?? '').trim()}`;
 }
 
 const COMM_TOAST_DURATION = {
@@ -83,10 +79,29 @@ export function showToast(message, type = 'success', options = {}) {
     const container = getContainer();
     const toastType = TOAST_TITLES[type] ? type : 'info';
     const duration = options.duration ?? TOAST_DURATION[toastType] ?? 5000;
+    const titleText = options.title ?? TOAST_TITLES[toastType];
+    const key = toastKey(toastType, message, titleText);
+
+    // Dedupe: refresh an existing identical toast instead of stacking copies.
+    const existing = [...container.querySelectorAll('.app-toast')].find((el) => el.dataset.toastKey === key);
+    if (existing) {
+        const dismissExisting = existing._toastDismiss;
+        if (typeof dismissExisting === 'function' && options.replace !== false) {
+            existing.classList.remove('is-visible');
+            requestAnimationFrame(() => existing.classList.add('is-visible'));
+            if (existing._toastTimer) {
+                window.clearTimeout(existing._toastTimer);
+            }
+            existing._toastTimer = window.setTimeout(() => dismissExisting(), duration);
+            return dismissExisting;
+        }
+        return () => {};
+    }
 
     const toast = document.createElement('div');
     toast.className = `app-toast app-toast-${toastType}${options.compact ? ' app-toast--compact' : ''}`;
     toast.setAttribute('role', 'alert');
+    toast.dataset.toastKey = key;
 
     const icon = document.createElement('div');
     icon.className = 'app-toast-icon';
@@ -97,7 +112,7 @@ export function showToast(message, type = 'success', options = {}) {
 
     const title = document.createElement('div');
     title.className = 'app-toast-title';
-    title.textContent = options.title ?? TOAST_TITLES[toastType];
+    title.textContent = titleText;
 
     const text = document.createElement('div');
     text.className = 'app-toast-message';
@@ -133,18 +148,18 @@ export function showToast(message, type = 'success', options = {}) {
     toast.appendChild(closeBtn);
     container.appendChild(toast);
 
-    let dismissTimer;
-
     const dismiss = () => {
-        if (dismissTimer) {
-            window.clearTimeout(dismissTimer);
+        if (toast._toastTimer) {
+            window.clearTimeout(toast._toastTimer);
+            toast._toastTimer = null;
         }
         toast.classList.remove('is-visible');
         window.setTimeout(() => toast.remove(), 220);
     };
 
+    toast._toastDismiss = dismiss;
     closeBtn.addEventListener('click', dismiss);
-    dismissTimer = window.setTimeout(dismiss, duration);
+    toast._toastTimer = window.setTimeout(dismiss, duration);
 
     requestAnimationFrame(() => {
         toast.classList.add('is-visible');

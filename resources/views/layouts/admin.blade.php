@@ -7,12 +7,27 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="auth-login-paths" content="{{ json_encode([route('admin.login', [], false), route('portal.login', [], false), '/login']) }}">
     <title>@yield('title', 'Dashboard') - {{ config('app.name') }}</title>
+    <script>
+        (function () {
+            try {
+                var t = localStorage.getItem('apex-ui-theme') || localStorage.getItem('communications.dialer_theme') || 'light';
+                t = t === 'dark' ? 'dark' : 'light';
+                document.documentElement.dataset.theme = t;
+                document.documentElement.dataset.commTheme = t;
+                document.documentElement.classList.toggle('theme-dark', t === 'dark');
+                document.documentElement.classList.toggle('theme-light', t === 'light');
+            } catch (e) {}
+        })();
+    </script>
     @include('layouts.partials.favicon')
+    @include('layouts.partials.critical-head')
+    @include('layouts.partials.google-fonts')
     @include('layouts.partials.vite-assets')
     @stack('head')
 </head>
 
-<body class="app-shell min-h-screen font-sans antialiased" data-turbo-prefetch="false"
+{{-- Turbo prefetch = Next.js <Link> style hover/idle warm cache for same-origin nav --}}
+<body class="app-shell min-h-screen font-sans antialiased" data-turbo-prefetch="true"
     @auth
 data-workspace-id="{{ auth()->user()->current_workspace_id }}"
         data-workspace-sync-scope="{{
@@ -28,7 +43,8 @@ data-workspace-id="{{ auth()->user()->current_workspace_id }}"
         }}"
         data-workspace-sync-url="{{ route('admin.sync.poll') }}"
         data-workspace-sync-stream-url="{{ route('admin.sync.stream') }}"
-        @if(app()->environment('local')) data-workspace-sync-use-poll="1" @endif
+        {{-- Poll (not SSE stream) so long-lived sync never blocks Turbo navigation --}}
+        data-workspace-sync-use-poll="1"
         data-lead-show-base="{{ url('/portal/leads') }}"
         data-workflow-show-base="{{ url('/admin/workflows') }}"
         data-push-vapid-key-url="{{ route('admin.push.vapid') }}"

@@ -85,6 +85,17 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Business / dashboard day boundary
+    |--------------------------------------------------------------------------
+    |
+    | "Today" KPIs (calls, connected, dispositions) use this timezone so the
+    | Dashboard matches the call center's working day instead of UTC midnight.
+    |
+    */
+    'business_timezone' => env('APP_BUSINESS_TIMEZONE', 'America/New_York'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Locale Configuration
     |--------------------------------------------------------------------------
     |

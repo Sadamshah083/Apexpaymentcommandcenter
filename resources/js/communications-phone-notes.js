@@ -767,7 +767,9 @@ export function initCommunicationsPhoneNotes(root = document) {
                 if (opening) {
                     openNotesPanel(screen);
                 } else if (state.dirty) {
-                    void saveActiveNotes({ silent: true, screen, closeAfter: true });
+                    void saveActiveNotes({ silent: true, screen, closeAfter: false }).then(() => {
+                        closeNotesPanel(screen);
+                    });
                 } else {
                     closeNotesPanel(screen);
                 }
@@ -800,8 +802,9 @@ export function initCommunicationsPhoneNotes(root = document) {
             if (state.saveTimer) {
                 window.clearTimeout(state.saveTimer);
             }
+            // Auto-save in the background — keep the notes panel open while typing.
             state.saveTimer = window.setTimeout(() => {
-                void saveActiveNotes({ silent: true, screen, closeAfter: true });
+                void saveActiveNotes({ silent: true, screen, closeAfter: false });
             }, SAVE_DEBOUNCE_MS);
         }, true);
     }
@@ -837,7 +840,7 @@ export function initCommunicationsPhoneNotes(root = document) {
                         inCallNotes,
                     });
                 } else {
-                    void notesApi?.save?.({ silent: true });
+                    void notesApi?.save?.({ silent: true, closeAfter: false });
                 }
             }
 
@@ -857,8 +860,40 @@ export function initCommunicationsPhoneNotes(root = document) {
                 }).catch(() => {});
             }
 
+            // Always close in-call notes + clear draft after hangup (save already flushed above).
+            if (state.saveTimer) {
+                window.clearTimeout(state.saveTimer);
+                state.saveTimer = null;
+            }
             state.callUuid = '';
             state.dirty = false;
+            try {
+                if (typeof notesApi?.clear === 'function') {
+                    notesApi.clear();
+                } else {
+                    document.querySelectorAll('[data-dialer-active-notes]').forEach((block) => {
+                        block.classList.add('hidden');
+                        block.setAttribute('aria-hidden', 'true');
+                    });
+                    document.querySelectorAll('[data-dialer-active-notes-toggle]').forEach((btn) => {
+                        btn.classList.remove('is-active');
+                        btn.setAttribute('aria-expanded', 'false');
+                    });
+                    document.querySelectorAll('[data-dialer-active-screen]').forEach((screen) => {
+                        screen.classList.remove('is-notes-open');
+                    });
+                    document.querySelectorAll('[data-dialer-active-notes-input]').forEach((el) => {
+                        el.value = '';
+                    });
+                }
+            } catch {
+                // ignore
+            }
+            try {
+                getWebphone()?.setActiveKeypadOpen?.(false);
+            } catch {
+                // ignore
+            }
         });
     }
 

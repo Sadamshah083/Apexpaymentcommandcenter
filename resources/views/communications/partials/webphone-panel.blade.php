@@ -20,6 +20,7 @@
         data-prepare-url="{{ route($routePrefix . 'communications.morpheus.webphone.prepare') }}"
         data-hangup-url="{{ route($routePrefix . 'communications.morpheus.calls.hangup', ['uuid' => '__UUID__']) }}"
         data-release-extension-url="{{ route($routePrefix . 'communications.morpheus.calls.release-extension') }}"
+        data-record-url="{{ route($routePrefix . 'communications.morpheus.calls.record', ['uuid' => '__UUID__']) }}"
         data-hold-url="{{ route($routePrefix . 'communications.morpheus.calls.hold', ['uuid' => '__UUID__']) }}"
         data-unhold-url="{{ route($routePrefix . 'communications.morpheus.calls.unhold', ['uuid' => '__UUID__']) }}"
         data-transfer-url="{{ route($routePrefix . 'communications.morpheus.calls.transfer', ['uuid' => '__UUID__']) }}"

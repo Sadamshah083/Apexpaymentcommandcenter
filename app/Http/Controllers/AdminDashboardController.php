@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Models\WorkflowLead;
 use App\Services\Dashboard\DashboardDetailService;
 use App\Services\Dashboard\PipelineMetricsService;
+use App\Services\Pipeline\CampaignKpiService;
 use App\Services\Pipeline\CampaignService;
 use App\Services\Portal\PortalDashboardService;
 use App\Services\Workflow\WorkflowDashboardService;
@@ -23,6 +24,7 @@ class AdminDashboardController extends Controller
         protected PipelineMetricsService $pipelineMetrics,
         protected WorkflowDashboardService $workflowDashboard,
         protected CampaignService $campaignService,
+        protected CampaignKpiService $campaignKpis,
         protected WorkspaceSyncService $sync,
     ) {}
 
@@ -38,6 +40,8 @@ class AdminDashboardController extends Controller
             ? $this->workflowDashboard->buildIndexData($workspace, $user, [
                 'search' => $request->input('search'),
                 'phase' => $request->input('phase'),
+                'workflow_id' => $request->input('workflow_id'),
+                'workflow_ids' => $request->input('workflow_ids', []),
                 'assigned_user_id' => $request->input('assigned_user_id'),
                 'refresh_enrichment' => $request->boolean('refresh_enrichment'),
             ])
@@ -48,9 +52,12 @@ class AdminDashboardController extends Controller
             unset($imports['workflows']);
         }
 
+        $campaigns = $this->campaignService->campaignsWithStats($workspace);
+
         return view('admin.dashboard.index', array_merge($data, $imports, [
             'workspace' => $workspace,
-            'campaigns' => $this->campaignService->campaignsWithStats($workspace),
+            'campaigns' => $campaigns,
+            'campaignKpis' => $this->campaignKpis->forCampaigns($workspace, $campaigns),
             'ops' => $this->portalDashboard->adminOperationalSummary($workspace),
             'detail' => $detail,
             'detailService' => $this->detailService,
@@ -76,6 +83,8 @@ class AdminDashboardController extends Controller
             $imports = $this->workflowDashboard->buildIndexData($workspace, $user, [
                 'search' => $request->input('search'),
                 'phase' => $request->input('phase'),
+                'workflow_id' => $request->input('workflow_id'),
+                'workflow_ids' => $request->input('workflow_ids', []),
                 'assigned_user_id' => $request->input('assigned_user_id'),
             ]);
             $leads = $imports['leads'] ?? null;
@@ -107,17 +116,30 @@ class AdminDashboardController extends Controller
      */
     protected function serializeCampaignsForRealtime($workspace): array
     {
-        return $this->campaignService->campaignsWithStats($workspace)
-            ->take(6)
-            ->map(fn ($campaign) => [
-                'id' => $campaign->id,
-                'name' => $campaign->name,
-                'leads_count' => (int) ($campaign->leads_count ?? 0),
-                'imports_count' => (int) ($campaign->imports_count ?? 0),
-                'enriched_count' => (int) ($campaign->enriched_count ?? 0),
-                'assigned_count' => (int) ($campaign->assigned_count ?? 0),
-                'show_url' => route('admin.campaigns.show', $campaign),
-            ])
+        $campaigns = $this->campaignService->campaignsWithStats($workspace)->take(12);
+        $kpis = $this->campaignKpis->forCampaigns($workspace, $campaigns);
+
+        return $campaigns
+            ->map(function ($campaign) use ($kpis) {
+                $kpi = $kpis[(int) $campaign->id] ?? [
+                    'dials' => 0,
+                    'connected' => 0,
+                    'connect_rate' => 0,
+                ];
+
+                return [
+                    'id' => $campaign->id,
+                    'name' => $campaign->name,
+                    'leads_count' => (int) ($campaign->leads_count ?? 0),
+                    'imports_count' => (int) ($campaign->imports_count ?? 0),
+                    'enriched_count' => (int) ($campaign->enriched_count ?? 0),
+                    'assigned_count' => (int) ($campaign->assigned_count ?? 0),
+                    'dials' => (int) ($kpi['dials'] ?? 0),
+                    'connected' => (int) ($kpi['connected'] ?? 0),
+                    'connect_rate' => (float) ($kpi['connect_rate'] ?? 0),
+                    'show_url' => route('admin.campaigns.show', $campaign),
+                ];
+            })
             ->values()
             ->all();
     }
@@ -167,9 +189,21 @@ class AdminDashboardController extends Controller
             ->values()
             ->all();
 
+        $assignedLeads = $workflowIds === []
+            ? 0
+            : WorkflowLead::query()
+                ->whereIn('workflow_id', $workflowIds)
+                ->where(function ($query) {
+                    $query->whereNotNull('assigned_user_id')
+                        ->orWhereNotNull('assigned_setter_id')
+                        ->orWhereNotNull('assigned_closer_id');
+                })
+                ->count();
+
         return [
             'pipeline' => [
                 'total_leads' => $pipeline['total_leads'],
+                'assigned_leads' => $assignedLeads,
                 'new' => $pipeline['new'],
                 'qualified' => $pipeline['qualified'],
                 'booked' => $pipeline['booked'],

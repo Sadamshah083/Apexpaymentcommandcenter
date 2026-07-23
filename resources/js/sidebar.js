@@ -24,6 +24,24 @@ function normalizeQuery(query) {
     return query.startsWith('?') ? query : `?${query}`;
 }
 
+function queryParamsFrom(query) {
+    const normalized = normalizeQuery(query).replace(/^\?/, '');
+
+    return new URLSearchParams(normalized);
+}
+
+function linkQueryParamsMatch(linkQuery, currentQuery) {
+    const linkParams = queryParamsFrom(linkQuery);
+    const currentParams = queryParamsFrom(currentQuery);
+    const entries = [...linkParams.entries()];
+
+    if (entries.length === 0) {
+        return currentParams.toString() === '';
+    }
+
+    return entries.every(([key, value]) => currentParams.get(key) === value);
+}
+
 function isPrefixMatch(linkPath, currentPath) {
     const link = normalizePath(linkPath);
     const current = normalizePath(currentPath);
@@ -83,17 +101,24 @@ function isLinkActive(link, currentLocation) {
     const queryMode = link.dataset.navQueryMode || 'ignore';
     const currentPath = normalizePath(currentLocation.pathname);
     const currentQuery = normalizeQuery(currentLocation.search);
+    const currentParams = queryParamsFrom(currentLocation.search);
 
     if (parseExcludePrefixes(link).some((prefix) => isPrefixMatch(prefix, currentPath))) {
         return false;
     }
 
     if (queryMode === 'exact') {
-        if (linkPath === currentPath && linkQuery === currentQuery) {
+        // Subset match: link params must be present (extra current params allowed).
+        if (linkPath === currentPath && linkQueryParamsMatch(linkQuery, currentQuery)) {
             return true;
         }
     } else if (queryMode === 'empty') {
         if (linkPath === currentPath && currentQuery === '') {
+            return true;
+        }
+    } else if (queryMode === 'base') {
+        // Path match, but never when a more specific query view is active (e.g. view=assigned).
+        if (currentParams.get('view') !== 'assigned' && isPrefixMatch(linkPath, currentPath)) {
             return true;
         }
     } else if (isPrefixMatch(linkPath, currentPath)) {

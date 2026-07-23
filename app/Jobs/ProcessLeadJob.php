@@ -19,18 +19,20 @@ class ProcessLeadJob implements ShouldQueue
 {
     use Queueable;
 
-    public int $tries = 5;
+    public int $tries = 12;
     public int $timeout = 180;
 
     public function backoff(): array
     {
-        return [2, 5, 10, 20, 30];
+        return [15, 30, 60, 90, 120, 180, 240, 300, 420, 600, 900];
     }
 
     public function __construct(
         public int $leadId,
         public ?string $customPrompt = null
-    ) {}
+    ) {
+        $this->onQueue('enrichment');
+    }
 
     public function handle(
         WorkflowExtractor $extractor,
@@ -48,12 +50,25 @@ class ProcessLeadJob implements ShouldQueue
             return;
         }
 
+        // Upload-only imports must never enter the AI enrichment path.
+        if ($workflow->isImportOnly()) {
+            if ($lead->status === 'extracting') {
+                SqliteConcurrency::retry(fn () => $lead->update(['status' => 'imported']));
+            }
+
+            return;
+        }
+
         $workspace = $workflow->workspace;
         if (! $workspace) {
             return;
         }
 
-        if (in_array($lead->status, ['completed', 'failed', 'pending_verification', 'enriched'], true)) {
+        // Skip finished leads. Allow re-queue of "completed" rows that never got research data.
+        if (in_array($lead->status, ['failed', 'pending_verification', 'enriched'], true)) {
+            return;
+        }
+        if ($lead->status === 'completed' && $lead->researched_at) {
             return;
         }
 
@@ -79,6 +94,13 @@ class ProcessLeadJob implements ShouldQueue
             }
 
             if (($result['status'] ?? '') === 'failed') {
+                $message = (string) ($result['error_message'] ?? 'Enrichment provider failed.');
+                if ($this->isTransientProviderFailure($message)) {
+                    $this->requeueTransient($lead, $message);
+
+                    return;
+                }
+
                 SqliteConcurrency::retry(fn () => $lead->update($result));
                 SqliteConcurrency::retry(fn () => $workflow->increment('failed_leads'));
                 $this->syncWorkflowProgress($workflow, $workspace, $syncService);
@@ -115,6 +137,12 @@ class ProcessLeadJob implements ShouldQueue
                 throw $e;
             }
 
+            if ($this->isTransientProviderFailure($e->getMessage())) {
+                $this->requeueTransient($lead, $e->getMessage());
+
+                return;
+            }
+
             Log::error("ProcessLeadJob failed for lead {$lead->id}: ".$e->getMessage());
             SqliteConcurrency::retry(fn () => $lead->update([
                 'status' => 'failed',
@@ -124,6 +152,80 @@ class ProcessLeadJob implements ShouldQueue
         }
 
         $this->syncWorkflowProgress($workflow, $workspace, $syncService);
+    }
+
+    protected function requeueTransient(WorkflowLead $lead, string $message): void
+    {
+        Log::warning("ProcessLeadJob releasing transient provider failure for lead {$lead->id}", [
+            'attempt' => $this->attempts(),
+            'error' => $message,
+        ]);
+
+        // Keep the lead queueable and wait for provider capacity instead of burn-failing.
+        SqliteConcurrency::retry(fn () => $lead->update([
+            'status' => 'imported',
+            'error_message' => null,
+        ]));
+
+        $delay = max(5, (int) config('workflow_enrichment.openrouter_retry_delay_seconds', 20));
+        $this->release($delay);
+    }
+
+    public function failed(?\Throwable $exception): void
+    {
+        $lead = WorkflowLead::find($this->leadId);
+        if (! $lead || $lead->status === 'failed') {
+            return;
+        }
+
+        DB::transaction(function () use ($lead, $exception) {
+            $lead->update([
+                'status' => 'failed',
+                'error_message' => $exception?->getMessage() ?: 'Enrichment retry limit reached.',
+            ]);
+
+            $workflow = Workflow::lockForUpdate()->find($lead->workflow_id);
+            if (! $workflow) {
+                return;
+            }
+
+            $workflow->increment('failed_leads');
+            $workflow->refresh();
+
+            $stillProcessing = WorkflowLead::where('workflow_id', $workflow->id)
+                ->whereIn('status', ['imported', 'extracting'])
+                ->exists();
+            if (! $stillProcessing && $workflow->status === 'extracting') {
+                $workflow->update(['status' => 'completed']);
+            }
+        });
+    }
+
+    protected function isTransientProviderFailure(string $message): bool
+    {
+        $message = strtolower($message);
+
+        foreach ([
+            'rate limit',
+            'temporarily throttled',
+            'too many requests',
+            'provider returned error',
+            'operation was aborted',
+            'timeout',
+            'timed out',
+            'connection reset',
+            'service unavailable',
+            'http 429',
+            'http 502',
+            'http 503',
+            'http 504',
+        ] as $needle) {
+            if (str_contains($message, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     protected function syncWorkflowProgress(Workflow $workflow, $workspace, WorkspaceSyncService $syncService): void

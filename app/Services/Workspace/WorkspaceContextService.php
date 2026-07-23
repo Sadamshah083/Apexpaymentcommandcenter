@@ -68,7 +68,7 @@ class WorkspaceContextService
     public function ensureCanManageMembers(User $user, Workspace $workspace): void
     {
         if (! $user->canManageWorkspaceMembers($workspace->id)) {
-            abort(403, 'Only the workspace Super Admin can manage user accounts.');
+            abort(403, 'Only workspace Admins and Super Admins can manage user accounts.');
         }
     }
 

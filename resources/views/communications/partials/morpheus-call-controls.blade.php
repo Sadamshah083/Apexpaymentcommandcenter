@@ -16,6 +16,18 @@
                 @csrf<button type="submit" class="comm-hub-btn text-xs py-1 px-3 comm-hub-btn-secondary">Hang up</button>
             </form>
             <form method="POST"
+                action="{{ route($routePrefix . 'communications.morpheus.calls.record', ['uuid' => $uuid]) }}">
+                @csrf
+                <input type="hidden" name="action" value="start">
+                <button type="submit" class="comm-hub-btn text-xs py-1 px-3 comm-hub-btn-secondary">Start record</button>
+            </form>
+            <form method="POST"
+                action="{{ route($routePrefix . 'communications.morpheus.calls.record', ['uuid' => $uuid]) }}">
+                @csrf
+                <input type="hidden" name="action" value="stop">
+                <button type="submit" class="comm-hub-btn text-xs py-1 px-3 comm-hub-btn-secondary">Stop record</button>
+            </form>
+            <form method="POST"
                 action="{{ route($routePrefix . 'communications.morpheus.calls.hold', ['uuid' => $uuid]) }}">@csrf<button
                     type="submit" class="comm-hub-btn text-xs py-1 px-3 comm-hub-btn-secondary">Hold</button></form>
             <form method="POST"

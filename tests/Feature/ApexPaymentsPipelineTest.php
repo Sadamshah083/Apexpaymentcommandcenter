@@ -345,6 +345,64 @@ class ApexPaymentsPipelineTest extends TestCase
         $this->assertSame(1, app(SetterDistributionService::class)->unassignedWorkflowLeadCount($workflow));
     }
 
+    public function test_admin_can_unassign_import_leads_back_to_pool(): void
+    {
+        $setterTl = $this->attachUser('setter_tl_unassign', 'appointment_setter_team_lead');
+        $workflow = Workflow::create([
+            'workspace_id' => $this->workspace->id,
+            'name' => 'unassign-result',
+            'status' => 'extracting',
+            'processing_mode' => 'full_pipeline',
+            'enriched_leads' => 3,
+            'total_leads' => 3,
+        ]);
+
+        foreach (range(1, 3) as $row) {
+            WorkflowLead::create([
+                'workflow_id' => $workflow->id,
+                'row_number' => $row,
+                'business_name' => "Unassign Lead {$row}",
+                'status' => 'enriched',
+                'pipeline_phase' => 'enriched',
+                'researched_at' => now(),
+            ]);
+        }
+
+        $this->actingAs($this->admin)
+            ->postJson(route('admin.workflows.assign-leads', $workflow), [
+                'team_lead_id' => $setterTl->id,
+                'lead_count' => 2,
+            ])
+            ->assertOk()
+            ->assertJsonPath('assigned', 2);
+
+        $agentIds = WorkflowLead::query()
+            ->where('workflow_id', $workflow->id)
+            ->whereNotNull('assigned_user_id')
+            ->pluck('assigned_user_id')
+            ->unique()
+            ->map(fn ($id) => (int) $id)
+            ->values()
+            ->all();
+
+        $this->assertNotEmpty($agentIds);
+
+        $response = $this->actingAs($this->admin)
+            ->postJson(route('admin.workflows.unassign-leads', $workflow), [
+                'lead_count' => 2,
+                'agent_ids' => $agentIds,
+            ]);
+
+        $response->assertOk()
+            ->assertJsonPath('unassigned', 2)
+            ->assertJsonPath('remaining', 3)
+            ->assertJsonPath('assigned', 0);
+
+        $this->assertSame(0, WorkflowLead::query()->where('workflow_id', $workflow->id)->whereNotNull('assigned_user_id')->count());
+        $this->assertSame(3, app(SetterDistributionService::class)->unassignedWorkflowLeadCount($workflow));
+        $this->assertSame(0, WorkflowLead::query()->where('workflow_id', $workflow->id)->whereNull('pipeline_phase')->count());
+    }
+
     public function test_assign_import_leads_requires_active_setters(): void
     {
         $setterTl = $this->attachUser('setter_tl_only', 'appointment_setter_team_lead');

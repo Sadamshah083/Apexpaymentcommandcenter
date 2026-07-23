@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\WorkflowLead;
 use App\Services\Dashboard\DashboardDetailService;
+use App\Services\Pipeline\CampaignKpiService;
 use App\Services\Pipeline\CampaignService;
 use App\Services\Pipeline\CloserAssignmentService;
 use App\Services\Pipeline\LeadPipelineService;
@@ -27,6 +28,7 @@ class PipelineController extends Controller
         protected SetterDistributionService $setterDistribution,
         protected DashboardDetailService $detailService,
         protected CampaignService $campaigns,
+        protected CampaignKpiService $campaignKpis,
     ) {}
 
     public function portalDashboard()
@@ -111,8 +113,20 @@ class PipelineController extends Controller
         $dashboard = $this->portalDashboard->forUser($user, $workspace);
         $focus = $this->detailService->resolvePortalFocus($request, $workspace, $user);
         $campaigns = $this->campaigns->portalSummaries($workspace);
+        $campaignKpis = $this->campaignKpis->forCampaigns($workspace, $campaigns);
 
-        return view('pipeline.setter-team.index', compact('workspace', 'leads', 'user', 'teamMetrics', 'dashboard', 'setters', 'unassignedLeads', 'focus', 'campaigns'));
+        return view('pipeline.setter-team.index', compact(
+            'workspace',
+            'leads',
+            'user',
+            'teamMetrics',
+            'dashboard',
+            'setters',
+            'unassignedLeads',
+            'focus',
+            'campaigns',
+            'campaignKpis',
+        ));
     }
 
     public function closerTeamDashboard(Request $request)
@@ -135,8 +149,19 @@ class PipelineController extends Controller
         $dashboard = $this->portalDashboard->forUser($user, $workspace);
         $focus = $this->detailService->resolvePortalFocus($request, $workspace, $user);
         $campaigns = $this->campaigns->portalSummaries($workspace);
+        $campaignKpis = $this->campaignKpis->forCampaigns($workspace, $campaigns);
 
-        return view('pipeline.closer-team.index', compact('workspace', 'leads', 'user', 'teamMetrics', 'dashboard', 'closers', 'focus', 'campaigns'));
+        return view('pipeline.closer-team.index', compact(
+            'workspace',
+            'leads',
+            'user',
+            'teamMetrics',
+            'dashboard',
+            'closers',
+            'focus',
+            'campaigns',
+            'campaignKpis',
+        ));
     }
 
     public function closerTeamQueue(Request $request)
@@ -257,7 +282,9 @@ class PipelineController extends Controller
 
         $data = $request->validate([
             'setter_id' => 'required|integer|exists:users,id',
-            'lead_count' => 'required|integer|min:1|max:500',
+            'lead_count' => 'nullable|integer|min:1|max:500',
+            'lead_ids' => 'nullable|array|max:500',
+            'lead_ids.*' => 'integer|exists:workflow_leads,id',
         ]);
 
         $setter = $workspace->users()
@@ -270,6 +297,31 @@ class PipelineController extends Controller
             return redirect()->back()->withErrors(['setter_id' => 'Selected user is not an active appointment setter.']);
         }
 
+        $selectedIds = array_values(array_unique(array_map('intval', $data['lead_ids'] ?? [])));
+        if ($selectedIds !== []) {
+            $assigned = $this->setterDistribution->assignSelectedLeadsToSetter(
+                $workspace,
+                $setter,
+                $selectedIds,
+                $user
+            );
+
+            if ($assigned === 0) {
+                return redirect()->back()->withErrors([
+                    'lead_ids' => 'None of the selected leads could be assigned. They may already be assigned or the setter is at capacity.',
+                ]);
+            }
+
+            return redirect()->back()->with('success', "Assigned {$assigned} selected lead(s) to {$setter->name}.");
+        }
+
+        $leadCount = (int) ($data['lead_count'] ?? 0);
+        if ($leadCount < 1) {
+            return redirect()->back()->withErrors([
+                'lead_count' => 'Enter a lead count or select leads from the table.',
+            ]);
+        }
+
         $available = $this->setterDistribution->unassignedLeadCount($workspace);
         if ($available === 0) {
             return redirect()->back()->withErrors(['lead_count' => 'No unassigned leads are available to assign.']);
@@ -278,7 +330,7 @@ class PipelineController extends Controller
         $assigned = $this->setterDistribution->assignLeadsToSetter(
             $workspace,
             $setter,
-            (int) $data['lead_count'],
+            $leadCount,
             $user
         );
 

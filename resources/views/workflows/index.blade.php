@@ -1,23 +1,117 @@
 @extends(request()->is('admin*') ? 'layouts.admin' : 'layouts.portal')
 
-@section('title', request()->is('admin*') ? 'Import leads' : 'My Lead Pool')
+@section('title', request()->is('admin*')
+    ? ((!empty($assignedLeadsView) || request()->routeIs('admin.assigned-leads') || request('view') === 'assigned') ? 'Assigned Leads' : 'Imported Leads')
+    : 'My Lead Pool')
 
 @section('content')
-<div class="app-page import-workflows-page space-y-5" data-import-hub>
-    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
+@php
+    $isAssignedLeadsView = !empty($assignedLeadsView) || request()->routeIs('admin.assigned-leads') || request('view') === 'assigned';
+@endphp
+<div class="app-page import-workflows-page space-y-5 {{ $isAssignedLeadsView ? 'import-workflows-page--assigned' : '' }}" data-import-hub>
+    <div class="import-leads-page-head flex flex-row items-center justify-between gap-3">
+        <div class="min-w-0 flex-1">
             @if(request()->is('admin*'))
-                <h1 class="app-page-title">Import leads</h1>
-                <p class="app-page-subtitle">Upload CSV files, track workflow performance, manage campaigns, and assign enriched leads.</p>
+                @if ($isAssignedLeadsView)
+                    <h1 class="app-page-title">Assigned Leads</h1>
+                @else
+                    <h1 class="app-page-title">Imported Leads</h1>
+                @endif
             @else
                 <h1 class="app-page-title">My Lead Pool</h1>
-                <p class="app-page-subtitle">Work assigned leads and log activity toward daily goals.</p>
             @endif
         </div>
-        @if(request()->is('admin*'))
-            <x-import-file-link />
-        @endif
+        <div class="import-leads-page-head__actions shrink-0 flex flex-wrap items-center justify-end gap-2">
+            @if(request()->is('admin*') && $isAssignedLeadsView)
+                @php
+                    $headerSelectedFiles = collect(request()->input('workflow_ids', []))
+                        ->map(fn ($id) => (string) $id)
+                        ->filter()
+                        ->values();
+                    if ($headerSelectedFiles->isEmpty() && filled(request('workflow_id'))) {
+                        $headerSelectedFiles = collect([(string) request('workflow_id')]);
+                    }
+                    $headerFileCount = $headerSelectedFiles->count();
+                @endphp
+                <button type="button"
+                    class="app-btn app-btn-secondary app-btn-sm import-leads-page-head__files-btn"
+                    data-uploaded-files-open
+                    aria-haspopup="dialog"
+                    aria-controls="uploaded-files-modal">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+                    </svg>
+                    <span>Uploaded files</span>
+                    <span class="uploaded-files-btn-count" data-uploaded-files-count {{ $headerFileCount === 0 ? 'hidden' : '' }}>
+                        {{ $headerFileCount > 0 ? $headerFileCount : '' }}
+                    </span>
+                </button>
+            @elseif(request()->is('admin*') && ! $isAssignedLeadsView)
+                @if (isset($enrichmentStatus))
+                    <button type="button"
+                        class="app-btn app-btn-secondary app-btn-sm"
+                        data-enrichment-status-open
+                        aria-haspopup="dialog"
+                        aria-controls="enrichment-status-modal">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                        <span>AI enrichment</span>
+                    </button>
+                @endif
+                <x-import-file-link class="import-leads-page-head__btn" />
+            @endif
+        </div>
     </div>
+
+    @if(request()->is('admin*') && ! $isAssignedLeadsView && isset($enrichmentStatus))
+        <div id="enrichment-status-modal" class="uploaded-files-modal enrichment-status-modal" hidden aria-hidden="true"
+            role="dialog" aria-labelledby="enrichment-status-modal-title" aria-modal="true">
+            <div class="uploaded-files-modal__backdrop" data-enrichment-status-close></div>
+            <div class="uploaded-files-modal__panel enrichment-status-modal__panel" role="document">
+                <div class="uploaded-files-modal__header">
+                    <div>
+                        <h3 id="enrichment-status-modal-title" class="uploaded-files-modal__title">AI enrichment</h3>
+                        <p class="uploaded-files-modal__desc">Provider status, pipeline model, and balance.</p>
+                    </div>
+                    <button type="button" class="app-modal-close" data-enrichment-status-close aria-label="Close">&times;</button>
+                </div>
+                <div class="enrichment-status-modal__body">
+                    @include('workflows.partials.enrichment-status', ['status' => $enrichmentStatus, 'embedded' => true])
+                </div>
+            </div>
+        </div>
+        @push('scripts')
+        <script>
+        (() => {
+            const modal = document.getElementById('enrichment-status-modal');
+            if (!modal || modal.dataset.bound === '1') return;
+            modal.dataset.bound = '1';
+            const open = () => {
+                modal.hidden = false;
+                modal.setAttribute('aria-hidden', 'false');
+                document.body.classList.add('uploaded-files-modal-open');
+            };
+            const close = () => {
+                modal.hidden = true;
+                modal.setAttribute('aria-hidden', 'true');
+                document.body.classList.remove('uploaded-files-modal-open');
+            };
+            document.querySelectorAll('[data-enrichment-status-open]').forEach((btn) => {
+                btn.addEventListener('click', open);
+            });
+            modal.querySelectorAll('[data-enrichment-status-close]').forEach((el) => {
+                el.addEventListener('click', close);
+            });
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape' && !modal.hidden) close();
+            });
+        })();
+        </script>
+        @endpush
+    @endif
 
     @if(isset($dailyMetrics))
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 app-stat-grid">
@@ -41,56 +135,11 @@
 
     @if(request()->is('admin*'))
         <div class="space-y-6">
-            <div class="app-card app-card-padded">
-                <h2 class="app-section-title mb-4">Data files &amp; workflow performance</h2>
-                <div class="admin-dash-table-wrap">
-                    <table class="admin-dash-table">
-                        <thead>
-                            <tr>
-                                <th>File Name</th>
-                                <th>Imported At</th>
-                                <th class="text-right">Total Leads</th>
-                                <th class="text-right">Enriched Success</th>
-                                <th class="text-right">Failed</th>
-                                <th class="text-right">Closed Won</th>
-                                <th class="text-right">Enrichment %</th>
-                                <th class="text-right">Close %</th>
-                                <th class="text-right">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @forelse (($workflowSummaries ?? []) as $wf)
-                                <tr>
-                                    <td>
-                                        <a href="{{ route('admin.workflows.show', $wf['id']) }}" class="admin-dash-table-link">{{ $wf['name'] }}</a>
-                                        <span class="admin-dash-table-meta">{{ $wf['filename'] }}</span>
-                                    </td>
-                                    <td>{{ $wf['created_at'] }}</td>
-                                    <td class="text-right"><span class="admin-dash-table-num">{{ $wf['total_leads'] }}</span></td>
-                                    <td class="text-right"><span class="admin-dash-table-num is-success">{{ $wf['enriched_leads'] }}</span></td>
-                                    <td class="text-right"><span class="admin-dash-table-num is-danger">{{ $wf['failed_leads'] }}</span></td>
-                                    <td class="text-right"><span class="admin-dash-table-num is-success">{{ $wf['closed_deals'] }}</span></td>
-                                    <td class="text-right"><span class="admin-dash-badge is-success">{{ $wf['enrichment_rate'] }}%</span></td>
-                                    <td class="text-right"><span class="admin-dash-badge is-success">{{ $wf['close_rate'] }}%</span></td>
-                                    <td class="text-right">
-                                        <a href="{{ route('admin.workflows.show', $wf['id']) }}" class="app-btn app-btn-secondary app-btn-sm">View details</a>
-                                    </td>
-                                </tr>
-                            @empty
-                                <tr>
-                                    <td colspan="9" class="admin-dash-empty">No workflow files uploaded yet.</td>
-                                </tr>
-                            @endforelse
-                        </tbody>
-                    </table>
-                </div>
-                @if (!empty($workflowSummariesPaginator) && $workflowSummariesPaginator->hasPages())
-                    <x-pagination :paginator="$workflowSummariesPaginator" class="mt-4" />
-                @endif
-            </div>
-
-            @include('admin.dashboard.partials.campaigns-panel')
-            @include('admin.dashboard.partials.imports-panel')
+            @if ($isAssignedLeadsView)
+                @include('admin.dashboard.partials.imports-panel', ['assignedLeadsOnly' => true])
+            @else
+                @include('admin.dashboard.partials.imports-panel', ['assignedLeadsOnly' => false])
+            @endif
         </div>
     @else
         <div class="app-card app-card-padded">
@@ -100,19 +149,26 @@
                     <p class="app-section-desc">Update stage and log outreach.</p>
                 </div>
 
-                <form method="GET" action="{{ route('portal.dashboard') }}" class="flex flex-wrap items-center gap-2">
-                    <div class="app-search-wrap">
-                        <svg class="app-search-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                        <input type="text" name="search" value="{{ request('search') }}" placeholder="Search business, owner…" class="app-input">
+                <form method="GET" action="{{ route('portal.dashboard') }}" class="active-leads-filters flex flex-wrap items-end gap-2.5">
+                    <div class="active-leads-filters__field active-leads-filters__field--search">
+                        <label class="active-leads-filters__label" for="portal-leads-search">Search</label>
+                        <div class="app-search-wrap">
+                            <svg class="app-search-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                            <input id="portal-leads-search" type="text" name="search" value="{{ request('search') }}" placeholder="Search business, owner…" class="app-input">
+                        </div>
                     </div>
-                    <select name="phase" onchange="this.form.submit()" class="app-input !w-auto">
-                        <option value="">All phases</option>
-                        @foreach($pipelinePhases ?? [] as $value => $label)
-                            <option value="{{ $value }}" {{ request('phase') === $value ? 'selected' : '' }}>{{ $label }}</option>
-                        @endforeach
-                    </select>
+                    <div class="active-leads-filters__field">
+                        <label class="active-leads-filters__label" for="portal-leads-phase">Phase</label>
+                        <select id="portal-leads-phase" name="phase" onchange="this.form.submit()" class="app-input js-pretty-select" data-pretty-select>
+                            <option value="">All phases</option>
+                            @foreach($pipelinePhases ?? [] as $value => $label)
+                                <option value="{{ $value }}" {{ request('phase') === $value ? 'selected' : '' }}>{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <button type="submit" class="app-btn app-btn-secondary app-btn-sm">Filter</button>
                     @if(request()->anyFilled(['search', 'phase']))
-                        <a href="{{ route('portal.dashboard') }}" class="app-btn app-btn-secondary app-btn-sm" title="Clear filters">Clear</a>
+                        <a href="{{ route('portal.dashboard') }}" class="app-btn app-btn-ghost app-btn-sm" title="Clear filters">Clear</a>
                     @endif
                 </form>
             </div>

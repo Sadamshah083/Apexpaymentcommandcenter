@@ -14,6 +14,7 @@ class MemberModuleAccess
         'closers_team_lead',
         'appointment_setter',
         'closer',
+        'closers_qa',
     ];
 
     public static function isConfigurableRole(?string $role): bool
@@ -41,9 +42,14 @@ class MemberModuleAccess
         ], true);
     }
 
+    public static function isQaRole(?string $role): bool
+    {
+        return $role === 'closers_qa';
+    }
+
     public static function usesPortalModules(?string $role): bool
     {
-        return self::isTeamLeadRole($role) || self::isAgentRole($role);
+        return self::isTeamLeadRole($role) || self::isAgentRole($role) || self::isQaRole($role);
     }
 
     /**
@@ -132,7 +138,7 @@ class MemberModuleAccess
             }
         }
 
-        foreach (['appointment_setter_team_lead', 'closers_team_lead', 'appointment_setter', 'closer'] as $role) {
+        foreach (['appointment_setter_team_lead', 'closers_team_lead', 'appointment_setter', 'closer', 'closers_qa'] as $role) {
             foreach (PortalModules::groupedForRole($role) as $section => $modules) {
                 foreach ($modules as $module) {
                     if ($module['always_available'] ?? false) {
@@ -156,6 +162,10 @@ class MemberModuleAccess
         }
 
         if (! $restricted) {
+            if (self::isQaRole($role)) {
+                return 'Call Notes + Call Monitoring';
+            }
+
             if (self::isAgentRole($role)) {
                 return 'Full agent access';
             }

@@ -7,7 +7,7 @@ import {
 } from './communications-webphone.js';
 import { initCommunicationsPhoneNotes } from './communications-phone-notes.js';
 const STORAGE_KEY = 'communications.dialer_extension';
-const DIAL_COOLDOWN_MS = 2500;
+const DIAL_COOLDOWN_MS = 800;
 let lastDialAt = 0;
 let dialInFlight = false;
 
@@ -48,6 +48,117 @@ function normalizePhone(value) {
 
 function csrfToken() {
     return document.querySelector('meta[name="csrf-token"]')?.content || '';
+}
+
+function applyCsrfToken(token) {
+    const next = String(token || '').trim();
+    if (!next) {
+        return;
+    }
+
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    if (meta) {
+        meta.setAttribute('content', next);
+    }
+
+    document.querySelectorAll('input[name="_token"]').forEach((input) => {
+        input.value = next;
+    });
+}
+
+function sessionPingUrl() {
+    const form = document.querySelector('.ghl-dialer-originate-form');
+    const action = String(form?.action || '');
+    if (action.includes('/morpheus/calls/originate')) {
+        return action.replace(/\/calls\/originate(?:\?.*)?$/, '/session/ping');
+    }
+
+    const release = document.querySelector('[data-webphone-panel]')?.dataset?.releaseExtensionUrl || '';
+    if (release.includes('/calls/release-extension')) {
+        return release.replace(/\/calls\/release-extension(?:\?.*)?$/, '/session/ping');
+    }
+
+    return '';
+}
+
+async function refreshDialerSession() {
+    const url = sessionPingUrl();
+    if (!url) {
+        return false;
+    }
+
+    try {
+        const res = await fetch(url, {
+            method: 'GET',
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            credentials: 'same-origin',
+            cache: 'no-store',
+        });
+        if (!res.ok) {
+            return false;
+        }
+        const data = await res.json().catch(() => ({}));
+        if (data.csrf_token) {
+            applyCsrfToken(data.csrf_token);
+        }
+
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function startDialerSessionHygiene() {
+    if (typeof document === 'undefined' || document.documentElement.dataset.dialerHygiene === '1') {
+        return;
+    }
+    document.documentElement.dataset.dialerHygiene = '1';
+
+    const tick = async () => {
+        if (document.hidden) {
+            return;
+        }
+
+        await refreshDialerSession();
+
+        if (dialInFlight && (Date.now() - lastDialAt) > 30000) {
+            dialInFlight = false;
+        }
+
+        const phone = getWebphone();
+        if (!phone) {
+            return;
+        }
+
+        const live = phone.isLiveCallUiActive?.()
+            || phone.isOutboundRingingUiActive?.()
+            || ['dialing', 'ringing', 'in-call'].includes(phone.state || '');
+        if (live) {
+            return;
+        }
+
+        if (phone.state === 'registered' && typeof phone.isTransportConnected === 'function' && !phone.isTransportConnected()) {
+            try {
+                await phone.connect(phone.currentExtension || undefined);
+            } catch {
+                // best-effort reconnect
+            }
+        }
+    };
+
+    void tick();
+    window.setInterval(() => {
+        void tick();
+    }, 8 * 60 * 1000);
+
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            void tick();
+        }
+    });
 }
 
 function resolveExtensionSelect(form) {
@@ -93,6 +204,136 @@ function handleDialerNumberChange(form) {
         refreshDialButton(numberInput, callerSelect, dialBtn);
     }
     refreshBackspaceVisibility(numberInput, backspace);
+    scheduleRecentDialPreview(form);
+}
+
+let recentDialPreviewTimer = null;
+let recentDialPreviewToken = 0;
+
+function recentByPhoneUrl() {
+    return document.querySelector('[data-phone-workspace]')?.dataset?.recentByPhoneUrl
+        || document.querySelector('[data-recent-by-phone-url]')?.dataset?.recentByPhoneUrl
+        || '';
+}
+
+function clearRecentDialPreview(form) {
+    const root = form?.querySelector('[data-dialer-recent-preview]')
+        || document.querySelector('[data-dialer-recent-preview]');
+    if (!root) {
+        return;
+    }
+    root.classList.add('hidden');
+    root.querySelector('[data-dialer-recent-empty]')?.classList.add('hidden');
+    root.querySelector('[data-dialer-recent-note]')?.classList.add('hidden');
+}
+
+function renderRecentDialPreview(form, log) {
+    const root = form?.querySelector('[data-dialer-recent-preview]')
+        || document.querySelector('[data-dialer-recent-preview]');
+    if (!root) {
+        return;
+    }
+
+    root.classList.remove('hidden');
+    const empty = root.querySelector('[data-dialer-recent-empty]');
+    const noteEl = root.querySelector('[data-dialer-recent-note]');
+    const whenEl = root.querySelector('[data-dialer-recent-when]');
+    const dispoEl = root.querySelector('[data-dialer-recent-disposition]');
+    const durEl = root.querySelector('[data-dialer-recent-duration]');
+    const resultEl = root.querySelector('[data-dialer-recent-result]');
+
+    if (!log) {
+        if (whenEl) whenEl.textContent = '—';
+        if (dispoEl) dispoEl.textContent = '—';
+        if (durEl) durEl.textContent = '';
+        if (resultEl) resultEl.textContent = '';
+        noteEl?.classList.add('hidden');
+        empty?.classList.remove('hidden');
+        return;
+    }
+
+    empty?.classList.add('hidden');
+    if (whenEl) {
+        whenEl.textContent = log.time_ago || log.time_label || '—';
+    }
+    if (dispoEl) {
+        dispoEl.textContent = log.disposition || log.result || 'No disposition';
+    }
+    if (durEl) {
+        durEl.textContent = log.duration_label ? `Duration ${log.duration_label}` : '';
+    }
+    if (resultEl) {
+        const result = log.result && log.result !== log.disposition ? log.result : '';
+        resultEl.textContent = result ? ` · ${result}` : '';
+    }
+    const note = String(log.note || '').trim();
+    if (noteEl) {
+        if (note) {
+            noteEl.textContent = note;
+            noteEl.classList.remove('hidden');
+        } else {
+            noteEl.textContent = '';
+            noteEl.classList.add('hidden');
+        }
+    }
+}
+
+function scheduleRecentDialPreview(form) {
+    const numberInput = getDialerFormNumberInput(form);
+    const url = recentByPhoneUrl();
+    if (!numberInput || !url) {
+        return;
+    }
+
+    const raw = String(numberInput.value || '').trim();
+    const digits = raw.replace(/\D/g, '');
+    if (digits.length < 10) {
+        clearRecentDialPreview(form);
+        return;
+    }
+
+    const phone = normalizePhone(raw);
+    if (!isValidPstnDestination(phone)) {
+        clearRecentDialPreview(form);
+        return;
+    }
+
+    if (recentDialPreviewTimer) {
+        clearTimeout(recentDialPreviewTimer);
+    }
+
+    const token = ++recentDialPreviewToken;
+    recentDialPreviewTimer = window.setTimeout(async () => {
+        try {
+            const endpoint = new URL(url, window.location.origin);
+            endpoint.searchParams.set('phone', phone);
+            const res = await fetch(endpoint.toString(), {
+                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                credentials: 'same-origin',
+            });
+            if (token !== recentDialPreviewToken) {
+                return;
+            }
+            const data = await res.json().catch(() => ({}));
+            renderRecentDialPreview(form, data?.log || null);
+        } catch {
+            if (token === recentDialPreviewToken) {
+                clearRecentDialPreview(form);
+            }
+        }
+    }, 320);
+}
+
+function bumpAgentTotalDials(delta = 1) {
+    const workspace = document.querySelector('[data-phone-workspace]');
+    const valueEl = document.querySelector('[data-agent-total-dials-value]');
+    if (!workspace || !valueEl) {
+        return;
+    }
+    const current = Number.parseInt(workspace.dataset.agentTotalDials || valueEl.textContent.replace(/\D/g, '') || '0', 10) || 0;
+    const next = Math.max(0, current + delta);
+    workspace.dataset.agentTotalDials = String(next);
+    valueEl.textContent = next.toLocaleString();
 }
 
 /** Clear the pad number field (lead context can stay on form dataset until hangup). */
@@ -198,6 +439,7 @@ async function originateViaWebphone(form, dialBtn) {
     try {
         await phone.dial(destination);
         await logDirectOutbound(form, destination);
+        bumpAgentTotalDials(1);
         showToast(`Calling ${destination} from your browser line — the destination phone will ring.`, 'success');
 
         return true;
@@ -216,7 +458,7 @@ async function originateViaWebphone(form, dialBtn) {
     }
 }
 
-async function originateViaJson(form, dialBtn) {
+async function originateViaJson(form, dialBtn, { skipCooldown = false } = {}) {
     if (dialInFlight) {
         showToast('A call is already being placed. Please wait.', 'warning');
 
@@ -224,7 +466,7 @@ async function originateViaJson(form, dialBtn) {
     }
 
     const sinceLastDial = Date.now() - lastDialAt;
-    if (sinceLastDial < DIAL_COOLDOWN_MS) {
+    if (!skipCooldown && sinceLastDial < DIAL_COOLDOWN_MS) {
         const waitSec = Math.ceil((DIAL_COOLDOWN_MS - sinceLastDial) / 1000);
         showToast(`Wait ${waitSec}s before placing another call on this line.`, 'warning');
 
@@ -250,68 +492,85 @@ async function originateViaJson(form, dialBtn) {
     hideLoadingOverlay();
 
     const phone = getWebphone();
+
+    // Fast path: line already Registered → fire originate in the same click tick.
+    // Slow path only when Connect line is still needed (was adding ~1.5s via prepare).
+    const lineReady = () => Boolean(phone.canDirectDial?.() && phone.isTransportConnected?.());
+    if (!lineReady()) {
+        try {
+            const ready = await ensureWebphoneReady({ silent: true });
+            if (!ready || !lineReady()) {
+                throw new Error('Connect your Phone line (WebSocket) and wait for Registered before calling.');
+            }
+        } catch (error) {
+            showToast(error?.message || 'Connect your Phone line (WebSocket) before calling.', 'error');
+            phone.forceTeardownForDisposition?.();
+            if (dialBtn) {
+                dialBtn.removeAttribute('disabled');
+                dialBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                dialBtn.removeAttribute('aria-disabled');
+            }
+
+            return false;
+        }
+    }
+
     const attempt = phone.beginOutboundAttempt?.() || { generation: 0, signal: null };
     phone.setCustomerFirstOutbound(false);
     phone.setCallContext('outbound', destination);
     phone.clickToCallActive = true;
     phone.awaitingDestinationBridge = true;
     phone.markClickToCallPending();
-    // Show ringing UI immediately — do not wait on Morpheus HTTP round-trip.
-    phone.showClickToCallRinging(destination, { customerFirst: false });
 
-    // Keep End Call usable during originate — never leave the dial button disabled while ringing.
     if (dialBtn) {
         dialBtn.removeAttribute('disabled');
         dialBtn.classList.remove('opacity-50', 'cursor-not-allowed');
         dialBtn.removeAttribute('aria-disabled');
     }
 
-    try {
-        await phone.assertTransportForOriginate();
-    } catch (error) {
-        phone.cancelOutboundAttempt?.('transport-failed');
-        showToast(error?.message || 'Connect your Phone line (WebSocket) before calling.', 'error');
-        phone.clickToCallActive = false;
-        phone.awaitingDestinationBridge = false;
-        phone.forceTeardownForDisposition?.();
-        if (dialBtn) {
-            dialBtn.removeAttribute('disabled');
-            dialBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-            dialBtn.removeAttribute('aria-disabled');
-        }
-
-        return false;
-    }
-
-    // Instant hangup while connecting the line.
-    if (phone.isOutboundAttemptCurrent && !phone.isOutboundAttemptCurrent(attempt.generation)) {
-        return false;
-    }
-
     formData.set('webphone_transport_connected', '1');
     dialInFlight = true;
     lastDialAt = Date.now();
 
-    try {
-        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-        const timeoutId = window.setTimeout(() => {
-            try {
-                controller?.abort('timeout');
-            } catch {
-                // ignore
-            }
-        }, 12000);
-        const onHangupAbort = () => {
-            try {
-                controller?.abort('hangup');
-            } catch {
-                // ignore
-            }
-        };
-        attempt.signal?.addEventListener?.('abort', onHangupAbort, { once: true });
-
-        let response;
+    // Start originate HTTP immediately — ringing UI paints after the request is in-flight.
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = window.setTimeout(() => {
         try {
+            controller?.abort('timeout');
+        } catch {
+            // ignore
+        }
+    }, 20000);
+    const onHangupAbort = () => {
+        try {
+            controller?.abort('hangup');
+        } catch {
+            // ignore
+        }
+    };
+    attempt.signal?.addEventListener?.('abort', onHangupAbort, { once: true });
+
+    const buildOriginateBody = () => {
+        const body = new FormData(form);
+        body.set('destination', destination);
+        body.set('webphone_transport_connected', phone.isTransportConnected?.() ? '1' : '1');
+        body.set('_token', csrfToken());
+
+        return body;
+    };
+
+    // Ringing UI after fetch started (does not delay Network originate).
+    try {
+        phone.showClickToCallRinging(destination, { customerFirst: false });
+    } catch {
+        // ignore UI errors
+    }
+
+    try {
+        let response = null;
+        let data = {};
+
+        for (let attemptNo = 1; attemptNo <= 2; attemptNo += 1) {
             response = await fetch(form.action, {
                 method: 'POST',
                 headers: {
@@ -320,23 +579,56 @@ async function originateViaJson(form, dialBtn) {
                     'X-CSRF-TOKEN': csrfToken(),
                 },
                 credentials: 'same-origin',
-                body: formData,
+                body: buildOriginateBody(),
                 signal: controller?.signal,
             });
-        } finally {
-            window.clearTimeout(timeoutId);
-            attempt.signal?.removeEventListener?.('abort', onHangupAbort);
-        }
 
-        const data = await response.json().catch(() => ({}));
-
-        // Agent hung up while originate was in flight — kill the late UUID and exit.
-        if (phone.isOutboundAttemptCurrent && !phone.isOutboundAttemptCurrent(attempt.generation)) {
-            if (data.call_uuid) {
-                await phone.killLateOriginate?.(data.call_uuid, destination);
+            if (response?.status === 419 && attemptNo < 2) {
+                await refreshDialerSession();
+                continue;
             }
 
-            return false;
+            data = await response.json().catch(() => ({}));
+
+            // Agent hung up while originate was in flight — kill the late UUID and exit.
+            if (phone.isOutboundAttemptCurrent && !phone.isOutboundAttemptCurrent(attempt.generation)) {
+                window.clearTimeout(timeoutId);
+                attempt.signal?.removeEventListener?.('abort', onHangupAbort);
+                if (data.call_uuid) {
+                    await phone.killLateOriginate?.(data.call_uuid, destination);
+                }
+
+                return false;
+            }
+
+            if ((!response.ok || data.ok === false) && data.extension_busy && attemptNo < 2) {
+                try {
+                    await phone.releaseExtensionCallsNow?.(
+                        phone.currentExtension || formData.get('from_extension'),
+                        destination,
+                    );
+                } catch {
+                    // ignore
+                }
+                await new Promise((resolve) => window.setTimeout(resolve, 600));
+                if (typeof phone.isTransportConnected === 'function' && !phone.isTransportConnected()) {
+                    try {
+                        await phone.connect(phone.currentExtension || undefined);
+                    } catch {
+                        // ignore
+                    }
+                }
+                continue;
+            }
+
+            break;
+        }
+
+        window.clearTimeout(timeoutId);
+        attempt.signal?.removeEventListener?.('abort', onHangupAbort);
+
+        if (!response) {
+            throw new Error('Could not place the call.');
         }
 
         if (!response.ok || data.ok === false) {
@@ -366,11 +658,16 @@ async function originateViaJson(form, dialBtn) {
 
         if (data.call_uuid) {
             phone.setMorpheusCallUuid(data.call_uuid);
+            // Open call-events WebSocket immediately after originate UUID lands.
+            phone.subscribeCallEvents?.();
         }
 
         if (data.line_reset) {
-            showToast('Line was reset to clear a busy extension — reconnecting…', 'warning');
-            await phone.connect(phone.currentExtension || undefined).catch(() => {});
+            // Soft recover only — full connect() mid-originate drops Morpheus WSS.
+            if (!phone.canDirectDial() || !phone.isTransportConnected()) {
+                showToast('Line was reset — reconnecting without dropping the dial…', 'warning');
+                await phone.softRecoverLine?.(phone.currentExtension || undefined).catch(() => {});
+            }
             if (phone.isOutboundAttemptCurrent && !phone.isOutboundAttemptCurrent(attempt.generation)) {
                 if (data.call_uuid) {
                     await phone.killLateOriginate?.(data.call_uuid, destination);
@@ -396,8 +693,10 @@ async function originateViaJson(form, dialBtn) {
         }
 
         phone.setCustomerFirstOutbound(Boolean(data.customer_first));
-        // Soft refresh only — never call showClickToCallRinging again (that resets hangup guards).
-        phone.refreshOutboundRingingUi?.(dialTarget);
+        // Soft subtitle/peer update only — never restart ringing timer (originate ACK glitch).
+        if (dialTarget && phone.timerPhase === 'ringing') {
+            phone.refreshOutboundRingingUi?.(dialTarget, { restartTimer: false });
+        }
 
         const fromExt = data.from ? String(data.from) : formData.get('from_extension');
         if (fromExt) {
@@ -417,8 +716,12 @@ async function originateViaJson(form, dialBtn) {
             showToast(data.warning || successMessage, data.warning ? 'warning' : 'success');
         }
 
+        bumpAgentTotalDials(1);
+
         return true;
     } catch (error) {
+        window.clearTimeout(timeoutId);
+        attempt.signal?.removeEventListener?.('abort', onHangupAbort);
         const aborted = error?.name === 'AbortError'
             || String(error?.message || error || '').toLowerCase().includes('abort');
         if (aborted || (phone.isOutboundAttemptCurrent && !phone.isOutboundAttemptCurrent(attempt.generation))) {
@@ -434,6 +737,7 @@ async function originateViaJson(form, dialBtn) {
 
         return false;
     } finally {
+        window.clearTimeout(timeoutId);
         dialInFlight = false;
         hideLoadingOverlay();
         if (dialBtn) {
@@ -904,7 +1208,12 @@ function attachDialerForm(form) {
             dialBtn.classList.add('opacity-50', 'cursor-not-allowed');
             dialBtn.setAttribute('aria-disabled', 'true');
 
-            const ready = await ensureWebphoneReady({ silent: true });
+            const phone = getWebphone();
+            // Skip prepare/connect when already Registered — originateViaJson fires instantly.
+            let ready = Boolean(phone.canDirectDial() && phone.isTransportConnected());
+            if (!ready) {
+                ready = await ensureWebphoneReady({ silent: true });
+            }
             const wasCancelled = form.dataset.dialerConnectCancelled === '1';
             form.dataset.dialerConnectPending = '0';
             form.dataset.dialerConnectCancelled = '0';
@@ -920,11 +1229,10 @@ function attachDialerForm(form) {
 
             if (form.dataset.originateJson === '1') {
                 const destination = normalizePhone(new FormData(form).get('destination'));
-                const phone = getWebphone();
 
                 if (!ready || !phone.canDirectDial()) {
                     showToast(
-                        'Connect your browser line first — pick your extension, click Connect line in the Phone panel, then try again.',
+                        'Click Connect first (pick your extension, then Connect). On HTTP, that prepares click-to-call; on HTTPS it registers the browser line.',
                         'error',
                     );
                     dialBtn.removeAttribute('disabled');
@@ -1098,6 +1406,8 @@ export function bootCommunicationsDialer() {
     initPhonePanelSwitch();
     initCallLogsInfiniteScroll();
     initCommunicationsPhoneNotes();
+    startDialerSessionHygiene();
+    // Theme toggle is owned by app.js (app-wide light/dark).
 }
 
 function stabilizeCallLogsScroll(workspace) {
@@ -1165,8 +1475,7 @@ function setPhoneWorkspaceView(workspace, view, recordingRole = null) {
 
     const activeRecordingRole = workspace.dataset.recordingRole || '';
 
-    const switcher = workspace.querySelector('[data-phone-panel-switch]');
-    switcher?.querySelectorAll('[data-phone-panel-view]').forEach((btn) => {
+    workspace.querySelectorAll('[data-phone-panel-view]').forEach((btn) => {
         const sameView = btn.dataset.phonePanelView === nextView;
         const btnRole = btn.dataset.recordingRole ?? '';
         const exactRoleMatch = sameView && (
@@ -1234,16 +1543,15 @@ function initPhonePanelSwitch(root = document) {
 
         workspace.dataset.phonePanelSwitchInit = '1';
 
-        const switcher = workspace.querySelector('[data-phone-panel-switch]');
-        if (!switcher || switcher.dataset.phonePanelSwitchBound === '1') {
+        if (workspace.dataset.phonePanelSwitchBound === '1') {
             return;
         }
 
-        switcher.dataset.phonePanelSwitchBound = '1';
+        workspace.dataset.phonePanelSwitchBound = '1';
 
-        switcher.addEventListener('click', (event) => {
+        workspace.addEventListener('click', (event) => {
             const btn = event.target.closest('[data-phone-panel-view]');
-            if (!btn) {
+            if (!btn || !workspace.contains(btn)) {
                 return;
             }
 
@@ -1830,15 +2138,15 @@ function buildCallLogRow(log) {
     const leadFileBlock = leadFileName
         ? `<span class="ghl-dialer-recent-file" title="${leadFileName}">${leadFileName}</span>`
         : '';
-    const result = escapeHtml(log.result || '—');
     // CDR statuses only — agent disposition "No Answer" must still render.
-    const statusLikeDispositions = ['', '—', '-', 'completed', 'initiated', 'connected', 'answered', 'no-answer', 'busy', 'failed', 'missed', 'unknown'];
+    const statusLikeDispositions = ['', '—', '-', 'completed', 'initiated', 'connected', 'answered', 'no-answer', 'busy', 'failed', 'missed', 'unknown', 'hangup', 'canceled', 'cancelled'];
     let rawDisposition = String(log.disposition || '').trim();
     if (rawDisposition && statusLikeDispositions.includes(rawDisposition.toLowerCase())) {
         rawDisposition = '';
     }
     // Prefer explicit agent disposition for the call-log row body.
     const disposition = escapeHtml(rawDisposition);
+    const result = escapeHtml(rawDisposition);
     const timeAgo = escapeHtml(log.time_ago || '—');
     const durationLabel = escapeHtml(log.duration_label || '0s');
     const callLogRef = escapeHtml(log.call_log_ref || log.id || '');
@@ -1938,7 +2246,7 @@ function buildCallLogRow(log) {
                         <span class="ghl-dialer-recent-meta__time">${timeAgo}</span>
                         <span class="ghl-dialer-recent-meta__sep" aria-hidden="true">·</span>
                         <span class="ghl-dialer-recent-duration">${durationLabel}</span>
-                        ${result && result !== '—' ? `<span class="ghl-dialer-recent-meta__sep" aria-hidden="true">·</span><span class="ghl-dialer-recent-result">${result}</span>` : ''}
+                        ${disposition ? `<span class="ghl-dialer-recent-meta__sep" aria-hidden="true">·</span><span class="ghl-dialer-recent-result ghl-dialer-recent-result--disposition">${disposition}</span>` : ''}
                     </span>
                 </div>
                 ${fieldsBlock}
@@ -1959,9 +2267,29 @@ function appendCallLogRows(itemsContainer, logs) {
 
     itemsContainer.querySelector('[data-call-logs-empty]')?.remove();
 
+    const seen = new Set(
+        [...itemsContainer.querySelectorAll('[data-phone-log-row]')].map((row) => {
+            return row.getAttribute('data-log-call-ref')
+                || `${row.getAttribute('data-log-phone') || ''}|${row.getAttribute('data-log-time') || ''}`;
+        }),
+    );
+
+    const uniqueLogs = logs.filter((log) => {
+        const key = String(log.id || log.call_log_ref || `${log.phone || ''}|${log.time_label || ''}`);
+        if (seen.has(key)) {
+            return false;
+        }
+        seen.add(key);
+        return true;
+    });
+
+    if (uniqueLogs.length === 0) {
+        return;
+    }
+
     const fragment = document.createDocumentFragment();
     const wrapper = document.createElement('div');
-    wrapper.innerHTML = logs.map((log) => buildCallLogRow(log)).join('');
+    wrapper.innerHTML = uniqueLogs.map((log) => buildCallLogRow(log)).join('');
     wrapper.childNodes.forEach((node) => {
         if (node.nodeType === Node.ELEMENT_NODE) {
             fragment.appendChild(node);
@@ -2000,28 +2328,43 @@ function initCallLogsInfiniteScroll(root = document) {
             try {
                 const url = new URL(apiUrl, window.location.origin);
                 url.searchParams.set('offset', String(offset));
+                url.searchParams.set('per_page', '30');
 
-                const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-                const timeoutId = window.setTimeout(() => {
+                const fetchOnce = async (timeoutMs) => {
+                    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+                    const timeoutId = window.setTimeout(() => {
+                        try {
+                            controller?.abort('timeout');
+                        } catch {
+                            // ignore
+                        }
+                    }, timeoutMs);
+
                     try {
-                        controller?.abort('timeout');
-                    } catch {
-                        // ignore
+                        return await fetch(url.toString(), {
+                            credentials: 'same-origin',
+                            headers: {
+                                Accept: 'application/json',
+                                'X-Requested-With': 'XMLHttpRequest',
+                            },
+                            signal: controller?.signal,
+                        });
+                    } finally {
+                        window.clearTimeout(timeoutId);
                     }
-                }, 12000);
+                };
 
+                // First paint used to cancel at 12s — leave enough room + one retry.
                 let response;
                 try {
-                    response = await fetch(url.toString(), {
-                        credentials: 'same-origin',
-                        headers: {
-                            Accept: 'application/json',
-                            'X-Requested-With': 'XMLHttpRequest',
-                        },
-                        signal: controller?.signal,
-                    });
-                } finally {
-                    window.clearTimeout(timeoutId);
+                    response = await fetchOnce(30000);
+                } catch (firstError) {
+                    const aborted = firstError?.name === 'AbortError'
+                        || String(firstError?.message || '').toLowerCase().includes('abort');
+                    if (!aborted) {
+                        throw firstError;
+                    }
+                    response = await fetchOnce(30000);
                 }
 
                 if (!response.ok) {
@@ -2036,8 +2379,13 @@ function initCallLogsInfiniteScroll(root = document) {
                 list.dataset.callLogsHasMore = hasMore ? '1' : '0';
             } catch (error) {
                 console.warn('[communications-dialer] call logs scroll failed', error);
-                hasMore = false;
-                list.dataset.callLogsHasMore = '0';
+                // Keep hasMore true on timeout so the next scroll/tab switch can retry.
+                const aborted = error?.name === 'AbortError'
+                    || String(error?.message || '').toLowerCase().includes('abort');
+                if (!aborted) {
+                    hasMore = false;
+                    list.dataset.callLogsHasMore = '0';
+                }
             } finally {
                 loading = false;
                 loadingEl?.classList.add('hidden');
@@ -2081,17 +2429,23 @@ function initCallLogsInfiniteScroll(root = document) {
             observer.observe(sentinel);
         }
 
-        // Fast SSR shell ships empty logs — always hydrate the first page.
+        // SSR may already include the first 30. Only hydrate when the list is empty.
         const hasRows = Boolean(itemsContainer?.querySelector('[data-phone-log-row], .ghl-dialer-recent-row'));
-        if (apiUrl && (!hasRows || (hasMore && offset === 0))) {
+        if (apiUrl && !hasRows) {
             hasMore = true;
             list.dataset.callLogsHasMore = '1';
-            void loadMore().then(() => {
-                const emptyEl = itemsContainer?.querySelector('[data-call-logs-empty]');
-                if (itemsContainer?.querySelector('[data-phone-log-row], .ghl-dialer-recent-row')) {
-                    emptyEl?.remove();
-                }
-            });
+            offset = 0;
+            list.dataset.callLogsOffset = '0';
+            window.setTimeout(() => {
+                void loadMore().then(() => {
+                    const emptyEl = itemsContainer?.querySelector('[data-call-logs-empty]');
+                    if (itemsContainer?.querySelector('[data-phone-log-row], .ghl-dialer-recent-row')) {
+                        emptyEl?.remove();
+                    } else if (emptyEl) {
+                        emptyEl.textContent = 'No recent calls yet.';
+                    }
+                });
+            }, 120);
         }
 
         const workspace = list.closest('[data-phone-workspace]');
@@ -2134,11 +2488,19 @@ export async function placeOutboundCall(phone, meta = {}) {
         form.dataset.dialLeadName = String(meta.name);
     }
     form.dataset.dialLeadPhone = destination;
+    const metaFile = String(meta?.file_name || meta?.workflow || '').trim();
+    if (metaFile) {
+        form.dataset.dialLeadFileName = metaFile;
+    }
     handleDialerNumberChange(form);
+
+    // Auto-dial queue hops already waited 6s — skip the pad cooldown so calls connect.
+    const skipCooldown = Boolean(meta?.skipCooldown)
+        || document.body.classList.contains('ch-dial-auto-session');
 
     let placed = false;
     if (document.querySelector('[data-webphone-panel]')) {
-        placed = await originateViaJson(form, dialBtn);
+        placed = await originateViaJson(form, dialBtn, { skipCooldown });
     } else {
         form.requestSubmit?.();
         form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
